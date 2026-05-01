@@ -127,7 +127,9 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
   }
 
   async run(queue: ExecutionQueue): Promise<void> {
-    await queue.consume(async (raw) => {
+    // Queue routes by executorId — no need to filter supportedActions here,
+    // but we still check as a safety net in case of misconfigured instructions.
+    await queue.consume(this.executorName, async (raw) => {
       if (!this.supportedActions.includes(raw.action)) return
 
       // TODO: 优化 Record，需要跟踪全流程（开始执行 -> 执行结束）

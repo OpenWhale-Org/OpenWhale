@@ -1,17 +1,23 @@
 import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
 
+type Waiter = (instruction: ExecutionInstruction) => void
+
 export class MemoryExecutionQueue implements ExecutionQueue {
-  private readonly queue: ExecutionInstruction[] = []
-  private readonly waiters: Array<(instruction: ExecutionInstruction) => void> = []
+  /** Per-executorId queues */
+  private readonly queues = new Map<string, ExecutionInstruction[]>()
+  /** Per-executorId waiters (consumers blocked on empty queue) */
+  private readonly waiters = new Map<string, Waiter[]>()
   private stopped = false
 
   async push(instruction: ExecutionInstruction): Promise<void> {
     if (this.stopped) return
-    const waiter = this.waiters.shift()
+    const { executorId } = instruction
+    const waiter = this.waiters.get(executorId)?.shift()
     if (waiter) {
       waiter(instruction)
     } else {
-      this.queue.push(instruction)
+      if (!this.queues.has(executorId)) this.queues.set(executorId, [])
+      this.queues.get(executorId)!.push(instruction)
     }
   }
 
@@ -21,9 +27,9 @@ export class MemoryExecutionQueue implements ExecutionQueue {
     }
   }
 
-  async consume(handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void> {
+  async consume(executorId: string, handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void> {
     while (!this.stopped) {
-      const instruction = await this.dequeue()
+      const instruction = await this.dequeue(executorId)
       if (instruction === null) break
       await handler(instruction)
     }
@@ -31,18 +37,23 @@ export class MemoryExecutionQueue implements ExecutionQueue {
 
   async stop(): Promise<void> {
     this.stopped = true
-    for (const waiter of this.waiters.splice(0)) {
-      waiter({ action: '__stop__', params: {} })
+    // Wake up all blocked consumers so they can exit their loops
+    for (const waiters of this.waiters.values()) {
+      for (const waiter of waiters.splice(0)) {
+        waiter({ executorId: '__stop__', action: '__stop__', params: {} })
+      }
     }
   }
 
-  private dequeue(): Promise<ExecutionInstruction | null> {
-    if (this.queue.length > 0) {
-      return Promise.resolve(this.queue.shift() ?? null)
+  private dequeue(executorId: string): Promise<ExecutionInstruction | null> {
+    const queue = this.queues.get(executorId)
+    if (queue && queue.length > 0) {
+      return Promise.resolve(queue.shift() ?? null)
     }
     if (this.stopped) return Promise.resolve(null)
     return new Promise((resolve) => {
-      this.waiters.push((instruction) => {
+      if (!this.waiters.has(executorId)) this.waiters.set(executorId, [])
+      this.waiters.get(executorId)!.push((instruction) => {
         if (this.stopped && instruction.action === '__stop__') {
           resolve(null)
         } else {

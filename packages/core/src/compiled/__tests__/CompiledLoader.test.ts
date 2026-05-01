@@ -77,7 +77,7 @@ describe('CompiledLoader', () => {
 
   it('loadAll registers a compiled strategy', async () => {
     const def: StrategyDefinition = {
-      id: 'strat-1', name: 'TestStrategy', source: 'compiled', monitorIds: [], executorId: '',
+      id: 'strat-1', name: 'TestStrategy', source: 'compiled', monitorIds: [], executorIds: [],
       compiledPath: path.join(tmpDir, 'compiled', 'strategies', 'strat-1', 'index.js'),
       createdAt: '', updatedAt: '',
     }

@@ -29,7 +29,7 @@ export interface StrategyDefinition {
   pluginName?: string
   compiledPath?: string
   monitorIds: string[]
-  executorId: string
+  executorIds: string[]
   createdAt: string
   updatedAt: string
 }

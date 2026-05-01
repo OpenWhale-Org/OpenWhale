@@ -1,6 +1,7 @@
 import type { ZodType } from 'zod'
 
 export interface ExecutionInstruction {
+  executorId: string
   action: string
   params: Record<string, unknown>
 }
@@ -16,7 +17,8 @@ export interface ExecutionResult<TInstruction extends ExecutionInstruction = Exe
 export interface ExecutionQueue {
   push(instruction: ExecutionInstruction): Promise<void>
   pushBatch(instructions: ExecutionInstruction[]): Promise<void>
-  consume(handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void>
+  /** Consume instructions for a specific executorId. Blocks until stop() is called. */
+  consume(executorId: string, handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void>
   stop(): Promise<void>
 }
 

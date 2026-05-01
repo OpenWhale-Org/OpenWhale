@@ -17,7 +17,7 @@ function makeExecutorDef(id: string): ExecutorDefinition {
   return { id, name: id, source: 'plugin', pluginName: 'test-plugin', supportedActions: [], createdAt: '', updatedAt: '' }
 }
 function makeStrategyDef(id: string): StrategyDefinition {
-  return { id, name: id, source: 'plugin', pluginName: 'test-plugin', monitorIds: [], executorId: '', createdAt: '', updatedAt: '' }
+  return { id, name: id, source: 'plugin', pluginName: 'test-plugin', monitorIds: [], executorIds: [], createdAt: '', updatedAt: '' }
 }
 
 function makePlugin(name: string): PluginFactory<Record<string, unknown>> {
