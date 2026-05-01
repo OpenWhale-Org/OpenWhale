@@ -54,7 +54,7 @@ export type { RedisConfig } from './executor/RedisExecutionQueue.js'
 export { TriggerManager } from './trigger/TriggerManager.js'
 
 // Strategy
-export { Strategy } from './strategy/Strategy.js'
+export { BaseStrategy } from './strategy/BaseStrategy.js'
 
 // Bundle
 export { BundleStore } from './bundle/BundleStore.js'

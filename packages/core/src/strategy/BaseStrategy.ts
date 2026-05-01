@@ -3,8 +3,9 @@ import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions } fro
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore } from '../types/credential.js'
 import { getDataDir } from '../utils/paths.js'
+import { createLogger } from '../utils/logger.js'
 
-export abstract class Strategy implements IStrategy {
+export abstract class BaseStrategy implements IStrategy {
   abstract readonly strategyId: string
 
   protected readonly dataDir: string
@@ -17,6 +18,7 @@ export abstract class Strategy implements IStrategy {
 
   private monitorReaders = new Map<string, MonitorDataReader>()
   private credentialStore?: CredentialStore
+  private get log() { return createLogger(this.strategyId) }
 
   constructor(options?: StrategyOptions) {
     this.dataDir = getDataDir(options?.dataDir)
@@ -34,12 +36,15 @@ export abstract class Strategy implements IStrategy {
     this.metrics.runsTotal++
     this.metrics.lastRunAt = Date.now()
     this.stepCache.clear()
+    this.log.debug({ triggerId: context.triggerId }, 'Strategy run started')
     try {
       const instructions = await this.evaluate(context)
       this.metrics.instructionsEmitted += instructions.length
+      this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
       return instructions
     } catch (err) {
       this.metrics.errors++
+      this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
       throw err
     }
   }
@@ -93,3 +98,4 @@ export abstract class Strategy implements IStrategy {
     throw new Error('llm() is not available in Phase 1 — use the Compiler to generate strategies with LLM calls')
   }
 }
+
