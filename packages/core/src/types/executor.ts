@@ -38,12 +38,6 @@ export interface ExecutorOptions {
   /** Timeout in ms for a single execute() call. 0 = no timeout. Default: 0. */
   timeout: number
   retry: RetryOptions
-  /**
-   * Idempotency mode. Default: true.
-   * When true, instructions with a messageId that was already successfully
-   * executed (per today's JSONL execution record) are skipped without calling execute().
-   */
-  idempotent: boolean
 }
 
 export type InstructionSchema<TInstruction extends ExecutionInstruction> = ZodType<TInstruction>
