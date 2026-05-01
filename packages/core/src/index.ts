@@ -8,7 +8,6 @@ export type {
   ExecutionQueue,
   ExecutorOptions,
   RetryOptions,
-  IdempotencyStore,
   InstructionSchema,
   TriggerFilter,
   CronTrigger,

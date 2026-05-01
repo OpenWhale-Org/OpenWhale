@@ -33,18 +33,6 @@ export interface RetryOptions {
   maxRetryDelay: number
 }
 
-/**
- * Pluggable store for tracking successfully executed message IDs.
- * Default implementation is in-memory (resets on restart).
- * Inject a Redis-backed implementation for cross-restart idempotency.
- */
-export interface IdempotencyStore {
-  /** Returns true if this messageId has already been successfully executed. */
-  has(messageId: string): Promise<boolean>
-  /** Mark a messageId as successfully executed. */
-  set(messageId: string): Promise<void>
-}
-
 export interface ExecutorOptions {
   dataDir?: string
   /** Timeout in ms for a single execute() call. 0 = no timeout. Default: 0. */
@@ -53,14 +41,9 @@ export interface ExecutorOptions {
   /**
    * Idempotency mode. Default: true.
    * When true, instructions with a messageId that was already successfully
-   * executed are skipped (status: 'skipped') without calling execute().
+   * executed (per today's JSONL execution record) are skipped without calling execute().
    */
   idempotent: boolean
-  /**
-   * Custom idempotency store. Default: in-memory Set (resets on restart).
-   * Inject a Redis-backed store for cross-restart idempotency.
-   */
-  idempotencyStore?: IdempotencyStore
 }
 
 export type InstructionSchema<TInstruction extends ExecutionInstruction> = ZodType<TInstruction>

@@ -1,14 +1,9 @@
 import fs from 'fs'
 import path from 'path'
-import type { ExecutionInstruction, ExecutionQueue, ExecutionResult, ExecutorOptions, IdempotencyStore, InstructionSchema, RetryOptions } from '../types/executor.js'
+import type { ExecutionInstruction, ExecutionQueue, ExecutionResult, ExecutorOptions, InstructionSchema, RetryOptions } from '../types/executor.js'
 import { getDataDir, getExecutionPath } from '../utils/paths.js'
+import { readJsonlLines } from '../utils/jsonl.js'
 import { createLogger } from '../utils/logger.js'
-
-class MemoryIdempotencyStore implements IdempotencyStore {
-  private readonly seen = new Set<string>()
-  async has(messageId: string): Promise<boolean> { return this.seen.has(messageId) }
-  async set(messageId: string): Promise<void> { this.seen.add(messageId) }
-}
 
 /**
  * @ai-guide 如何编写一个 Executor
@@ -97,14 +92,29 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
   private readonly timeout: number
   private readonly retry: RetryOptions
   private readonly idempotent: boolean
-  private readonly idempotencyStore: IdempotencyStore
+  // In-memory set of successfully executed messageIds, populated from JSONL on first run()
+  private readonly executedIds = new Set<string>()
+  private executedIdsLoaded = false
 
   protected constructor(options?: Partial<ExecutorOptions>) {
     this.dataDir = getDataDir(options?.dataDir)
     this.timeout = options?.timeout ?? 0
     this.retry = options?.retry ?? { maxRetries: 0, retryDelay: 500, maxRetryDelay: 30000 }
     this.idempotent = options?.idempotent ?? true
-    this.idempotencyStore = options?.idempotencyStore ?? new MemoryIdempotencyStore()
+  }
+
+  /** Loads today's execution JSONL and populates executedIds with successful messageIds. */
+  private async loadExecutedIds(): Promise<void> {
+    if (this.executedIdsLoaded) return
+    this.executedIdsLoaded = true
+    const filePath = getExecutionPath(this.dataDir, this.executorName)
+    type Row = { instruction?: { messageId?: string }; status?: string }
+    const rows = await readJsonlLines<Row>(filePath)
+    for (const row of rows) {
+      if (row.status === 'success' && row.instruction?.messageId) {
+        this.executedIds.add(row.instruction.messageId)
+      }
+    }
   }
 
   private get log() { return createLogger(this.executorName) }
@@ -139,11 +149,12 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
   async run(queue: ExecutionQueue): Promise<void> {
     // Queue routes by executorId — no need to filter supportedActions here,
     // but we still check as a safety net in case of misconfigured instructions.
+    await this.loadExecutedIds()
     await queue.consume(this.executorName, async (raw) => {
       if (!this.supportedActions.includes(raw.action)) return
 
       // Idempotency check — skip if already successfully executed
-      if (this.idempotent && await this.idempotencyStore.has(raw.messageId)) {
+      if (this.idempotent && this.executedIds.has(raw.messageId)) {
         this.log.debug({ messageId: raw.messageId }, 'Skipping duplicate instruction')
         await this.recordSafe({ instruction: raw as TInstruction, status: 'skipped', executedAt: new Date() })
         return
@@ -181,7 +192,7 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
         // Mark as successfully executed — must happen after record to avoid
         // skipping on restart before the result is persisted.
         if (this.idempotent && result.status === 'success') {
-          await this.idempotencyStore.set(instruction.messageId)
+          this.executedIds.add(instruction.messageId)
         }
         return
       } catch (err) {
