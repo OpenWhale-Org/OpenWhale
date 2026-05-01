@@ -1,4 +1,9 @@
+import { Redis } from 'ioredis'
+import type { Redis as RedisClient } from 'ioredis'
 import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
+import { createLogger } from '../utils/logger.js'
+
+const log = createLogger('RedisExecutionQueue')
 
 export interface RedisConfig {
   host: string
@@ -7,135 +12,237 @@ export interface RedisConfig {
   db?: number
   /** Key prefix for per-executorId streams. Default: 'openwhale:queue' */
   keyPrefix?: string
-  /** Consumer group name. All instances of the same executor join this group. Default: 'openwhale' */
+  /** Consumer group name shared by all instances of the same executor. Default: 'openwhale' */
   consumerGroup?: string
-  /** Unique consumer name within the group (e.g. hostname + pid). Default: auto-generated */
+  /** Unique consumer name within the group. Default: 'consumer-{pid}' */
   consumerName?: string
   /** How long (ms) to block on XREADGROUP waiting for new messages. Default: 5000 */
   blockMs?: number
-  /** Max number of messages to fetch per XREADGROUP call. Default: 1 */
+  /** Max messages to fetch per XREADGROUP call. Default: 1 */
   batchSize?: number
+  /**
+   * How often (ms) to run XAUTOCLAIM to reclaim messages from crashed consumers.
+   * Default: 30000 (30s)
+   */
+  reclaimIntervalMs?: number
+  /**
+   * How long (ms) a message must be idle in the PEL before it can be reclaimed.
+   * Should be longer than the expected max execution time. Default: 60000 (60s)
+   */
+  reclaimMinIdleMs?: number
 }
 
 export class RedisExecutionQueue implements ExecutionQueue {
+  private readonly redis: RedisClient
   private readonly keyPrefix: string
   private readonly consumerGroup: string
   private readonly consumerName: string
   private readonly blockMs: number
   private readonly batchSize: number
+  private readonly reclaimIntervalMs: number
+  private readonly reclaimMinIdleMs: number
+  private stopped = false
+  private reclaimTimers = new Map<string, NodeJS.Timeout>()
 
-  constructor(_config: RedisConfig) {
-    this.keyPrefix = _config.keyPrefix ?? 'openwhale:queue'
-    this.consumerGroup = _config.consumerGroup ?? 'openwhale'
-    this.consumerName = _config.consumerName ?? `consumer-${process.pid}`
-    this.blockMs = _config.blockMs ?? 5000
-    this.batchSize = _config.batchSize ?? 1
-
-    // TODO: initialize ioredis client
-    //   this.redis = new Redis({ host, port, password, db })
-    //
-    // NOTE: Each executorId gets its own Stream key: `${keyPrefix}:${executorId}`
-    // Consumer group must be created before consuming:
-    //   await this.redis.xgroup('CREATE', streamKey, this.consumerGroup, '$', 'MKSTREAM')
-    //   — use '$' to only consume new messages, '0' to replay from beginning
-    //   — MKSTREAM creates the stream if it doesn't exist
+  constructor(config: RedisConfig) {
+    this.redis = new Redis({
+      host: config.host,
+      port: config.port,
+      password: config.password,
+      db: config.db,
+      lazyConnect: true,
+    })
+    this.keyPrefix = config.keyPrefix ?? 'openwhale:queue'
+    this.consumerGroup = config.consumerGroup ?? 'openwhale'
+    this.consumerName = config.consumerName ?? `consumer-${process.pid}`
+    this.blockMs = config.blockMs ?? 5000
+    this.batchSize = config.batchSize ?? 1
+    this.reclaimIntervalMs = config.reclaimIntervalMs ?? 30_000
+    this.reclaimMinIdleMs = config.reclaimMinIdleMs ?? 60_000
   }
 
-  /** Returns the Redis Stream key for a given executorId */
   private key(executorId: string): string {
     return `${this.keyPrefix}:${executorId}`
   }
 
   async push(instruction: ExecutionInstruction): Promise<void> {
-    // XADD ${key} * executorId ${executorId} action ${action} params ${JSON.stringify(params)}
-    //
-    // '*' lets Redis auto-generate the message ID (timestamp-based).
-    // Fields are flat key-value pairs; we serialize params as JSON string.
-    //
-    // Example:
-    //   await this.redis.xadd(
-    //     this.key(instruction.executorId),
-    //     '*',
-    //     'executorId', instruction.executorId,
-    //     'action',     instruction.action,
-    //     'params',     JSON.stringify(instruction.params),
-    //   )
-    throw new Error('RedisExecutionQueue is not yet implemented')
+    await this.redis.xadd(
+      this.key(instruction.executorId),
+      '*',
+      'executorId', instruction.executorId,
+      'action',     instruction.action,
+      'params',     JSON.stringify(instruction.params),
+    )
   }
 
   async pushBatch(instructions: ExecutionInstruction[]): Promise<void> {
-    // Use a pipeline to batch all XADDs in a single round-trip:
-    //
-    //   const pipeline = this.redis.pipeline()
-    //   for (const instruction of instructions) {
-    //     pipeline.xadd(
-    //       this.key(instruction.executorId), '*',
-    //       'executorId', instruction.executorId,
-    //       'action',     instruction.action,
-    //       'params',     JSON.stringify(instruction.params),
-    //     )
-    //   }
-    //   await pipeline.exec()
-    throw new Error('RedisExecutionQueue is not yet implemented')
+    const pipeline = this.redis.pipeline()
+    for (const instruction of instructions) {
+      pipeline.xadd(
+        this.key(instruction.executorId),
+        '*',
+        'executorId', instruction.executorId,
+        'action',     instruction.action,
+        'params',     JSON.stringify(instruction.params),
+      )
+    }
+    await pipeline.exec()
   }
 
-  /**
-   * Consume instructions for a specific executorId using Redis Streams consumer groups.
-   *
-   * Multiple instances with the same executorId join the same consumer group.
-   * Redis delivers each message to exactly one consumer in the group (at-most-once per group).
-   * After successful processing, the message is ACKed and removed from the PEL
-   * (Pending Entries List). If the consumer crashes before ACK, the message stays
-   * in the PEL and can be reclaimed via XAUTOCLAIM / XCLAIM.
-   *
-   * Flow:
-   *   1. Ensure consumer group exists (XGROUP CREATE ... MKSTREAM)
-   *   2. Loop: XREADGROUP GROUP ${group} ${consumer} COUNT ${batchSize} BLOCK ${blockMs} STREAMS ${key} >
-   *      — '>' means "give me only new, undelivered messages"
-   *   3. For each message: deserialize → call handler → XACK
-   *   4. On stop(): break loop, disconnect
-   *
-   * Pending message recovery (implement separately):
-   *   XAUTOCLAIM ${key} ${group} ${consumer} ${minIdleMs} 0-0 COUNT ${n}
-   *   — reclaims messages idle longer than minIdleMs from crashed consumers
-   */
-  async consume(executorId: string, _handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void> {
-    // const streamKey = this.key(executorId)
-    //
-    // // Ensure group exists (idempotent — BUSYGROUP error is ignored)
-    // try {
-    //   await this.redis.xgroup('CREATE', streamKey, this.consumerGroup, '$', 'MKSTREAM')
-    // } catch (err) {
-    //   if (!(err as Error).message.includes('BUSYGROUP')) throw err
-    // }
-    //
-    // while (!this.stopped) {
-    //   const results = await this.redis.xreadgroup(
-    //     'GROUP', this.consumerGroup, this.consumerName,
-    //     'COUNT', this.batchSize,
-    //     'BLOCK', this.blockMs,
-    //     'STREAMS', streamKey, '>'
-    //   )
-    //   if (!results) continue  // timeout, loop again
-    //
-    //   for (const [, messages] of results) {
-    //     for (const [id, fields] of messages) {
-    //       const instruction: ExecutionInstruction = {
-    //         executorId: fields[fields.indexOf('executorId') + 1],
-    //         action:     fields[fields.indexOf('action') + 1],
-    //         params:     JSON.parse(fields[fields.indexOf('params') + 1]),
-    //       }
-    //       await handler(instruction)
-    //       await this.redis.xack(streamKey, this.consumerGroup, id)
-    //     }
-    //   }
-    // }
-    throw new Error('RedisExecutionQueue is not yet implemented')
+  async consume(executorId: string, handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void> {
+    const streamKey = this.key(executorId)
+    await this.ensureGroup(streamKey)
+    this.startReclaimLoop(streamKey, handler)
+
+    while (!this.stopped) {
+      let results: [string, [string, string[]][]][] | null
+      try {
+        // '>' = only new messages not yet delivered to any consumer in this group
+        results = await (this.redis as RedisClient).xreadgroup(
+          'GROUP', this.consumerGroup, this.consumerName,
+          'COUNT', String(this.batchSize),
+          'BLOCK', String(this.blockMs),
+          'STREAMS', streamKey, '>',
+        ) as [string, [string, string[]][]][] | null
+      } catch (err) {
+        if (this.stopped) break
+        log.error({ err, executorId }, 'XREADGROUP error')
+        continue
+      }
+
+      if (!results) continue // BLOCK timeout, loop again
+
+      for (const [, messages] of results) {
+        for (const [id, fields] of messages) {
+          const instruction = parseFields(fields)
+          try {
+            await handler(instruction)
+            await this.redis.xack(streamKey, this.consumerGroup, id)
+          } catch (err) {
+            // Handler failed — do NOT ack. Message stays in PEL and will be
+            // reclaimed by XAUTOCLAIM after reclaimMinIdleMs.
+            log.error({ err, executorId, messageId: id }, 'Handler failed, message left in PEL for reclaim')
+          }
+        }
+      }
+    }
+
+    this.stopReclaimLoop(executorId)
   }
 
   async stop(): Promise<void> {
-    // this.stopped = true
-    // await this.redis.quit()
-    throw new Error('RedisExecutionQueue is not yet implemented')
+    this.stopped = true
+    for (const executorId of this.reclaimTimers.keys()) {
+      this.stopReclaimLoop(executorId)
+    }
+    await this.redis.quit()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Consumer group setup
+  // ---------------------------------------------------------------------------
+
+  private async ensureGroup(streamKey: string): Promise<void> {
+    try {
+      // '$' = only consume messages added after group creation
+      // MKSTREAM = create the stream if it doesn't exist yet
+      await this.redis.xgroup('CREATE', streamKey, this.consumerGroup, '$', 'MKSTREAM')
+    } catch (err) {
+      // BUSYGROUP = group already exists, safe to ignore
+      if (!(err instanceof Error) || !err.message.includes('BUSYGROUP')) throw err
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // XAUTOCLAIM — periodic reclaim of messages from crashed consumers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Starts a periodic loop that uses XAUTOCLAIM to reclaim messages that have
+   * been idle in the PEL longer than reclaimMinIdleMs (i.e. delivered to a
+   * consumer that crashed before ACKing).
+   *
+   * Reclaimed messages are re-delivered to this consumer and processed normally.
+   * This provides at-least-once semantics for crash recovery — handlers should
+   * be idempotent where possible.
+   */
+  private startReclaimLoop(
+    streamKey: string,
+    handler: (instruction: ExecutionInstruction) => Promise<void>,
+  ): void {
+    const executorId = streamKey.slice(this.keyPrefix.length + 1)
+    const timer = setInterval(async () => {
+      if (this.stopped) return
+      try {
+        await this.reclaimPending(streamKey, executorId, handler)
+      } catch (err) {
+        log.error({ err, executorId }, 'XAUTOCLAIM error')
+      }
+    }, this.reclaimIntervalMs)
+    this.reclaimTimers.set(executorId, timer)
+  }
+
+  private stopReclaimLoop(executorId: string): void {
+    const timer = this.reclaimTimers.get(executorId)
+    if (timer) {
+      clearInterval(timer)
+      this.reclaimTimers.delete(executorId)
+    }
+  }
+
+  private async reclaimPending(
+    streamKey: string,
+    executorId: string,
+    handler: (instruction: ExecutionInstruction) => Promise<void>,
+  ): Promise<void> {
+    // XAUTOCLAIM key group consumer min-idle-time start [COUNT count]
+    // Returns: [nextCursor, [[id, fields], ...], [deletedIds]]
+    // Cursor '0-0' = scan from the beginning of the PEL
+    let cursor = '0-0'
+
+    while (true) {
+      const result = await (this.redis as RedisClient).xautoclaim(
+        streamKey,
+        this.consumerGroup,
+        this.consumerName,
+        String(this.reclaimMinIdleMs),
+        cursor,
+        'COUNT', '10',
+      ) as [string, [string, string[]][], string[]]
+
+      const [nextCursor, messages] = result
+
+      for (const [id, fields] of messages) {
+        if (!fields || fields.length === 0) continue // deleted message
+        const instruction = parseFields(fields)
+        log.warn({ executorId, messageId: id }, 'Reclaiming pending message from crashed consumer')
+        try {
+          await handler(instruction)
+          await this.redis.xack(streamKey, this.consumerGroup, id)
+        } catch (err) {
+          log.error({ err, executorId, messageId: id }, 'Reclaimed message handler failed, will retry next cycle')
+        }
+      }
+
+      // '0-0' cursor means we've scanned the entire PEL
+      if (nextCursor === '0-0') break
+      cursor = nextCursor
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parseFields(fields: string[]): ExecutionInstruction {
+  const map: Record<string, string> = {}
+  for (let i = 0; i < fields.length - 1; i += 2) {
+    map[fields[i]!] = fields[i + 1]!
+  }
+  return {
+    executorId: map['executorId'] ?? '',
+    action:     map['action'] ?? '',
+    params:     map['params'] ? JSON.parse(map['params']) as Record<string, unknown> : {},
   }
 }

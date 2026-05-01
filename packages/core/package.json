@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "esbuild": "^0.28.0",
+    "ioredis": "^5.10.1",
     "nanoid": "^5.0.7",
     "node-cron": "^3.0.3",
     "pino": "^10.3.1",
