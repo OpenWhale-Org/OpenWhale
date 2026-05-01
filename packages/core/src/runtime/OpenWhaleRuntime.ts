@@ -5,6 +5,7 @@ import type { IStrategy } from '../types/strategy.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
+import type { CredentialStore } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
 import { Registry, createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
@@ -24,6 +25,7 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly bundleStore: BundleStore
   private readonly pluginManager: PluginManager | undefined
   private readonly compiledLoader: CompiledLoader | undefined
+  private readonly credentialStore: CredentialStore | undefined
   protected readonly dataDir: string
   private running = false
 
@@ -36,6 +38,7 @@ export class OpenWhaleRuntime implements IRuntime {
     this.bundleStore = options?.bundleStore ?? new BundleStore(this.dataDir)
     this.pluginManager = options?.pluginManager
     this.compiledLoader = options?.compiledLoader
+    this.credentialStore = options?.credentialStore
   }
 
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor): void {
@@ -94,7 +97,7 @@ export class OpenWhaleRuntime implements IRuntime {
       }
     }
 
-    this.triggerManager.start(this.queue)
+    this.triggerManager.start(this.queue, this.credentialStore)
 
     // Start executors from registry
     for (const def of this.executorRegistry.list()) {

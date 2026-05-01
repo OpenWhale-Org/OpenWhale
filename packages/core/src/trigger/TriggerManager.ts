@@ -3,6 +3,7 @@ import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
 import type { CronTrigger, SubscribeTrigger, Trigger, TriggerFilter } from '../types/trigger.js'
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
+import type { CredentialStore } from '../types/credential.js'
 
 interface BundleEntry {
   triggers: Trigger[]
@@ -27,9 +28,24 @@ export class TriggerManager {
     this.bundles.delete(bundleId)
   }
 
-  start(queue: ExecutionQueue): void {
+  start(queue: ExecutionQueue, credentialStore?: CredentialStore): void {
     if (this.running) return
     this.running = true
+
+    // Inject MonitorDataReaders and CredentialStore into each strategy
+    for (const [, entry] of this.bundles) {
+      if (credentialStore) {
+        entry.strategy.setCredentialStore(credentialStore)
+      }
+      for (const trigger of entry.triggers) {
+        if (trigger.type === 'subscribe') {
+          const monitor = this.monitors.get(trigger.monitorName)
+          if (monitor) {
+            entry.strategy.setMonitorReader(trigger.key, monitor.getReader(trigger.key as never))
+          }
+        }
+      }
+    }
 
     // Set up monitor emit handlers — one handler per monitor, dispatches to all matching subscribe triggers
     for (const [monitorName, monitor] of this.monitors) {

@@ -8,6 +8,7 @@ import type { CompiledLoader } from '../compiled/CompiledLoader.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { IStrategy } from './strategy.js'
+import type { CredentialStore } from './credential.js'
 
 export interface RuntimeOptions {
   dataDir?: string
@@ -18,6 +19,7 @@ export interface RuntimeOptions {
   bundleStore?: BundleStore
   pluginManager?: PluginManager
   compiledLoader?: CompiledLoader
+  credentialStore?: CredentialStore
 }
 
 export interface IRuntime {
