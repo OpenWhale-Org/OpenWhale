@@ -1,6 +1,27 @@
 import { homedir } from 'os'
 import path from 'path'
 
+/**
+ * ~/.openwhale/
+ * ├── credentials.jsonl                          — 加密凭证存储
+ * ├── monitors/                                  — Monitor 采集数据
+ * │   └── {monitorName}/
+ * │       └── {key}.jsonl
+ * ├── executions/                                — Executor 执行记录
+ * │   └── {executorName}/
+ * │       └── {YYYY-MM-DD}.jsonl
+ * ├── registry/                                  — AI 编译产物的元数据索引
+ * │   ├── monitors/{id}.json
+ * │   ├── executors/{id}.json
+ * │   └── strategies/{id}.json
+ * ├── compiled/                                  — AI 编译产物代码
+ * │   ├── monitors/{id}/source.ts + index.js
+ * │   ├── executors/{id}/source.ts + index.js
+ * │   └── strategies/{id}/source.ts + index.js
+ * └── bundles/                                   — StrategyBundle 运行时配置
+ *     └── {id}.json
+ */
+
 export function getDataDir(custom?: string): string {
   return custom ?? path.join(homedir(), '.openwhale')
 }

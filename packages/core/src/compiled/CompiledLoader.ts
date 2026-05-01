@@ -7,6 +7,9 @@ import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { IStrategy } from '../types/strategy.js'
 import { getDataDir, getRegistryPath, getCompiledOutputPath, getCompiledSourcePath } from '../utils/paths.js'
+import { createLogger } from '../utils/logger.js'
+
+const log = createLogger('CompiledLoader')
 
 export type CompiledType = 'monitors' | 'executors' | 'strategies'
 
@@ -73,7 +76,7 @@ export class CompiledLoader {
           try {
             await fs.promises.access(outputPath)
           } catch {
-            console.warn(`[CompiledLoader] Skipping ${type}/${id}: index.js not found`)
+            log.warn(`Skipping ${type}/${id}: index.js not found`)
             return
           }
           await this.loadEntry(type, id, outputPath)
@@ -88,14 +91,14 @@ export class CompiledLoader {
       const content = await fs.promises.readFile(definitionPath, 'utf8')
       definition = JSON.parse(content) as MonitorDefinition | ExecutorDefinition | StrategyDefinition
     } catch (err) {
-      console.warn(`[CompiledLoader] Skipping ${type}/${id}: definition file not found`)
+      log.warn(`Skipping ${type}/${id}: definition file not found`)
       return
     }
 
     // Use a cache-busting query param to force re-import on recompile
     const mod = await import(`${outputPath}?t=${Date.now()}`) as { default?: unknown }
     if (typeof mod.default !== 'function') {
-      console.warn(`[CompiledLoader] Skipping ${type}/${id}: default export is not a constructor`)
+      log.warn(`Skipping ${type}/${id}: default export is not a constructor`)
       return
     }
 

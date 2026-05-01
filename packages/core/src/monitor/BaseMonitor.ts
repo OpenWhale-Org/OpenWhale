@@ -3,6 +3,7 @@ import path from 'path'
 import type { EmitHandler, MonitorDataReader, MonitorOptions } from '../types/monitor.js'
 import { getDataDir, getMonitorPath } from '../utils/paths.js'
 import { MonitorDataReaderImpl } from './MonitorDataReader.js'
+import { createLogger } from '../utils/logger.js'
 
 /**
  * Standalone — 只能独立运行，不支持 subscribe 驱动
@@ -127,6 +128,7 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   private readonly refCounts = new Map<string, number>()
   private emitHandler?: EmitHandler<TData>
   protected readonly dataDir: string
+  private get log() { return createLogger(this.monitorName) }
 
   /**
    * 声明当前 Monitor 支持的运行模式，子类覆盖此属性。
@@ -253,10 +255,19 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
 
   /**
    * 子类采集到数据后调用此方法提交，基类负责持久化和事件分发。
+   * append 或 emit 失败时记录错误日志，不中断采集循环。
    */
   protected async push(key: TKey, data: TData): Promise<void> {
-    await this.append(key, data)
-    await this.emit(key, data)
+    try {
+      await this.append(key, data)
+    } catch (err) {
+      this.log.error({ key, err }, 'Failed to append monitor data')
+    }
+    try {
+      await this.emit(key, data)
+    } catch (err) {
+      this.log.error({ key, err }, 'Failed to emit monitor data')
+    }
   }
 
   protected async append(key: TKey, data: TData): Promise<void> {

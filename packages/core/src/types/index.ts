@@ -4,6 +4,8 @@ export type {
   ExecutionResult,
   ExecutionQueue,
   ExecutorOptions,
+  RetryOptions,
+  InstructionSchema,
 } from './executor.js'
 export type { TriggerFilter, CronTrigger, SubscribeTrigger, Trigger } from './trigger.js'
 export type {

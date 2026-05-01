@@ -7,6 +7,8 @@ export type {
   ExecutionResult,
   ExecutionQueue,
   ExecutorOptions,
+  RetryOptions,
+  InstructionSchema,
   TriggerFilter,
   CronTrigger,
   SubscribeTrigger,
@@ -79,6 +81,8 @@ export { OpenWhaleRuntime } from './runtime/OpenWhaleRuntime.js'
 
 // Utils
 export { generateId } from './utils/id.js'
+export { getLogger, setLogger, createLogger } from './utils/logger.js'
+export type { Logger, LogLevel } from './utils/logger.js'
 export {
   getDataDir,
   getMonitorPath,
