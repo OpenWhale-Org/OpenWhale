@@ -29,6 +29,10 @@ export type {
   IAdapter,
   RuntimeOptions,
   IRuntime,
+  MonitorDefinition,
+  ExecutorDefinition,
+  StrategyDefinition,
+  IRegistry,
 } from './types/index.js'
 
 // Credentials
@@ -50,10 +54,39 @@ export { TriggerManager } from './trigger/TriggerManager.js'
 // Strategy
 export { Strategy } from './strategy/Strategy.js'
 
+// Bundle
+export { BundleStore } from './bundle/BundleStore.js'
+
+// Plugin
+export { PluginManager } from './plugin/PluginManager.js'
+export type { OpenWhalePlugin, PluginContext, PluginFactory, PluginManagerOptions } from './plugin/PluginManager.js'
+
+// Compiled
+export { CompiledLoader } from './compiled/CompiledLoader.js'
+export type { CompiledType, CompiledLoaderOptions } from './compiled/CompiledLoader.js'
+
+// Registry
+export {
+  Registry,
+  createMonitorRegistry,
+  createExecutorRegistry,
+  createStrategyRegistry,
+} from './registry/Registry.js'
+export type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from './registry/Registry.js'
+
 // Runtime
 export { OpenWhaleRuntime } from './runtime/OpenWhaleRuntime.js'
 
 // Utils
 export { generateId } from './utils/id.js'
-export { getDataDir, getMonitorPath, getExecutionPath, getCredentialPath } from './utils/paths.js'
+export {
+  getDataDir,
+  getMonitorPath,
+  getExecutionPath,
+  getCredentialPath,
+  getRegistryPath,
+  getCompiledSourcePath,
+  getCompiledOutputPath,
+  getBundlePath,
+} from './utils/paths.js'
 export { appendJsonl, readJsonlLines, writeJsonlLines, streamJsonlLines } from './utils/jsonl.js'

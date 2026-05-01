@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "esbuild": "^0.28.0",
     "nanoid": "^5.0.7",
     "node-cron": "^3.0.3"
   },

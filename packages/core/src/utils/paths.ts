@@ -17,3 +17,19 @@ export function getExecutionPath(dataDir: string, executorName: string): string 
 export function getCredentialPath(dataDir: string): string {
   return path.join(dataDir, 'credentials.jsonl')
 }
+
+export function getRegistryPath(dataDir: string, type: string, id: string): string {
+  return path.join(dataDir, 'registry', type, `${id}.json`)
+}
+
+export function getCompiledSourcePath(dataDir: string, type: string, id: string): string {
+  return path.join(dataDir, 'compiled', type, id, 'source.ts')
+}
+
+export function getCompiledOutputPath(dataDir: string, type: string, id: string): string {
+  return path.join(dataDir, 'compiled', type, id, 'index.js')
+}
+
+export function getBundlePath(dataDir: string, id: string): string {
+  return path.join(dataDir, 'bundles', `${id}.json`)
+}

@@ -4,12 +4,11 @@ export interface StrategyBundle {
   id: string
   name: string
   description?: string
-  strategyCode: string
-  executorCode?: string
+  strategyId: string
   triggers: Trigger[]
+  enabled: boolean
   createdAt: string
   updatedAt: string
-  enabled: boolean
 }
 
 export interface StrategyBundleInfo {
