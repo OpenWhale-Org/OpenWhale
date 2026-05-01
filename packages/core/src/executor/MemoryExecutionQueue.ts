@@ -2,6 +2,11 @@ import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
 
 type Waiter = (instruction: ExecutionInstruction) => void
 
+let messageCounter = 0
+function nextMessageId(): string {
+  return `mem-${Date.now()}-${++messageCounter}`
+}
+
 export class MemoryExecutionQueue implements ExecutionQueue {
   /** Per-executorId queues */
   private readonly queues = new Map<string, ExecutionInstruction[]>()
@@ -11,13 +16,14 @@ export class MemoryExecutionQueue implements ExecutionQueue {
 
   async push(instruction: ExecutionInstruction): Promise<void> {
     if (this.stopped) return
-    const { executorId } = instruction
+    const stamped = { ...instruction, messageId: instruction.messageId || nextMessageId() }
+    const { executorId } = stamped
     const waiter = this.waiters.get(executorId)?.shift()
     if (waiter) {
-      waiter(instruction)
+      waiter(stamped)
     } else {
       if (!this.queues.has(executorId)) this.queues.set(executorId, [])
-      this.queues.get(executorId)!.push(instruction)
+      this.queues.get(executorId)!.push(stamped)
     }
   }
 
@@ -40,7 +46,7 @@ export class MemoryExecutionQueue implements ExecutionQueue {
     // Wake up all blocked consumers so they can exit their loops
     for (const waiters of this.waiters.values()) {
       for (const waiter of waiters.splice(0)) {
-        waiter({ executorId: '__stop__', action: '__stop__', params: {} })
+        waiter({ messageId: '__stop__', executorId: '__stop__', action: '__stop__', params: {} })
       }
     }
   }

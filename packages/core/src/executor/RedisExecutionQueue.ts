@@ -114,7 +114,7 @@ export class RedisExecutionQueue implements ExecutionQueue {
 
       for (const [, messages] of results) {
         for (const [id, fields] of messages) {
-          const instruction = parseFields(fields)
+          const instruction = parseFields(id, fields)
           try {
             await handler(instruction)
             await this.redis.xack(streamKey, this.consumerGroup, id)
@@ -214,7 +214,7 @@ export class RedisExecutionQueue implements ExecutionQueue {
 
       for (const [id, fields] of messages) {
         if (!fields || fields.length === 0) continue // deleted message
-        const instruction = parseFields(fields)
+        const instruction = parseFields(id, fields)
         log.warn({ executorId, messageId: id }, 'Reclaiming pending message from crashed consumer')
         try {
           await handler(instruction)
@@ -235,12 +235,13 @@ export class RedisExecutionQueue implements ExecutionQueue {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseFields(fields: string[]): ExecutionInstruction {
+function parseFields(messageId: string, fields: string[]): ExecutionInstruction {
   const map: Record<string, string> = {}
   for (let i = 0; i < fields.length - 1; i += 2) {
     map[fields[i]!] = fields[i + 1]!
   }
   return {
+    messageId,
     executorId: map['executorId'] ?? '',
     action:     map['action'] ?? '',
     params:     map['params'] ? JSON.parse(map['params']) as Record<string, unknown> : {},
