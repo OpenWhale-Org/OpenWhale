@@ -2,9 +2,85 @@ import type { ExecutionInstruction } from '../types/executor.js'
 import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore } from '../types/credential.js'
+import type { ZodType } from 'zod'
 import { getDataDir } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
+import { LlmClient } from './llm.js'
+import type { CoreMessage, LlmCallOptions } from './llm.js'
 
+export type { CoreMessage }
+
+/**
+ * @ai-guide 如何编写一个 Strategy
+ *
+ * Strategy 负责：接收触发上下文 → 决策 → 返回一批 ExecutionInstruction。
+ * 子类只需实现 `evaluate(context)`，基类提供决策辅助、数据访问和 LLM 推理能力。
+ *
+ * 基本示例：
+ * ```typescript
+ * class MyStrategy extends BaseStrategy {
+ *   readonly strategyId = 'my-strategy'
+ *
+ *   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
+ *     const price = await this.step('price', () => fetchPrice())
+ *     return this.when(price > 100, [
+ *       { executorId: 'trade', messageId: '', action: 'buy', params: { symbol: 'BTC' } }
+ *     ])
+ *   }
+ * }
+ * ```
+ *
+ * 使用 LLM 推理（结构化输出）：
+ * ```typescript
+ * class AiStrategy extends BaseStrategy {
+ *   readonly strategyId = 'ai-strategy'
+ *
+ *   constructor() {
+ *     super({ llm: { defaultModel: 'openai:gpt-4o' } })
+ *     // 需要在 CredentialStore 中存储 'openai-api-key'
+ *   }
+ *
+ *   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
+ *     const data = await this.monitorData('market')?.getLatest()
+ *
+ *     const decision = await this.llm({
+ *       messages: [
+ *         { role: 'system', content: '你是一个交易分析师，根据市场数据给出操作建议。' },
+ *         { role: 'user', content: JSON.stringify(data) },
+ *       ],
+ *       schema: z.object({
+ *         action: z.enum(['buy', 'sell', 'hold']),
+ *         reason: z.string(),
+ *       }),
+ *     })
+ *     // decision: { action: 'buy' | 'sell' | 'hold', reason: string }
+ *
+ *     return this.when(decision.action !== 'hold', [
+ *       { executorId: 'trade', messageId: '', action: decision.action, params: {} }
+ *     ])
+ *   }
+ * }
+ * ```
+ *
+ * 使用自定义 Provider：
+ * ```typescript
+ * class CustomAiStrategy extends BaseStrategy {
+ *   constructor() {
+ *     super({
+ *       llm: {
+ *         defaultModel: 'my-llm:my-model',
+ *         providers: [{
+ *           provider: 'custom',
+ *           id: 'my-llm',
+ *           credentialName: 'my-llm-api-key',
+ *           create: (apiKey) => (modelId) => createMyProvider({ apiKey })(modelId),
+ *         }],
+ *       },
+ *     })
+ *   }
+ * }
+ * ```
+ */
 export abstract class BaseStrategy implements IStrategy {
   abstract readonly strategyId: string
 
@@ -18,10 +94,14 @@ export abstract class BaseStrategy implements IStrategy {
 
   private monitorReaders = new Map<string, MonitorDataReader>()
   private credentialStore?: CredentialStore
+  private readonly llmClient?: LlmClient
   private get log() { return createLogger(this.strategyId) }
 
   constructor(options?: StrategyOptions) {
     this.dataDir = getDataDir(options?.dataDir)
+    if (options?.llm) {
+      this.llmClient = new LlmClient(options.llm)
+    }
   }
 
   setMonitorReader(key: string, reader: MonitorDataReader): void {
@@ -55,6 +135,8 @@ export abstract class BaseStrategy implements IStrategy {
     return { ...this.metrics }
   }
 
+  // ── Decision helpers ──────────────────────────────────────────────────────
+
   protected rule(condition: boolean, instructions: ExecutionInstruction[]): ExecutionInstruction[] {
     return condition ? instructions : []
   }
@@ -85,6 +167,8 @@ export abstract class BaseStrategy implements IStrategy {
     return condition ? thenInstructions : elseInstructions
   }
 
+  // ── Data access ───────────────────────────────────────────────────────────
+
   protected monitorData(key: string): MonitorDataReader | undefined {
     return this.monitorReaders.get(key)
   }
@@ -94,8 +178,43 @@ export abstract class BaseStrategy implements IStrategy {
     return this.credentialStore.getByName(name)
   }
 
-  protected llm(_prompt: string): never {
-    throw new Error('llm() is not available in Phase 1 — use the Compiler to generate strategies with LLM calls')
+  // ── LLM inference ─────────────────────────────────────────────────────────
+
+  /**
+   * Call an LLM with structured output. Returns the parsed object typed by the schema.
+   *
+   * @example
+   * const result = await this.llm({
+   *   messages: [{ role: 'user', content: 'Analyse this data...' }],
+   *   schema: z.object({ action: z.enum(['buy', 'sell', 'hold']) }),
+   * })
+   * // result: { action: 'buy' | 'sell' | 'hold' }
+   */
+  protected async llm<TSchema extends ZodType>(
+    options: LlmCallOptions<TSchema>
+  ): Promise<import('zod').infer<TSchema>>
+
+  /**
+   * Call an LLM for plain text output.
+   *
+   * @example
+   * const summary = await this.llm({ messages: [{ role: 'user', content: 'Summarise...' }] })
+   * // summary: string
+   */
+  protected async llm(options: LlmCallOptions<undefined>): Promise<string>
+
+  protected async llm<TSchema extends ZodType | undefined>(
+    options: LlmCallOptions<TSchema>
+  ): Promise<TSchema extends ZodType ? import('zod').infer<TSchema> : string> {
+    if (!this.llmClient) {
+      throw new Error(
+        `llm() called but no LLM is configured. Pass 'llm: { defaultModel: "provider:model" }' in StrategyOptions.`
+      )
+    }
+    if (!this.credentialStore) {
+      throw new Error('llm() requires a CredentialStore — make sure the runtime has injected one.')
+    }
+    return this.llmClient.call(options, this.credentialStore)
   }
 }
 

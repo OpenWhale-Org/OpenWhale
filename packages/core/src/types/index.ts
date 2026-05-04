@@ -18,6 +18,11 @@ export type {
   StrategyContext,
   StrategyMetrics,
   StrategyOptions,
+  LlmOptions,
+  BuiltinProviderId,
+  ProviderConfig,
+  BuiltinProviderConfig,
+  CustomProviderConfig,
   IStrategy,
 } from './strategy.js'
 export type { SkillParameter, SkillDefinition, SkillModule } from './skill.js'

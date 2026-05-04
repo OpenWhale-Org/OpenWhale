@@ -17,6 +17,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.74",
+    "@ai-sdk/google": "^3.0.67",
+    "@ai-sdk/openai": "^3.0.58",
+    "ai": "^6.0.174",
     "esbuild": "^0.28.0",
     "ioredis": "^5.10.1",
     "nanoid": "^5.0.7",

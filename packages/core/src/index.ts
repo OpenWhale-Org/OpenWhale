@@ -20,6 +20,11 @@ export type {
   StrategyContext,
   StrategyMetrics,
   StrategyOptions,
+  LlmOptions,
+  BuiltinProviderId,
+  ProviderConfig,
+  BuiltinProviderConfig,
+  CustomProviderConfig,
   IStrategy,
   SkillParameter,
   SkillDefinition,
@@ -55,6 +60,7 @@ export { TriggerManager } from './trigger/TriggerManager.js'
 
 // Strategy
 export { BaseStrategy } from './strategy/BaseStrategy.js'
+export type { CoreMessage, LlmCallOptions } from './strategy/llm.js'
 
 // Bundle
 export { BundleStore } from './bundle/BundleStore.js'
