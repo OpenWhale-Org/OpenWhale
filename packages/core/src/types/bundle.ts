@@ -11,11 +11,11 @@ export interface StrategyBundle {
   updatedAt: string
 }
 
-export interface StrategyBundleInfo {
-  id: string
-  name: string
-  description?: string
-  enabled: boolean
-  createdAt: string
-  updatedAt: string
-}
+// export interface StrategyBundleInfo {
+//   id: string
+//   name: string
+//   description?: string
+//   enabled: boolean
+//   createdAt: string
+//   updatedAt: string
+// }

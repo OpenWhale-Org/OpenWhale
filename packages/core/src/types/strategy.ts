@@ -4,10 +4,9 @@ import type { CredentialStore } from './credential.js'
 import type { RetryOptions } from './executor.js'
 
 export interface StrategyContext {
-  triggerType: 'cron' | 'subscribe'
   triggerId: string
-  monitorKey?: string
-  monitorData?: Record<string, unknown>
+  /** Flattened monitor data at the time of trigger, keyed by 'monitorName:key'. Empty for pure cron triggers. */
+  monitorData: Record<string, Record<string, unknown>>
   timestamp: number
 }
 
@@ -59,6 +58,8 @@ export interface StrategyOptions {
 
 export interface IStrategy {
   readonly strategyId: string
+  /** Monitor names this strategy depends on. TriggerManager injects readers for these at startup. */
+  readonly monitors: readonly string[]
   run(context: StrategyContext): Promise<ExecutionInstruction[]>
   getMetrics(): StrategyMetrics
   setMonitorReader(key: string, reader: MonitorDataReader): void

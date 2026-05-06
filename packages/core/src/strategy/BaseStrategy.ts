@@ -83,6 +83,8 @@ export type { CoreMessage }
  */
 export abstract class BaseStrategy implements IStrategy {
   abstract readonly strategyId: string
+  /** Declare monitor dependencies. TriggerManager injects a reader for each at startup. */
+  readonly monitors: readonly string[] = []
 
   protected readonly dataDir: string
   private readonly stepCache = new Map<string, unknown>()
@@ -169,8 +171,17 @@ export abstract class BaseStrategy implements IStrategy {
 
   // ── Data access ───────────────────────────────────────────────────────────
 
-  protected monitorData(key: string): MonitorDataReader | undefined {
-    return this.monitorReaders.get(key)
+  /**
+   * Returns the MonitorDataReader for the given monitor name.
+   * Use reader.readLast(key, n), reader.keys(), reader.readAllLatest() etc.
+   *
+   * @example
+   * const reader = this.monitorData('price')
+   * const latest = await reader?.readLatest('BTC')
+   * const all = await reader?.readAllLatest()
+   */
+  protected monitorData(monitorName: string): MonitorDataReader | undefined {
+    return this.monitorReaders.get(monitorName)
   }
 
   protected async credential(name: string): Promise<string> {

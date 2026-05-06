@@ -126,6 +126,7 @@ export enum MonitorMode {
  */
 export abstract class BaseMonitor<TKey extends string = string, TData = Record<string, unknown>> {
   private readonly refCounts = new Map<string, number>()
+  private wildcardRefCount = 0
   private emitHandler?: EmitHandler<TData>
   protected readonly dataDir: string
   private get log() { return createLogger(this.monitorName) }
@@ -239,6 +240,20 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
     return (this.refCounts.get(key) ?? 0) > 0
   }
 
+  /** Subscribe to all keys emitted by this monitor, regardless of key value. */
+  subscribeAll(): void {
+    this.wildcardRefCount++
+  }
+
+  /** Unsubscribe from the wildcard subscription. */
+  unsubscribeAll(): void {
+    if (this.wildcardRefCount > 0) this.wildcardRefCount--
+  }
+
+  get hasWildcardSubscribers(): boolean {
+    return this.wildcardRefCount > 0
+  }
+
   protected onFirstSubscribe(key: TKey): void {
     this.start(key)
   }
@@ -278,9 +293,9 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
     await fs.promises.appendFile(filePath, JSON.stringify(record) + '\n', 'utf8')
   }
 
-  getReader(key: TKey): MonitorDataReader<TData> {
-    const filePath = getMonitorPath(this.dataDir, this.monitorName, key)
-    return new MonitorDataReaderImpl<TData>(filePath)
+  getReader(): MonitorDataReader<TData> {
+    const monitorDir = path.join(this.dataDir, 'monitors', this.monitorName)
+    return new MonitorDataReaderImpl<TData>(monitorDir)
   }
 
   setEmitHandler(handler: EmitHandler<TData>): void {
@@ -288,7 +303,7 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   }
 
   protected async emit(key: TKey, data: TData): Promise<void> {
-    if (!this.hasSubscribers(key) && this.emitHandler === undefined) return
+    if (!this.hasSubscribers(key) && !this.hasWildcardSubscribers && this.emitHandler === undefined) return
     this.onBeforeEmit(key, data)
     if (this.emitHandler) {
       await this.emitHandler(key, data)
