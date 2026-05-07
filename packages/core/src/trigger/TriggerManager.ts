@@ -1,5 +1,5 @@
 import cron from 'node-cron'
-import type { BaseMonitor } from '../monitor/BaseMonitor.js'
+import { MonitorMode, type BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
 import type { CronCondition, MonitorCondition, MonitorSource, Trigger, TriggerFilter } from '../types/trigger.js'
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
@@ -52,7 +52,7 @@ export class TriggerManager {
   // ── Start / stop helpers ──────────────────────────────────────────────────
 
   private injectDependencies(credentialStore?: CredentialStore): void {
-    [...this.bundles.entries()].forEach(([bundleId, entry]) => {
+    for (const [bundleId, entry] of this.bundles) {
       if (credentialStore) entry.strategy.setCredentialStore(credentialStore)
       entry.strategy.monitors.forEach(monitorName => {
         const monitor = this.monitors.get(monitorName)
@@ -61,23 +61,23 @@ export class TriggerManager {
         )
         entry.strategy.setMonitorReader(monitorName, monitor.getReader())
       })
-    })
+    }
   }
 
   private initTriggerStates(): void {
-    [...this.bundles.values()].forEach(entry =>
+    for (const entry of this.bundles.values()) {
       entry.triggers
         .filter(t => t.enabled)
         .forEach(t => this.triggerStates.set(t.id, new TriggerState(t.conditions.length)))
-    )
+    }
   }
 
   private setupMonitorHandlers(queue: ExecutionQueue): void {
-    [...this.monitors.entries()].forEach(([monitorName, monitor]) =>
+    for (const [monitorName, monitor] of this.monitors) {
       monitor.setEmitHandler((key, data) =>
         this.onMonitorEmit(monitorName, key, data as Record<string, unknown>, queue)
       )
-    )
+    }
   }
 
   private async onMonitorEmit(
@@ -87,18 +87,16 @@ export class TriggerManager {
     queue: ExecutionQueue,
   ): Promise<void> {
     const now = Date.now()
-    await Promise.all(
-      [...this.bundles.values()].flatMap(entry =>
-        entry.triggers
-          .filter(t => t.enabled)
-          .map(async trigger => {
-            const triggerState = this.triggerStates.get(trigger.id)
-            if (!triggerState) return
-            this.applyMonitorEmitToTrigger(trigger, triggerState, monitorName, key, data, now)
-            return this.checkAndFire(trigger, triggerState, entry.strategy, queue, now)
-          })
-      )
-    )
+    const promises: Promise<void>[] = []
+    for (const entry of this.bundles.values()) {
+      entry.triggers.filter(t => t.enabled).forEach(trigger => {
+        const triggerState = this.triggerStates.get(trigger.id)
+        if (!triggerState) return
+        this.applyMonitorEmitToTrigger(trigger, triggerState, monitorName, key, data, now)
+        promises.push(this.checkAndFire(trigger, triggerState, entry.strategy, queue, now))
+      })
+    }
+    await Promise.all(promises)
   }
 
   private applyMonitorEmitToTrigger(
@@ -120,65 +118,59 @@ export class TriggerManager {
   }
 
   private subscribeMonitors(): void {
-    [...this.bundles.values()].forEach(entry =>
+    for (const entry of this.bundles.values()) {
       entry.triggers.filter(t => t.enabled).forEach(trigger =>
         trigger.conditions
           .filter((c): c is MonitorCondition => c.type === 'monitor')
           .flatMap(c => c.sources)
           .forEach(source => this.subscribeSource(source))
       )
-    )
+    }
   }
 
   private unsubscribeMonitors(): void {
-    [...this.bundles.values()].forEach(entry =>
+    for (const entry of this.bundles.values()) {
       entry.triggers.forEach(trigger =>
         trigger.conditions
           .filter((c): c is MonitorCondition => c.type === 'monitor')
           .flatMap(c => c.sources)
           .forEach(source => this.unsubscribeSource(source))
       )
-    )
+    }
   }
 
   private subscribeSource(source: MonitorSource): void {
     const monitor = this.monitors.get(source.monitorName)
     if (!monitor) return
-    source.key === '*' ? monitor.subscribeAll() : monitor.subscribe(source.key as never)
+    if (source.key === '*') {
+      monitor.subscribeAll()
+    } else if (monitor.mode !== 'standalone') {
+      monitor.subscribe(source.key as never)
+    }
+    // Standalone monitors manage their own lifecycle — no subscribe(key) needed
   }
 
   private unsubscribeSource(source: MonitorSource): void {
     const monitor = this.monitors.get(source.monitorName)
     if (!monitor) return
-    source.key === '*' ? monitor.unsubscribeAll() : monitor.unsubscribe(source.key as never)
+    if (source.key === '*') {
+      monitor.unsubscribeAll()
+    } else if (monitor.mode !== 'standalone') {
+      monitor.unsubscribe(source.key as never)
+    }
   }
 
   private scheduleCronConditions(queue: ExecutionQueue): void {
-    [...this.bundles.values()].forEach(entry =>
+    for (const entry of this.bundles.values()) {
       entry.triggers.filter(t => t.enabled).forEach(trigger =>
         trigger.conditions.forEach((condition, i) => {
           if (condition.type === 'cron') this.scheduleCron(trigger, i, condition, entry.strategy, queue)
         })
       )
-    )
+    }
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
-
-  private async checkAndFire(
-    trigger: Trigger,
-    triggerState: TriggerState,
-    strategy: IStrategy,
-    queue: ExecutionQueue,
-    now: number,
-  ): Promise<void> {
-    if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
-    const monitorData = triggerState.collectMonitorData(trigger.conditions)
-    triggerState.reset()
-    const context: StrategyContext = { triggerId: trigger.id, monitorData, timestamp: now }
-    const instructions = await strategy.run(context)
-    await queue.pushBatch(instructions)
-  }
 
   private scheduleCron(
     trigger: Trigger,
@@ -196,6 +188,22 @@ export class TriggerManager {
     })
     this.cronTasks.push(task)
   }
+
+  private async checkAndFire(
+      trigger: Trigger,
+      triggerState: TriggerState,
+      strategy: IStrategy,
+      queue: ExecutionQueue,
+      now: number,
+  ): Promise<void> {
+    if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
+    const monitorData = triggerState.collectMonitorData(trigger.conditions)
+    triggerState.reset()
+    const context: StrategyContext = { triggerId: trigger.id, monitorData, timestamp: now }
+    const instructions = await strategy.run(context)
+    await queue.pushBatch(instructions)
+  }
+
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────

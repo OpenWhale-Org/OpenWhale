@@ -240,8 +240,11 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
     return (this.refCounts.get(key) ?? 0) > 0
   }
 
-  /** Subscribe to all keys emitted by this monitor, regardless of key value. */
+  /** Subscribe to all keys emitted by this monitor. Only valid for Standalone/Any mode monitors. */
   subscribeAll(): void {
+    if (this.mode === MonitorMode.Subscribe) {
+      throw new Error(`Monitor "${this.monitorName}" is Subscribe mode and does not support key: '*'`)
+    }
     this.wildcardRefCount++
   }
 

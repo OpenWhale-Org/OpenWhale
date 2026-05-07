@@ -44,12 +44,14 @@ export class TriggerState {
   }
 
   collectMonitorData(conditions: TriggerCondition[]): Record<string, Record<string, unknown>> {
-    return Object.fromEntries(
-      conditions.flatMap((condition, i) => {
-        if (condition.type !== 'monitor') return []
-        return [...this.states[i]!.sourceStates.entries()].map(([k, s]) => [k, s.data])
-      })
-    )
+    const result: Record<string, Record<string, unknown>> = {}
+    conditions.forEach((condition, i) => {
+      if (condition.type !== 'monitor') return
+      for (const [k, s] of this.states[i]!.sourceStates) {
+        result[k] = s.data
+      }
+    })
+    return result
   }
 
   reset(): void {
@@ -65,10 +67,13 @@ export class TriggerState {
     window: number | undefined,
     now: number,
   ): boolean {
+    // Wildcard: satisfied if at least one key from this monitor has emitted within the window.
+    // e.g. source { monitorName: 'price', key: '*' } is satisfied as long as any 'price:XXX' key fired.
     if (source.key === '*') {
-      return [...state.sourceStates.entries()].some(
-        ([k, s]) => k.startsWith(`${source.monitorName}:`) && isWithinWindow(s.satisfiedAt, window, now)
-      )
+      for (const [k, s] of state.sourceStates) {
+        if (k.startsWith(`${source.monitorName}:`) && isWithinWindow(s.satisfiedAt, window, now)) return true
+      }
+      return false
     }
     const key = `${source.monitorName}:${source.key}`
     const sourceState = state.sourceStates.get(key)
