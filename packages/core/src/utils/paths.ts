@@ -18,7 +18,7 @@ import path from 'path'
  * │   ├── monitors/{id}/source.ts + index.js
  * │   ├── executors/{id}/source.ts + index.js
  * │   └── strategies/{id}/source.ts + index.js
- * └── bundles/                                   — StrategyBundle 运行时配置
+ * └── instances/                                 — StrategyInstance 运行时配置
  *     └── {id}.json
  */
 
@@ -51,6 +51,6 @@ export function getCompiledOutputPath(dataDir: string, type: string, id: string)
   return path.join(dataDir, 'compiled', type, id, 'index.js')
 }
 
-export function getBundlePath(dataDir: string, id: string): string {
-  return path.join(dataDir, 'bundles', `${id}.json`)
+export function getInstancePath(dataDir: string, id: string): string {
+  return path.join(dataDir, 'instances', `${id}.json`)
 }

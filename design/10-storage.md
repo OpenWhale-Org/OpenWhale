@@ -4,10 +4,12 @@
 
 ## 一、设计原则
 
-- **轻量化**：不依赖数据库，所有数据本地文件存储
-- **单机友好**：适合个人/小团队本地运行，零外部依赖
-- **可读性**：JSONL 格式，可直接用文本工具查看和处理
-- **追加写入**：Monitor 数据和执行记录只追加，不修改历史
+存储层分为两类，各司其职：
+
+- **时序数据** → JSONL 文件：追加写入，无需随机访问，可直接用文本工具查看，适合流式读取和历史回放
+- **配置与状态数据** → SQL 数据库：需要随机读写、唯一性约束、事务保证
+
+> SQL 数据库层的详细设计（表结构、接口、加密方案）见 `14-database.md`。
 
 ---
 
@@ -15,17 +17,13 @@
 
 ```
 ~/.openwhale/
-  ├── credentials.enc.json          # 加密的 Credentials 存储
-  │
-  ├── bundles/                      # StrategyBundle 存储
-  │   ├── {bundleId}.json
-  │   └── ...
+  ├── openwhale.db                  # SQL 数据库（bundles、credentials、strategy_store 等）
   │
   ├── cache/                        # 编译缓存（hash 索引）
   │   ├── {sha256}.json
   │   └── ...
   │
-  ├── monitor-data/                 # Monitor 采集数据（JSONL）
+  ├── monitors/                     # Monitor 采集数据（JSONL）
   │   ├── FundingRateMonitor/
   │   │   ├── BTC.jsonl
   │   │   └── ETH.jsonl
@@ -34,8 +32,9 @@
   │   └── {MonitorName}/
   │       └── {key}.jsonl
   │
-  ├── executions/                   # 策略执行记录（JSONL）
-  │   ├── {bundleId}.jsonl
+  ├── executions/                   # Executor 执行记录（JSONL）
+  │   ├── {executorName}/
+  │   │   └── {YYYY-MM-DD}.jsonl
   │   └── ...
   │
   ├── optimizer/                    # 优化历史（JSONL）
@@ -43,60 +42,15 @@
   │   └── ...
   │
   └── logs/                         # 编译日志
-      ├── compiler/
-      │   └── {timestamp}-{hash}.json
-      └── ...
+      └── compiler/
+          └── {timestamp}-{hash}.json
 ```
 
 ---
 
-## 三、各文件格式
+## 三、JSONL 文件格式
 
-### credentials.enc.json
-
-整体 AES-256-GCM 加密，解密后为 JSON 数组：
-
-```json
-[
-  {
-    "id": "cred_01",
-    "name": "My Wallet",
-    "type": "wallet_private_key",
-    "encryptedData": "iv:authTag:encrypted",
-    "metadata": { "address": "0xabc...", "network": "ethereum" },
-    "createdAt": "2026-04-30T00:00:00Z",
-    "updatedAt": "2026-04-30T00:00:00Z"
-  }
-]
-```
-
-### bundles/{bundleId}.json
-
-```json
-{
-  "id": "bundle_01",
-  "description": "当 BTC 资金费率连续 3 次为正且超过 0.01% 时，做空 BTC，止损 5%",
-  "triggerConfig": {
-    "id": "trigger_01",
-    "type": "subscribe",
-    "monitorName": "FundingRateMonitor",
-    "key": "BTC",
-    "strategyBundleId": "bundle_01",
-    "enabled": true,
-    "filter": { "field": "rate", "op": "gt", "value": 0.0001 }
-  },
-  "strategyCode": "class GeneratedStrategy extends Strategy { ... }",
-  "requiredAdapters": ["perp_exchange"],
-  "requiredSkills": [],
-  "requiredCredentials": ["My Wallet"],
-  "defaultContext": { "coin": "BTC", "stopLossPercent": 5 },
-  "allowConcurrent": false,
-  "compiledAt": "2026-04-30T00:00:00Z",
-  "backtestScore": 0.92
-}
-```
-
-### monitor-data/{MonitorName}/{key}.jsonl
+### monitors/{MonitorName}/{key}.jsonl
 
 每行一个 JSON 对象，必须包含 `ts` 字段（Unix 毫秒时间戳）：
 

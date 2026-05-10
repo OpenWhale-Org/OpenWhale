@@ -2,6 +2,8 @@ import type { ExecutionInstruction, ExecutionQueue } from '../../types/executor.
 import type { IStrategy, StrategyContext, StrategyMetrics } from '../../types/strategy.js'
 import type { MonitorDataReader } from '../../types/monitor.js'
 import type { CredentialStore } from '../../types/credential.js'
+import type { IStrategyStore } from '../../strategy/StrategyStore.js'
+import type { HttpClient } from '../../strategy/HttpClient.js'
 import { BaseMonitor, MonitorMode } from '../../monitor/BaseMonitor.js'
 
 // ── MockQueue ─────────────────────────────────────────────────────────────────
@@ -51,6 +53,8 @@ export class MockStrategy implements IStrategy {
 
   setMonitorReader(_key: string, _reader: MonitorDataReader): void {}
   setCredentialStore(_store: CredentialStore): void {}
+  setStore(_store: IStrategyStore): void {}
+  setHttpClient(_client: HttpClient): void {}
 }
 
 // ── MockMonitor ───────────────────────────────────────────────────────────────
@@ -71,8 +75,13 @@ export class MockMonitor extends BaseMonitor<string, Record<string, unknown>> {
   // Skip file I/O in tests
   protected async append(_key: string, _data: Record<string, unknown>): Promise<void> {}
 
-  /** Manually push a data event for testing. */
+  /** Manually push a data event for testing (persists + emits). */
   async fire(key: string, data: Record<string, unknown>): Promise<void> {
     await this.push(key, data)
+  }
+
+  /** Directly emit a data event for testing (skips persistence). */
+  async emit(key: string, data: Record<string, unknown>): Promise<void> {
+    await super.emit(key as never, data as never)
   }
 }

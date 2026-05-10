@@ -4,15 +4,19 @@ import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
 import type { CronCondition, MonitorCondition, MonitorSource, Trigger, TriggerFilter } from '../types/trigger.js'
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
+import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
+import { DBStrategyStore } from '../strategy/StrategyStore.js'
+import { HttpClient } from '../strategy/HttpClient.js'
 import { TriggerState } from './TriggerState.js'
 
-interface BundleEntry {
+interface InstanceEntry {
+  instanceId: string
   triggers: Trigger[]
   strategy: IStrategy
 }
 
 export class TriggerManager {
-  private readonly bundles = new Map<string, BundleEntry>()
+  private readonly instances = new Map<string, InstanceEntry>()
   private readonly monitors = new Map<string, BaseMonitor>()
   private readonly cronTasks: cron.ScheduledTask[] = []
   private readonly triggerStates = new Map<string, TriggerState>()
@@ -22,19 +26,29 @@ export class TriggerManager {
     this.monitors.set(monitor.monitorName, monitor)
   }
 
-  registerBundle(bundleId: string, triggers: Trigger[], strategy: IStrategy): void {
-    this.bundles.set(bundleId, { triggers, strategy })
+  registerInstance(instanceId: string, triggers: Trigger[], strategy: IStrategy): void {
+    this.instances.set(instanceId, { instanceId, triggers, strategy })
   }
 
-  unregisterBundle(bundleId: string): void {
-    this.bundles.get(bundleId)?.triggers.forEach(t => this.triggerStates.delete(t.id))
-    this.bundles.delete(bundleId)
+  unregisterInstance(instanceId: string): void {
+    this.instances.get(instanceId)?.triggers.forEach(t => this.triggerStates.delete(t.id))
+    this.instances.delete(instanceId)
   }
 
-  start(queue: ExecutionQueue, credentialStore?: CredentialStore): void {
+  /** @deprecated Use registerInstance */
+  registerBundle(instanceId: string, triggers: Trigger[], strategy: IStrategy): void {
+    this.registerInstance(instanceId, triggers, strategy)
+  }
+
+  /** @deprecated Use unregisterInstance */
+  unregisterBundle(instanceId: string): void {
+    this.unregisterInstance(instanceId)
+  }
+
+  start(queue: ExecutionQueue, credentialStore?: CredentialStore, database?: DatabaseAdapter): void {
     if (this.running) return
     this.running = true
-    this.injectDependencies(credentialStore)
+    this.injectDependencies(credentialStore, database)
     this.initTriggerStates()
     this.setupMonitorHandlers(queue)
     this.subscribeMonitors()
@@ -51,21 +65,28 @@ export class TriggerManager {
 
   // ── Start / stop helpers ──────────────────────────────────────────────────
 
-  private injectDependencies(credentialStore?: CredentialStore): void {
-    for (const [bundleId, entry] of this.bundles) {
-      if (credentialStore) entry.strategy.setCredentialStore(credentialStore)
-      entry.strategy.monitors.forEach(monitorName => {
+  private injectDependencies(credentialStore?: CredentialStore, database?: DatabaseAdapter): void {
+    for (const { instanceId, strategy } of this.instances.values()) {
+      if (credentialStore) strategy.setCredentialStore(credentialStore)
+
+      if (database) {
+        strategy.setStore(new DBStrategyStore(instanceId, database))
+      }
+
+      strategy.setHttpClient(new HttpClient(strategy.strategyId))
+
+      strategy.monitors.forEach(monitorName => {
         const monitor = this.monitors.get(monitorName)
         if (!monitor) throw new Error(
-          `Bundle "${bundleId}": strategy "${entry.strategy.strategyId}" declares monitor dependency "${monitorName}" but it is not registered`
+          `Instance "${instanceId}": strategy "${strategy.strategyId}" declares monitor dependency "${monitorName}" but it is not registered`
         )
-        entry.strategy.setMonitorReader(monitorName, monitor.getReader())
+        strategy.setMonitorReader(monitorName, monitor.getReader())
       })
     }
   }
 
   private initTriggerStates(): void {
-    for (const entry of this.bundles.values()) {
+    for (const entry of this.instances.values()) {
       entry.triggers
         .filter(t => t.enabled)
         .forEach(t => this.triggerStates.set(t.id, new TriggerState(t.conditions.length)))
@@ -88,12 +109,12 @@ export class TriggerManager {
   ): Promise<void> {
     const now = Date.now()
     const promises: Promise<void>[] = []
-    for (const entry of this.bundles.values()) {
+    for (const entry of this.instances.values()) {
       entry.triggers.filter(t => t.enabled).forEach(trigger => {
         const triggerState = this.triggerStates.get(trigger.id)
         if (!triggerState) return
         this.applyMonitorEmitToTrigger(trigger, triggerState, monitorName, key, data, now)
-        promises.push(this.checkAndFire(trigger, triggerState, entry.strategy, queue, now))
+        promises.push(this.checkAndFire(entry.instanceId, trigger, triggerState, entry.strategy, queue, now))
       })
     }
     await Promise.all(promises)
@@ -118,7 +139,7 @@ export class TriggerManager {
   }
 
   private subscribeMonitors(): void {
-    for (const entry of this.bundles.values()) {
+    for (const entry of this.instances.values()) {
       entry.triggers.filter(t => t.enabled).forEach(trigger =>
         trigger.conditions
           .filter((c): c is MonitorCondition => c.type === 'monitor')
@@ -129,7 +150,7 @@ export class TriggerManager {
   }
 
   private unsubscribeMonitors(): void {
-    for (const entry of this.bundles.values()) {
+    for (const entry of this.instances.values()) {
       entry.triggers.forEach(trigger =>
         trigger.conditions
           .filter((c): c is MonitorCondition => c.type === 'monitor')
@@ -161,10 +182,10 @@ export class TriggerManager {
   }
 
   private scheduleCronConditions(queue: ExecutionQueue): void {
-    for (const entry of this.bundles.values()) {
+    for (const entry of this.instances.values()) {
       entry.triggers.filter(t => t.enabled).forEach(trigger =>
         trigger.conditions.forEach((condition, i) => {
-          if (condition.type === 'cron') this.scheduleCron(trigger, i, condition, entry.strategy, queue)
+          if (condition.type === 'cron') this.scheduleCron(entry.instanceId, trigger, i, condition, entry.strategy, queue)
         })
       )
     }
@@ -173,6 +194,7 @@ export class TriggerManager {
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   private scheduleCron(
+    instanceId: string,
     trigger: Trigger,
     conditionIndex: number,
     condition: CronCondition,
@@ -184,12 +206,13 @@ export class TriggerManager {
       const triggerState = this.triggerStates.get(trigger.id)
       if (!triggerState) return
       triggerState.satisfyCron(conditionIndex, now)
-      await this.checkAndFire(trigger, triggerState, strategy, queue, now)
+      await this.checkAndFire(instanceId, trigger, triggerState, strategy, queue, now)
     })
     this.cronTasks.push(task)
   }
 
   private async checkAndFire(
+      instanceId: string,
       trigger: Trigger,
       triggerState: TriggerState,
       strategy: IStrategy,
@@ -199,7 +222,7 @@ export class TriggerManager {
     if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
     const monitorData = triggerState.collectMonitorData(trigger.conditions)
     triggerState.reset()
-    const context: StrategyContext = { triggerId: trigger.id, monitorData, timestamp: now }
+    const context: StrategyContext = { instanceId, triggerId: trigger.id, monitorData, timestamp: now }
     const instructions = await strategy.run(context)
     await queue.pushBatch(instructions)
   }

@@ -60,7 +60,7 @@ export type TriggerCondition = CronCondition | MonitorCondition
  */
 export interface Trigger {
   id: string
-  strategyBundleId: string
+  strategyInstanceId: string
   enabled: boolean
   conditions: [TriggerCondition, ...TriggerCondition[]]
   window?: number  // ms; undefined = no expiry

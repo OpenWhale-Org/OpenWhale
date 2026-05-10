@@ -2,11 +2,13 @@ import type { ExecutionInstruction } from '../types/executor.js'
 import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore } from '../types/credential.js'
+import type { IStrategyStore } from './StrategyStore.js'
 import type { ZodType } from 'zod'
 import { getDataDir } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
 import type { CoreMessage, LlmCallOptions } from './llm.js'
+import { HttpClient } from './HttpClient.js'
 
 export type { CoreMessage }
 
@@ -96,6 +98,8 @@ export abstract class BaseStrategy implements IStrategy {
 
   private monitorReaders = new Map<string, MonitorDataReader>()
   private credentialStore?: CredentialStore
+  private storeInstance?: IStrategyStore
+  private httpClient?: HttpClient
   private readonly llmClient?: LlmClient
   private get log() { return createLogger(this.strategyId) }
 
@@ -112,6 +116,14 @@ export abstract class BaseStrategy implements IStrategy {
 
   setCredentialStore(store: CredentialStore): void {
     this.credentialStore = store
+  }
+
+  setStore(store: IStrategyStore): void {
+    this.storeInstance = store
+  }
+
+  setHttpClient(client: HttpClient): void {
+    this.httpClient = client
   }
 
   async run(context: StrategyContext): Promise<ExecutionInstruction[]> {
@@ -187,6 +199,32 @@ export abstract class BaseStrategy implements IStrategy {
   protected async credential(name: string): Promise<string> {
     if (!this.credentialStore) throw new Error('CredentialStore not configured')
     return this.credentialStore.getByName(name)
+  }
+
+  /**
+   * Bundle-scoped persistent KV store. Values survive process restarts.
+   * Backed by SQL (DBStrategyStore) when a DatabaseAdapter is configured.
+   *
+   * @example
+   * await this.store.set('lastPrice', 50000)
+   * const last = await this.store.get<number>('lastPrice')
+   */
+  protected get store(): IStrategyStore {
+    if (!this.storeInstance) throw new Error('StrategyStore not configured — make sure the runtime has a DatabaseAdapter')
+    return this.storeInstance
+  }
+
+  /**
+   * Controlled HTTP client. All requests are logged for observability.
+   * Use this instead of calling fetch directly.
+   *
+   * @example
+   * const res = await this.http.get<{ price: number }>('https://api.example.com/price')
+   * const res = await this.http.post('https://api.example.com/order', { side: 'buy' })
+   */
+  protected get http(): HttpClient {
+    if (!this.httpClient) throw new Error('HttpClient not configured')
+    return this.httpClient
   }
 
   // ── LLM inference ─────────────────────────────────────────────────────────

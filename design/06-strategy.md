@@ -4,237 +4,221 @@
 
 ## 一、定位
 
-Strategy 是 OpenWhale 的决策单元。
+Strategy 是 OpenWhale 的决策单元，负责：接收触发上下文 → 决策 → 返回 `ExecutionInstruction[]`。
 
 **关键特点：**
-- 由 Compiler 根据策略描述自动生成代码
-- 继承 `Strategy` 基类，使用 `rule()` + `llm()` 混合执行模式
-- 规则引擎优先（快速、确定性、零 LLM 成本），LLM 按需调用
-- **只负责决策，不负责执行**：输出 `ExecutionInstruction[]`，由 Executor 实际执行
-- 可读取 Monitor 历史数据和 Credentials，不直接调用任何外部服务
+- 继承 `BaseStrategy`，实现 `evaluate(context)` 方法
+- 声明 Trigger（`triggers(params)`）、Monitor 依赖（`monitors`）、账户类型（`accountTypes`）、参数 schema
+- 只负责决策，不负责执行（输出指令，由 Executor 执行）
+- 规则引擎优先，LLM 按需调用
 
 ---
 
-## 二、Strategy 基类
+## 二、Strategy 类结构
 
 ```typescript
-interface StepOptions {
-  cache?: boolean       // 是否缓存结果，默认 true
-  timeout?: number      // 超时时间（ms），默认 30000
-}
+class FundingRateStrategy extends BaseStrategy {
+  // ── 身份 ──────────────────────────────────────────────────────────────────
+  readonly strategyId = 'funding-rate'
 
-interface LLMOptions {
-  prompt: string
-  model?: string        // 模型 ID，默认使用 Runtime 配置的执行模型
-  temperature?: number  // 默认 0.7
-  parser?: 'text' | 'json' | 'number'
-  reasoning?: 'minimal' | 'low' | 'medium' | 'high'
-}
+  // ── 依赖声明 ──────────────────────────────────────────────────────────────
+  /** 依赖的 Monitor 名称列表，框架启动时注入对应 reader */
+  readonly monitors = ['funding-rate']
 
-class Strategy {
-  protected context: StrategyContext
+  /** 依赖的账户类型，按顺序对应 StrategyInstance.accounts[] */
+  readonly accountTypes = ['hyperliquid'] as const
+  // 或带 label：
+  // readonly accountTypes = [{ type: 'hyperliquid', label: 'main' }] as const
 
-  // ==================== 核心执行原语 ====================
+  // ── 参数 schema ───────────────────────────────────────────────────────────
+  /** 必填参数，用户手动配置 */
+  readonly baseParamsSchema = z.object({
+    coin: z.string(),
+    maxPositionSize: z.number().positive(),
+  })
 
-  // 执行步骤（带缓存）
-  async step<T>(name: string, fn: () => Promise<T>, options?: StepOptions): Promise<T>
+  /** 可调优参数，AI Optimizer 可自动调整，带默认值 */
+  readonly tunableParamsSchema = z.object({
+    threshold: z.number().min(0.00001).max(0.01).default(0.0001),
+    maWindow: z.number().int().min(3).max(50).default(14),
+  })
 
-  // 规则引擎（同步、确定性，不消耗 LLM）
-  async rule<T>(name: string, fn: () => T): Promise<T>
-
-  // LLM 调用（异步，消耗 token）
-  async llm(name: string, options: LLMOptions): Promise<any>
-
-  // ==================== 流程控制 ====================
-
-  // 并行执行多个步骤
-  async parallel<T>(steps: (() => Promise<T>)[]): Promise<T[]>
-
-  // 遍历集合（串行）
-  async forEach<T, R>(collection: T[], fn: (item: T) => Promise<R>): Promise<R[]>
-
-  // 条件分支
-  async when<T>(
-    condition: boolean | (() => boolean),
-    thenFn: () => Promise<T>,
-    elseFn?: () => Promise<T>
-  ): Promise<T | null>
-
-  // ==================== 资源访问 ====================
-
-  // 访问 Credentials（解密后的明文）
-  async credential(name: string): Promise<string>
-
-  // 读取 Monitor 历史数据
-  monitorData<T>(monitorName: string, key: string): MonitorDataReader<T>
-
-  // ==================== 指标收集 ====================
-
-  getMetrics(): StrategyMetrics
-}
-```
-
----
-
-## 三、ExecutionInstruction 格式
-
-Strategy 的输出是开放格式的指令，由 Skill 在编译阶段定义：
-
-```typescript
-interface ExecutionInstruction {
-  action: string              // 指令名，如 'hl.market_order'、'uniswap.swap'
-  params: Record<string, any> // 指令参数，格式由对应 Skill 定义
-}
-```
-
-**使用已有 Executor 时**，Strategy 必须严格按照该 Executor 对应 Skill 声明的格式输出，Compiler 在编译时通过注入 Skill 描述来保证这一点。
-
----
-
-## 四、AI 生成的 Strategy 代码规范
-
-1. 类名必须为 `GeneratedStrategy`，继承 `Strategy`
-2. 必须实现 `async execute(context)` 方法
-3. 返回值为 `ExecutionInstruction[]`、单个 `ExecutionInstruction`，或 `null`（不执行）
-4. 优先使用 `rule()` 处理确定性逻辑，只在需要复杂判断时使用 `llm()`
-5. 使用可选链（`?.`）防御性访问 context 属性
-6. 纯 JavaScript，不含 TypeScript 类型注解
-7. **不得直接调用任何外部服务**，所有外部操作通过 `ExecutionInstruction` 表达
-
----
-
-## 五、Strategy 代码示例
-
-### 示例 1：资金费率套利策略
-
-```javascript
-class GeneratedStrategy extends Strategy {
-  async execute(context) {
-    const history = this.monitorData('FundingRateMonitor', context.coin).readLast(3)
-
-    // rule: 判断是否连续 3 次为正且超过阈值
-    const shouldShort = await this.rule('check-funding', () => {
-      if (history.length < 3) return false
-      return history.every(d => d.rate > 0.0001)
-    })
-
-    if (!shouldShort) return null
-
-    // rule: 计算仓位大小
-    const size = await this.rule('calc-size', () => {
-      return Math.min(context.balance * 0.1, 1000)
-    })
-
-    // 输出执行指令（格式由 HyperliquidSkill 定义）
-    return {
-      action: 'hl.market_order',
-      params: { coin: context.coin, isBuy: false, size, slippageBps: 50 }
-    }
+  // ── Trigger 定义 ──────────────────────────────────────────────────────────
+  /** 触发条件，动态值从 params 读取 */
+  triggers(params: { base: Record<string, unknown>; tunable: Record<string, unknown> }) {
+    return [{
+      enabled: true,
+      conditions: [{
+        type: 'monitor' as const,
+        sources: [{
+          monitorName: 'funding-rate',
+          key: params.base.coin as string,
+          filter: { field: 'rate', op: 'gt' as const, value: params.tunable.threshold }
+        }]
+      }]
+    }]
   }
-}
-```
 
-### 示例 2：含 LLM 推理的趋势策略
+  // ── 决策逻辑 ──────────────────────────────────────────────────────────────
+  async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
+    // 读取账户（按 index，对应 accountTypes[0] = 'hyperliquid'）
+    const hl = await this.account<IHyperliquidAccount>(0)
+    const balance = await hl.balance()
 
-```javascript
-class GeneratedStrategy extends Strategy {
-  async execute(context) {
-    const prices = this.monitorData('PriceMonitor', 'BTC-USDT').readLast(48)
+    // 读取 Monitor 历史数据
+    const reader = this.monitorData('funding-rate')
+    const recent = await reader?.readLast(this.params.base.coin, this.params.tunable.maWindow)
 
-    // rule: 快速技术指标计算
-    const trend = await this.rule('calc-trend', () => {
-      const ma7  = prices.slice(-7).reduce((s, d) => s + d.price, 0) / 7
-      const ma24 = prices.slice(-24).reduce((s, d) => s + d.price, 0) / 24
-      return { ma7, ma24, bullish: ma7 > ma24 }
-    })
+    if (!recent || recent.length < 3) return []
 
-    // 只在趋势不明朗时调用 LLM
-    if (Math.abs(trend.ma7 - trend.ma24) / trend.ma24 < 0.005) {
-      const decision = await this.llm('trend-analysis', {
-        prompt: `MA7=${trend.ma7.toFixed(2)}, MA24=${trend.ma24.toFixed(2)}, 最新价=${context.price}，判断趋势方向`,
-        parser: 'json',
-        reasoning: 'low'
-      })
-      if (decision.action === 'skip') return null
-      return {
-        action: 'hl.market_order',
-        params: { coin: 'BTC', isBuy: decision.bullish, size: context.balance * 0.05 }
-      }
-    }
+    const allAboveThreshold = recent.every(d => (d.rate as number) > this.params.tunable.threshold)
+    if (!allAboveThreshold) return []
 
-    return {
-      action: 'hl.market_order',
-      params: { coin: 'BTC', isBuy: trend.bullish, size: context.balance * 0.05 }
-    }
-  }
-}
-```
-
-### 示例 3：并行多币种扫描，输出多条指令
-
-```javascript
-class GeneratedStrategy extends Strategy {
-  async execute(context) {
-    const coins = ['BTC', 'ETH', 'SOL', 'ARB']
-
-    // 并行读取所有币种的最新资金费率
-    const rates = await this.parallel(
-      coins.map(coin => async () => {
-        const latest = this.monitorData('FundingRateMonitor', coin).readLatest()
-        return { coin, rate: latest?.rate ?? 0 }
-      })
+    const size = Math.min(
+      balance.available * 0.1,
+      this.params.base.maxPositionSize
     )
 
-    // rule: 找出所有满足条件的币种
-    const targets = await this.rule('filter-targets', () => {
-      return rates.filter(r => r.rate > 0.0001)
-    })
-
-    if (targets.length === 0) return null
-
-    // 对每个目标输出一条执行指令
-    return targets.map(t => ({
-      action: 'hl.market_order',
-      params: { coin: t.coin, isBuy: false, size: context.balance * 0.05 }
-    }))
+    return [{
+      executorId: 'hyperliquid',
+      messageId: '',
+      action: 'perp.market_order',
+      params: { coin: this.params.base.coin, isBuy: false, size }
+    }]
   }
 }
 ```
 
 ---
 
-## 六、StrategyContext
+## 三、框架注入的接口（全部 protected）
+
+| 接口 | 类型 | 说明 |
+|------|------|------|
+| `this.params.base` | `z.infer<typeof baseParamsSchema>` | 必填参数，类型从 schema infer |
+| `this.params.tunable` | `z.infer<typeof tunableParamsSchema>` | 可调优参数，含 Zod 默认值 |
+| `this.account<T>(index)` | `Promise<T>` | 按 index 访问账户，有 label 时也支持按 label |
+| `this.monitorData(name)` | `MonitorDataReader \| undefined` | 读取 Monitor 历史数据 |
+| `this.credential(name)` | `Promise<{ type, data }>` | 读取原始 Credential |
+| `this.store` | `IStrategyStore` | Instance 级持久化 KV，跨重启保留 |
+| `this.http` | `HttpClient` | 受控 HTTP 客户端，所有请求自动 log |
+| `this.llm(options)` | `Promise<T \| string>` | LLM 推理，支持结构化输出（Zod schema） |
+
+---
+
+## 四、参数系统
+
+### 两段式 schema
 
 ```typescript
-interface StrategyContext {
-  // 触发信息
-  triggerType: 'cron' | 'subscribe'
-  triggerData?: any       // SubscribeTrigger 触发时的 Monitor 数据
-  triggerTime: Date
+// 必填参数：用户手动配置，框架不调优
+readonly baseParamsSchema = z.object({
+  coin: z.string(),
+  maxPositionSize: z.number().positive(),
+})
 
-  // 运行时注入（由 Runtime 填充）
-  credentials: CredentialStore
-  monitorDataDir: string
+// 可调优参数：AI Optimizer 可自动调整，必须有默认值
+readonly tunableParamsSchema = z.object({
+  threshold: z.number().min(0.00001).max(0.01).default(0.0001),
+  maWindow: z.number().int().min(3).max(50).default(14),
+})
+```
 
-  // 用户自定义上下文（来自 StrategyBundle.defaultContext）
-  [key: string]: any
-}
+**基类默认提供空 schema**，子类按需 override：
+
+```typescript
+// BaseStrategy 默认
+readonly baseParamsSchema = z.object({})
+readonly tunableParamsSchema = z.object({})
+```
+
+### 校验时机
+
+`Runtime.activate(instance)` 时：
+1. `baseParamsSchema.parse(instance.params?.base ?? {})` — 必填字段缺失直接报错
+2. `tunableParamsSchema.parse(instance.params?.tunable ?? {})` — 缺失字段用 `.default()` 补全
+
+### 访问方式
+
+类型从 schema infer，不需要泛型参数：
+
+```typescript
+this.params.base.coin           // string
+this.params.tunable.maWindow    // number（含默认值）
 ```
 
 ---
 
-## 七、执行指标
+## 五、账户系统
+
+### 声明账户类型
 
 ```typescript
-interface StrategyMetrics {
-  steps: StepMetric[]
-  ruleExecutions: number
-  llmCalls: number
-  totalTime: number
-  totalCost: number       // LLM 调用总成本（USD）
-  totalTokens: number
-  ruleRatio: number       // rule 占总步骤的比例（越高越好）
-}
+// 简单形式（字符串数组）
+readonly accountTypes = ['hyperliquid', 'binance'] as const
+
+// 带 label 形式（支持按 label 访问）
+readonly accountTypes = [
+  { type: 'hyperliquid', label: 'main' },
+  { type: 'binance', label: 'hedge' },
+] as const
 ```
 
-**黄金比例目标：** rule:llm = 50:50，尽量用规则引擎替代 LLM 调用，降低成本、提升速度。
+### 访问账户
+
+```typescript
+// 按 index
+const hl = await this.account<IPerpAccount>(0)
+
+// 按 label（仅当声明了 label 时有效）
+const hl = await this.account<IPerpAccount>('main')
+```
+
+### 校验时机
+
+`Runtime.activate(instance)` 时：
+- `instance.accounts.length === strategy.accountTypes.length`
+- `instance.accounts[i]` 对应 Credential 的 `type` 必须匹配 `accountTypes[i]`
+
+---
+
+## 六、工作流辅助方法
+
+| 方法 | 说明 |
+|------|------|
+| `this.step(key, fn)` | 单次运行内缓存，同一 key 只执行一次 |
+| `this.rule(cond, instructions)` | 条件为真时返回指令，否则返回空数组 |
+| `this.when(cond, then, else)` | if/else 分支 |
+| `this.parallel(sets)` | 合并多组指令（flat） |
+| `this.forEach(items, fn)` | 对列表每项生成指令 |
+
+---
+
+## 七、注入链
+
+```
+Runtime.activate(instance)
+  ├─ strategyFactory() → 创建 Strategy 实例
+  ├─ parseParams()     → Zod 校验并补全 params
+  ├─ validateAccounts() → 校验账户类型匹配
+  ├─ ensureAccounts()  → 按需创建 Account 实例存入 AccountRegistry
+  └─ strategy.triggers(parsedParams) → 生成 Trigger，注册到 TriggerManager
+
+TriggerManager.start() → injectDependencies()
+  ├─ strategy.setCredentialStore(store)
+  ├─ strategy.setStore(new DBStrategyStore(instanceId, db))
+  ├─ strategy.setHttpClient(new HttpClient(strategyId))
+  ├─ strategy.setAccounts(instanceAccounts)   ← 该 instance 的账户列表
+  ├─ strategy.setParams(parsedParams)         ← 校验补全后的 params
+  └─ strategy.setMonitorReader(name, reader)  ← 按 monitors[] 注入
+```
+
+---
+
+## 八、设计边界
+
+Strategy **只做决策**，不做副作用：
+- 不直接调用交易所 API（交给 Executor）
+- 不写 Monitor 数据（Monitor 自己写）
+- HTTP 请求允许但必须通过 `this.http`（可观测）
+- Account 只读（`balance()`、`positions()` 等查询方法，无下单操作）

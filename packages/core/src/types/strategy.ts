@@ -2,8 +2,11 @@ import type { ExecutionInstruction } from './executor.js'
 import type { MonitorDataReader } from './monitor.js'
 import type { CredentialStore } from './credential.js'
 import type { RetryOptions } from './executor.js'
+import type { IStrategyStore } from '../strategy/StrategyStore.js'
+import type { HttpClient } from '../strategy/HttpClient.js'
 
 export interface StrategyContext {
+  instanceId: string
   triggerId: string
   /** Flattened monitor data at the time of trigger, keyed by 'monitorName:key'. Empty for pure cron triggers. */
   monitorData: Record<string, Record<string, unknown>>
@@ -64,4 +67,6 @@ export interface IStrategy {
   getMetrics(): StrategyMetrics
   setMonitorReader(key: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void
+  setStore(store: IStrategyStore): void
+  setHttpClient(client: HttpClient): void
 }

@@ -31,7 +31,7 @@ export type {
   SkillParameter,
   SkillDefinition,
   SkillModule,
-  StrategyBundle,
+  StrategyInstance,
   AdapterQueryOptions,
   AdapterExecuteOptions,
   IAdapter,
@@ -45,6 +45,7 @@ export type {
 
 // Credentials
 export { FileCredentialStore } from './credentials/CredentialStore.js'
+export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 
 // Monitor
 export { BaseMonitor, MonitorMode } from './monitor/BaseMonitor.js'
@@ -62,9 +63,19 @@ export { TriggerManager } from './trigger/TriggerManager.js'
 // Strategy
 export { BaseStrategy } from './strategy/BaseStrategy.js'
 export type { CoreMessage, LlmCallOptions } from './strategy/llm.js'
+export type { IStrategyStore } from './strategy/StrategyStore.js'
+export { DBStrategyStore } from './strategy/StrategyStore.js'
+export { HttpClient, HttpError } from './strategy/HttpClient.js'
+export type { HttpRequestOptions, HttpResponse } from './strategy/HttpClient.js'
 
-// Bundle
-export { BundleStore } from './bundle/BundleStore.js'
+// Instance
+export { StrategyInstanceStore } from './bundle/StrategyInstanceStore.js'
+export { DBStrategyInstanceStore } from './bundle/DBStrategyInstanceStore.js'
+
+// Database
+export type { DatabaseAdapter, Row } from './database/DatabaseAdapter.js'
+export { SQLiteAdapter } from './database/SQLiteAdapter.js'
+export type { SQLiteAdapterOptions } from './database/SQLiteAdapter.js'
 
 // Plugin
 export { PluginManager } from './plugin/PluginManager.js'
@@ -98,6 +109,6 @@ export {
   getRegistryPath,
   getCompiledSourcePath,
   getCompiledOutputPath,
-  getBundlePath,
+  getInstancePath,
 } from './utils/paths.js'
 export { appendJsonl, readJsonlLines, writeJsonlLines, streamJsonlLines } from './utils/jsonl.js'
