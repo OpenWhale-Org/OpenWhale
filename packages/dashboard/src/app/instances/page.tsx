@@ -12,7 +12,12 @@ export default async function InstancesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Strategy Instances</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Strategy Instances</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+            Activate and manage running strategy instances
+          </p>
+        </div>
       </div>
       <InstancesClient initialInstances={instances} />
     </div>
