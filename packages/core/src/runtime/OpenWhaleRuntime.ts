@@ -8,6 +8,7 @@ import type { IStrategy } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AccountFactory, IAccount } from '../types/account.js'
+import type { RawCredentialData } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
@@ -15,16 +16,16 @@ import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../reg
 import { StrategyInstanceStore } from '../bundle/StrategyInstanceStore.js'
 import { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
 import type { PluginManager } from '../plugin/PluginManager.js'
-import type { CompiledLoader } from '../compiled/CompiledLoader.js'
+import { CompiledLoader } from '../compiled/CompiledLoader.js'
 import { getDataDir } from '../utils/paths.js'
 
 export class OpenWhaleRuntime implements IRuntime {
   private readonly instances = new Map<string, StrategyInstance>()
-  private readonly triggerManager = new TriggerManager()
-  private readonly queue: ExecutionQueue
   private readonly monitorRegistry: MonitorRegistry
   private readonly executorRegistry: ExecutorRegistry
   private readonly strategyRegistry: StrategyRegistry
+  private readonly triggerManager: TriggerManager
+  private readonly queue: ExecutionQueue
   private readonly instanceStore: StrategyInstanceStore | DBStrategyInstanceStore
   private readonly pluginManager: PluginManager | undefined
   private readonly compiledLoader: CompiledLoader | undefined
@@ -41,17 +42,23 @@ export class OpenWhaleRuntime implements IRuntime {
     this.monitorRegistry = options?.monitorRegistry ?? createMonitorRegistry()
     this.executorRegistry = options?.executorRegistry ?? createExecutorRegistry()
     this.strategyRegistry = options?.strategyRegistry ?? createStrategyRegistry()
+    this.triggerManager = new TriggerManager(this.monitorRegistry)
     this.database = options?.database
     this.instanceStore = options?.instanceStore
       ?? (this.database ? new DBStrategyInstanceStore(this.database) : new StrategyInstanceStore(this.dataDir))
     this.pluginManager = options?.pluginManager
     this.compiledLoader = options?.compiledLoader
+      ?? new CompiledLoader({
+        monitorRegistry: this.monitorRegistry,
+        executorRegistry: this.executorRegistry,
+        strategyRegistry: this.strategyRegistry,
+        dataDir: this.dataDir,
+      })
     this.credentialStore = options?.credentialStore
   }
 
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor): void {
     this.monitorRegistry.register(definition, instance)
-    this.triggerManager.registerMonitor(instance)
   }
 
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor): void {
@@ -64,45 +71,6 @@ export class OpenWhaleRuntime implements IRuntime {
 
   registerAccountFactory(accountType: string, factory: AccountFactory): void {
     this.accountFactories.set(accountType, factory)
-  }
-
-  async activate(instance: StrategyInstance): Promise<void> {
-    // ① Create strategy instance from factory
-    const strategyFactory = this.strategyRegistry.get(instance.strategyId)
-    if (!strategyFactory) {
-      throw new Error(`Strategy not found: ${instance.strategyId}`)
-    }
-    const strategy = strategyFactory()
-
-    // ② Parse and validate params
-    const parsedParams = this.parseParams(strategy, instance)
-
-    // ③ Validate account types match
-    this.validateAccounts(strategy, instance)
-
-    // ④ Ensure account instances exist in registry
-    const accounts = await this.ensureAccounts(instance)
-
-    // ⑤ Generate triggers from strategy
-    const rawTriggers = strategy.triggers(parsedParams)
-    const triggers = rawTriggers.map((t, i) => ({
-      ...t,
-      id: `${instance.id}-trigger-${i}`,
-      strategyInstanceId: instance.id,
-    }))
-
-    // ⑥ Register instance with TriggerManager (passes strategy + triggers)
-    this.instances.set(instance.id, instance)
-    this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts)
-
-    // ⑦ Persist instance
-    await this.instanceStore.save(instance)
-  }
-
-  async deactivate(instanceId: string): Promise<void> {
-    this.instances.delete(instanceId)
-    this.triggerManager.unregisterInstance(instanceId)
-    await this.instanceStore.delete(instanceId)
   }
 
   async start(): Promise<void> {
@@ -119,12 +87,6 @@ export class OpenWhaleRuntime implements IRuntime {
       await this.compiledLoader.loadAll()
     }
 
-    // Register compiled monitors into TriggerManager
-    for (const def of this.monitorRegistry.list()) {
-      const instance = this.monitorRegistry.get(def.id)
-      if (instance) this.triggerManager.registerMonitor(instance)
-    }
-
     // Load and activate persisted instances
     const persistedInstances = await this.instanceStore.loadAll()
     for (const instance of persistedInstances) {
@@ -133,15 +95,7 @@ export class OpenWhaleRuntime implements IRuntime {
         if (strategyFactory) {
           const strategy = strategyFactory()
           const parsedParams = this.parseParams(strategy, instance)
-          const accounts = await this.ensureAccounts(instance)
-          const rawTriggers = strategy.triggers(parsedParams)
-          const triggers = rawTriggers.map((t, i) => ({
-            ...t,
-            id: `${instance.id}-trigger-${i}`,
-            strategyInstanceId: instance.id,
-          }))
-          this.instances.set(instance.id, instance)
-          this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts)
+          await this.registerWithTriggerManager(instance, strategy, parsedParams)
         }
       }
     }
@@ -165,17 +119,76 @@ export class OpenWhaleRuntime implements IRuntime {
     }
   }
 
+  async activate(instance: StrategyInstance): Promise<void> {
+    // ① Create strategy instance from factory
+    const strategyFactory = this.strategyRegistry.get(instance.strategyId)
+    if (!strategyFactory) {
+      throw new Error(`Strategy not found: ${instance.strategyId}`)
+    }
+    const strategy = strategyFactory()
+
+    // ② Parse and validate params
+    const parsedParams = this.parseParams(strategy, instance)
+
+    // ③ Validate account types match
+    this.validateAccounts(strategy, instance)
+
+    // ④–⑥ Ensure accounts, generate triggers, register with TriggerManager
+    await this.registerWithTriggerManager(instance, strategy, parsedParams)
+
+    // ⑦ Persist instance
+    await this.instanceStore.save(instance)
+  }
+
+  async deactivate(instanceId: string): Promise<void> {
+    this.instances.delete(instanceId)
+    this.triggerManager.unregisterInstance(instanceId)
+    await this.instanceStore.delete(instanceId)
+  }
+
   listInstances(): StrategyInstance[] {
     return Array.from(this.instances.values())
   }
 
+  listStrategies(): StrategyDefinition[] {
+    return this.strategyRegistry.list()
+  }
+
+  listMonitors(): MonitorDefinition[] {
+    return this.monitorRegistry.list()
+  }
+
+  listExecutors(): ExecutorDefinition[] {
+    return this.executorRegistry.list()
+  }
+
+  getMonitor(id: string): BaseMonitor | undefined {
+    return this.monitorRegistry.get(id)
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  /** Steps ④–⑥ of activate(): ensure accounts, build triggers, register with TriggerManager. */
+  private async registerWithTriggerManager(
+    instance: StrategyInstance,
+    strategy: IStrategy,
+    parsedParams: ReturnType<typeof this.parseParams>,
+  ): Promise<void> {
+    const accounts = await this.ensureAccounts(instance)
+    const triggers = strategy.triggers(parsedParams).map((t, i) => ({
+      ...t,
+      id: `${instance.id}-trigger-${i}`,
+      strategyInstanceId: instance.id,
+    }))
+    this.instances.set(instance.id, instance)
+    this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts)
+  }
 
   private parseParams(strategy: IStrategy, instance: StrategyInstance) {
     const base = instance.params?.base ?? {}
     const tunable = instance.params?.tunable ?? {}
     // Fill tunable defaults via Zod parse
-    const parsedTunable = strategy.tunableParamsSchema.parse(tunable) as Record<string, unknown>
+    const parsedTunable = strategy.tunableParamsSchema.parse(tunable) as RawCredentialData
     return { base, tunable: parsedTunable }
   }
 

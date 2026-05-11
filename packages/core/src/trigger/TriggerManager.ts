@@ -7,6 +7,7 @@ import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { IAccount } from '../types/account.js'
+import type { MonitorRegistry } from '../registry/Registry.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import { HttpClient } from '../strategy/HttpClient.js'
 import { TriggerState } from './TriggerState.js'
@@ -19,13 +20,13 @@ interface InstanceEntry {
 
 export class TriggerManager {
   private readonly instances = new Map<string, InstanceEntry>()
-  private readonly monitors = new Map<string, BaseMonitor>()
+  private readonly monitorRegistry: MonitorRegistry
   private readonly cronTasks: cron.ScheduledTask[] = []
   private readonly triggerStates = new Map<string, TriggerState>()
   private running = false
 
-  registerMonitor(monitor: BaseMonitor): void {
-    this.monitors.set(monitor.monitorName, monitor)
+  constructor(monitorRegistry: MonitorRegistry) {
+    this.monitorRegistry = monitorRegistry
   }
 
   registerInstance(
@@ -43,18 +44,6 @@ export class TriggerManager {
   unregisterInstance(instanceId: string): void {
     this.instances.get(instanceId)?.triggers.forEach(t => this.triggerStates.delete(t.id))
     this.instances.delete(instanceId)
-  }
-
-  /** @deprecated Use registerInstance */
-  registerBundle(instanceId: string, triggers: Trigger[], strategy: IStrategy): void {
-    strategy.setParams({ base: {}, tunable: {} })
-    strategy.setAccounts([])
-    this.instances.set(instanceId, { instanceId, triggers, strategy })
-  }
-
-  /** @deprecated Use unregisterInstance */
-  unregisterBundle(instanceId: string): void {
-    this.unregisterInstance(instanceId)
   }
 
   start(queue: ExecutionQueue, credentialStore?: CredentialStore, database?: DatabaseAdapter): void {
@@ -88,7 +77,7 @@ export class TriggerManager {
       strategy.setHttpClient(new HttpClient(strategy.strategyId))
 
       strategy.monitors.forEach(monitorName => {
-        const monitor = this.monitors.get(monitorName)
+        const monitor = this.monitorRegistry.get(monitorName)
         if (!monitor) throw new Error(
           `Instance "${instanceId}": strategy "${strategy.strategyId}" declares monitor dependency "${monitorName}" but it is not registered`
         )
@@ -106,9 +95,11 @@ export class TriggerManager {
   }
 
   private setupMonitorHandlers(queue: ExecutionQueue): void {
-    for (const [monitorName, monitor] of this.monitors) {
-      monitor.setEmitHandler((key, data) =>
-        this.onMonitorEmit(monitorName, key, data as Record<string, unknown>, queue)
+    for (const def of this.monitorRegistry.list()) {
+      const monitor = this.monitorRegistry.get(def.id)
+      if (!monitor) continue
+      monitor.setEmitHandler((key: string, data: unknown) =>
+        this.onMonitorEmit(def.id, key, data as Record<string, unknown>, queue)
       )
     }
   }
@@ -173,7 +164,7 @@ export class TriggerManager {
   }
 
   private subscribeSource(source: MonitorSource): void {
-    const monitor = this.monitors.get(source.monitorName)
+    const monitor = this.monitorRegistry.get(source.monitorName)
     if (!monitor) return
     if (source.key === '*') {
       monitor.subscribeAll()
@@ -184,7 +175,7 @@ export class TriggerManager {
   }
 
   private unsubscribeSource(source: MonitorSource): void {
-    const monitor = this.monitors.get(source.monitorName)
+    const monitor = this.monitorRegistry.get(source.monitorName)
     if (!monitor) return
     if (source.key === '*') {
       monitor.unsubscribeAll()

@@ -2,6 +2,13 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { TriggerManager } from '../TriggerManager.js'
 import { MockQueue, MockStrategy, MockMonitor } from './mocks.js'
 import type { Trigger } from '../../types/trigger.js'
+import { createMonitorRegistry } from '../../registry/Registry.js'
+import type { MonitorRegistry } from '../../registry/Registry.js'
+import type { MonitorDefinition } from '../../types/definition.js'
+
+function makeMonitorDef(id: string): MonitorDefinition {
+  return { id, name: id, source: 'builtin', createdAt: '', updatedAt: '' }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,16 +29,18 @@ function makeInstruction() {
 
 describe('TriggerManager', () => {
   let manager: TriggerManager
+  let monitorRegistry: MonitorRegistry
   let queue: MockQueue
   let monitor: MockMonitor
   let strategy: MockStrategy
 
   beforeEach(() => {
-    manager = new TriggerManager()
-    queue = new MockQueue()
+    monitorRegistry = createMonitorRegistry()
     monitor = new MockMonitor('price')
+    monitorRegistry.register(makeMonitorDef('price'), monitor)
+    manager = new TriggerManager(monitorRegistry)
+    queue = new MockQueue()
     strategy = new MockStrategy({ id: 'test', monitors: ['price'], instructions: [makeInstruction()] })
-    manager.registerMonitor(monitor)
   })
 
   afterEach(() => {
@@ -160,8 +169,8 @@ describe('TriggerManager', () => {
   describe('AND conditions with window', () => {
     it('fires when all conditions are satisfied within window', async () => {
       const monitor2 = new MockMonitor('volume')
+      monitorRegistry.register(makeMonitorDef('volume'), monitor2)
       strategy = new MockStrategy({ id: 'test', monitors: ['price', 'volume'], instructions: [makeInstruction()] })
-      manager.registerMonitor(monitor2)
 
       const trigger = makeTrigger({
         window: 5000,
@@ -181,8 +190,8 @@ describe('TriggerManager', () => {
 
     it('does not fire when only one of two conditions is satisfied', async () => {
       const monitor2 = new MockMonitor('volume')
+      monitorRegistry.register(makeMonitorDef('volume'), monitor2)
       strategy = new MockStrategy({ id: 'test', monitors: ['price', 'volume'], instructions: [] })
-      manager.registerMonitor(monitor2)
 
       const trigger = makeTrigger({
         window: 5000,
