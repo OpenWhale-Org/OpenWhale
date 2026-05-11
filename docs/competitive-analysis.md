@@ -8,15 +8,16 @@
 
 本文对比以下五个框架：
 
-| 项目 | 仓库 | Stars | 语言 | 定位 |
-|------|------|-------|------|------|
-| **OpenWhale** | openwhale（本项目） | — | TypeScript | AI 交易策略引擎框架 |
-| **OpenAlice** | TraderAlice/OpenAlice | — | TypeScript | 本地 AI 交易代理（全资产类别） |
-| **AI-Trader** | HKUDS/AI-Trader | — | Python + TypeScript | Agent 原生交易平台（集体智能 + 信号市场） |
-| **Hyper Alpha Arena** | HammerGPT/Hyper-Alpha-Arena | 990 | Python | 多 Agent AI 交易平台 |
-| **NOFX** | NoFxAiOS/nofx | — | Go + TypeScript | 自主 AI 交易助手（x402 支付） |
-| **Chainstack Bot** | chainstacklabs/hyperliquid-trading-bot | 52 | Python | Hyperliquid 网格交易机器人 |
-| **HyperLiquidAlgoBot** | SimSimButDifferent/HyperLiquidAlgoBot | 45 | JavaScript | Hyperliquid 指标策略机器人 |
+| 项目 | 仓库                                    | Stars | 语言                  | 定位 |
+|------|---------------------------------------|-------|---------------------|------|
+| **OpenWhale** | openwhale（本项目）                        | —     | TypeScript          | AI 交易策略引擎框架 |
+| **OpenAlice** | TraderAlice/OpenAlice                 | —     | TypeScript          | 本地 AI 交易代理（全资产类别） |
+| **AI-Trader** | HKUDS/AI-Trader                       | —     | Python + TypeScript | Agent 原生交易平台（集体智能 + 信号市场） |
+| **Hyper Alpha Arena** | HammerGPT/Hyper-Alpha-Arena           | 990   | Python              | 多 Agent AI 交易平台 |
+| **NOFX** | NoFxAiOS/nofx                         | —     | Go + TypeScript     | 自主 AI 交易助手（x402 支付） |
+| **Chainstack Bot** | chainstacklabs/hyperliquid-trading-bot | 52    | Python              | Hyperliquid 网格交易机器人 |
+| **HyperLiquidAlgoBot** | SimSimButDifferent/HyperLiquidAlgoBot | 45    | JavaScript          | Hyperliquid 指标策略机器人 |
+| **Minara** | https://minara.ai/ | -     | -                   | AI 交易 Copilot |
 
 ---
 

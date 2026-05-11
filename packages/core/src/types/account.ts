@@ -1,3 +1,5 @@
+import type { RawCredentialData } from './credential.js'
+
 export interface IBalance {
   available: number   // Available funds (USD-denominated)
   total: number       // Total assets (USD-denominated)
@@ -42,4 +44,4 @@ export interface IAccount {
 }
 
 /** Factory function that creates an IAccount from decrypted credential data. */
-export type AccountFactory = (data: Record<string, unknown>) => IAccount
+export type AccountFactory = (data: RawCredentialData) => IAccount

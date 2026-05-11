@@ -1,6 +1,8 @@
+import type { RawCredentialData } from './credential.js'
+
 export interface StrategyParams {
-  base: Record<string, unknown>
-  tunable: Record<string, unknown>
+  base: RawCredentialData
+  tunable: RawCredentialData
 }
 
 export interface StrategyInstance {

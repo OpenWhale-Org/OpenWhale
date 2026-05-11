@@ -15,13 +15,15 @@ export interface CredentialInfo {
   updatedAt: string
 }
 
+export type RawCredentialData = Record<string, unknown>
+
 export interface CredentialData {
   type: string
-  data: Record<string, unknown>
+  data: RawCredentialData
 }
 
 export interface CredentialStore {
-  set(name: string, type: string, data: Record<string, unknown>): Promise<CredentialInfo>
+  set(name: string, type: string, data: RawCredentialData): Promise<CredentialInfo>
   getByName(name: string): Promise<CredentialData>
   delete(id: string): Promise<void>
   list(): Promise<CredentialInfo[]>

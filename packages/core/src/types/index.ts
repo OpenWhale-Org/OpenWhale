@@ -1,4 +1,4 @@
-export type { Credential, CredentialInfo, CredentialData, CredentialStore } from './credential.js'
+export type { Credential, CredentialInfo, CredentialData, RawCredentialData, CredentialStore } from './credential.js'
 export type {
   ExecutionInstruction,
   ExecutionResult,
@@ -26,7 +26,6 @@ export type {
   IStrategy,
   AccountTypeDeclaration,
 } from './strategy.js'
-export type { SkillParameter, SkillDefinition, SkillModule } from './skill.js'
 export type { IAccount, IBalance, IPosition, IOrder, IPnL, IHistoryRecord, AccountFactory } from './account.js'
 export type { StrategyInstance, StrategyParams } from './instance.js'
 export type { AdapterQueryOptions, AdapterExecuteOptions, IAdapter } from './adapter.js'

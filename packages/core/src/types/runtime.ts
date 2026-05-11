@@ -11,6 +11,7 @@ import type { IStrategy } from './strategy.js'
 import type { CredentialStore } from './credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AccountFactory } from './account.js'
+import type { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
 
 export interface RuntimeOptions {
   dataDir?: string
@@ -18,7 +19,7 @@ export interface RuntimeOptions {
   monitorRegistry?: MonitorRegistry
   executorRegistry?: ExecutorRegistry
   strategyRegistry?: StrategyRegistry
-  instanceStore?: StrategyInstanceStore
+  instanceStore?: StrategyInstanceStore | DBStrategyInstanceStore
   pluginManager?: PluginManager
   compiledLoader?: CompiledLoader
   credentialStore?: CredentialStore
@@ -32,6 +33,10 @@ export interface IRuntime {
   start(): Promise<void>
   stop(): Promise<void>
   listInstances(): StrategyInstance[]
+  listStrategies(): StrategyDefinition[]
+  listMonitors(): MonitorDefinition[]
+  listExecutors(): ExecutorDefinition[]
+  getMonitor(id: string): BaseMonitor | undefined
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor): void
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor): void
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void

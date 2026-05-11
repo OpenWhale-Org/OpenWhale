@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import type { CredentialData, CredentialInfo, CredentialStore } from '../types/credential.js'
+import type { CredentialData, CredentialInfo, CredentialStore, RawCredentialData } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import { generateId } from '../utils/id.js'
 
@@ -48,7 +48,7 @@ export class DBCredentialStore implements CredentialStore {
     this.key = deriveKey(masterKey)
   }
 
-  async set(name: string, type: string, data: Record<string, unknown>): Promise<CredentialInfo> {
+  async set(name: string, type: string, data: RawCredentialData): Promise<CredentialInfo> {
     const now = new Date().toISOString()
     const encryptedData = encrypt(JSON.stringify(data), this.key)
     const existing = await this.db.get<CredentialRow>(
@@ -75,7 +75,7 @@ export class DBCredentialStore implements CredentialStore {
   async getByName(name: string): Promise<CredentialData> {
     const row = await this.db.get<CredentialRow>('SELECT * FROM credentials WHERE name = ?', [name])
     if (!row) throw new Error(`Credential not found: ${name}`)
-    const data = JSON.parse(decrypt(row.data, this.key)) as Record<string, unknown>
+    const data = JSON.parse(decrypt(row.data, this.key)) as RawCredentialData
     return { type: row.type, data }
   }
 
