@@ -21,7 +21,7 @@
     "@ai-sdk/google": "^3.0.67",
     "@ai-sdk/openai": "^3.0.58",
     "ai": "^6.0.174",
-    "better-sqlite3": "^9.6.0",
+    "better-sqlite3": "^12.9.0",
     "esbuild": "^0.28.0",
     "ioredis": "^5.10.1",
     "nanoid": "^5.0.7",
