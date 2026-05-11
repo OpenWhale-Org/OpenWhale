@@ -35,7 +35,8 @@ export class Registry<TDefinition extends { id: string }, TInstance>
 
 export type MonitorRegistry = IRegistry<MonitorDefinition, BaseMonitor>
 export type ExecutorRegistry = IRegistry<ExecutorDefinition, BaseExecutor>
-export type StrategyRegistry = IRegistry<StrategyDefinition, IStrategy>
+/** Strategy registry stores factory functions — each activate() call creates a fresh instance. */
+export type StrategyRegistry = IRegistry<StrategyDefinition, () => IStrategy>
 
 export function createMonitorRegistry(): MonitorRegistry {
   return new Registry<MonitorDefinition, BaseMonitor>()
@@ -46,5 +47,5 @@ export function createExecutorRegistry(): ExecutorRegistry {
 }
 
 export function createStrategyRegistry(): StrategyRegistry {
-  return new Registry<StrategyDefinition, IStrategy>()
+  return new Registry<StrategyDefinition, () => IStrategy>()
 }

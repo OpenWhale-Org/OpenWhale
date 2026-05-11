@@ -2,12 +2,9 @@
  * DDL statements for the OpenWhale SQLite schema.
  *
  * Tables:
- *   strategy_instances — StrategyInstance records (JSON-serialised triggers column)
+ *   strategy_instances — StrategyInstance records
  *   credentials        — AES-256-GCM encrypted credential values
- *   registry_monitors  — MonitorDefinition records
- *   registry_executors — ExecutorDefinition records (JSON-serialised supportedActions)
- *   registry_strategies— StrategyDefinition records (JSON-serialised monitorIds/executorIds)
- *   strategy_store     — Bundle-scoped KV store for Strategy runtime state
+ *   strategy_store     — Instance-scoped KV store for Strategy runtime state
  */
 export const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -18,18 +15,20 @@ CREATE TABLE IF NOT EXISTS strategy_instances (
   name        TEXT NOT NULL,
   description TEXT,
   strategy_id TEXT NOT NULL,
-  triggers    TEXT NOT NULL,   -- JSON array of Trigger objects
+  accounts    TEXT,   -- JSON array of credential names, nullable
+  params      TEXT,   -- JSON { base, tunable }, nullable
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS credentials (
-  id             TEXT PRIMARY KEY,
-  name           TEXT NOT NULL UNIQUE,
-  encrypted_data TEXT NOT NULL,
-  created_at     TEXT NOT NULL,
-  updated_at     TEXT NOT NULL
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  type       TEXT NOT NULL,
+  data       TEXT NOT NULL,   -- AES-256-GCM encrypted JSON
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 -- TODO: Registry 持久化（尚未实现）

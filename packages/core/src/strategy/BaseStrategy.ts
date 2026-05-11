@@ -1,9 +1,13 @@
 import type { ExecutionInstruction } from '../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions } from '../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, AccountTypeDeclaration } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
-import type { CredentialStore } from '../types/credential.js'
+import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
 import type { ZodType } from 'zod'
+import type { Trigger } from '../types/trigger.js'
+import type { StrategyParams } from '../types/instance.js'
+import type { IAccount } from '../types/account.js'
+import { z } from 'zod'
 import { getDataDir } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
@@ -87,6 +91,13 @@ export abstract class BaseStrategy implements IStrategy {
   abstract readonly strategyId: string
   /** Declare monitor dependencies. TriggerManager injects a reader for each at startup. */
   readonly monitors: readonly string[] = []
+  /** Declare account type requirements. Framework validates and injects accounts at activate() time. */
+  readonly accountTypes: readonly AccountTypeDeclaration[] = []
+
+  /** Base params schema (required, no defaults). Override in subclass. */
+  readonly baseParamsSchema: z.ZodObject<z.ZodRawShape> = z.object({})
+  /** Tunable params schema (AI-optimizable, all fields must have .default()). Override in subclass. */
+  readonly tunableParamsSchema: z.ZodObject<z.ZodRawShape> = z.object({})
 
   protected readonly dataDir: string
   private readonly stepCache = new Map<string, unknown>()
@@ -101,6 +112,8 @@ export abstract class BaseStrategy implements IStrategy {
   private storeInstance?: IStrategyStore
   private httpClient?: HttpClient
   private readonly llmClient?: LlmClient
+  private injectedParams?: StrategyParams
+  private injectedAccounts: IAccount[] = []
   private get log() { return createLogger(this.strategyId) }
 
   constructor(options?: StrategyOptions) {
@@ -124,6 +137,19 @@ export abstract class BaseStrategy implements IStrategy {
 
   setHttpClient(client: HttpClient): void {
     this.httpClient = client
+  }
+
+  setParams(params: StrategyParams): void {
+    this.injectedParams = params
+  }
+
+  setAccounts(accounts: IAccount[]): void {
+    this.injectedAccounts = accounts
+  }
+
+  /** Returns the triggers this strategy needs. Override in subclass. Default: no triggers. */
+  triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
+    return []
   }
 
   async run(context: StrategyContext): Promise<ExecutionInstruction[]> {
@@ -196,9 +222,39 @@ export abstract class BaseStrategy implements IStrategy {
     return this.monitorReaders.get(monitorName)
   }
 
-  protected async credential(name: string): Promise<string> {
+  protected async credential(name: string): Promise<CredentialData> {
     if (!this.credentialStore) throw new Error('CredentialStore not configured')
     return this.credentialStore.getByName(name)
+  }
+
+  /**
+   * Access injected params. Available after activate() injects them.
+   */
+  protected get params(): StrategyParams {
+    if (!this.injectedParams) throw new Error('Params not injected — strategy not yet activated')
+    return this.injectedParams
+  }
+
+  /**
+   * Access an injected account by index or label.
+   * Cast to a platform-specific interface for extended fields.
+   *
+   * @example
+   * const hl = this.account<IPerpAccount>(0)
+   * const hl = this.account<IPerpAccount>('main')  // requires label in accountTypes
+   */
+  protected account<T extends IAccount = IAccount>(indexOrLabel: number | string): T {
+    if (typeof indexOrLabel === 'number') {
+      const acc = this.injectedAccounts[indexOrLabel]
+      if (!acc) throw new Error(`Account at index ${indexOrLabel} not found`)
+      return acc as T
+    }
+    const acc = this.injectedAccounts.find((a) => {
+      const decl = this.accountTypes[this.injectedAccounts.indexOf(a)]
+      return typeof decl === 'object' && decl.label === indexOrLabel
+    })
+    if (!acc) throw new Error(`Account with label '${indexOrLabel}' not found`)
+    return acc as T
   }
 
   /**

@@ -32,7 +32,7 @@ describe('CompiledLoader', () => {
   let tmpDir: string
   let monitorRegistry: Registry<MonitorDefinition, BaseMonitor>
   let executorRegistry: Registry<ExecutorDefinition, BaseExecutor>
-  let strategyRegistry: Registry<StrategyDefinition, IStrategy>
+  let strategyRegistry: Registry<StrategyDefinition, () => IStrategy>
   let loader: CompiledLoader
 
   beforeEach(async () => {

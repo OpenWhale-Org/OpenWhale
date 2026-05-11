@@ -120,7 +120,7 @@ export class CompiledLoader {
       case 'strategies':
         this.strategyRegistry.register(
           definition as StrategyDefinition,
-          new Ctor() as IStrategy
+          () => new Ctor() as IStrategy
         )
         break
     }

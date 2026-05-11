@@ -7,7 +7,8 @@ interface InstanceRow {
   name: string
   description: string | null
   strategy_id: string
-  triggers: string
+  accounts: string | null
+  params: string | null
   enabled: number
   created_at: string
   updated_at: string
@@ -18,12 +19,13 @@ function rowToInstance(row: InstanceRow): StrategyInstance {
     id: row.id,
     name: row.name,
     strategyId: row.strategy_id,
-    triggers: JSON.parse(row.triggers) as StrategyInstance['triggers'],
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
   if (row.description !== null) instance.description = row.description
+  if (row.accounts !== null) instance.accounts = JSON.parse(row.accounts) as string[]
+  if (row.params !== null) instance.params = JSON.parse(row.params) as NonNullable<StrategyInstance['params']>
   return instance
 }
 
@@ -32,13 +34,14 @@ export class DBStrategyInstanceStore {
 
   async save(instance: StrategyInstance): Promise<void> {
     await this.db.run(
-      `INSERT INTO strategy_instances (id, name, description, strategy_id, triggers, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO strategy_instances (id, name, description, strategy_id, accounts, params, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name        = excluded.name,
          description = excluded.description,
          strategy_id = excluded.strategy_id,
-         triggers    = excluded.triggers,
+         accounts    = excluded.accounts,
+         params      = excluded.params,
          enabled     = excluded.enabled,
          updated_at  = excluded.updated_at`,
       [
@@ -46,7 +49,8 @@ export class DBStrategyInstanceStore {
         instance.name,
         instance.description ?? null,
         instance.strategyId,
-        JSON.stringify(instance.triggers),
+        instance.accounts ? JSON.stringify(instance.accounts) : null,
+        instance.params ? JSON.stringify(instance.params) : null,
         instance.enabled ? 1 : 0,
         instance.createdAt,
         instance.updatedAt,

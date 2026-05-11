@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import type { Credential, CredentialInfo, CredentialStore } from '../types/credential.js'
+import type { CredentialData, CredentialInfo, CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import { generateId } from '../utils/id.js'
 
@@ -34,7 +34,8 @@ interface CredentialRow {
   [key: string]: unknown
   id: string
   name: string
-  encrypted_data: string
+  type: string
+  data: string
   created_at: string
   updated_at: string
 }
@@ -47,8 +48,9 @@ export class DBCredentialStore implements CredentialStore {
     this.key = deriveKey(masterKey)
   }
 
-  async set(name: string, value: string): Promise<CredentialInfo> {
+  async set(name: string, type: string, data: Record<string, unknown>): Promise<CredentialInfo> {
     const now = new Date().toISOString()
+    const encryptedData = encrypt(JSON.stringify(data), this.key)
     const existing = await this.db.get<CredentialRow>(
       'SELECT * FROM credentials WHERE name = ?',
       [name]
@@ -56,30 +58,25 @@ export class DBCredentialStore implements CredentialStore {
 
     if (existing) {
       await this.db.run(
-        'UPDATE credentials SET encrypted_data = ?, updated_at = ? WHERE id = ?',
-        [encrypt(value, this.key), now, existing.id]
+        'UPDATE credentials SET type = ?, data = ?, updated_at = ? WHERE id = ?',
+        [type, encryptedData, now, existing.id]
       )
-      return { id: existing.id, name, createdAt: existing.created_at, updatedAt: now }
+      return { id: existing.id, name, type, createdAt: existing.created_at, updatedAt: now }
     }
 
     const id = generateId('cred')
     await this.db.run(
-      'INSERT INTO credentials (id, name, encrypted_data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      [id, name, encrypt(value, this.key), now, now]
+      'INSERT INTO credentials (id, name, type, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, name, type, encryptedData, now, now]
     )
-    return { id, name, createdAt: now, updatedAt: now }
+    return { id, name, type, createdAt: now, updatedAt: now }
   }
 
-  async get(id: string): Promise<string> {
-    const row = await this.db.get<CredentialRow>('SELECT * FROM credentials WHERE id = ?', [id])
-    if (!row) throw new Error(`Credential not found: ${id}`)
-    return decrypt(row.encrypted_data, this.key)
-  }
-
-  async getByName(name: string): Promise<string> {
+  async getByName(name: string): Promise<CredentialData> {
     const row = await this.db.get<CredentialRow>('SELECT * FROM credentials WHERE name = ?', [name])
     if (!row) throw new Error(`Credential not found: ${name}`)
-    return decrypt(row.encrypted_data, this.key)
+    const data = JSON.parse(decrypt(row.data, this.key)) as Record<string, unknown>
+    return { type: row.type, data }
   }
 
   async delete(id: string): Promise<void> {
@@ -89,8 +86,8 @@ export class DBCredentialStore implements CredentialStore {
 
   async list(): Promise<CredentialInfo[]> {
     const rows = await this.db.all<CredentialRow>(
-      'SELECT id, name, created_at, updated_at FROM credentials ORDER BY name ASC'
+      'SELECT id, name, type, created_at, updated_at FROM credentials ORDER BY name ASC'
     )
-    return rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at }))
+    return rows.map((r) => ({ id: r.id, name: r.name, type: r.type, createdAt: r.created_at, updatedAt: r.updated_at }))
   }
 }

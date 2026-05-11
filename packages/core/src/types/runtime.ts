@@ -10,6 +10,7 @@ import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { IStrategy } from './strategy.js'
 import type { CredentialStore } from './credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
+import type { AccountFactory } from './account.js'
 
 export interface RuntimeOptions {
   dataDir?: string
@@ -33,5 +34,6 @@ export interface IRuntime {
   listInstances(): StrategyInstance[]
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor): void
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor): void
-  registerStrategy(definition: StrategyDefinition, instance: IStrategy): void
+  registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void
+  registerAccountFactory(accountType: string, factory: AccountFactory): void
 }

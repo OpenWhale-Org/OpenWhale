@@ -1,4 +1,4 @@
-export type { Credential, CredentialInfo, CredentialStore } from './credential.js'
+export type { Credential, CredentialInfo, CredentialData, CredentialStore } from './credential.js'
 export type {
   ExecutionInstruction,
   ExecutionResult,
@@ -24,9 +24,11 @@ export type {
   BuiltinProviderConfig,
   CustomProviderConfig,
   IStrategy,
+  AccountTypeDeclaration,
 } from './strategy.js'
 export type { SkillParameter, SkillDefinition, SkillModule } from './skill.js'
-export type { StrategyInstance } from './instance.js'
+export type { IAccount, IBalance, IPosition, IOrder, IPnL, IHistoryRecord, AccountFactory } from './account.js'
+export type { StrategyInstance, StrategyParams } from './instance.js'
 export type { AdapterQueryOptions, AdapterExecuteOptions, IAdapter } from './adapter.js'
 export type { RuntimeOptions, IRuntime } from './runtime.js'
 export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from './definition.js'

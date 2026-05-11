@@ -1,9 +1,13 @@
 import type { ExecutionInstruction, ExecutionQueue } from '../../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics } from '../../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, AccountTypeDeclaration } from '../../types/strategy.js'
 import type { MonitorDataReader } from '../../types/monitor.js'
 import type { CredentialStore } from '../../types/credential.js'
 import type { IStrategyStore } from '../../strategy/StrategyStore.js'
 import type { HttpClient } from '../../strategy/HttpClient.js'
+import type { Trigger } from '../../types/trigger.js'
+import type { StrategyParams } from '../../types/instance.js'
+import type { IAccount } from '../../types/account.js'
+import { z } from 'zod'
 import { BaseMonitor, MonitorMode } from '../../monitor/BaseMonitor.js'
 
 // ── MockQueue ─────────────────────────────────────────────────────────────────
@@ -29,17 +33,27 @@ export class MockQueue implements ExecutionQueue {
 export class MockStrategy implements IStrategy {
   readonly strategyId: string
   readonly monitors: readonly string[]
+  readonly accountTypes: readonly AccountTypeDeclaration[] = []
+  readonly baseParamsSchema = z.object({})
+  readonly tunableParamsSchema = z.object({})
   readonly contexts: StrategyContext[] = []
   private instructions: ExecutionInstruction[]
+  private mockTriggers: Omit<Trigger, 'id' | 'strategyInstanceId'>[]
 
   constructor(options: {
     id?: string
     monitors?: string[]
     instructions?: ExecutionInstruction[]
+    triggers?: Omit<Trigger, 'id' | 'strategyInstanceId'>[]
   } = {}) {
     this.strategyId = options.id ?? 'mock-strategy'
     this.monitors = options.monitors ?? []
     this.instructions = options.instructions ?? []
+    this.mockTriggers = options.triggers ?? []
+  }
+
+  triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
+    return this.mockTriggers
   }
 
   async run(context: StrategyContext): Promise<ExecutionInstruction[]> {
@@ -55,6 +69,8 @@ export class MockStrategy implements IStrategy {
   setCredentialStore(_store: CredentialStore): void {}
   setStore(_store: IStrategyStore): void {}
   setHttpClient(_client: HttpClient): void {}
+  setParams(_params: StrategyParams): void {}
+  setAccounts(_accounts: IAccount[]): void {}
 }
 
 // ── MockMonitor ───────────────────────────────────────────────────────────────

@@ -4,6 +4,10 @@ import type { CredentialStore } from './credential.js'
 import type { RetryOptions } from './executor.js'
 import type { IStrategyStore } from '../strategy/StrategyStore.js'
 import type { HttpClient } from '../strategy/HttpClient.js'
+import type { Trigger } from './trigger.js'
+import type { StrategyParams } from './instance.js'
+import type { IAccount } from './account.js'
+import type { ZodObject, ZodRawShape } from 'zod'
 
 export interface StrategyContext {
   instanceId: string
@@ -59,14 +63,27 @@ export interface StrategyOptions {
   llm?: LlmOptions
 }
 
+/** Account type declaration: simple string or with a label for named access. */
+export type AccountTypeDeclaration = string | { type: string; label: string }
+
 export interface IStrategy {
   readonly strategyId: string
   /** Monitor names this strategy depends on. TriggerManager injects readers for these at startup. */
   readonly monitors: readonly string[]
+  /** Account type declarations. Framework validates and injects accounts at activate() time. */
+  readonly accountTypes: readonly AccountTypeDeclaration[]
+  /** Base params schema (required fields, no defaults). */
+  readonly baseParamsSchema: ZodObject<ZodRawShape>
+  /** Tunable params schema (AI-optimizable, all fields must have .default()). */
+  readonly tunableParamsSchema: ZodObject<ZodRawShape>
+  /** Returns the triggers this strategy needs, given its params. Framework fills id/strategyInstanceId. */
+  triggers(params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[]
   run(context: StrategyContext): Promise<ExecutionInstruction[]>
   getMetrics(): StrategyMetrics
   setMonitorReader(key: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void
   setStore(store: IStrategyStore): void
   setHttpClient(client: HttpClient): void
+  setParams(params: StrategyParams): void
+  setAccounts(accounts: IAccount[]): void
 }

@@ -153,7 +153,8 @@ export class LlmClient {
     )
 
     if (explicitConfig?.provider === 'custom') {
-      const apiKey = await credentialStore.getByName(explicitConfig.credentialName)
+      const { data } = await credentialStore.getByName(explicitConfig.credentialName)
+      const apiKey = data['apiKey'] as string
       return explicitConfig.create(apiKey)
     }
 
@@ -166,7 +167,8 @@ export class LlmClient {
     const credentialName = (explicitConfig as BuiltinProviderConfig | undefined)?.credentialName
       ?? BUILTIN_CREDENTIAL_NAMES[builtinId]
 
-    const apiKey = await credentialStore.getByName(credentialName)
+    const { data } = await credentialStore.getByName(credentialName)
+    const apiKey = data['apiKey'] as string
     return BUILTIN_FACTORIES[builtinId](apiKey)
   }
 }

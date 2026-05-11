@@ -10,7 +10,6 @@ function makeInstance(id: string): StrategyInstance {
     id,
     name: `Instance ${id}`,
     strategyId: `strategy-${id}`,
-    triggers: [],
     enabled: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

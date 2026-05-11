@@ -2,6 +2,7 @@
 export type {
   Credential,
   CredentialInfo,
+  CredentialData,
   CredentialStore,
   ExecutionInstruction,
   ExecutionResult,
@@ -28,10 +29,19 @@ export type {
   BuiltinProviderConfig,
   CustomProviderConfig,
   IStrategy,
+  AccountTypeDeclaration,
   SkillParameter,
   SkillDefinition,
   SkillModule,
   StrategyInstance,
+  StrategyParams,
+  IAccount,
+  IBalance,
+  IPosition,
+  IOrder,
+  IPnL,
+  IHistoryRecord,
+  AccountFactory,
   AdapterQueryOptions,
   AdapterExecuteOptions,
   IAdapter,
@@ -44,7 +54,6 @@ export type {
 } from './types/index.js'
 
 // Credentials
-export { FileCredentialStore } from './credentials/CredentialStore.js'
 export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 
 // Monitor

@@ -5,6 +5,8 @@ import type { CronCondition, MonitorCondition, MonitorSource, Trigger, TriggerFi
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
+import type { StrategyParams } from '../types/instance.js'
+import type { IAccount } from '../types/account.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import { HttpClient } from '../strategy/HttpClient.js'
 import { TriggerState } from './TriggerState.js'
@@ -26,7 +28,15 @@ export class TriggerManager {
     this.monitors.set(monitor.monitorName, monitor)
   }
 
-  registerInstance(instanceId: string, triggers: Trigger[], strategy: IStrategy): void {
+  registerInstance(
+    instanceId: string,
+    strategy: IStrategy,
+    triggers: Trigger[],
+    params: StrategyParams,
+    accounts: IAccount[],
+  ): void {
+    strategy.setParams(params)
+    strategy.setAccounts(accounts)
     this.instances.set(instanceId, { instanceId, triggers, strategy })
   }
 
@@ -37,7 +47,9 @@ export class TriggerManager {
 
   /** @deprecated Use registerInstance */
   registerBundle(instanceId: string, triggers: Trigger[], strategy: IStrategy): void {
-    this.registerInstance(instanceId, triggers, strategy)
+    strategy.setParams({ base: {}, tunable: {} })
+    strategy.setAccounts([])
+    this.instances.set(instanceId, { instanceId, triggers, strategy })
   }
 
   /** @deprecated Use unregisterInstance */

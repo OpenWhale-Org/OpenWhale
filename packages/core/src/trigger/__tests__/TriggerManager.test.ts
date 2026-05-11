@@ -45,7 +45,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -59,7 +59,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('ETH', { price: 3000 })
@@ -71,7 +71,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -83,7 +83,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -100,7 +100,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: '*' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('ETH', { price: 3000 })
@@ -112,7 +112,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: '*' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('SOL', { price: 150 })
@@ -131,7 +131,7 @@ describe('TriggerManager', () => {
           sources: [{ monitorName: 'price', key: 'BTC', filter: { field: 'price', op: 'gt', value: 40000 } }],
         }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -146,7 +146,7 @@ describe('TriggerManager', () => {
           sources: [{ monitorName: 'price', key: 'BTC', filter: { field: 'price', op: 'gt', value: 60000 } }],
         }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -170,7 +170,7 @@ describe('TriggerManager', () => {
           { type: 'monitor', sources: [{ monitorName: 'volume', key: 'BTC' }] },
         ],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -191,7 +191,7 @@ describe('TriggerManager', () => {
           { type: 'monitor', sources: [{ monitorName: 'volume', key: 'BTC' }] },
         ],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -211,7 +211,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'cron', expression: '* * * * *' }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       // Advance time by 1 minute to trigger cron
@@ -230,7 +230,7 @@ describe('TriggerManager', () => {
         enabled: false,
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -246,7 +246,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', [trigger], strategy)
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [])
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -266,7 +266,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'cron', expression: '* * * * *' }],
       })
-      manager.registerInstance('instance-1', [trigger], missingStrategy)
+      manager.registerInstance('instance-1', missingStrategy, [trigger], { base: {}, tunable: {} }, [])
 
       expect(() => manager.start(queue)).toThrow(/nonexistent.*not registered/i)
     })

@@ -2,16 +2,19 @@ import type { CredentialStore } from '../types/credential.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { IStrategy } from '../types/strategy.js'
+import type { AccountFactory } from '../types/account.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
-import { generateId } from '../utils/id.js'
 
 export interface OpenWhalePlugin {
   name: string
   version: string
   monitors: Array<{ definition: MonitorDefinition; instance: BaseMonitor }>
   executors: Array<{ definition: ExecutorDefinition; instance: BaseExecutor }>
-  strategies: Array<{ definition: StrategyDefinition; instance: IStrategy }>
+  /** Strategy factories — each activate() call creates a fresh instance. */
+  strategies: Array<{ definition: StrategyDefinition; factory: () => IStrategy }>
+  /** Account factories — registered by accountType. */
+  accounts: Array<{ accountType: string; factory: AccountFactory }>
 }
 
 export interface PluginContext<TConfig = Record<string, unknown>> {
@@ -28,6 +31,8 @@ export interface PluginManagerOptions {
   executorRegistry: ExecutorRegistry
   strategyRegistry: StrategyRegistry
   credentials: CredentialStore
+  /** Callback to register account factories with the runtime. */
+  registerAccountFactory?: (accountType: string, factory: AccountFactory) => void
 }
 
 export class PluginManager {
@@ -35,6 +40,7 @@ export class PluginManager {
   private readonly executorRegistry: ExecutorRegistry
   private readonly strategyRegistry: StrategyRegistry
   private readonly credentials: CredentialStore
+  private readonly registerAccountFactory: ((accountType: string, factory: AccountFactory) => void) | undefined
   private readonly loadedPlugins = new Map<string, OpenWhalePlugin>()
 
   constructor(options: PluginManagerOptions) {
@@ -42,6 +48,7 @@ export class PluginManager {
     this.executorRegistry = options.executorRegistry
     this.strategyRegistry = options.strategyRegistry
     this.credentials = options.credentials
+    this.registerAccountFactory = options.registerAccountFactory
   }
 
   load<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void {
@@ -58,8 +65,11 @@ export class PluginManager {
     for (const { definition, instance } of plugin.executors) {
       this.executorRegistry.register(definition, instance)
     }
-    for (const { definition, instance } of plugin.strategies) {
-      this.strategyRegistry.register(definition, instance)
+    for (const { definition, factory: strategyFactory } of plugin.strategies) {
+      this.strategyRegistry.register(definition, strategyFactory)
+    }
+    for (const { accountType, factory: accountFactory } of plugin.accounts) {
+      this.registerAccountFactory?.(accountType, accountFactory)
     }
 
     this.loadedPlugins.set(plugin.name, plugin)
@@ -95,3 +105,4 @@ export class PluginManager {
     return Array.from(this.loadedPlugins.keys())
   }
 }
+

@@ -1,12 +1,13 @@
 import type { StrategyInstance } from '../types/instance.js'
 import type { ExecutionQueue } from '../types/executor.js'
 import type { IRuntime, RuntimeOptions } from '../types/runtime.js'
-import type { IStrategy } from '../types/strategy.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
+import type { IStrategy } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
+import type { AccountFactory, IAccount } from '../types/account.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
@@ -29,6 +30,8 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly compiledLoader: CompiledLoader | undefined
   private readonly credentialStore: CredentialStore | undefined
   private readonly database: DatabaseAdapter | undefined
+  private readonly accountFactories = new Map<string, AccountFactory>()
+  private readonly accountRegistry = new Map<string, IAccount>()
   protected readonly dataDir: string
   private running = false
 
@@ -55,17 +58,44 @@ export class OpenWhaleRuntime implements IRuntime {
     this.executorRegistry.register(definition, instance)
   }
 
-  registerStrategy(definition: StrategyDefinition, instance: IStrategy): void {
-    this.strategyRegistry.register(definition, instance)
+  registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void {
+    this.strategyRegistry.register(definition, factory)
+  }
+
+  registerAccountFactory(accountType: string, factory: AccountFactory): void {
+    this.accountFactories.set(accountType, factory)
   }
 
   async activate(instance: StrategyInstance): Promise<void> {
-    const strategy = this.strategyRegistry.get(instance.strategyId)
-    if (!strategy) {
+    // ① Create strategy instance from factory
+    const strategyFactory = this.strategyRegistry.get(instance.strategyId)
+    if (!strategyFactory) {
       throw new Error(`Strategy not found: ${instance.strategyId}`)
     }
+    const strategy = strategyFactory()
+
+    // ② Parse and validate params
+    const parsedParams = this.parseParams(strategy, instance)
+
+    // ③ Validate account types match
+    this.validateAccounts(strategy, instance)
+
+    // ④ Ensure account instances exist in registry
+    const accounts = await this.ensureAccounts(instance)
+
+    // ⑤ Generate triggers from strategy
+    const rawTriggers = strategy.triggers(parsedParams)
+    const triggers = rawTriggers.map((t, i) => ({
+      ...t,
+      id: `${instance.id}-trigger-${i}`,
+      strategyInstanceId: instance.id,
+    }))
+
+    // ⑥ Register instance with TriggerManager (passes strategy + triggers)
     this.instances.set(instance.id, instance)
-    this.triggerManager.registerInstance(instance.id, instance.triggers, strategy)
+    this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts)
+
+    // ⑦ Persist instance
     await this.instanceStore.save(instance)
   }
 
@@ -99,10 +129,19 @@ export class OpenWhaleRuntime implements IRuntime {
     const persistedInstances = await this.instanceStore.loadAll()
     for (const instance of persistedInstances) {
       if (!this.instances.has(instance.id)) {
-        const strategy = this.strategyRegistry.get(instance.strategyId)
-        if (strategy) {
+        const strategyFactory = this.strategyRegistry.get(instance.strategyId)
+        if (strategyFactory) {
+          const strategy = strategyFactory()
+          const parsedParams = this.parseParams(strategy, instance)
+          const accounts = await this.ensureAccounts(instance)
+          const rawTriggers = strategy.triggers(parsedParams)
+          const triggers = rawTriggers.map((t, i) => ({
+            ...t,
+            id: `${instance.id}-trigger-${i}`,
+            strategyInstanceId: instance.id,
+          }))
           this.instances.set(instance.id, instance)
-          this.triggerManager.registerInstance(instance.id, instance.triggers, strategy)
+          this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts)
         }
       }
     }
@@ -128,5 +167,50 @@ export class OpenWhaleRuntime implements IRuntime {
 
   listInstances(): StrategyInstance[] {
     return Array.from(this.instances.values())
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────────────
+
+  private parseParams(strategy: IStrategy, instance: StrategyInstance) {
+    const base = instance.params?.base ?? {}
+    const tunable = instance.params?.tunable ?? {}
+    // Fill tunable defaults via Zod parse
+    const parsedTunable = strategy.tunableParamsSchema.parse(tunable) as Record<string, unknown>
+    return { base, tunable: parsedTunable }
+  }
+
+  private validateAccounts(strategy: IStrategy, instance: StrategyInstance): void {
+    const accountTypes = strategy.accountTypes
+    if (accountTypes.length === 0) return
+
+    const accounts = instance.accounts ?? []
+    if (accounts.length !== accountTypes.length) {
+      throw new Error(
+        `Strategy "${instance.strategyId}" requires ${accountTypes.length} account(s), but instance "${instance.id}" has ${accounts.length}`
+      )
+    }
+  }
+
+  private async ensureAccounts(instance: StrategyInstance): Promise<IAccount[]> {
+    const credentialNames = instance.accounts ?? []
+    const accounts: IAccount[] = []
+
+    for (const credentialName of credentialNames) {
+      if (!this.accountRegistry.has(credentialName)) {
+        if (!this.credentialStore) {
+          throw new Error(`CredentialStore not configured — cannot create account for "${credentialName}"`)
+        }
+        const { type, data } = await this.credentialStore.getByName(credentialName)
+        const factory = this.accountFactories.get(type)
+        if (!factory) {
+          throw new Error(`No AccountFactory registered for type: "${type}" (credential: "${credentialName}")`)
+        }
+        this.accountRegistry.set(credentialName, factory(data))
+      }
+      const account = this.accountRegistry.get(credentialName)!
+      accounts.push(account)
+    }
+
+    return accounts
   }
 }

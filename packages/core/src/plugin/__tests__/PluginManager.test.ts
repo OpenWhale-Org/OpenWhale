@@ -26,14 +26,15 @@ function makePlugin(name: string): PluginFactory<Record<string, unknown>> {
     version: '1.0.0',
     monitors: [{ definition: makeMonitorDef(`${name}-monitor`), instance: {} as BaseMonitor }],
     executors: [{ definition: makeExecutorDef(`${name}-executor`), instance: {} as BaseExecutor }],
-    strategies: [{ definition: makeStrategyDef(`${name}-strategy`), instance: {} as IStrategy }],
+    strategies: [{ definition: makeStrategyDef(`${name}-strategy`), factory: () => ({} as IStrategy) }],
+    accounts: [],
   })
 }
 
 describe('PluginManager', () => {
   let monitorRegistry: Registry<MonitorDefinition, BaseMonitor>
   let executorRegistry: Registry<ExecutorDefinition, BaseExecutor>
-  let strategyRegistry: Registry<StrategyDefinition, IStrategy>
+  let strategyRegistry: Registry<StrategyDefinition, () => IStrategy>
   let manager: PluginManager
 
   beforeEach(() => {
@@ -85,7 +86,7 @@ describe('PluginManager', () => {
     let receivedConfig: MyConfig | undefined
     const factory: PluginFactory<MyConfig> = (ctx) => {
       receivedConfig = ctx.config
-      return { name: 'my-plugin', version: '1.0.0', monitors: [], executors: [], strategies: [] }
+      return { name: 'my-plugin', version: '1.0.0', monitors: [], executors: [], strategies: [], accounts: [] }
     }
     manager.load(factory, { testnet: true })
     expect(receivedConfig).toEqual({ testnet: true })
