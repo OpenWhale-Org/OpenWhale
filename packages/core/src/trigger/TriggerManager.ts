@@ -21,12 +21,20 @@ interface InstanceEntry {
 export class TriggerManager {
   private readonly instances = new Map<string, InstanceEntry>()
   private readonly monitorRegistry: MonitorRegistry
+  private readonly credentialStore: CredentialStore | undefined
+  private readonly database: DatabaseAdapter | undefined
   private readonly cronTasks: cron.ScheduledTask[] = []
   private readonly triggerStates = new Map<string, TriggerState>()
   private running = false
 
-  constructor(monitorRegistry: MonitorRegistry) {
+  constructor(
+    monitorRegistry: MonitorRegistry,
+    credentialStore?: CredentialStore,
+    database?: DatabaseAdapter,
+  ) {
     this.monitorRegistry = monitorRegistry
+    this.credentialStore = credentialStore
+    this.database = database
   }
 
   registerInstance(
@@ -38,6 +46,9 @@ export class TriggerManager {
   ): void {
     strategy.setParams(params)
     strategy.setAccounts(accounts)
+    if (this.credentialStore) strategy.setCredentialStore(this.credentialStore)
+    if (this.database) strategy.setStore(new DBStrategyStore(instanceId, this.database))
+    strategy.setHttpClient(new HttpClient(strategy.strategyId))
     this.instances.set(instanceId, { instanceId, triggers, strategy })
   }
 
@@ -46,10 +57,10 @@ export class TriggerManager {
     this.instances.delete(instanceId)
   }
 
-  start(queue: ExecutionQueue, credentialStore?: CredentialStore, database?: DatabaseAdapter): void {
+  start(queue: ExecutionQueue): void {
     if (this.running) return
     this.running = true
-    this.injectDependencies(credentialStore, database)
+    this.injectMonitorReaders()
     this.initTriggerStates()
     this.setupMonitorHandlers(queue)
     this.subscribeMonitors()
@@ -66,16 +77,8 @@ export class TriggerManager {
 
   // ── Start / stop helpers ──────────────────────────────────────────────────
 
-  private injectDependencies(credentialStore?: CredentialStore, database?: DatabaseAdapter): void {
+  private injectMonitorReaders(): void {
     for (const { instanceId, strategy } of this.instances.values()) {
-      if (credentialStore) strategy.setCredentialStore(credentialStore)
-
-      if (database) {
-        strategy.setStore(new DBStrategyStore(instanceId, database))
-      }
-
-      strategy.setHttpClient(new HttpClient(strategy.strategyId))
-
       strategy.monitors.forEach(monitorName => {
         const monitor = this.monitorRegistry.get(monitorName)
         if (!monitor) throw new Error(
