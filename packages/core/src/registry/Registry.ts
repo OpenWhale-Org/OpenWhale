@@ -33,17 +33,21 @@ export class Registry<TDefinition extends { id: string }, TInstance>
   }
 }
 
-export type MonitorRegistry = IRegistry<MonitorDefinition, BaseMonitor>
-export type ExecutorRegistry = IRegistry<ExecutorDefinition, BaseExecutor>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type MonitorRegistry = IRegistry<MonitorDefinition, BaseMonitor<string, any>>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ExecutorRegistry = IRegistry<ExecutorDefinition, BaseExecutor<any>>
 /** Strategy registry stores factory functions — each activate() call creates a fresh instance. */
 export type StrategyRegistry = IRegistry<StrategyDefinition, () => IStrategy>
 
 export function createMonitorRegistry(): MonitorRegistry {
-  return new Registry<MonitorDefinition, BaseMonitor>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new Registry<MonitorDefinition, BaseMonitor<string, any>>()
 }
 
 export function createExecutorRegistry(): ExecutorRegistry {
-  return new Registry<ExecutorDefinition, BaseExecutor>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new Registry<ExecutorDefinition, BaseExecutor<any>>()
 }
 
 export function createStrategyRegistry(): StrategyRegistry {

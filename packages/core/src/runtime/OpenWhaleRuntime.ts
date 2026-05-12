@@ -57,11 +57,13 @@ export class OpenWhaleRuntime implements IRuntime {
     this.credentialStore = options?.credentialStore
   }
 
-  registerMonitor(definition: MonitorDefinition, instance: BaseMonitor): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registerMonitor(definition: MonitorDefinition, instance: BaseMonitor<string, any>): void {
     this.monitorRegistry.register(definition, instance)
   }
 
-  registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor<any>): void {
     this.executorRegistry.register(definition, instance)
   }
 

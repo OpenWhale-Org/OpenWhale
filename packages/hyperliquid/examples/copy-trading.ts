@@ -45,8 +45,8 @@ import { CopyTradingStrategy } from '../src/strategy.js'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
-// ── 目标跟单地址（修改为你想跟单的地址） ──────────────────────────────────────
-const TARGET_ADDRESS = '0xTargetTraderAddressHere'
+// ── 目标跟单地址（从环境变量读取） ────────────────────────────────────────────
+const TARGET_ADDRESS = process.env['HL_TARGET_ADDRESS'] ?? ''
 
 async function main() {
   // ── 1. 读取环境变量 ───────────────────────────────────────────────────────
@@ -57,6 +57,7 @@ async function main() {
   if (!encryptionKey) throw new Error('OPENWHALE_ENCRYPTION_KEY is required')
   if (!walletAddress) throw new Error('HL_WALLET_ADDRESS is required')
   if (!privateKey)    throw new Error('HL_PRIVATE_KEY is required')
+  if (!TARGET_ADDRESS) throw new Error('HL_TARGET_ADDRESS is required')
 
   // ── 2. 初始化数据库 + CredentialStore ────────────────────────────────────
   const dataDir  = process.env['OPENWHALE_DATA_DIR'] ?? join(homedir(), '.openwhale')
