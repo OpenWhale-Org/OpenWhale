@@ -28,7 +28,13 @@ export type {
 } from './strategy.js'
 export type { IAccount, IBalance, IPosition, IOrder, IPnL, IHistoryRecord, AccountFactory } from './account.js'
 export type { StrategyInstance, StrategyParams } from './instance.js'
-export type { AdapterQueryOptions, AdapterExecuteOptions, IAdapter } from './adapter.js'
+export type {
+  AdapterQueryOptions, AdapterExecuteOptions, IAdapter,
+  Ticker, Kline, OrderBook,
+  ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade,
+  FundingRateData, SpotOrderParams, PerpOrderParams,
+  SpotExchangeAdapter, PerpExchangeAdapter,
+} from './adapter.js'
 export type { RuntimeOptions, IRuntime } from './runtime.js'
 export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from './definition.js'
 export type { IRegistry } from './registry.js'

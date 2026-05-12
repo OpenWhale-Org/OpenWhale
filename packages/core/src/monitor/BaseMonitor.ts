@@ -292,7 +292,7 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
     const filePath = getMonitorPath(this.dataDir, this.monitorName, key)
     const dir = path.dirname(filePath)
     await fs.promises.mkdir(dir, { recursive: true })
-    const record = { ts: Date.now(), ...data }
+    const record = { ts: Date.now(), data }
     await fs.promises.appendFile(filePath, JSON.stringify(record) + '\n', 'utf8')
   }
 
