@@ -1,4 +1,4 @@
-// ── n8n-style param field schema ──────────────────────────────────────────────
+// ── Param field UI schema ─────────────────────────────────────────────────────
 
 export type ParamFieldType = 'string' | 'number' | 'boolean' | 'options'
 
@@ -89,7 +89,7 @@ export interface StrategyDefinition {
   compiledPath?: string
   monitorIds: string[]
   executorIds: string[]
-  /** n8n-style field descriptors for generic UI rendering. Optional — falls back to JSON editor if absent. */
+  /** Field descriptors for generic UI rendering. Optional — falls back to JSON editor if absent. */
   paramsFields?: ParamFieldDef[]
   createdAt: string
   updatedAt: string

@@ -77,7 +77,7 @@ export interface IStrategy {
   readonly baseParamsSchema: ZodObject<ZodRawShape>
   /** Tunable params schema (AI-optimizable, all fields must have .default()). */
   readonly tunableParamsSchema: ZodObject<ZodRawShape>
-  /** n8n-style field descriptors for generic UI rendering. Optional. */
+  /** Field descriptors for generic UI rendering. Optional. */
   readonly paramsFields?: ParamFieldDef[]
   /** Returns the triggers this strategy needs, given its params. Framework fills id/strategyInstanceId. */
   triggers(params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[]

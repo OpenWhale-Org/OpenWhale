@@ -61,11 +61,19 @@ export class OpenWhaleRuntime implements IRuntime {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor<string, any>): void {
     this.monitorRegistry.register(definition, instance)
+    // Also register by monitorName so strategies can declare dependencies by logical name
+    if (instance.monitorName && instance.monitorName !== definition.id) {
+      this.monitorRegistry.register({ ...definition, id: instance.monitorName }, instance)
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor<any>): void {
     this.executorRegistry.register(definition, instance)
+    // Also register by executorName so queue routing and executorId references work by logical name
+    if (instance.executorName && instance.executorName !== definition.id) {
+      this.executorRegistry.register({ ...definition, id: instance.executorName }, instance)
+    }
   }
 
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void {
