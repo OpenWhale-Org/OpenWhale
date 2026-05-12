@@ -1,11 +1,15 @@
 /**
- * Runnable example — no API keys required.
+ * Runnable example — MomentumStrategy 始终运行；
+ * 若环境变量中存在 LLM API Key，则同时激活 AiTradingStrategy。
  *
- * Uses MomentumStrategy + PriceMonitor + TradeExecutor with an in-memory queue
- * and a temporary SQLite database. Runs for 30 seconds then exits cleanly.
+ * 支持的环境变量（自动扫描，取第一个匹配的 provider）：
+ *   OPENAI_API_KEY      → openai:gpt-4o-mini
+ *   ANTHROPIC_API_KEY   → anthropic:claude-haiku-4-5-20251001
+ *   GOOGLE_API_KEY      → google:gemini-1.5-flash
  *
- * Run:
- *   npx tsx packages/core/examples/index.ts
+ * 运行方式：
+ *   pnpm example
+ *   OPENAI_API_KEY=sk-... pnpm example
  */
 
 import * as os from 'os'
@@ -13,27 +17,45 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { OpenWhaleRuntime } from '../src/runtime/OpenWhaleRuntime.js'
 import { SQLiteAdapter } from '../src/database/SQLiteAdapter.js'
+import { DBCredentialStore } from '../src/credentials/DBCredentialStore.js'
+import { importLlmKeysFromEnv } from '../src/strategy/llm.js'
 import { PriceMonitor } from './PriceMonitor.js'
 import { TradeExecutor } from './TradeExecutor.js'
 import { MomentumStrategy } from './MomentumStrategy.js'
+import { AiTradingStrategy } from './AiTradingStrategy.js'
+import type { BuiltinProviderId } from '../src/types/strategy.js'
+
+// 每个 provider 对应的默认 model
+const DEFAULT_MODELS: Partial<Record<BuiltinProviderId, string>> = {
+  openai:    'openai:gpt-4o-mini',
+  anthropic: 'anthropic:claude-haiku-4-5-20251001',
+  google:    'google:gemini-1.5-flash',
+}
 
 async function main() {
-  // ── Temp DB (cleaned up on exit) ─────────────────────────────────────────
+  // ── 临时数据库（退出时自动清理）────────────────────────────────────────────
   const dbPath = path.join(os.tmpdir(), `openwhale-example-${Date.now()}.db`)
   const database = new SQLiteAdapter({ filePath: dbPath })
   await database.initialize()
 
+  const credentials = new DBCredentialStore('example-key', database)
+
+  // ── 扫描环境变量，将 LLM API Key 导入 CredentialStore ─────────────────────
+  const importedProviders = await importLlmKeysFromEnv(credentials)
+  const activeProvider = importedProviders[0]
+  const defaultModel = activeProvider ? DEFAULT_MODELS[activeProvider] : undefined
+
   // ── Runtime ───────────────────────────────────────────────────────────────
-  const runtime = new OpenWhaleRuntime({ database })
+  const runtime = new OpenWhaleRuntime({ database, credentialStore: credentials })
   const now = new Date().toISOString()
 
-  // ── Register Monitor ──────────────────────────────────────────────────────
+  // ── 注册 Monitor ──────────────────────────────────────────────────────────
   runtime.registerMonitor(
     { id: 'price', name: 'Price Monitor', source: 'builtin', createdAt: now, updatedAt: now },
-    new PriceMonitor(2000),  // poll every 2s so we see output quickly
+    new PriceMonitor(2000),
   )
 
-  // ── Register Executor ─────────────────────────────────────────────────────
+  // ── 注册 Executor ─────────────────────────────────────────────────────────
   runtime.registerExecutor(
     {
       id: 'trade',
@@ -46,7 +68,7 @@ async function main() {
     new TradeExecutor(),
   )
 
-  // ── Register Strategy ─────────────────────────────────────────────────────
+  // ── 注册 Strategy ─────────────────────────────────────────────────────────
   runtime.registerStrategy(
     {
       id: 'momentum',
@@ -60,8 +82,22 @@ async function main() {
     () => new MomentumStrategy(),
   )
 
-  // ── Activate instances ────────────────────────────────────────────────────
-  // Use a small longWindow so the strategy fires quickly with simulated data
+  if (defaultModel) {
+    runtime.registerStrategy(
+      {
+        id: 'ai-trading',
+        name: 'AI Trading Strategy',
+        source: 'builtin',
+        monitorIds: ['price'],
+        executorIds: ['trade'],
+        createdAt: now,
+        updatedAt: now,
+      },
+      () => new AiTradingStrategy({ llm: { defaultModel } }),
+    )
+  }
+
+  // ── 激活实例 ──────────────────────────────────────────────────────────────
   await runtime.activate({
     id: 'instance-btc',
     name: 'BTC Momentum',
@@ -90,20 +126,37 @@ async function main() {
     updatedAt: now,
   })
 
-  // ── Start ─────────────────────────────────────────────────────────────────
-  await runtime.start()
-  console.log('Runtime started. Running for 30 seconds...\n')
+  if (defaultModel) {
+    await runtime.activate({
+      id: 'instance-ai-trading',
+      name: 'AI Trading (1m)',
+      strategyId: 'ai-trading',
+      accounts: [],
+      params: {
+        base:    { watchlist: ['BTC', 'ETH'] },
+        tunable: {},
+      },
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    console.log(`LLM 已检测到 (${defaultModel}) — AiTradingStrategy 已激活。\n`)
+  } else {
+    console.log('未检测到 LLM API Key，仅运行 MomentumStrategy。')
+    console.log('设置 OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY 可同时激活 AiTradingStrategy。\n')
+  }
 
-  // ── Stop after 30s ────────────────────────────────────────────────────────
+  // ── 启动 ──────────────────────────────────────────────────────────────────
+  await runtime.start()
+  console.log('Runtime 已启动，运行 30 秒后自动退出...\n')
+
   await new Promise<void>(resolve => setTimeout(resolve, 30_000))
 
-  console.log('\nShutting down...')
+  console.log('\n正在关闭...')
   await runtime.stop()
   await database.close()
-
-  // Clean up temp DB
   fs.rmSync(dbPath, { force: true })
-  console.log('Done.')
+  console.log('完成。')
 }
 
 main().catch(err => {

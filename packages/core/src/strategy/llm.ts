@@ -11,7 +11,7 @@ import type { CredentialStore } from '../types/credential.js'
 export type { ModelMessage as CoreMessage }
 
 /** Default credential name for each built-in provider. */
-const BUILTIN_CREDENTIAL_NAMES: Record<BuiltinProviderId, string> = {
+export const BUILTIN_CREDENTIAL_NAMES: Record<BuiltinProviderId, string> = {
   openai:    'openai-api-key',
   anthropic: 'anthropic-api-key',
   google:    'google-api-key',
@@ -154,7 +154,7 @@ export class LlmClient {
 
     if (explicitConfig?.provider === 'custom') {
       const { data } = await credentialStore.getByName(explicitConfig.credentialName)
-      const apiKey = data['apiKey'] as string
+      const apiKey = data['value'] as string
       return explicitConfig.create(apiKey)
     }
 
@@ -168,11 +168,45 @@ export class LlmClient {
       ?? BUILTIN_CREDENTIAL_NAMES[builtinId]
 
     const { data } = await credentialStore.getByName(credentialName)
-    const apiKey = data['apiKey'] as string
+    const apiKey = data['value'] as string
     return BUILTIN_FACTORIES[builtinId](apiKey)
   }
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Scans environment variables for built-in LLM provider API keys and imports
+ * any found into the CredentialStore.
+ *
+ * Mapping rule: credential name → env var
+ *   'openai-api-key'    → OPENAI_API_KEY
+ *   'anthropic-api-key' → ANTHROPIC_API_KEY
+ *   'google-api-key'    → GOOGLE_API_KEY
+ *   ... (credentialName.toUpperCase().replaceAll('-', '_'))
+ *
+ * Returns the list of provider IDs that were imported.
+ *
+ * @example
+ * // In an example or dev script:
+ * const imported = await importLlmKeysFromEnv(credentialStore)
+ * if (imported.length === 0) console.log('No LLM API keys found in environment.')
+ * else console.log(`Imported: ${imported.join(', ')}`)
+ */
+export async function importLlmKeysFromEnv(
+  credentialStore: CredentialStore,
+): Promise<BuiltinProviderId[]> {
+  const imported: BuiltinProviderId[] = []
+
+  for (const [provider, credentialName] of Object.entries(BUILTIN_CREDENTIAL_NAMES) as [BuiltinProviderId, string][]) {
+    const envVar = credentialName.toUpperCase().replaceAll('-', '_')
+    const apiKey = process.env[envVar]
+    if (!apiKey) continue
+    await credentialStore.set(credentialName, 'api-key', { value: apiKey })
+    imported.push(provider)
+  }
+
+  return imported
 }

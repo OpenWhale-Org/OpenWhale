@@ -21,9 +21,9 @@
 
 import { z } from 'zod'
 import { BaseStrategy } from '../src/strategy/BaseStrategy.js'
-import type { StrategyContext } from '../src/types/strategy.js'
-import type { ExecutionInstruction } from '../src/types/executor.js'
+import type { StrategyContext, StrategyOptions } from '../src/types/strategy.js'
 import type { StrategyParams } from '../src/types/instance.js'
+import type { ExecutionInstruction } from '../src/types/executor.js'
 import type { Trigger } from '../src/types/trigger.js'
 
 // ── LLM 输出 Schema ───────────────────────────────────────────────────────────
@@ -52,13 +52,9 @@ export class AiTradingStrategy extends BaseStrategy {
     watchlist: z.array(z.string()),  // e.g. ['BTC', 'ETH', 'SOL']
   })
 
-  constructor() {
-    super({
-      llm: {
-        defaultModel: 'openai:gpt-4o-mini',
-        // 如需自定义 credential 名称：
-        // providers: [{ provider: 'openai', credentialName: 'my-openai-key' }]
-      },
+  constructor(options?: StrategyOptions) {
+    super(options ?? {
+      llm: { defaultModel: 'openai:gpt-4o-mini' },
     })
   }
 

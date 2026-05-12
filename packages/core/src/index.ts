@@ -81,6 +81,7 @@ export { TriggerManager } from './trigger/TriggerManager.js'
 
 // Strategy
 export { BaseStrategy } from './strategy/BaseStrategy.js'
+export { importLlmKeysFromEnv, BUILTIN_CREDENTIAL_NAMES } from './strategy/llm.js'
 export type { CoreMessage, LlmCallOptions } from './strategy/llm.js'
 export type { IStrategyStore } from './strategy/StrategyStore.js'
 export { DBStrategyStore } from './strategy/StrategyStore.js'
