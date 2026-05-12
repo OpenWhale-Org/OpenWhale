@@ -36,7 +36,8 @@
  *   npx tsx packages/hyperliquid/examples/copy-trading.ts
  */
 
-import { OpenWhaleRuntime, DBCredentialStore, SQLiteAdapter } from '@openwhale/core'
+import { OpenWhaleRuntime, DBCredentialStore, SQLiteAdapter, BaseExecutor, createLogger } from '@openwhale/core'
+import type { ExecutionInstruction, ExecutionResult } from '@openwhale/core'
 import { HyperliquidAdapter } from '../src/adapter.js'
 import { HyperliquidAccount } from '../src/account.js'
 import { UserTradesMonitor } from '../src/monitor.js'
@@ -47,6 +48,19 @@ import { homedir } from 'node:os'
 
 // ── 目标跟单地址（从环境变量读取） ────────────────────────────────────────────
 const TARGET_ADDRESS = process.env['HL_TARGET_ADDRESS'] ?? ''
+
+const mockLog = createLogger('MockExecutor')
+const log = createLogger('CopyTradingExample')
+
+class MockExecutor extends BaseExecutor<ExecutionInstruction> {
+  get executorName() { return 'perp-trading' }
+  get supportedActions() { return ['placeOrder', 'cancelOrder', 'setLeverage'] }
+
+  async execute(instruction: ExecutionInstruction): Promise<ExecutionResult<ExecutionInstruction>> {
+    mockLog.info({ action: instruction.action, params: instruction.params, messageId: instruction.messageId }, '[MOCK] Would execute instruction')
+    return { instruction, status: 'success', executedAt: new Date() }
+  }
+}
 
 async function main() {
   // ── 1. 读取环境变量 ───────────────────────────────────────────────────────
@@ -86,10 +100,14 @@ async function main() {
     new UserTradesMonitor(hlAdapter),
   )
 
-  // 注册 Executor：执行永续合约下单
+  // 注册 Executor：MOCK_EXECUTOR=true 时只打印指令，否则真实下单
+  const isMock = process.env['MOCK_EXECUTOR'] === 'true'
+  const executor = isMock ? new MockExecutor() : new PerpTradingExecutor(hlAdapter)
+  const executorName = isMock ? 'Mock Perp Trading Executor' : 'Perp Trading Executor'
+  log.info({ mock: isMock }, 'Executor mode')
   runtime.registerExecutor(
-    { id: 'perp-trading', name: 'Perp Trading Executor', source: 'builtin', supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'], createdAt: now, updatedAt: now },
-    new PerpTradingExecutor(hlAdapter),
+    { id: 'perp-trading', name: executorName, source: 'builtin', supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'], createdAt: now, updatedAt: now },
+    executor,
   )
 
   // 注册 Strategy
@@ -122,7 +140,7 @@ async function main() {
         maxPositionUsd: 1000, // 单个仓位最大 1000 USD
       },
       tunable: {
-        minTradeUsd: 20,          // 低于 20 USD 的成交忽略
+        minTradeUsd: 10,          // 低于 20 USD 的成交忽略
         slippageTolerance: 0.005, // 0.5% 滑点容忍
       },
     },

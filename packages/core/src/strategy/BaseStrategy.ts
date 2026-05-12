@@ -3,10 +3,11 @@ import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, Acco
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
-import type { ZodType } from 'zod'
+import type { ZodType, ZodRawShape } from 'zod'
 import type { Trigger } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { IAccount } from '../types/account.js'
+import type { ParamFieldDef, ParamFieldMeta, ParamFieldType } from '../types/definition.js'
 import { z } from 'zod'
 import { getDataDir } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
@@ -98,6 +99,91 @@ export abstract class BaseStrategy implements IStrategy {
   readonly baseParamsSchema: z.ZodObject<z.ZodRawShape> = z.object({})
   /** Tunable params schema (AI-optimizable, all fields must have .default()). Override in subclass. */
   readonly tunableParamsSchema: z.ZodObject<z.ZodRawShape> = z.object({})
+
+  /**
+   * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.
+   * Override manually only if you need full control over the UI descriptor.
+   */
+  get paramsFields(): ParamFieldDef[] {
+    return BaseStrategy.deriveParamFields(this.baseParamsSchema, this.tunableParamsSchema) ?? []
+  }
+
+  /**
+   * Derive ParamFieldDef[] from two ZodObject schemas.
+   * Reads .meta() on each field for UI metadata; infers type from Zod type string.
+   * Returns undefined if both schemas have empty shapes (no fields to show).
+   */
+  static deriveParamFields(
+    baseSchema: z.ZodObject<ZodRawShape>,
+    tunableSchema: z.ZodObject<ZodRawShape>,
+  ): ParamFieldDef[] | undefined {
+    const baseKeys = Object.keys(baseSchema.shape)
+    const tunableKeys = Object.keys(tunableSchema.shape)
+    if (baseKeys.length === 0 && tunableKeys.length === 0) return undefined
+
+    const fields: ParamFieldDef[] = []
+
+    function processShape(shape: ZodRawShape, group: 'base' | 'tunable') {
+      for (const [name, rawField] of Object.entries(shape)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let field: any = rawField
+        let defaultValue: unknown = undefined
+        let required = group === 'base'
+
+        // Read meta from the outermost wrapper first (covers .default().meta() pattern)
+        let meta: ParamFieldMeta = field.meta?.() ?? {}
+
+        // Unwrap ZodDefault to get the inner type and default value
+        if (field.type === 'default') {
+          defaultValue = typeof field.def.defaultValue === 'function'
+            ? field.def.defaultValue()
+            : field.def.defaultValue
+          field = field.def.innerType
+          required = false
+          // If meta was empty on the wrapper, try the inner type (.meta().default() pattern)
+          if (Object.keys(meta).length === 0) meta = field.meta?.() ?? {}
+        }
+
+        // Unwrap ZodOptional
+        if (field.type === 'optional') {
+          field = field.def.innerType
+          required = false
+          if (Object.keys(meta).length === 0) meta = field.meta?.() ?? {}
+        }
+
+        const zodType: string = field.type ?? ''
+        const fieldType = BaseStrategy.zodTypeToParamFieldType(zodType, meta)
+
+        fields.push({
+          name,
+          displayName: meta.displayName ?? name,
+          type: fieldType,
+          group,
+          ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+          ...(required ? { required: true } : {}),
+          ...(meta.description ? { description: meta.description } : {}),
+          ...(meta.hint ? { hint: meta.hint } : {}),
+          ...(meta.placeholder ? { placeholder: meta.placeholder } : {}),
+          ...(meta.options ? { options: meta.options } : {}),
+          ...(meta.displayOptions ? { displayOptions: meta.displayOptions } : {}),
+        })
+      }
+    }
+
+    processShape(baseSchema.shape, 'base')
+    processShape(tunableSchema.shape, 'tunable')
+
+    return fields
+  }
+
+  private static zodTypeToParamFieldType(zodType: string, meta: ParamFieldMeta): ParamFieldType {
+    if (meta.options && meta.options.length > 0) return 'options'
+    switch (zodType) {
+      case 'number': return 'number'
+      case 'boolean': return 'boolean'
+      default: return 'string'
+    }
+  }
 
   protected readonly dataDir: string
   private readonly stepCache = new Map<string, unknown>()

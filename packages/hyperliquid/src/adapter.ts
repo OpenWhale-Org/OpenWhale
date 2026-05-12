@@ -101,12 +101,21 @@ export class HyperliquidAdapter implements PerpExchangeAdapter {
     if (params.reduceOnly !== undefined) extra.reduceOnly = params.reduceOnly
     if (params.timeInForce !== undefined) extra.timeInForce = params.timeInForce
 
+    // Hyperliquid requires a price for market orders to calculate max slippage.
+    // If not provided, fetch the current mid price and let ccxt apply its default
+    // 5% slippage tolerance.
+    let price = params.price
+    if (params.type === 'market' && price === undefined) {
+      const ticker = await this.exchange.fetchTicker(params.symbol)
+      price = ticker.last ?? ticker.close ?? undefined
+    }
+
     const order = await this.exchange.createOrder(
       params.symbol,
       params.type,
       params.side,
       params.amount,
-      params.price,
+      price,
       extra,
     )
     return this.mapOrder(order)

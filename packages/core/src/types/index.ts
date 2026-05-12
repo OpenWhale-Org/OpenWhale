@@ -36,5 +36,5 @@ export type {
   SpotExchangeAdapter, PerpExchangeAdapter,
 } from './adapter.js'
 export type { RuntimeOptions, IRuntime } from './runtime.js'
-export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from './definition.js'
+export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamFieldDef, ParamFieldType, ParamFieldOption, ParamFieldMeta } from './definition.js'
 export type { IRegistry } from './registry.js'

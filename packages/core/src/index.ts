@@ -60,6 +60,10 @@ export type {
   MonitorDefinition,
   ExecutorDefinition,
   StrategyDefinition,
+  ParamFieldDef,
+  ParamFieldType,
+  ParamFieldOption,
+  ParamFieldMeta,
   IRegistry,
 } from './types/index.js'
 

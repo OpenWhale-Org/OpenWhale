@@ -9,8 +9,10 @@ import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '
 export interface OpenWhalePlugin {
   name: string
   version: string
-  monitors: Array<{ definition: MonitorDefinition; instance: BaseMonitor }>
-  executors: Array<{ definition: ExecutorDefinition; instance: BaseExecutor }>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  monitors: Array<{ definition: MonitorDefinition; instance: BaseMonitor<string, any> }>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  executors: Array<{ definition: ExecutorDefinition; instance: BaseExecutor<any> }>
   /** Strategy factories — each activate() call creates a fresh instance. */
   strategies: Array<{ definition: StrategyDefinition; factory: () => IStrategy }>
   /** Account factories — registered by accountType. */

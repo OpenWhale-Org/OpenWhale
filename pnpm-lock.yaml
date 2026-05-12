@@ -144,6 +144,9 @@ importers:
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)

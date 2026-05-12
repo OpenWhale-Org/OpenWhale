@@ -71,8 +71,9 @@ export class OpenWhaleRuntime implements IRuntime {
     // Extract paramsFields from a temporary strategy instance if not already in definition
     if (!definition.paramsFields) {
       const probe = factory()
-      if (probe.paramsFields) {
-        this.strategyRegistry.register({ ...definition, paramsFields: probe.paramsFields }, factory)
+      const fields = probe.paramsFields
+      if (fields && fields.length > 0) {
+        this.strategyRegistry.register({ ...definition, paramsFields: fields }, factory)
         return
       }
     }
