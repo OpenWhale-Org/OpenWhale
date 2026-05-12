@@ -1,25 +1,20 @@
 /**
  * Example: PriceMonitor
  *
- * Subscribe 模式 Monitor — 每隔 5 秒轮询一次价格接口，
+ * Subscribe 模式 Monitor — 每隔 N 秒轮询一次价格接口，
  * 每个交易对（key）独立维护一个 setInterval。
  *
  * 关键点：
  * - mode = MonitorMode.Subscribe：由 TriggerManager 通过 subscribe(key) 驱动
  * - startSubscribe(key) 启动轮询，stopSubscribe(key) 清理定时器
  * - 调用 this.push(key, data) 提交数据，基类负责写 JSONL 和触发 emit
+ * - 存储格式：{ ts: number, data: { price, volume24h, change24h } }（MonitorRecord 结构）
  * - 不需要手动管理引用计数，基类已处理
  */
 
 import { BaseMonitor, MonitorMode } from '../src/monitor/BaseMonitor.js'
 
-interface PriceData {
-  price: number
-  volume24h: number
-  change24h: number
-}
-
-export class PriceMonitor extends BaseMonitor<string, PriceData> {
+export class PriceMonitor extends BaseMonitor {
   readonly mode = MonitorMode.Subscribe
 
   get monitorName() {
@@ -59,11 +54,11 @@ export class PriceMonitor extends BaseMonitor<string, PriceData> {
    *   const res = await fetch(`https://api.exchange.com/ticker/${key}`)
    *   return res.json()
    */
-  private async fetchPrice(symbol: string): Promise<PriceData> {
+  private async fetchPrice(symbol: string): Promise<Record<string, unknown>> {
     // 模拟价格数据
     const base = symbol === 'BTC' ? 65000 : symbol === 'ETH' ? 3500 : 100
     return {
-      price: base * (1 + (Math.random() - 0.5) * 0.02),
+      price:     base * (1 + (Math.random() - 0.5) * 0.02),
       volume24h: Math.random() * 1e9,
       change24h: (Math.random() - 0.5) * 10,
     }

@@ -12,11 +12,10 @@
  * 4. 根据决策生成交易指令
  *
  * 关键点：
- * - 构造函数传入 llm 配置，指定 defaultModel 和 provider
- * - CredentialStore 中需要存储对应的 API Key（如 'openai-api-key'）
+ * - baseParamsSchema 声明 watchlist（必填），triggers() 返回 cron 触发器
+ * - monitors 声明依赖的 monitor，TriggerManager 在 start() 时注入 reader
+ * - monitorData('price') 返回 reader，readLatest(key) / readLast(key, n) 读取数据
  * - llm({ schema }) 返回类型由 Zod schema 推断，完全类型安全
- * - llm({ schema }) 内部使用 generateObject，无 schema 时使用 generateText
- * - parallel() 将多组指令合并为一个平铺数组
  * - step() 缓存 LLM 调用结果，避免同一次 evaluate 内重复调用
  */
 
@@ -24,16 +23,18 @@ import { z } from 'zod'
 import { BaseStrategy } from '../src/strategy/BaseStrategy.js'
 import type { StrategyContext } from '../src/types/strategy.js'
 import type { ExecutionInstruction } from '../src/types/executor.js'
+import type { StrategyParams } from '../src/types/instance.js'
+import type { Trigger } from '../src/types/trigger.js'
 
 // ── LLM 输出 Schema ───────────────────────────────────────────────────────────
 
 const marketAnalysisSchema = z.object({
-  sentiment: z.enum(['bullish', 'bearish', 'neutral']),
+  sentiment:  z.enum(['bullish', 'bearish', 'neutral']),
   confidence: z.number().min(0).max(1),
   signals: z.array(z.object({
-    symbol: z.string(),
-    action: z.enum(['buy', 'sell', 'hold']),
-    reason: z.string(),
+    symbol:  z.string(),
+    action:  z.enum(['buy', 'sell', 'hold']),
+    reason:  z.string(),
     urgency: z.enum(['high', 'medium', 'low']),
   })),
   summary: z.string(),
@@ -45,10 +46,13 @@ type MarketAnalysis = z.infer<typeof marketAnalysisSchema>
 
 export class AiTradingStrategy extends BaseStrategy {
   readonly strategyId = 'ai-trading'
+  readonly monitors   = ['price']
 
-  private readonly watchlist: string[]
+  readonly baseParamsSchema = z.object({
+    watchlist: z.array(z.string()),  // e.g. ['BTC', 'ETH', 'SOL']
+  })
 
-  constructor(watchlist: string[] = ['BTC', 'ETH', 'SOL']) {
+  constructor() {
     super({
       llm: {
         defaultModel: 'openai:gpt-4o-mini',
@@ -56,13 +60,20 @@ export class AiTradingStrategy extends BaseStrategy {
         // providers: [{ provider: 'openai', credentialName: 'my-openai-key' }]
       },
     })
-    this.watchlist = watchlist
+  }
+
+  triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
+    return [{
+      enabled: true,
+      conditions: [{ type: 'cron', expression: '* * * * *' }],  // 每分钟
+    }]
   }
 
   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
-    // 收集所有交易对的市场数据
-    const marketData = await this.step('market-data', () => this.collectMarketData())
+    const { watchlist } = this.params.base as { watchlist: string[] }
 
+    // 收集所有交易对的市场数据
+    const marketData = await this.step('market-data', () => this.collectMarketData(watchlist))
     if (Object.keys(marketData).length === 0) return []
 
     // 调用 LLM 分析，结果由 Zod schema 校验并推断类型
@@ -80,10 +91,7 @@ export class AiTradingStrategy extends BaseStrategy {
           },
           {
             role: 'user',
-            content: JSON.stringify({
-              timestamp: context.timestamp,
-              marketData,
-            }),
+            content: JSON.stringify({ timestamp: context.timestamp, marketData }),
           },
         ],
         schema: marketAnalysisSchema,
@@ -108,42 +116,25 @@ export class AiTradingStrategy extends BaseStrategy {
   ): ExecutionInstruction[] {
     const baseAmount = analysis.confidence > 0.85 ? 200 : 100  // 高置信度加仓
 
-    if (signal.action === 'buy') {
-      return [{
-        executorId: 'trade',
-        messageId: '',
-        action: 'buy',
-        params: { symbol: signal.symbol, quoteAmount: baseAmount },
-      }]
-    }
+    if (signal.action === 'buy')
+      return [{ executorId: 'trade', messageId: '', action: 'buy', params: { symbol: signal.symbol, quoteAmount: baseAmount } }]
 
-    if (signal.action === 'sell') {
-      return [{
-        executorId: 'trade',
-        messageId: '',
-        action: 'sell',
-        params: { symbol: signal.symbol, baseAmount: 0.01 },
-      }]
-    }
+    if (signal.action === 'sell')
+      return [{ executorId: 'trade', messageId: '', action: 'sell', params: { symbol: signal.symbol, baseAmount: 0.01 } }]
 
     return []
   }
 
-  private async collectMarketData(): Promise<Record<string, unknown>> {
+  private async collectMarketData(watchlist: string[]): Promise<Record<string, unknown>> {
+    const reader = this.monitorData('price')
+    if (!reader) return {}
+
     const result: Record<string, unknown> = {}
-
-    for (const symbol of this.watchlist) {
-      const reader = this.monitorData(symbol)
-      if (!reader) continue
-
-      const latest = await reader.readLatest()
-      const history = await reader.readLast(10)
-
-      if (latest) {
-        result[symbol] = { latest, history }
-      }
+    for (const symbol of watchlist) {
+      const latest  = await reader.readLatest(symbol)
+      const history = await reader.readLast(symbol, 10)
+      if (latest) result[symbol] = { latest, history }
     }
-
     return result
   }
 }

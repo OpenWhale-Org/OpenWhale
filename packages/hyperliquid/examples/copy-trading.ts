@@ -10,7 +10,7 @@
  *
  * ── 所需环境变量 ──────────────────────────────────────────────────────────────
  *
- *   OPENWHALE_ENCRYPTION_KEY   必填  数据库加密密钥（任意 32 字节 hex 字符串）
+ *   OPENWHALE_ENCRYPTION_KEY   必填  数据库加密密钥（任意非空字符串，建议 32 字节 hex）
  *                                    生成示例：openssl rand -hex 32
  *
  *   HL_WALLET_ADDRESS          必填  你的 Hyperliquid 钱包地址（0x...）
@@ -36,16 +36,14 @@
  *   npx tsx packages/hyperliquid/examples/copy-trading.ts
  */
 
-import { OpenWhaleRuntime } from '../../core/src/runtime/OpenWhaleRuntime.js'
-import { DBCredentialStore } from '../../core/src/credentials/DBCredentialStore.js'
-import { SQLiteAdapter } from '../../core/src/database/SQLiteAdapter.js'
+import { OpenWhaleRuntime, DBCredentialStore, SQLiteAdapter } from '@openwhale/core'
 import { HyperliquidAdapter } from '../src/adapter.js'
 import { HyperliquidAccount } from '../src/account.js'
 import { UserTradesMonitor } from '../src/monitor.js'
 import { PerpTradingExecutor } from '../src/executor.js'
 import { CopyTradingStrategy } from '../src/strategy.js'
-import path from 'path'
-import { homedir } from 'os'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 // ── 目标跟单地址（修改为你想跟单的地址） ──────────────────────────────────────
 const TARGET_ADDRESS = '0xTargetTraderAddressHere'
@@ -61,23 +59,17 @@ async function main() {
   if (!privateKey)    throw new Error('HL_PRIVATE_KEY is required')
 
   // ── 2. 初始化数据库 + CredentialStore ────────────────────────────────────
-  const dataDir  = process.env['OPENWHALE_DATA_DIR'] ?? path.join(homedir(), '.openwhale')
-  const dbPath   = path.join(dataDir, 'openwhale.db')
+  const dataDir  = process.env['OPENWHALE_DATA_DIR'] ?? join(homedir(), '.openwhale')
+  const dbPath   = join(dataDir, 'openwhale.db')
   const database = new SQLiteAdapter({ filePath: dbPath })
   await database.initialize()
 
-  const credentialStore = new DBCredentialStore(database, encryptionKey)
+  // DBCredentialStore(masterKey, db)
+  const credentialStore = new DBCredentialStore(encryptionKey, database)
 
-  // 将 Hyperliquid 凭证存入加密数据库（首次运行时写入，后续复用）
+  // 将 Hyperliquid 凭证存入加密数据库（首次运行时写入，后续覆盖更新）
   // 凭证名称 'HL Main' 需与 StrategyInstance.accounts 中的名称一致
-  await credentialStore.upsert({
-    name: 'HL Main',
-    type: 'hyperliquid',
-    data: {
-      walletAddress,
-      privateKey,
-    },
-  })
+  await credentialStore.set('HL Main', 'hyperliquid', { walletAddress, privateKey })
 
   // ── 3. 初始化 HyperliquidAdapter ─────────────────────────────────────────
   // Adapter 是底层，Account 和 Executor 共享同一实例，避免重复建立连接
@@ -87,20 +79,21 @@ async function main() {
   const runtime = new OpenWhaleRuntime({ database, credentialStore, dataDir })
 
   // 注册 Monitor：监听目标地址的实时成交
+  const now = new Date().toISOString()
   runtime.registerMonitor(
-    { id: 'user-trades', name: 'User Trades Monitor', source: 'builtin', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    { id: 'user-trades', name: 'User Trades Monitor', source: 'builtin', createdAt: now, updatedAt: now },
     new UserTradesMonitor(hlAdapter),
   )
 
   // 注册 Executor：执行永续合约下单
   runtime.registerExecutor(
-    { id: 'perp-trading', name: 'Perp Trading Executor', source: 'builtin', supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    { id: 'perp-trading', name: 'Perp Trading Executor', source: 'builtin', supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'], createdAt: now, updatedAt: now },
     new PerpTradingExecutor(hlAdapter),
   )
 
   // 注册 Strategy
   runtime.registerStrategy(
-    { id: 'copy-trading', name: 'Copy Trading', source: 'builtin', monitorIds: ['user-trades'], executorIds: ['perp-trading'], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    { id: 'copy-trading', name: 'Copy Trading', source: 'builtin', monitorIds: ['user-trades'], executorIds: ['perp-trading'], createdAt: now, updatedAt: now },
     () => new CopyTradingStrategy(),
   )
 
@@ -116,7 +109,6 @@ async function main() {
   await runtime.start()
 
   // ── 6. 激活跟单策略实例 ───────────────────────────────────────────────────
-  const now = new Date().toISOString()
   await runtime.activate({
     id: 'copy-trading-instance-1',
     name: `跟单 ${TARGET_ADDRESS.slice(0, 8)}...`,
@@ -138,8 +130,8 @@ async function main() {
     updatedAt: now,
   })
 
-  console.log(`✓ CopyTrading started — tracking ${TARGET_ADDRESS}`)
-  console.log('  Press Ctrl+C to stop')
+  console.log(`CopyTrading started — tracking ${TARGET_ADDRESS}`)
+  console.log('Press Ctrl+C to stop')
 
   // ── 7. 优雅退出 ───────────────────────────────────────────────────────────
   process.on('SIGINT', async () => {

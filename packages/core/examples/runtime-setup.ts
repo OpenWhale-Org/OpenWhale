@@ -2,113 +2,126 @@
  * Example: 完整 Runtime 组装
  *
  * 展示如何将 Monitor、Executor、Strategy 注册到 OpenWhaleRuntime，
- * 并激活 Bundle 让整个系统运转起来。
+ * 并激活 StrategyInstance 让整个系统运转起来。
  *
- * 运行方式（仅供参考，需要先 build）：
+ * 运行方式（需要先 build）：
  *   npx tsx packages/core/examples/runtime-setup.ts
  */
 
 import { OpenWhaleRuntime } from '../src/runtime/OpenWhaleRuntime.js'
-import { CredentialStore } from '../src/credentials/CredentialStore.js'
+import { DBCredentialStore } from '../src/credentials/DBCredentialStore.js'
+import { SQLiteAdapter } from '../src/database/SQLiteAdapter.js'
+import * as path from 'path'
+import { homedir } from 'os'
 import { PriceMonitor } from './PriceMonitor.js'
 import { TradeExecutor } from './TradeExecutor.js'
 import { MomentumStrategy } from './MomentumStrategy.js'
 import { AiTradingStrategy } from './AiTradingStrategy.js'
 
 async function main() {
-  // ── 1. 初始化 CredentialStore ─────────────────────────────────────────────
+  // ── 1. 初始化数据库 + CredentialStore ────────────────────────────────────
   // 加密密钥从环境变量读取，生产环境应使用 KMS 或 Vault
   const encryptionKey = process.env['OPENWHALE_ENCRYPTION_KEY']
   if (!encryptionKey) throw new Error('OPENWHALE_ENCRYPTION_KEY is required')
 
-  const credentials = new CredentialStore(encryptionKey)
+  const dbPath = path.join(homedir(), '.openwhale', 'openwhale.db')
+  const database = new SQLiteAdapter({ filePath: dbPath })
+  await database.initialize()
 
-  // 存储 API Key（首次运行时执行，之后注释掉）
-  // await credentials.set({ name: 'openai-api-key', value: process.env['OPENAI_API_KEY'] ?? '' })
+  const credentials = new DBCredentialStore(encryptionKey, database)
+
+  // 首次运行时存储 API Key（之后注释掉）：
+  // await credentials.set('openai-api-key', 'api-key', { value: process.env['OPENAI_API_KEY'] ?? '' })
 
   // ── 2. 创建 Runtime ───────────────────────────────────────────────────────
-  const runtime = new OpenWhaleRuntime({ credentialStore: credentials })
+  const runtime = new OpenWhaleRuntime({ credentialStore: credentials, database })
+
+  const now = new Date().toISOString()
 
   // ── 3. 注册 Monitor ───────────────────────────────────────────────────────
-  const priceMonitor = new PriceMonitor(5000)  // 5 秒轮询
-
   runtime.registerMonitor(
-    { id: 'price', name: 'Price Monitor', monitorName: 'price' },
-    priceMonitor,
+    {
+      id: 'price',
+      name: 'Price Monitor',
+      source: 'builtin',
+      createdAt: now,
+      updatedAt: now,
+    },
+    new PriceMonitor(5000),  // 5 秒轮询
   )
 
   // ── 4. 注册 Executor ──────────────────────────────────────────────────────
-  const tradeExecutor = new TradeExecutor()
-
   runtime.registerExecutor(
-    { id: 'trade', name: 'Trade Executor', executorName: 'trade', executorIds: ['trade'] },
-    tradeExecutor,
+    {
+      id: 'trade',
+      name: 'Trade Executor',
+      source: 'builtin',
+      supportedActions: ['buy', 'sell', 'cancel'],
+      createdAt: now,
+      updatedAt: now,
+    },
+    new TradeExecutor(),
   )
 
   // ── 5. 注册 Strategy ──────────────────────────────────────────────────────
-  const momentumStrategy = new MomentumStrategy({ shortWindow: 5, longWindow: 20 })
-  const aiStrategy = new AiTradingStrategy(['BTC', 'ETH'])
+  // registerStrategy 接收工厂函数，每次 activate 时创建新实例
+  runtime.registerStrategy(
+    {
+      id: 'momentum',
+      name: 'Momentum Strategy',
+      source: 'builtin',
+      monitorIds: ['price'],
+      executorIds: ['trade'],
+      createdAt: now,
+      updatedAt: now,
+    },
+    () => new MomentumStrategy(),
+  )
 
   runtime.registerStrategy(
-    { id: 'momentum', name: 'Momentum Strategy', strategyId: 'momentum', executorIds: ['trade'] },
-    momentumStrategy,
-  )
-  runtime.registerStrategy(
-    { id: 'ai-trading', name: 'AI Trading Strategy', strategyId: 'ai-trading', executorIds: ['trade'] },
-    aiStrategy,
+    {
+      id: 'ai-trading',
+      name: 'AI Trading Strategy',
+      source: 'builtin',
+      monitorIds: ['price'],
+      executorIds: ['trade'],
+      createdAt: now,
+      updatedAt: now,
+    },
+    () => new AiTradingStrategy(),
   )
 
-  // ── 6. 激活 Bundle ────────────────────────────────────────────────────────
-  const now = new Date().toISOString()
+  // ── 6. 激活 StrategyInstance ──────────────────────────────────────────────
+  // triggers 由 strategy.triggers(params) 动态生成，不在 instance 中声明
 
-  // Bundle A：BTC 价格变动时触发 MomentumStrategy
+  // Instance A：BTC 价格变动时触发 MomentumStrategy
   await runtime.activate({
-    id: 'bundle-momentum-btc',
+    id: 'instance-momentum-btc',
     name: 'BTC Momentum',
     strategyId: 'momentum',
+    accounts: [],  // MomentumStrategy 不需要账户
+    params: {
+      base:    { symbol: 'BTC' },
+      tunable: {},  // 使用 tunableParamsSchema 中的默认值
+    },
     enabled: true,
     createdAt: now,
     updatedAt: now,
-    triggers: [
-      {
-        id: 'trigger-price-btc',
-        strategyBundleId: 'bundle-momentum-btc',
-        enabled: true,
-        conditions: [
-          {
-            type: 'monitor',
-            sources: [
-              {
-                monitorName: 'price',
-                key: 'BTC',
-                // 可选 filter：只在价格变动超过 1% 时触发
-                // filter: { field: 'change24h', op: 'gt', value: 1 },
-              },
-            ],
-          },
-        ],
-      },
-    ],
   })
 
-  // Bundle B：每分钟触发 AiTradingStrategy
+  // Instance B：每分钟触发 AiTradingStrategy（监控 BTC + ETH）
   await runtime.activate({
-    id: 'bundle-ai-trading',
+    id: 'instance-ai-trading',
     name: 'AI Trading (1m)',
     strategyId: 'ai-trading',
+    accounts: [],  // 如需账户操作，填入 credential 名称，如 ['my-exchange']
+    params: {
+      base:    { watchlist: ['BTC', 'ETH'] },
+      tunable: {},
+    },
     enabled: true,
     createdAt: now,
     updatedAt: now,
-    triggers: [
-      {
-        id: 'trigger-cron-1m',
-        strategyBundleId: 'bundle-ai-trading',
-        enabled: true,
-        conditions: [
-          { type: 'cron', expression: '* * * * *' },  // 每分钟
-        ],
-      },
-    ],
   })
 
   // ── 7. 启动 ───────────────────────────────────────────────────────────────
