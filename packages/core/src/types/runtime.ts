@@ -3,7 +3,7 @@ import type { ExecutionQueue } from './executor.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from './definition.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
 import type { StrategyInstanceStore } from '../bundle/StrategyInstanceStore.js'
-import type { PluginManager } from '../plugin/PluginManager.js'
+import type { PluginManager, PluginFactory } from '../plugin/PluginManager.js'
 import type { CompiledLoader } from '../compiled/CompiledLoader.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
@@ -41,4 +41,5 @@ export interface IRuntime {
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor): void
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void
   registerAccountFactory(accountType: string, factory: AccountFactory): void
+  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void
 }

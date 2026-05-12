@@ -15,7 +15,7 @@ import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry }
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
 import { StrategyInstanceStore } from '../bundle/StrategyInstanceStore.js'
 import { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
-import type { PluginManager } from '../plugin/PluginManager.js'
+import type { PluginManager, PluginFactory } from '../plugin/PluginManager.js'
 import { CompiledLoader } from '../compiled/CompiledLoader.js'
 import { getDataDir } from '../utils/paths.js'
 
@@ -68,11 +68,27 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void {
+    // Extract paramsFields from a temporary strategy instance if not already in definition
+    if (!definition.paramsFields) {
+      const probe = factory()
+      if (probe.paramsFields) {
+        this.strategyRegistry.register({ ...definition, paramsFields: probe.paramsFields }, factory)
+        return
+      }
+    }
     this.strategyRegistry.register(definition, factory)
   }
 
   registerAccountFactory(accountType: string, factory: AccountFactory): void {
     this.accountFactories.set(accountType, factory)
+  }
+
+  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void {
+    const plugin = factory({ credentials: this.credentialStore!, config })
+    for (const { definition, instance } of plugin.monitors) this.registerMonitor(definition, instance)
+    for (const { definition, instance } of plugin.executors) this.registerExecutor(definition, instance)
+    for (const { definition, factory: sf } of plugin.strategies) this.registerStrategy(definition, sf)
+    for (const { accountType, factory: af } of plugin.accounts) this.registerAccountFactory(accountType, af)
   }
 
   async start(): Promise<void> {
