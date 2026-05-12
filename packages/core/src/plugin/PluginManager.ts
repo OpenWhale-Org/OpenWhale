@@ -95,7 +95,8 @@ export class PluginManager {
   }
 
   async loadFromPath<TConfig>(filePath: string, config: TConfig): Promise<void> {
-    const mod = await import(filePath) as { default?: PluginFactory<TConfig> }
+    // webpackIgnore: true — suppress webpack critical dependency warning for dynamic import
+    const mod = await import(/* webpackIgnore: true */ filePath) as { default?: PluginFactory<TConfig> }
     const factory = mod.default
     if (typeof factory !== 'function') {
       throw new Error(`Plugin at "${filePath}" must export a default factory function`)
