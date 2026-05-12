@@ -1,8 +1,29 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { StrategyInstance } from '@openwhale/core'
-import type { StrategyDefinition, CredentialInfo, ParamFieldDef } from '@openwhale/core'
+import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ExecutionResult } from '@openwhale/core'
+
+// ── SSE event types ───────────────────────────────────────────────────────────
+
+interface MonitorEmitEvent {
+  type: 'monitor_emit'
+  monitor: string
+  key: string
+  data: unknown
+  ts: number
+}
+
+interface StrategyRunEvent {
+  type: 'strategy_run'
+  instanceId: string
+  triggerId: string
+  monitorData: Record<string, unknown>
+  instructions: Array<{ action: string; executorId: string; params: Record<string, unknown> }>
+  timestamp: number
+}
+
+type LiveEvent = MonitorEmitEvent | StrategyRunEvent
 
 function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`
@@ -12,7 +33,7 @@ interface Props {
   initialInstances: StrategyInstance[]
 }
 
-// ── Generic param fields form (n8n-style) ─────────────────────────────────────
+// ── Generic param fields form ─────────────────────────────────────────────────
 
 function isFieldVisible(field: ParamFieldDef, values: Record<string, string>): boolean {
   const { displayOptions } = field
@@ -600,80 +621,225 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 function InstanceCard({ instance, onDeactivate }: { instance: StrategyInstance; onDeactivate: () => void }) {
   const [confirming, setConfirming] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const base = instance.params?.base ?? {}
 
   return (
     <div
-      className="rounded-lg p-4 flex items-start justify-between gap-4"
+      className="rounded-lg overflow-hidden"
       style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
     >
-      <div className="flex flex-col gap-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium truncate">{instance.name}</span>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{
-              background: instance.enabled ? '#14532d' : '#3f1f1f',
-              color: instance.enabled ? 'var(--success)' : 'var(--danger)',
-            }}
-          >
-            {instance.enabled ? 'enabled' : 'disabled'}
-          </span>
-        </div>
-        {instance.description && (
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>{instance.description}</span>
-        )}
-        <span className="text-xs" style={{ color: 'var(--muted)' }}>
-          strategy: <span style={{ color: 'var(--accent)' }}>{instance.strategyId}</span>
-          {' · '}id: {instance.id}
-        </span>
-        {instance.accounts && instance.accounts.length > 0 && (
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            accounts: {instance.accounts.join(', ')}
-          </span>
-        )}
-        {/* Copy-trading specific display */}
-        {instance.strategyId === 'hl-copy-trading' && base.targetAddress ? (
-          <div className="flex flex-wrap gap-3 mt-1">
-            <ParamBadge label="target" value={String(base.targetAddress).slice(0, 10) + '…'} />
-            <ParamBadge label="ratio" value={`${Number(base.ratio) * 100}%`} />
-            <ParamBadge label="max" value={`$${base.maxPositionUsd}`} />
+      {/* Header row */}
+      <div className="p-4 flex items-start justify-between gap-4">
+        <button
+          className="flex flex-col gap-1 min-w-0 text-left flex-1"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium truncate">{instance.name}</span>
+            <span
+              className="text-xs px-2 py-0.5 rounded-full"
+              style={{
+                background: instance.enabled ? '#14532d' : '#3f1f1f',
+                color: instance.enabled ? 'var(--success)' : 'var(--danger)',
+              }}
+            >
+              {instance.enabled ? 'enabled' : 'disabled'}
+            </span>
+            <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>
+              {expanded ? '▲' : '▼'}
+            </span>
           </div>
-        ) : Object.keys(base).length > 0 ? (
-          <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
-            base: {JSON.stringify(base)}
+          {instance.description && (
+            <span className="text-xs" style={{ color: 'var(--muted)' }}>{instance.description}</span>
+          )}
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>
+            strategy: <span style={{ color: 'var(--accent)' }}>{instance.strategyId}</span>
+            {' · '}id: {instance.id}
           </span>
-        ) : null}
+          {instance.accounts && instance.accounts.length > 0 && (
+            <span className="text-xs" style={{ color: 'var(--muted)' }}>
+              accounts: {instance.accounts.join(', ')}
+            </span>
+          )}
+          {instance.strategyId === 'hl-copy-trading' && base.targetAddress ? (
+            <div className="flex flex-wrap gap-3 mt-1">
+              <ParamBadge label="target" value={String(base.targetAddress).slice(0, 10) + '…'} />
+              <ParamBadge label="ratio" value={`${Number(base.ratio) * 100}%`} />
+              <ParamBadge label="max" value={`$${base.maxPositionUsd}`} />
+            </div>
+          ) : Object.keys(base).length > 0 ? (
+            <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
+              base: {JSON.stringify(base)}
+            </span>
+          ) : null}
+        </button>
+
+        <div className="shrink-0 flex gap-2">
+          {confirming ? (
+            <>
+              <button
+                onClick={() => setConfirming(false)}
+                className="px-3 py-1.5 rounded-md text-xs"
+                style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onDeactivate}
+                className="px-3 py-1.5 rounded-md text-xs"
+                style={{ background: 'var(--danger)', color: '#fff' }}
+              >
+                Confirm
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              className="px-3 py-1.5 rounded-md text-xs"
+              style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}
+            >
+              Deactivate
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="shrink-0 flex gap-2">
-        {confirming ? (
-          <>
-            <button
-              onClick={() => setConfirming(false)}
-              className="px-3 py-1.5 rounded-md text-xs"
-              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onDeactivate}
-              className="px-3 py-1.5 rounded-md text-xs"
-              style={{ background: 'var(--danger)', color: '#fff' }}
-            >
-              Confirm
-            </button>
-          </>
-        ) : (
+      {/* Detail panel */}
+      {expanded && <InstanceDetail instanceId={instance.id} />}
+    </div>
+  )
+}
+
+// ── Instance detail panel ─────────────────────────────────────────────────────
+
+function InstanceDetail({ instanceId }: { instanceId: string }) {
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([])
+  const [executions, setExecutions] = useState<ExecutionResult[]>([])
+  const [activeTab, setActiveTab] = useState<'events' | 'executions'>('events')
+  const eventsEndRef = useRef<HTMLDivElement>(null)
+
+  // SSE — filter events for this instance
+  useEffect(() => {
+    const es = new EventSource('/api/events')
+    es.onmessage = (e: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(e.data) as LiveEvent
+        if (event.type === 'strategy_run' && event.instanceId !== instanceId) return
+        setLiveEvents((prev) => [event, ...prev].slice(0, 100))
+      } catch { /* ignore */ }
+    }
+    return () => es.close()
+  }, [instanceId])
+
+  // Auto-scroll events list
+  useEffect(() => {
+    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [liveEvents])
+
+  // Poll executions every 5 s
+  const fetchExecutions = useCallback(async () => {
+    const res = await fetch(`/api/instances/${instanceId}/executions`)
+    if (res.ok) setExecutions(await res.json() as ExecutionResult[])
+  }, [instanceId])
+
+  useEffect(() => {
+    void fetchExecutions()
+    const t = setInterval(() => void fetchExecutions(), 5000)
+    return () => clearInterval(t)
+  }, [fetchExecutions])
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)' }}>
+      {/* Tabs */}
+      <div className="flex" style={{ borderBottom: '1px solid var(--border)' }}>
+        {(['events', 'executions'] as const).map((tab) => (
           <button
-            onClick={() => setConfirming(true)}
-            className="px-3 py-1.5 rounded-md text-xs"
-            style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className="px-4 py-2 text-xs capitalize"
+            style={{
+              background: activeTab === tab ? 'var(--background)' : 'transparent',
+              color: activeTab === tab ? 'var(--foreground)' : 'var(--muted)',
+              borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
+            }}
           >
-            Deactivate
+            {tab === 'events' ? `Live Events (${liveEvents.length})` : `Executions (${executions.length})`}
           </button>
-        )}
+        ))}
       </div>
+
+      <div className="p-3 max-h-72 overflow-y-auto font-mono text-xs flex flex-col gap-1.5" style={{ background: 'var(--background)' }}>
+        {activeTab === 'events' ? (
+          liveEvents.length === 0 ? (
+            <span style={{ color: 'var(--muted)' }}>Waiting for events…</span>
+          ) : (
+            liveEvents.map((ev, i) => <EventRow key={i} event={ev} />)
+          )
+        ) : (
+          executions.length === 0 ? (
+            <span style={{ color: 'var(--muted)' }}>No executions recorded today.</span>
+          ) : (
+            executions.map((ex, i) => <ExecutionRow key={i} result={ex} />)
+          )
+        )}
+        <div ref={eventsEndRef} />
+      </div>
+    </div>
+  )
+}
+
+function EventRow({ event }: { event: LiveEvent }) {
+  const time = new Date(event.type === 'monitor_emit' ? event.ts : event.timestamp).toLocaleTimeString()
+
+  if (event.type === 'monitor_emit') {
+    return (
+      <div className="flex gap-2 items-start">
+        <span style={{ color: 'var(--muted)' }}>{time}</span>
+        <span className="px-1 rounded text-xs" style={{ background: 'var(--accent)22', color: 'var(--accent)' }}>monitor</span>
+        <span style={{ color: 'var(--muted)' }}>{event.monitor}</span>
+        <span style={{ color: 'var(--foreground)' }}>key={event.key}</span>
+        <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(event.data).slice(0, 80)}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex gap-2 items-start">
+        <span style={{ color: 'var(--muted)' }}>{time}</span>
+        <span className="px-1 rounded text-xs" style={{ background: 'var(--warning)22', color: 'var(--warning)' }}>strategy</span>
+        <span style={{ color: 'var(--foreground)' }}>triggered</span>
+        <span style={{ color: 'var(--muted)' }}>{event.triggerId}</span>
+      </div>
+      {event.instructions.length > 0 && (
+        <div className="ml-16 flex flex-col gap-0.5">
+          {event.instructions.map((ins, i) => (
+            <div key={i} className="flex gap-2">
+              <span className="px-1 rounded text-xs" style={{ background: 'var(--success)22', color: 'var(--success)' }}>→</span>
+              <span style={{ color: 'var(--foreground)' }}>{ins.action}</span>
+              <span style={{ color: 'var(--muted)' }}>via {ins.executorId}</span>
+              <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(ins.params).slice(0, 60)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ExecutionRow({ result }: { result: ExecutionResult }) {
+  const time = new Date(result.executedAt).toLocaleTimeString()
+  const statusColor = result.status === 'success' ? 'var(--success)' : result.status === 'failed' ? 'var(--danger)' : 'var(--muted)'
+
+  return (
+    <div className="flex gap-2 items-start">
+      <span style={{ color: 'var(--muted)' }}>{time}</span>
+      <span className="px-1 rounded text-xs" style={{ background: statusColor + '22', color: statusColor }}>{result.status}</span>
+      <span style={{ color: 'var(--foreground)' }}>{result.instruction.action}</span>
+      <span style={{ color: 'var(--muted)' }}>via {result.instruction.executorId}</span>
+      {result.error && <span style={{ color: 'var(--danger)' }}>{result.error}</span>}
+      <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(result.instruction.params).slice(0, 60)}</span>
     </div>
   )
 }

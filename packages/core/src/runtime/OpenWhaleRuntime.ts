@@ -11,6 +11,7 @@ import type { AccountFactory, IAccount } from '../types/account.js'
 import type { RawCredentialData } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
+import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
 import { StrategyInstanceStore } from '../bundle/StrategyInstanceStore.js'
@@ -90,6 +91,10 @@ export class OpenWhaleRuntime implements IRuntime {
     for (const { definition, instance } of plugin.executors) this.registerExecutor(definition, instance)
     for (const { definition, factory: sf } of plugin.strategies) this.registerStrategy(definition, sf)
     for (const { accountType, factory: af } of plugin.accounts) this.registerAccountFactory(accountType, af)
+  }
+
+  setStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
+    this.triggerManager.setStrategyRunHandler(handler)
   }
 
   async start(): Promise<void> {

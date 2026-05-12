@@ -6,6 +6,8 @@ export interface ExecutionInstruction {
   messageId: string
   action: string
   params: Record<string, unknown>
+  /** Strategy instance that emitted this instruction. Injected by TriggerManager. */
+  instanceId?: string
 }
 
 export interface ExecutionResult<TInstruction extends ExecutionInstruction = ExecutionInstruction> {

@@ -82,6 +82,7 @@ export type { RedisConfig } from './executor/RedisExecutionQueue.js'
 
 // Trigger
 export { TriggerManager } from './trigger/TriggerManager.js'
+export type { StrategyRunEvent } from './trigger/TriggerManager.js'
 
 // Strategy
 export { BaseStrategy } from './strategy/BaseStrategy.js'

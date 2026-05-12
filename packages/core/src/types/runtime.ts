@@ -12,6 +12,7 @@ import type { CredentialStore } from './credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AccountFactory } from './account.js'
 import type { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
+import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 
 export interface RuntimeOptions {
   dataDir?: string
@@ -42,4 +43,5 @@ export interface IRuntime {
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void
   registerAccountFactory(accountType: string, factory: AccountFactory): void
   loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void
+  setStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
 }

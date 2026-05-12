@@ -12,6 +12,14 @@ import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import { HttpClient } from '../strategy/HttpClient.js'
 import { TriggerState } from './TriggerState.js'
 
+export interface StrategyRunEvent {
+  instanceId: string
+  triggerId: string
+  monitorData: Record<string, Record<string, unknown>>
+  instructions: ExecutionInstruction[]
+  timestamp: number
+}
+
 interface InstanceEntry {
   instanceId: string
   triggers: Trigger[]
@@ -26,6 +34,7 @@ export class TriggerManager {
   private readonly cronTasks: cron.ScheduledTask[] = []
   private readonly triggerStates = new Map<string, TriggerState>()
   private running = false
+  private onStrategyRun: ((event: StrategyRunEvent) => void) | undefined
 
   constructor(
     monitorRegistry: MonitorRegistry,
@@ -35,6 +44,10 @@ export class TriggerManager {
     this.monitorRegistry = monitorRegistry
     this.credentialStore = credentialStore
     this.database = database
+  }
+
+  setStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
+    this.onStrategyRun = handler
   }
 
   registerInstance(
@@ -230,7 +243,9 @@ export class TriggerManager {
     triggerState.reset()
     const context: StrategyContext = { instanceId, triggerId: trigger.id, monitorData, timestamp: now }
     const instructions = await strategy.run(context)
-    await queue.pushBatch(instructions)
+    const tagged = instructions.map(i => ({ ...i, instanceId }))
+    await queue.pushBatch(tagged)
+    this.onStrategyRun?.({ instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now })
   }
 
 }
