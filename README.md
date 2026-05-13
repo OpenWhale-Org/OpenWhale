@@ -38,7 +38,10 @@ class MomentumStrategy extends BaseStrategy {
     const { symbol, threshold } = this.params.base
     const tick = context.getData('price', symbol)
     if (!tick || tick.price < threshold) return []
-    return [this.instruction('perp', 'placeOrder', { symbol, side: 'buy', type: 'market', amount: 0.01 })]
+
+    return [this.instruction('perp', 'placeOrder', {
+      symbol, side: 'buy', type: 'market', amount: 0.01,
+    })]
   }
 }
 ```
@@ -49,7 +52,10 @@ class MomentumStrategy extends BaseStrategy {
 const runtime = new OpenWhaleRuntime({ database, credentialStore })
 runtime.loadPlugin(hyperliquidPlugin)
 await runtime.start()
-await runtime.activate({ strategyId: 'hyperliquid/copy-trading', params: { base: { targetAddress: '0x...', ratio: 0.5 } } })
+await runtime.activate({
+  strategyId: 'hyperliquid/copy-trading',
+  params: { base: { targetAddress: '0x...', ratio: 0.5 } },
+})
 ```
 
 ### AI-driven strategy with structured output
@@ -57,12 +63,20 @@ await runtime.activate({ strategyId: 'hyperliquid/copy-trading', params: { base:
 ```typescript
 async evaluate(context: StrategyContext) {
   const data = context.getData('price', 'BTC/USDC:USDC')
+
   const { action, confidence } = await this.llm({
     messages: [{ role: 'user', content: JSON.stringify(data) }],
-    schema: z.object({ action: z.enum(['buy', 'sell', 'hold']), confidence: z.number() }),
+    schema: z.object({
+      action: z.enum(['buy', 'sell', 'hold']),
+      confidence: z.number(),
+    }),
   })
+
   if (action === 'hold' || confidence < 0.7) return []
-  return [this.instruction('perp', 'placeOrder', { symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01 })]
+
+  return [this.instruction('perp', 'placeOrder', {
+    symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01,
+  })]
 }
 ```
 
