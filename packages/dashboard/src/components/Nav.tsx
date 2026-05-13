@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Logo } from './Logo'
 
 const links = [
   {
@@ -74,9 +73,6 @@ export function Nav() {
       className="w-52 shrink-0 flex flex-col gap-1 p-4 border-r"
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
     >
-      <div className="mb-6 px-2" style={{ color: 'var(--accent)' }}>
-        <Logo size={28} />
-      </div>
       {links.map(({ href, label, icon }) => {
         const active = pathname.startsWith(href)
         return (
