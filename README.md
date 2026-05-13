@@ -1,5 +1,7 @@
 # OpenWhale
 
+<img src="./logo.svg" width="64" height="64" />
+
 **The programmable layer for composable, AI-native economic strategies**
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
