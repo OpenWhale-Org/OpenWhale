@@ -6,9 +6,9 @@ import { MonitorDataReaderImpl } from './MonitorDataReader.js'
 import { createLogger } from '../utils/logger.js'
 
 /**
- * Standalone — 只能独立运行，不支持 subscribe 驱动
- * Subscribe  — 只能被 subscribe 驱动，不支持独立运行
- * Any        — 两种方式均支持
+ * Standalone — can only run independently; does not support subscribe-driven mode
+ * Subscribe  — can only be driven by subscribe; does not support standalone mode
+ * Any        — supports both modes
  */
 export enum MonitorMode {
   Standalone = 'standalone',
@@ -17,25 +17,25 @@ export enum MonitorMode {
 }
 
 /**
- * @ai-guide 如何编写一个 Monitor
+ * @ai-guide How to write a Monitor
  *
- * 1. 确定运行模式（mode）：
- *    - MonitorMode.Subscribe：数据由外部 key 驱动（如 REST 轮询），覆盖 startSubscribe/stopSubscribe
- *    - MonitorMode.Standalone：Monitor 自行管理连接（如 WebSocket），覆盖 startStandalone/stopStandalone
- *    - MonitorMode.Any：同时支持两种模式，覆盖全部四个方法
+ * 1. Choose a run mode:
+ *    - MonitorMode.Subscribe: data is driven by external keys (e.g. REST polling); override startSubscribe/stopSubscribe
+ *    - MonitorMode.Standalone: monitor manages its own connection (e.g. WebSocket); override startStandalone/stopStandalone
+ *    - MonitorMode.Any: supports both modes; override all four methods
  *
- * 2. 定义泛型参数：
- *    - TKey：监控的 key 类型，通常是交易对、地址等字符串标识
- *    - TData：每次采集到的数据结构，不需要包含时间戳（基类自动注入 ts 字段）
+ * 2. Define generic parameters:
+ *    - TKey: the key type being monitored, typically a trading pair, address, or string identifier
+ *    - TData: the data structure collected each time; no need to include a timestamp (base class injects ts automatically)
  *
- * 3. 实现 monitorName：返回唯一的字符串名称，用于确定 JSONL 文件存储路径
+ * 3. Implement monitorName: return a unique string name used to determine the JSONL file storage path
  *
- * 4. 在 startSubscribe(key) / startStandalone() 中启动采集，
- *    每次获取到数据后调用 this.push(key, data) 提交给基类
+ * 4. In startSubscribe(key) / startStandalone(), start collection.
+ *    Call this.push(key, data) each time new data is available to submit to the base class.
  *
- * 5. 在 stopSubscribe(key) / stopStandalone() 中清理资源（clearInterval、关闭连接等）
+ * 5. In stopSubscribe(key) / stopStandalone(), clean up resources (clearInterval, close connections, etc.)
  *
- * Subscribe 模式示例（REST 轮询）：
+ * Subscribe mode example (REST polling):
  * ```typescript
  * class PriceMonitor extends BaseMonitor<string, { price: number }> {
  *   readonly mode = MonitorMode.Subscribe
@@ -56,7 +56,7 @@ export enum MonitorMode {
  * }
  * ```
  *
- * Subscribe 模式示例（单一 WebSocket 连接，按 key 订阅/退订）：
+ * Subscribe mode example (single WebSocket connection, subscribe/unsubscribe per key):
  * ```typescript
  * class TradeMonitor extends BaseMonitor<string, TradeData> {
  *   readonly mode = MonitorMode.Subscribe
@@ -64,7 +64,7 @@ export enum MonitorMode {
  *   private ws?: WebSocket
  *   private subscribedKeys = new Set<string>()
  *
- *   // 确保 WS 连接存在，首次调用时建立
+ *   // Ensure WS connection exists; establish on first call
  *   private ensureConnected() {
  *     if (this.ws) return
  *     this.ws = new WebSocket('wss://exchange/stream')
@@ -73,7 +73,7 @@ export enum MonitorMode {
  *       if (this.subscribedKeys.has(key)) void this.push(key, data)
  *     })
  *     this.ws.on('open', () => {
- *       // 重连后重新订阅所有 key
+ *       // Re-subscribe all keys after reconnect
  *       for (const key of this.subscribedKeys) this.sendSubscribe(key)
  *     })
  *   }
@@ -95,7 +95,7 @@ export enum MonitorMode {
  *   protected stopSubscribe(key: string) {
  *     this.subscribedKeys.delete(key)
  *     this.sendUnsubscribe(key)
- *     // 所有 key 都退订后关闭连接
+ *     // Close connection when all keys are unsubscribed
  *     if (this.subscribedKeys.size === 0) {
  *       this.ws?.close()
  *       this.ws = undefined
@@ -104,7 +104,7 @@ export enum MonitorMode {
  * }
  * ```
  *
- * Standalone 模式示例（WebSocket）：
+ * Standalone mode example (WebSocket):
  * ```typescript
  * class OrderbookMonitor extends BaseMonitor<string, OrderbookData> {
  *   readonly mode = MonitorMode.Standalone
@@ -132,7 +132,7 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   private get log() { return createLogger(this.monitorName) }
 
   /**
-   * 声明当前 Monitor 支持的运行模式，子类覆盖此属性。
+   * Declares the run mode supported by this monitor. Override in subclass.
    */
   readonly mode: MonitorMode = MonitorMode.Any
 
@@ -143,41 +143,41 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   abstract get monitorName(): string
 
   /**
-   * 独立运行模式的启动，子类按需覆盖。
-   * mode 为 Subscribe 的子类无需实现此方法。
+   * Start in standalone mode. Override in subclass as needed.
+   * Subclasses with mode=Subscribe do not need to implement this.
    */
   protected startStandalone(): void {
     throw new Error(`Monitor "${this.monitorName}" does not support standalone mode`)
   }
 
   /**
-   * 独立运行模式的停止，子类按需覆盖。
-   * mode 为 Subscribe 的子类无需实现此方法。
+   * Stop standalone mode. Override in subclass as needed.
+   * Subclasses with mode=Subscribe do not need to implement this.
    */
   protected stopStandalone(): void {
     throw new Error(`Monitor "${this.monitorName}" does not support standalone mode`)
   }
 
   /**
-   * subscribe 驱动模式的启动，针对指定 key 启动采集，子类按需覆盖。
-   * mode 为 Standalone 的子类无需实现此方法。
+   * Start subscribe-driven mode for the given key. Override in subclass as needed.
+   * Subclasses with mode=Standalone do not need to implement this.
    */
   protected startSubscribe(_key: TKey): void {
     throw new Error(`Monitor "${this.monitorName}" does not support subscribe mode`)
   }
 
   /**
-   * subscribe 驱动模式的停止，针对指定 key 停止采集，子类按需覆盖。
-   * mode 为 Standalone 的子类无需实现此方法。
+   * Stop subscribe-driven mode for the given key. Override in subclass as needed.
+   * Subclasses with mode=Standalone do not need to implement this.
    */
   protected stopSubscribe(_key: TKey): void {
     throw new Error(`Monitor "${this.monitorName}" does not support subscribe mode`)
   }
 
   /**
-   * 启动 Monitor。
-   * - 无参数：独立运行模式，mode 为 Subscribe 时抛出错误
-   * - 有参数：subscribe 驱动模式，mode 为 Standalone 时抛出错误
+   * Start the monitor.
+   * - No argument: standalone mode; throws if mode is Subscribe
+   * - With argument: subscribe-driven mode; throws if mode is Standalone
    */
   start(key?: TKey): void {
     if (key === undefined) {
@@ -194,9 +194,9 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   }
 
   /**
-   * 停止 Monitor。
-   * - 无参数：停止独立运行
-   * - 有参数：停止指定 key 的采集
+   * Stop the monitor.
+   * - No argument: stop standalone mode
+   * - With argument: stop collection for the given key
    */
   stop(key?: TKey): void {
     if (key === undefined) {
@@ -272,8 +272,8 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   protected onAfterEmit(_key: TKey, _data: TData): void {}
 
   /**
-   * 子类采集到数据后调用此方法提交，基类负责持久化和事件分发。
-   * append 或 emit 失败时记录错误日志，不中断采集循环。
+   * Called by subclasses when new data is collected. Base class handles persistence and event dispatch.
+   * Errors in append or emit are logged but do not interrupt the collection loop.
    */
   protected async push(key: TKey, data: TData): Promise<void> {
     try {

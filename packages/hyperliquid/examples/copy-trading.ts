@@ -1,38 +1,38 @@
 /**
- * Example: Hyperliquid CopyTrading 完整示例
+ * Example: Hyperliquid CopyTrading
  *
- * 展示如何用 @openwhale/hyperliquid 包搭建一个跟单机器人：
- *   1. 初始化 HyperliquidAdapter
- *   2. 注册 UserTradesMonitor（监听目标地址成交）
- *   3. 注册 PerpTradingExecutor（执行下单）
- *   4. 注册 HyperliquidAccount（账户查询）
- *   5. 激活 CopyTradingStrategy 实例
+ * Shows how to build a copy-trading bot using @openwhale/hyperliquid:
+ *   1. Initialize HyperliquidAdapter
+ *   2. Register UserTradesMonitor (watch target address fills)
+ *   3. Register PerpTradingExecutor (execute orders)
+ *   4. Register HyperliquidAccount (account queries)
+ *   5. Activate a CopyTradingStrategy instance
  *
- * ── 所需环境变量 ──────────────────────────────────────────────────────────────
+ * ── Required environment variables ───────────────────────────────────────────
  *
- *   OPENWHALE_ENCRYPTION_KEY   必填  数据库加密密钥（任意非空字符串，建议 32 字节 hex）
- *                                    生成示例：openssl rand -hex 32
+ *   OPENWHALE_ENCRYPTION_KEY   required  database encryption key (any non-empty string; 32-byte hex recommended)
+ *                                        generate: openssl rand -hex 32
  *
- *   HL_WALLET_ADDRESS          必填  你的 Hyperliquid 钱包地址（0x...）
+ *   HL_WALLET_ADDRESS          required  your Hyperliquid wallet address (0x...)
  *
- *   HL_PRIVATE_KEY             必填  对应私钥（0x...），用于签名下单请求
- *                                    ⚠️  不要提交到版本控制，建议存入 .env 文件
+ *   HL_PRIVATE_KEY             required  corresponding private key (0x...) used to sign order requests
+ *                                        ⚠️  do not commit to version control; store in a .env file
  *
- * ── 可选环境变量 ──────────────────────────────────────────────────────────────
+ * ── Optional environment variables ───────────────────────────────────────────
  *
- *   OPENWHALE_DATA_DIR         可选  数据目录，默认 ~/.openwhale
+ *   OPENWHALE_DATA_DIR         optional  data directory; defaults to ~/.openwhale
  *
- * ── 运行方式 ──────────────────────────────────────────────────────────────────
+ * ── How to run ────────────────────────────────────────────────────────────────
  *
- *   # 安装依赖
+ *   # install dependencies
  *   pnpm install
  *
- *   # 设置环境变量（或创建 .env 文件后用 dotenv 加载）
+ *   # set environment variables (or create a .env file and load with dotenv)
  *   export OPENWHALE_ENCRYPTION_KEY="$(openssl rand -hex 32)"
  *   export HL_WALLET_ADDRESS="0xYourWalletAddress"
  *   export HL_PRIVATE_KEY="0xYourPrivateKey"
  *
- *   # 运行
+ *   # run
  *   npx tsx packages/hyperliquid/examples/copy-trading.ts
  */
 
@@ -46,7 +46,7 @@ import { CopyTradingStrategy } from '../src/strategy.js'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
-// ── 目标跟单地址（从环境变量读取） ────────────────────────────────────────────
+// ── Target copy-trading address (from env) ────────────────────────────────────
 const TARGET_ADDRESS = process.env['HL_TARGET_ADDRESS'] ?? ''
 
 const mockLog = createLogger('MockExecutor')
@@ -63,7 +63,7 @@ class MockExecutor extends BaseExecutor<ExecutionInstruction> {
 }
 
 async function main() {
-  // ── 1. 读取环境变量 ───────────────────────────────────────────────────────
+  // ── 1. Read environment variables ────────────────────────────────────────
   const encryptionKey = process.env['OPENWHALE_ENCRYPTION_KEY']
   const walletAddress = process.env['HL_WALLET_ADDRESS']
   const privateKey    = process.env['HL_PRIVATE_KEY']
@@ -73,7 +73,7 @@ async function main() {
   if (!privateKey)    throw new Error('HL_PRIVATE_KEY is required')
   if (!TARGET_ADDRESS) throw new Error('HL_TARGET_ADDRESS is required')
 
-  // ── 2. 初始化数据库 + CredentialStore ────────────────────────────────────
+  // ── 2. Initialize database + CredentialStore ─────────────────────────────
   const dataDir  = process.env['OPENWHALE_DATA_DIR'] ?? join(homedir(), '.openwhale')
   const dbPath   = join(dataDir, 'openwhale.db')
   const database = new SQLiteAdapter({ filePath: dbPath })
@@ -82,25 +82,25 @@ async function main() {
   // DBCredentialStore(masterKey, db)
   const credentialStore = new DBCredentialStore(encryptionKey, database)
 
-  // 将 Hyperliquid 凭证存入加密数据库（首次运行时写入，后续覆盖更新）
-  // 凭证名称 'HL Main' 需与 StrategyInstance.accounts 中的名称一致
+  // Store Hyperliquid credentials in the encrypted database (written on first run; overwritten on subsequent runs).
+  // The credential name 'HL Main' must match the name in StrategyInstance.accounts.
   await credentialStore.set('HL Main', 'hyperliquid', { walletAddress, privateKey })
 
-  // ── 3. 初始化 HyperliquidAdapter ─────────────────────────────────────────
-  // Adapter 是底层，Account 和 Executor 共享同一实例，避免重复建立连接
+  // ── 3. Initialize HyperliquidAdapter ─────────────────────────────────────
+  // Adapter is the low-level layer; Account and Executor share the same instance to avoid duplicate connections
   const hlAdapter = new HyperliquidAdapter({ walletAddress, privateKey })
 
-  // ── 4. 组装 Runtime ───────────────────────────────────────────────────────
+  // ── 4. Assemble Runtime ───────────────────────────────────────────────────
   const runtime = new OpenWhaleRuntime({ database, credentialStore, dataDir })
 
-  // 注册 Monitor：监听目标地址的实时成交
+  // Register Monitor: watch real-time fills for the target address
   const now = new Date().toISOString()
   runtime.registerMonitor(
     { id: 'user-trades', name: 'User Trades Monitor', source: 'builtin', createdAt: now, updatedAt: now },
     new UserTradesMonitor(hlAdapter),
   )
 
-  // 注册 Executor：MOCK_EXECUTOR=true 时只打印指令，否则真实下单
+  // Register Executor: MOCK_EXECUTOR=true prints instructions only; otherwise places real orders
   const isMock = process.env['MOCK_EXECUTOR'] === 'true'
   const executor = isMock ? new MockExecutor() : new PerpTradingExecutor(hlAdapter)
   const executorName = isMock ? 'Mock Perp Trading Executor' : 'Perp Trading Executor'
@@ -110,13 +110,13 @@ async function main() {
     executor,
   )
 
-  // 注册 Strategy
+  // Register Strategy
   runtime.registerStrategy(
     { id: 'copy-trading', name: 'Copy Trading', source: 'builtin', monitorIds: ['user-trades'], executorIds: ['perp-trading'], createdAt: now, updatedAt: now },
     () => new CopyTradingStrategy(),
   )
 
-  // 注册 AccountFactory：框架在 activate() 时从 CredentialStore 读取凭证并调用此工厂
+  // Register AccountFactory: framework reads credentials from CredentialStore and calls this factory at activate()
   runtime.registerAccountFactory('hyperliquid', (data) =>
     new HyperliquidAccount('HL Main', new HyperliquidAdapter({
       walletAddress: data['walletAddress'] as string,
@@ -124,24 +124,24 @@ async function main() {
     }))
   )
 
-  // ── 5. 启动 Runtime ───────────────────────────────────────────────────────
+  // ── 5. Start Runtime ──────────────────────────────────────────────────────
   await runtime.start()
 
-  // ── 6. 激活跟单策略实例 ───────────────────────────────────────────────────
+  // ── 6. Activate copy-trading strategy instance ────────────────────────────
   await runtime.activate({
     id: 'copy-trading-instance-1',
-    name: `跟单 ${TARGET_ADDRESS.slice(0, 8)}...`,
+    name: `Copy ${TARGET_ADDRESS.slice(0, 8)}...`,
     strategyId: 'copy-trading',
-    accounts: ['HL Main'],   // 对应 credentialStore 中的凭证名称
+    accounts: ['HL Main'],   // matches the credential name in credentialStore
     params: {
       base: {
         targetAddress: TARGET_ADDRESS,
-        ratio: 0.5,           // 跟单比例：目标仓位的 50%
-        maxPositionUsd: 1000, // 单个仓位最大 1000 USD
+        ratio: 0.5,           // copy ratio: 50% of target position size
+        maxPositionUsd: 1000, // max 1000 USD per position
       },
       tunable: {
-        minTradeUsd: 10,          // 低于 20 USD 的成交忽略
-        slippageTolerance: 0.005, // 0.5% 滑点容忍
+        minTradeUsd: 10,          // ignore fills below 20 USD
+        slippageTolerance: 0.005, // 0.5% slippage tolerance
       },
     },
     enabled: true,
@@ -152,7 +152,7 @@ async function main() {
   console.log(`CopyTrading started — tracking ${TARGET_ADDRESS}`)
   console.log('Press Ctrl+C to stop')
 
-  // ── 7. 优雅退出 ───────────────────────────────────────────────────────────
+  // ── 7. Graceful shutdown ──────────────────────────────────────────────────
   process.on('SIGINT', async () => {
     console.log('\nShutting down...')
     await runtime.stop()

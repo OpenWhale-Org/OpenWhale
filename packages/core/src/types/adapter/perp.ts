@@ -2,56 +2,57 @@ import type { ExchangePosition, ExchangeOrder, FundingRateData, PerpOrderParams 
 import type { SpotExchangeAdapter } from './spot.js'
 
 /**
- * 永续合约交易所 Adapter
+ * Perpetual futures exchange adapter.
  *
- * 继承 SpotExchangeAdapter 的全部能力，额外提供永续合约特有的接口：
- * 资金费率查询、持仓管理、杠杆/保证金模式设置。
+ * Extends SpotExchangeAdapter with perp-specific interfaces:
+ * funding rate queries, position management, and leverage/margin mode configuration.
  *
- * createOrder 参数升级为 PerpOrderParams，支持 reduceOnly 和 timeInForce。
+ * createOrder parameter is upgraded to PerpOrderParams, supporting reduceOnly and timeInForce.
  *
- * 已知实现：
- * - HyperliquidAdapter（packages/hyperliquid）
+ * Known implementations:
+ * - HyperliquidAdapter (packages/hyperliquid)
  */
 export interface PerpExchangeAdapter extends SpotExchangeAdapter {
-  // ── 行情（永续特有） ───────────────────────────────────────────────────────
+  // ── Market data (perp-specific) ───────────────────────────────────────────
 
   /**
-   * 获取单个合约的当期资金费率
-   * 注意：部分交易所（如 Hyperliquid）不支持单独查询，实现层会从批量接口中筛选
+   * Fetch the current funding rate for a single contract.
+   * Note: some exchanges (e.g. Hyperliquid) don't support individual queries;
+   * implementations will filter from the bulk endpoint.
    */
   fetchFundingRate(symbol: string): Promise<FundingRateData>
 
-  /** 批量获取所有合约的资金费率，推荐优先使用此接口以减少请求次数 */
+  /** Fetch funding rates for all contracts. Prefer this over fetchFundingRate to reduce request count. */
   fetchFundingRates(): Promise<FundingRateData[]>
 
-  // ── 账户（永续特有） ───────────────────────────────────────────────────────
+  // ── Account (perp-specific) ───────────────────────────────────────────────
 
   /**
-   * 获取持仓列表
-   * @param symbols 指定合约列表，为空时返回所有持仓（含空仓位，由实现决定是否过滤）
+   * Fetch position list.
+   * @param symbols filter by contract list; returns all positions (including flat) if omitted
    */
   fetchPositions(symbols?: string[]): Promise<ExchangePosition[]>
 
-  /** 获取单个合约的持仓详情 */
+  /** Fetch position details for a single contract */
   fetchPosition(symbol: string): Promise<ExchangePosition>
 
-  // ── 交易（永续特有） ───────────────────────────────────────────────────────
+  // ── Trading (perp-specific) ───────────────────────────────────────────────
 
   /**
-   * 下单（永续版本）
-   * 支持 reduceOnly（只减仓）和 timeInForce（订单有效期）
+   * Place an order (perp version).
+   * Supports reduceOnly (close-only) and timeInForce.
    */
   createOrder(params: PerpOrderParams): Promise<ExchangeOrder>
 
   /**
-   * 设置杠杆倍数
-   * @param params 交易所特有参数，如 Hyperliquid 的 { isCross: true }
+   * Set leverage multiplier.
+   * @param params exchange-specific params, e.g. Hyperliquid's { isCross: true }
    */
   setLeverage(symbol: string, leverage: number, params?: Record<string, unknown>): Promise<void>
 
   /**
-   * 切换保证金模式
-   * cross = 全仓（共享账户余额），isolated = 逐仓（独立保证金）
+   * Switch margin mode.
+   * cross = cross margin (shared account balance), isolated = isolated margin (dedicated margin per position)
    */
   setMarginMode(symbol: string, marginMode: 'cross' | 'isolated'): Promise<void>
 }

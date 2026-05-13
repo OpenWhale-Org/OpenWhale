@@ -19,12 +19,13 @@ import { HttpClient } from './HttpClient.js'
 export type { CoreMessage }
 
 /**
- * @ai-guide 如何编写一个 Strategy
+ * @ai-guide How to write a Strategy
  *
- * Strategy 负责：接收触发上下文 → 决策 → 返回一批 ExecutionInstruction。
- * 子类只需实现 `evaluate(context)`，基类提供决策辅助、数据访问和 LLM 推理能力。
+ * A Strategy receives a trigger context, makes decisions, and returns a batch of ExecutionInstructions.
+ * Subclasses only need to implement `evaluate(context)`; the base class provides decision helpers,
+ * data access, and LLM inference capabilities.
  *
- * 基本示例：
+ * Basic example:
  * ```typescript
  * class MyStrategy extends BaseStrategy {
  *   readonly strategyId = 'my-strategy'
@@ -38,14 +39,14 @@ export type { CoreMessage }
  * }
  * ```
  *
- * 使用 LLM 推理（结构化输出）：
+ * Using LLM inference (structured output):
  * ```typescript
  * class AiStrategy extends BaseStrategy {
  *   readonly strategyId = 'ai-strategy'
  *
  *   constructor() {
  *     super({ llm: { defaultModel: 'openai:gpt-4o' } })
- *     // 需要在 CredentialStore 中存储 'openai-api-key'
+ *     // requires 'openai-api-key' stored in CredentialStore
  *   }
  *
  *   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
@@ -53,7 +54,7 @@ export type { CoreMessage }
  *
  *     const decision = await this.llm({
  *       messages: [
- *         { role: 'system', content: '你是一个交易分析师，根据市场数据给出操作建议。' },
+ *         { role: 'system', content: 'You are a trading analyst. Recommend an action based on market data.' },
  *         { role: 'user', content: JSON.stringify(data) },
  *       ],
  *       schema: z.object({
@@ -70,7 +71,7 @@ export type { CoreMessage }
  * }
  * ```
  *
- * 使用自定义 Provider：
+ * Using a custom provider:
  * ```typescript
  * class CustomAiStrategy extends BaseStrategy {
  *   constructor() {

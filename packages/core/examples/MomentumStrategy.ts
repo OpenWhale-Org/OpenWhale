@@ -1,23 +1,23 @@
 /**
  * Example: MomentumStrategy
  *
- * 纯规则策略（无 LLM）— 基于价格动量信号决定买卖。
+ * Rule-based strategy (no LLM) — makes buy/sell decisions based on price momentum signals.
  *
- * 触发方式：Subscribe 触发（PriceMonitor 每次推送新价格时触发）
+ * Trigger: Subscribe-driven (fires each time PriceMonitor pushes a new price)
  *
- * 逻辑：
- * 1. 读取最近 N 条价格记录，计算短期均价和长期均价
- * 2. 短期均价 > 长期均价 * threshold → 买入信号
- * 3. 短期均价 < 长期均价 / threshold → 卖出信号
- * 4. 否则持仓不动
+ * Logic:
+ * 1. Read the last N price records and compute short-term and long-term moving averages
+ * 2. shortAvg > longAvg * threshold → buy signal
+ * 3. shortAvg < longAvg / threshold → sell signal
+ * 4. Otherwise hold
  *
- * 关键点：
- * - baseParamsSchema 声明必填参数（symbol），tunableParamsSchema 声明可调参数（窗口、阈值）
- * - triggers() 根据 params 动态生成触发器，框架在 activate() 时调用
- * - this.params 访问运行时注入的参数
- * - step() 缓存同一次 evaluate 内的重复计算
- * - monitorData('price') 返回 price monitor 的 reader，通过 reader.readLast(key, n) 读取历史数据
- * - context.monitorData 包含触发本次 evaluate 的 monitor 数据，key 格式为 'monitorName:symbol'
+ * Key points:
+ * - baseParamsSchema declares required params (symbol); tunableParamsSchema declares tunable params (windows, threshold)
+ * - triggers() dynamically generates triggers from params; called by the framework at activate()
+ * - this.params accesses runtime-injected params
+ * - step() caches repeated computations within a single evaluate call
+ * - monitorData('price') returns the price monitor reader; use reader.readLast(key, n) to read history
+ * - context.monitorData contains the monitor data that triggered this evaluate; key format is 'monitorName:symbol'
  */
 
 import { z } from 'zod'
@@ -43,7 +43,7 @@ export class MomentumStrategy extends BaseStrategy {
   readonly tunableParamsSchema = z.object({
     shortWindow: z.number().int().positive().default(5),
     longWindow:  z.number().int().positive().default(20),
-    threshold:   z.number().positive().default(1.005),  // 0.5% 偏差触发
+    threshold:   z.number().positive().default(1.005),  // 0.5% deviation triggers signal
   })
 
   triggers(params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
@@ -70,7 +70,7 @@ export class MomentumStrategy extends BaseStrategy {
       return reader.readLast(symbol, longWindow) as Promise<PriceRecord[]>
     })
 
-    if (prices.length < longWindow) return []  // 数据不足，跳过
+    if (prices.length < longWindow) return []  // not enough data, skip
 
     const shortPrices = prices.slice(-shortWindow)
     const shortAvg = avg(shortPrices.map(p => p.data.price))

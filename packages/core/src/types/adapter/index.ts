@@ -1,11 +1,11 @@
 /**
  * @openwhale/core adapter types
  *
- * 目录结构：
- *   base.ts     — IAdapter 通用接口（框架层）
- *   exchange.ts — 交易所共享数据类型（Ticker / Order / Position 等）
- *   spot.ts     — SpotExchangeAdapter（现货）
- *   perp.ts     — PerpExchangeAdapter（永续合约，继承 Spot）
+ * Directory structure:
+ *   base.ts     — IAdapter generic interface (framework layer)
+ *   exchange.ts — Shared exchange data types (Ticker / Order / Position, etc.)
+ *   spot.ts     — SpotExchangeAdapter (spot trading)
+ *   perp.ts     — PerpExchangeAdapter (perpetual futures, extends Spot)
  */
 export type { AdapterQueryOptions, AdapterExecuteOptions, IAdapter } from './base.js'
 export type {

@@ -5,26 +5,26 @@ import { getDataDir, getExecutionPath } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
 
 /**
- * @ai-guide 如何编写一个 Executor
+ * @ai-guide How to write an Executor
  *
- * 1. 定义 Instruction 类型：
- *    - 单 action：直接定义一个 interface 继承 ExecutionInstruction
- *    - 多 action：用 discriminated union，以 action 字段区分，每种 action 有独立的 params 类型
+ * 1. Define the Instruction type:
+ *    - Single action: define an interface extending ExecutionInstruction
+ *    - Multiple actions: use a discriminated union keyed on the action field, each with its own params type
  *
- * 2. 实现 executorName：返回唯一字符串，用于确定执行记录的 JSONL 文件路径
+ * 2. Implement executorName: return a unique string used to determine the JSONL execution record path
  *
- * 3. 实现 supportedActions：返回该 Executor 处理的 action 名称列表，
- *    run() 会自动过滤掉不在列表中的指令
+ * 3. Implement supportedActions: return the list of action names this executor handles.
+ *    run() automatically filters out instructions not in this list.
  *
- * 4. 实现 execute(instruction)：处理单条指令，返回 ExecutionResult
+ * 4. Implement execute(instruction): process a single instruction and return an ExecutionResult.
  *    - status: 'success' | 'failed' | 'skipped'
- *    - 抛出异常会导致 run() 循环中断，建议内部 try/catch 并返回 failed
+ *    - Throwing an exception will break the run() loop; prefer internal try/catch and return 'failed'
  *
- * 5. 可选：覆盖 instructionSchema，提供 Zod schema 做运行时校验，
- *    parse 失败时自动记录 failed 结果，不调用 execute()
- *    多 action 时推荐使用 z.discriminatedUnion('action', [...])
+ * 5. Optional: override instructionSchema with a Zod schema for runtime validation.
+ *    On parse failure, the base class records a 'failed' result and skips execute().
+ *    For multiple actions, use z.discriminatedUnion('action', [...]).
  *
- * 单 action 示例（无 Zod）：
+ * Single action example (no Zod):
  * ```typescript
  * interface NotifyInstruction extends ExecutionInstruction {
  *   action: 'notify'
@@ -42,7 +42,7 @@ import { createLogger } from '../utils/logger.js'
  * }
  * ```
  *
- * 多 action 示例（discriminated union）：
+ * Multiple actions example (discriminated union):
  * ```typescript
  * type TradeInstruction =
  *   | { action: 'buy';  params: { symbol: string; amount: number } }
@@ -54,10 +54,10 @@ import { createLogger } from '../utils/logger.js'
  *
  *   async execute(instruction: TradeInstruction): Promise<ExecutionResult<TradeInstruction>> {
  *     if (instruction.action === 'buy') {
- *       // instruction.params 是 { symbol, amount } ✓
+ *       // instruction.params is { symbol, amount } ✓
  *       await placeBuyOrder(instruction.params.symbol, instruction.params.amount)
  *     } else {
- *       // instruction.params 是 { symbol, quantity } ✓
+ *       // instruction.params is { symbol, quantity } ✓
  *       await placeSellOrder(instruction.params.symbol, instruction.params.quantity)
  *     }
  *     return { instruction, status: 'success', executedAt: new Date() }
@@ -65,7 +65,7 @@ import { createLogger } from '../utils/logger.js'
  * }
  * ```
  *
- * 带 Zod 校验示例（多 action + discriminatedUnion）：
+ * With Zod validation (multiple actions + discriminatedUnion):
  * ```typescript
  * const tradeSchema = z.discriminatedUnion('action', [
  *   z.object({ action: z.literal('buy'),  params: z.object({ symbol: z.string(), amount: z.number().positive() }) }),
@@ -79,7 +79,7 @@ import { createLogger } from '../utils/logger.js'
  *   protected get instructionSchema() { return tradeSchema }
  *
  *   async execute(instruction: TradeInstruction): Promise<ExecutionResult<TradeInstruction>> {
- *     // 到这里 instruction 已经过 Zod 校验，类型完全安全
+ *     // instruction is fully validated by Zod here; types are safe
  *     if (instruction.action === 'buy') { ... }
  *     return { instruction, status: 'success', executedAt: new Date() }
  *   }
@@ -136,8 +136,7 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     await queue.consume(consumeId ?? this.executorName, async (raw) => {
       if (!this.supportedActions.includes(raw.action)) return
 
-      // TODO: 优化 Record，需要跟踪全流程（开始执行 -> 执行结束）
-
+      // TODO: improve Record to track the full lifecycle (execution start -> execution end)
       const schema = this.instructionSchema
       if (schema) {
         const parsed = schema.safeParse(raw)

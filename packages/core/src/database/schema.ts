@@ -31,10 +31,10 @@ CREATE TABLE IF NOT EXISTS credentials (
   updated_at TEXT NOT NULL
 );
 
--- TODO: Registry 持久化（尚未实现）
--- 当前 Monitor / Executor / Strategy 的注册信息只存在内存 Map 中，进程重启后由
--- PluginManager（插件）和 CompiledLoader（AI 编译产物）重新加载。
--- 后续若需要跨重启保留注册信息或支持远程查询，再启用以下三张表。
+-- TODO: Registry persistence (not yet implemented)
+-- Monitor / Executor / Strategy registrations currently live only in an in-memory Map and are
+-- reloaded on restart by PluginManager (plugins) and CompiledLoader (AI-compiled artifacts).
+-- Enable the three tables below if cross-restart persistence or remote querying is needed.
 --
 -- CREATE TABLE IF NOT EXISTS registry_monitors (
 --   id            TEXT PRIMARY KEY,

@@ -1,24 +1,24 @@
 /**
- * 交易所 Adapter 共享数据类型
+ * Shared data types for exchange adapters.
  *
- * 字段命名与 ccxt 对齐，降低实现层的映射成本。
- * 所有价格/数量均为 number（浮点），货币单位由 symbol 或 currency 字段标识。
+ * Field names align with ccxt to minimize mapping overhead in implementations.
+ * All prices/amounts are number (float); currency unit is identified by the symbol or currency field.
  */
 
-/** 行情快照 */
+/** Ticker snapshot */
 export interface Ticker {
   symbol: string
   timestamp: number
-  last: number          // 最新成交价
-  bid: number           // 买一价
-  ask: number           // 卖一价
-  high: number          // 24h 最高价
-  low: number           // 24h 最低价
-  volume: number        // 24h 成交量（基础资产）
-  quoteVolume: number   // 24h 成交额（计价资产）
+  last: number          // last trade price
+  bid: number           // best bid price
+  ask: number           // best ask price
+  high: number          // 24h high
+  low: number           // 24h low
+  volume: number        // 24h volume (base asset)
+  quoteVolume: number   // 24h volume (quote asset)
 }
 
-/** K 线（OHLCV） */
+/** OHLCV candlestick */
 export interface Kline {
   timestamp: number
   open: number
@@ -29,8 +29,8 @@ export interface Kline {
 }
 
 /**
- * 订单簿快照
- * bids/asks 按价格排序：bids 降序（最优买价在前），asks 升序（最优卖价在前）
+ * Order book snapshot.
+ * bids/asks are price-sorted: bids descending (best bid first), asks ascending (best ask first).
  */
 export interface OrderBook {
   symbol: string
@@ -39,44 +39,44 @@ export interface OrderBook {
   asks: [number, number][]
 }
 
-/** 账户余额（单币种） */
+/** Account balance for a single currency */
 export interface ExchangeBalance {
   currency: string
-  free: number    // 可用余额
-  used: number    // 占用中（挂单保证金 / 仓位保证金）
+  free: number    // available balance
+  used: number    // locked (open order margin / position margin)
   total: number   // free + used
 }
 
 /**
- * 永续合约持仓
- * notional = contracts × contractSize × markPrice（名义价值，USD 计）
+ * Perpetual futures position.
+ * notional = contracts × contractSize × markPrice (USD-denominated)
  */
 export interface ExchangePosition {
   symbol: string
   side: 'long' | 'short'
-  contracts: number         // 持仓张数
-  contractSize: number      // 每张合约面值
-  entryPrice: number        // 开仓均价
-  markPrice: number         // 当前标记价格
-  notional: number          // 名义价值（USD）
-  unrealizedPnl: number     // 未实现盈亏（USD）
-  leverage: number          // 当前杠杆倍数
-  liquidationPrice: number  // 强平价格
+  contracts: number         // number of contracts held
+  contractSize: number      // face value per contract
+  entryPrice: number        // average entry price
+  markPrice: number         // current mark price
+  notional: number          // notional value (USD)
+  unrealizedPnl: number     // unrealized PnL (USD)
+  leverage: number          // current leverage
+  liquidationPrice: number  // liquidation price
   marginMode: 'cross' | 'isolated'
-  initialMargin: number     // 初始保证金
-  maintenanceMargin: number // 维持保证金
+  initialMargin: number     // initial margin
+  maintenanceMargin: number // maintenance margin
 }
 
-/** 订单 */
+/** Order */
 export interface ExchangeOrder {
   id: string
   symbol: string
   type: 'market' | 'limit'
   side: 'buy' | 'sell'
   price: number
-  amount: number    // 委托数量（基础资产）
-  filled: number    // 已成交数量
-  remaining: number // 未成交数量
+  amount: number    // order quantity (base asset)
+  filled: number    // filled quantity
+  remaining: number // unfilled quantity
   status: 'open' | 'closed' | 'canceled' | 'rejected' | 'expired'
   timestamp: number
   reduceOnly: boolean
@@ -84,43 +84,43 @@ export interface ExchangeOrder {
   fee?: { cost: number; currency: string }
 }
 
-/** 成交记录（单笔） */
+/** Single trade record */
 export interface ExchangeTrade {
   id: string
   symbol: string
   side: 'buy' | 'sell'
   price: number
   amount: number
-  cost: number      // price × amount（成交额）
+  cost: number      // price × amount (trade value)
   timestamp: number
   fee?: { cost: number; currency: string }
   takerOrMaker: 'taker' | 'maker'
 }
 
-/** 资金费率 */
+/** Funding rate data */
 export interface FundingRateData {
   symbol: string
-  fundingRate: number           // 当期资金费率（小数，如 0.0001 = 0.01%）
-  fundingTimestamp: number      // 当期结算时间戳（ms）
-  nextFundingTimestamp: number  // 下期结算时间戳（ms）
+  fundingRate: number           // current funding rate (decimal, e.g. 0.0001 = 0.01%)
+  fundingTimestamp: number      // current settlement timestamp (ms)
+  nextFundingTimestamp: number  // next settlement timestamp (ms)
 }
 
-/** 现货下单参数 */
+/** Spot order parameters */
 export interface SpotOrderParams {
   symbol: string
   side: 'buy' | 'sell'
   type: 'market' | 'limit'
   amount: number
-  price?: number          // limit 单必填
-  clientOrderId?: string  // 客户端自定义订单 ID，用于幂等性校验
-  /** 交易所特有参数透传，不影响通用接口语义 */
+  price?: number          // required for limit orders
+  clientOrderId?: string  // client-defined order ID for idempotency
+  /** Exchange-specific passthrough params, does not affect the generic interface semantics */
   params?: Record<string, unknown>
 }
 
-/** 永续合约下单参数（扩展现货参数） */
+/** Perpetual futures order parameters (extends spot params) */
 export interface PerpOrderParams extends SpotOrderParams {
-  /** 只减仓，不开新仓 */
+  /** Reduce-only: close existing position without opening a new one */
   reduceOnly?: boolean
-  /** 订单有效期类型：GTC=一直有效 / IOC=立即成交否则取消 / FOK=全部成交否则取消 / PO=只做 Maker */
+  /** Order validity type: GTC=good till cancel / IOC=immediate or cancel / FOK=fill or kill / PO=post-only */
   timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'PO'
 }

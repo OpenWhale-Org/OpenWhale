@@ -3,22 +3,22 @@ import path from 'path'
 
 /**
  * ~/.openwhale/
- * ├── credentials.jsonl                          — 加密凭证存储
- * ├── monitors/                                  — Monitor 采集数据
+ * ├── credentials.jsonl                          — encrypted credential store
+ * ├── monitors/                                  — monitor collected data
  * │   └── {monitorName}/
  * │       └── {key}.jsonl
- * ├── executions/                                — Executor 执行记录
+ * ├── executions/                                — executor execution records
  * │   └── {executorName}/
  * │       └── {YYYY-MM-DD}.jsonl
- * ├── registry/                                  — AI 编译产物的元数据索引
+ * ├── registry/                                  — metadata index for AI-compiled artifacts
  * │   ├── monitors/{id}.json
  * │   ├── executors/{id}.json
  * │   └── strategies/{id}.json
- * ├── compiled/                                  — AI 编译产物代码
+ * ├── compiled/                                  — AI-compiled artifact code
  * │   ├── monitors/{id}/source.ts + index.js
  * │   ├── executors/{id}/source.ts + index.js
  * │   └── strategies/{id}/source.ts + index.js
- * └── instances/                                 — StrategyInstance 运行时配置
+ * └── instances/                                 — StrategyInstance runtime config
  *     └── {id}.json
  */
 

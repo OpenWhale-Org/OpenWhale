@@ -5,96 +5,96 @@ import type {
 } from './exchange.js'
 
 /**
- * 现货交易所 Adapter
+ * Spot exchange adapter.
  *
- * 覆盖现货市场的行情查询、账户查询、交易操作和 WebSocket 实时数据。
- * 永续合约交易所请使用 PerpExchangeAdapter。
+ * Covers market data queries, account queries, trading operations, and WebSocket streaming for spot markets.
+ * For perpetual futures, use PerpExchangeAdapter instead.
  *
- * 实现约定：
- * - watch* 方法应持续运行（内部 while(true) 循环），直到 close() 被调用
- * - 所有方法在网络错误时应抛出异常，由调用方决定重试策略
- * - symbol 格式遵循 ccxt 规范：现货 'BTC/USDT'，永续 'BTC/USDT:USDT'
+ * Implementation conventions:
+ * - watch* methods should run continuously (internal while(true) loop) until close() is called
+ * - All methods should throw on network errors; retry strategy is the caller's responsibility
+ * - symbol format follows ccxt convention: spot 'BTC/USDT', perp 'BTC/USDT:USDT'
  */
 export interface SpotExchangeAdapter {
-  // ── 行情 ──────────────────────────────────────────────────────────────────
+  // ── Market data ───────────────────────────────────────────────────────────
 
-  /** 获取单个交易对的行情快照 */
+  /** Fetch ticker snapshot for a single symbol */
   fetchTicker(symbol: string): Promise<Ticker>
 
-  /** 获取订单簿，depth 为档位数量（默认由实现决定） */
+  /** Fetch order book; depth is the number of levels (default determined by implementation) */
   fetchOrderBook(symbol: string, depth?: number): Promise<OrderBook>
 
   /**
-   * 获取 K 线数据
-   * @param timeframe ccxt 格式，如 '1m' '5m' '1h' '1d'
-   * @param limit 返回条数，从最新往前
+   * Fetch OHLCV candlestick data.
+   * @param timeframe ccxt format, e.g. '1m' '5m' '1h' '1d'
+   * @param limit number of candles to return, from most recent
    */
   fetchOHLCV(symbol: string, timeframe: string, limit?: number): Promise<Kline[]>
 
-  /** 获取最近公开成交记录 */
+  /** Fetch recent public trades */
   fetchTrades(symbol: string, limit?: number): Promise<ExchangeTrade[]>
 
-  // ── 账户 ──────────────────────────────────────────────────────────────────
+  // ── Account ───────────────────────────────────────────────────────────────
 
-  /** 获取所有币种余额，仅返回 total > 0 的条目 */
+  /** Fetch all balances; returns only entries where total > 0 */
   fetchBalance(): Promise<ExchangeBalance[]>
 
-  /** 获取当前挂单，symbol 为空时返回所有交易对的挂单 */
+  /** Fetch open orders; returns all symbols if symbol is omitted */
   fetchOpenOrders(symbol?: string): Promise<ExchangeOrder[]>
 
-  /** 获取历史订单（含已成交/已取消），symbol 为空时返回所有 */
+  /** Fetch order history (including filled/canceled); returns all symbols if symbol is omitted */
   fetchOrders(symbol?: string, limit?: number): Promise<ExchangeOrder[]>
 
-  // ── 交易 ──────────────────────────────────────────────────────────────────
+  // ── Trading ───────────────────────────────────────────────────────────────
 
-  /** 下单，返回订单详情 */
+  /** Place an order; returns order details */
   createOrder(params: SpotOrderParams): Promise<ExchangeOrder>
 
-  /** 撤销指定订单 */
+  /** Cancel a specific order */
   cancelOrder(orderId: string, symbol: string): Promise<void>
 
   /**
-   * 撤销所有挂单
-   * 注意：部分交易所不原生支持此接口，实现层可能降级为逐个撤单
+   * Cancel all open orders.
+   * Note: some exchanges don't natively support this; implementations may fall back to canceling one by one.
    */
   cancelAllOrders(symbol?: string): Promise<void>
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
 
   /**
-   * 订阅行情推送，每次收到更新时调用 callback
-   * 此方法持续运行，调用 close() 后退出
+   * Subscribe to ticker updates; callback is invoked on each update.
+   * Runs continuously until close() is called.
    */
   watchTicker(symbol: string, callback: (ticker: Ticker) => void): Promise<void>
 
   /**
-   * 订阅公开成交流，每次推送一批新成交
-   * 此方法持续运行，调用 close() 后退出
+   * Subscribe to public trade stream; callback receives a batch of new trades.
+   * Runs continuously until close() is called.
    */
   watchTrades(symbol: string, callback: (trades: ExchangeTrade[]) => void): Promise<void>
 
   /**
-   * 订阅订单簿推送
-   * 此方法持续运行，调用 close() 后退出
+   * Subscribe to order book updates.
+   * Runs continuously until close() is called.
    */
   watchOrderBook(symbol: string, callback: (orderBook: OrderBook) => void, depth?: number): Promise<void>
 
   /**
-   * 订阅账户成交流（私有频道）
-   * params 可传入 { user: '0x...' } 以监听指定地址（Hyperliquid 等支持此特性的交易所）
-   * 此方法持续运行，调用 close() 后退出
+   * Subscribe to private trade stream (own fills).
+   * Pass { user: '0x...' } in params to monitor a specific address (supported by Hyperliquid and similar exchanges).
+   * Runs continuously until close() is called.
    */
   watchMyTrades(callback: (trades: ExchangeTrade[]) => void, params?: Record<string, unknown>): Promise<void>
 
   /**
-   * 订阅订单状态变更推送（私有频道）
-   * symbol 为 undefined 时订阅所有交易对
-   * 此方法持续运行，调用 close() 后退出
+   * Subscribe to order status updates (private channel).
+   * Subscribes to all symbols if symbol is undefined.
+   * Runs continuously until close() is called.
    */
   watchOrders(symbol: string | undefined, callback: (orders: ExchangeOrder[]) => void): Promise<void>
 
-  // ── 生命周期 ──────────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  /** 关闭所有 WebSocket 连接，释放资源 */
+  /** Close all WebSocket connections and release resources */
   close(): Promise<void>
 }
