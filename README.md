@@ -14,10 +14,6 @@ OpenWhale is a TypeScript framework for building automated economic strategies. 
 
 ## Why OpenWhale
 
-Most strategy frameworks couple data collection, decision logic, and execution into a single monolith. Swapping an exchange or adding a new data source means rewriting core logic. AI integrations are bolted on as "decision makers" that consume tokens on every tick — not as programmers that produce reusable, auditable code.
-
-OpenWhale is built differently:
-
 - **Fully decoupled layers** — Monitor, Strategy, and Executor are independent. Replace any layer without touching the others.
 - **Exchange-agnostic strategies** — Strategy code has zero knowledge of which exchange it runs on. One strategy, any platform.
 - **AI as a programmer** — LLM inference is built into the strategy layer. AI generates type-safe TypeScript strategies that are compiled, hot-loaded, and can evolve automatically — no token cost per tick.
