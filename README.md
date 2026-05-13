@@ -35,9 +35,11 @@ class MomentumStrategy extends BaseStrategy {
     const tick = context.getData('price', symbol)
     if (!tick || tick.price < threshold) return []
 
-    return [this.instruction('perp', 'placeOrder', {
-      symbol, side: 'buy', type: 'market', amount: 0.01,
-    })]
+    return [
+        this.instruction('perp', 'placeOrder', {
+          symbol, side: 'buy', type: 'market', amount: 0.01,
+        })
+    ]
   }
 }
 ```
@@ -70,9 +72,11 @@ async evaluate(context: StrategyContext) {
 
   if (action === 'hold' || confidence < 0.7) return []
 
-  return [this.instruction('perp', 'placeOrder', {
-    symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01,
-  })]
+  return [
+      this.instruction('perp', 'placeOrder', {
+        symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01,
+      })
+  ]
 }
 ```
 
