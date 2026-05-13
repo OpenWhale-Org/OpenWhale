@@ -130,10 +130,10 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     return results
   }
 
-  async run(queue: ExecutionQueue): Promise<void> {
+  async run(queue: ExecutionQueue, consumeId?: string): Promise<void> {
     // Queue routes by executorId — no need to filter supportedActions here,
     // but we still check as a safety net in case of misconfigured instructions.
-    await queue.consume(this.executorName, async (raw) => {
+    await queue.consume(consumeId ?? this.executorName, async (raw) => {
       if (!this.supportedActions.includes(raw.action)) return
 
       // TODO: 优化 Record，需要跟踪全流程（开始执行 -> 执行结束）
@@ -150,7 +150,7 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
           })
           return
         }
-        await this.runWithRetry(parsed.data)
+        await this.runWithRetry({ ...parsed.data, executorId: raw.executorId, messageId: raw.messageId, instanceId: raw.instanceId } as TInstruction)
       } else {
         await this.runWithRetry(raw as TInstruction)
       }
@@ -168,15 +168,18 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
         return
       } catch (err) {
         lastError = err
+        this.log.error({ action: instruction.action, messageId: instruction.messageId, attempt, err }, 'Execution error')
         this.onError(instruction, err, attempt)
 
         if (attempt < maxRetries) {
           const delay = Math.min(retryDelay * Math.pow(2, attempt), maxRetryDelay)
+          this.log.warn({ action: instruction.action, attempt, delay }, 'Retrying after delay')
           await sleep(delay)
         }
       }
     }
 
+    this.log.error({ action: instruction.action, messageId: instruction.messageId, maxRetries }, 'Instruction failed after all retries')
     await this.recordSafe({
       instruction,
       status: 'failed',

@@ -43,5 +43,8 @@ export interface IRuntime {
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void
   registerAccountFactory(accountType: string, factory: AccountFactory): void
   loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void
+  addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
+  removeStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
+  /** @deprecated Use addStrategyRunHandler instead */
   setStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
 }

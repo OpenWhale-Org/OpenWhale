@@ -68,7 +68,8 @@ export class PerpTradingExecutor extends BaseExecutor<PerpInstruction & Executio
   async execute(instruction: PerpInstruction & ExecutionInstruction): Promise<ExecutionResult<PerpInstruction & ExecutionInstruction>> {
     log.info({ action: instruction.action, messageId: instruction.messageId }, 'Executing instruction')
 
-    switch (instruction.action) {
+    try {
+      switch (instruction.action) {
       case 'placeOrder': {
         const { symbol, side, type, amount, price, reduceOnly, timeInForce, slippage } = instruction.params
         log.debug({ symbol, side, type, amount, price, reduceOnly, timeInForce, slippage }, 'Placing order')
@@ -109,5 +110,9 @@ export class PerpTradingExecutor extends BaseExecutor<PerpInstruction & Executio
 
     log.info({ action: instruction.action, messageId: instruction.messageId }, 'Instruction completed')
     return { instruction, status: 'success', executedAt: new Date() }
+    } catch (err) {
+      log.error({ action: instruction.action, messageId: instruction.messageId, err }, 'Execution failed')
+      throw err
+    }
   }
 }

@@ -1,5 +1,5 @@
 import type { ExecutionInstruction, ExecutionQueue } from '../../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, AccountTypeDeclaration } from '../../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, AccountTypeDeclaration, MonitorDeclaration, ExecutorDeclaration } from '../../types/strategy.js'
 import type { MonitorDataReader } from '../../types/monitor.js'
 import type { CredentialStore } from '../../types/credential.js'
 import type { IStrategyStore } from '../../strategy/StrategyStore.js'
@@ -32,13 +32,15 @@ export class MockQueue implements ExecutionQueue {
 
 export class MockStrategy implements IStrategy {
   readonly strategyId: string
-  readonly monitors: readonly string[]
+  readonly monitors: readonly MonitorDeclaration[]
+  readonly executors: readonly ExecutorDeclaration[] = []
   readonly accountTypes: readonly AccountTypeDeclaration[] = []
   readonly baseParamsSchema = z.object({})
   readonly tunableParamsSchema = z.object({})
   readonly contexts: StrategyContext[] = []
   private instructions: ExecutionInstruction[]
   private mockTriggers: Omit<Trigger, 'id' | 'strategyInstanceId'>[]
+  private namespace?: string
 
   constructor(options: {
     id?: string
@@ -50,6 +52,34 @@ export class MockStrategy implements IStrategy {
     this.monitors = options.monitors ?? []
     this.instructions = options.instructions ?? []
     this.mockTriggers = options.triggers ?? []
+  }
+
+  get resolvedMonitors(): readonly string[] {
+    return this.monitors.map(m => {
+      const name = typeof m === 'string' ? m : m.name
+      if (name.includes('/')) return name
+      return this.namespace ? `${this.namespace}/${name}` : name
+    })
+  }
+
+  monitor(labelOrIndex: string | number): string {
+    const decl = typeof labelOrIndex === 'number'
+      ? this.monitors[labelOrIndex]
+      : this.monitors.find(m => (typeof m === 'string' ? m : m.label) === labelOrIndex)
+    if (!decl) throw new Error(`monitor '${labelOrIndex}' not declared`)
+    const name = typeof decl === 'string' ? decl : decl.name
+    if (name.includes('/')) return name
+    return this.namespace ? `${this.namespace}/${name}` : name
+  }
+
+  executor(labelOrIndex: string | number): string {
+    const decl = typeof labelOrIndex === 'number'
+      ? this.executors[labelOrIndex]
+      : this.executors.find(e => (typeof e === 'string' ? e : e.label) === labelOrIndex)
+    if (!decl) throw new Error(`executor '${labelOrIndex}' not declared`)
+    const name = typeof decl === 'string' ? decl : decl.name
+    if (name.includes('/')) return name
+    return this.namespace ? `${this.namespace}/${name}` : name
   }
 
   triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
@@ -71,6 +101,8 @@ export class MockStrategy implements IStrategy {
   setHttpClient(_client: HttpClient): void {}
   setParams(_params: StrategyParams): void {}
   setAccounts(_accounts: IAccount[]): void {}
+  setInstanceId(_instanceId: string): void {}
+  setPrefixedNames(namespace: string): void { this.namespace = namespace }
 }
 
 // ── MockMonitor ───────────────────────────────────────────────────────────────

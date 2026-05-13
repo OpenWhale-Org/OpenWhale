@@ -36,22 +36,30 @@ export async function GET() {
       }, 15_000)
 
       // Monitor emit events
+      const monitorHandlers: Array<{ monitor: ReturnType<typeof runtime.getMonitor>; handler: (key: string, data: unknown) => void }> = []
       for (const def of runtime.listMonitors()) {
         const monitor = runtime.getMonitor(def.id)
         if (!monitor) continue
-        monitor.setEmitHandler((key: string, data: unknown) => {
+        const handler = (key: string, data: unknown) => {
           send({ type: 'monitor_emit', monitor: def.id, key, data, ts: Date.now() })
-        })
+        }
+        monitor.addEmitHandler(handler)
+        monitorHandlers.push({ monitor, handler })
       }
 
       // Strategy run events
-      runtime.setStrategyRunHandler((event) => {
+      const strategyRunHandler = (event: Parameters<typeof runtime.addStrategyRunHandler>[0]) => {
         send({ type: 'strategy_run', ...event })
-      })
+      }
+      runtime.addStrategyRunHandler(strategyRunHandler)
 
       return () => {
         closed = true
         clearInterval(heartbeat)
+        for (const { monitor, handler } of monitorHandlers) {
+          monitor?.removeEmitHandler(handler)
+        }
+        runtime.removeStrategyRunHandler(strategyRunHandler)
       }
     },
   })

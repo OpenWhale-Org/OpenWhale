@@ -1,5 +1,5 @@
 import type { ExecutionInstruction } from '../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, AccountTypeDeclaration } from '../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, AccountTypeDeclaration, MonitorDeclaration, ExecutorDeclaration } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
@@ -9,6 +9,7 @@ import type { StrategyParams } from '../types/instance.js'
 import type { IAccount } from '../types/account.js'
 import type { ParamFieldDef, ParamFieldMeta, ParamFieldType } from '../types/definition.js'
 import { z } from 'zod'
+import { nanoid } from 'nanoid'
 import { getDataDir } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
@@ -90,8 +91,10 @@ export type { CoreMessage }
  */
 export abstract class BaseStrategy implements IStrategy {
   abstract readonly strategyId: string
-  /** Declare monitor dependencies. TriggerManager injects a reader for each at startup. */
-  readonly monitors: readonly string[] = []
+  /** Declare monitor dependencies. Use `{ name, label }` for named access, or plain string for name=label. */
+  readonly monitors: readonly MonitorDeclaration[] = []
+  /** Declare executor dependencies. Use `{ name, label }` for named access, or plain string for name=label. */
+  readonly executors: readonly ExecutorDeclaration[] = []
   /** Declare account type requirements. Framework validates and injects accounts at activate() time. */
   readonly accountTypes: readonly AccountTypeDeclaration[] = []
 
@@ -200,6 +203,8 @@ export abstract class BaseStrategy implements IStrategy {
   private readonly llmClient?: LlmClient
   private injectedParams?: StrategyParams
   private injectedAccounts: IAccount[] = []
+  private namespace?: string
+  private instanceId?: string
   private get log() { return createLogger(this.strategyId) }
 
   constructor(options?: StrategyOptions) {
@@ -207,6 +212,80 @@ export abstract class BaseStrategy implements IStrategy {
     if (options?.llm) {
       this.llmClient = new LlmClient(options.llm)
     }
+  }
+
+  get resolvedMonitors(): readonly string[] {
+    return this.monitors.map(m => this._resolveDeclarationName(typeof m === 'string' ? m : m.name))
+  }
+
+  /**
+   * Called by loadPlugin() to inject the plugin namespace (e.g. 'hyperliquid').
+   * After this, monitor/executor names without '/' are resolved as '{namespace}/{name}'.
+   */
+  setPrefixedNames(namespace: string): void {
+    this.namespace = namespace
+  }
+
+  /**
+   * Resolve a monitor declaration by label or index to its registry key.
+   * Use this in triggers() to reference monitors without hardcoding registry keys.
+   *
+   * @example
+   * sources: [{ monitorName: this.monitor('trades'), key: targetAddress }]
+   */
+  monitor(labelOrIndex: string | number): string {
+    return this._resolveDeclaration(this.monitors, labelOrIndex, 'monitor')
+  }
+
+  /**
+   * Resolve an executor declaration by label or index to its registry key.
+   * Use this in evaluate() to build ExecutionInstructions without hardcoding executor ids.
+   *
+   * @example
+   * { executorId: this.executor('perp'), action: 'placeOrder', ... }
+   */
+  executor(labelOrIndex: string | number): string {
+    return this._resolveDeclaration(this.executors, labelOrIndex, 'executor')
+  }
+
+  /** Resolve a declaration name: if it contains '/', use as-is; otherwise prepend namespace. */
+  private _resolveDeclarationName(name: string): string {
+    if (name.includes('/')) return name
+    return this.namespace ? `${this.namespace}/${name}` : name
+  }
+
+  private _resolveDeclaration(
+    declarations: readonly MonitorDeclaration[],
+    labelOrIndex: string | number,
+    kind: string,
+  ): string {
+    if (typeof labelOrIndex === 'number') {
+      const decl = declarations[labelOrIndex]
+      if (!decl) throw new Error(`${kind}[${labelOrIndex}] not declared in strategy "${this.strategyId}"`)
+      const name = typeof decl === 'string' ? decl : decl.name
+      return this._resolveDeclarationName(name)
+    }
+    const decl = declarations.find(d =>
+      typeof d === 'string' ? d === labelOrIndex : d.label === labelOrIndex
+    )
+    if (!decl) throw new Error(`${kind} with label '${labelOrIndex}' not declared in strategy "${this.strategyId}"`)
+    const name = typeof decl === 'string' ? decl : decl.name
+    return this._resolveDeclarationName(name)
+  }
+
+  /** Resolve a monitor label/index to the key used in monitorReaders and context.monitorData. */
+  private _resolveMonitorLabel(labelOrIndex: string | number): string {
+    const declarations = this.monitors
+    if (typeof labelOrIndex === 'number') {
+      const decl = declarations[labelOrIndex]
+      if (!decl) throw new Error(`monitor[${labelOrIndex}] not declared in strategy "${this.strategyId}"`)
+      return typeof decl === 'string' ? decl : decl.label
+    }
+    const decl = declarations.find(d =>
+      typeof d === 'string' ? d === labelOrIndex : d.label === labelOrIndex
+    )
+    if (!decl) throw new Error(`monitor with label '${labelOrIndex}' not declared in strategy "${this.strategyId}"`)
+    return typeof decl === 'string' ? decl : decl.label
   }
 
   setMonitorReader(key: string, reader: MonitorDataReader): void {
@@ -227,6 +306,10 @@ export abstract class BaseStrategy implements IStrategy {
 
   setParams(params: StrategyParams): void {
     this.injectedParams = params
+  }
+
+  setInstanceId(instanceId: string): void {
+    this.instanceId = instanceId
   }
 
   setAccounts(accounts: IAccount[]): void {
@@ -296,16 +379,36 @@ export abstract class BaseStrategy implements IStrategy {
   // ── Data access ───────────────────────────────────────────────────────────
 
   /**
-   * Returns the MonitorDataReader for the given monitor name.
+   * Returns the MonitorDataReader for the given monitor label or index.
    * Use reader.readLast(key, n), reader.keys(), reader.readAllLatest() etc.
    *
    * @example
-   * const reader = this.monitorData('price')
+   * const reader = this.monitorData('trades')
    * const latest = await reader?.readLatest('BTC')
-   * const all = await reader?.readAllLatest()
    */
-  protected monitorData(monitorName: string): MonitorDataReader | undefined {
-    return this.monitorReaders.get(monitorName)
+  protected monitorData(labelOrIndex: string | number): MonitorDataReader | undefined {
+    const registryKey = this._resolveDeclaration(this.monitors, labelOrIndex, 'monitor')
+    return this.monitorReaders.get(registryKey)
+  }
+
+  /**
+   * Build an ExecutionInstruction for a declared executor.
+   *
+   * @example
+   * return [this.instruction('perp', 'placeOrder', { symbol: 'BTC', side: 'buy', ... })]
+   */
+  protected instruction(
+    executorLabelOrIndex: string | number,
+    action: string,
+    params: Record<string, unknown>,
+  ): ExecutionInstruction {
+    return {
+      executorId: this.executor(executorLabelOrIndex),
+      messageId: nanoid(),
+      action,
+      params,
+      ...(this.instanceId ? { instanceId: this.instanceId } : {}),
+    }
   }
 
   protected async credential(name: string): Promise<CredentialData> {

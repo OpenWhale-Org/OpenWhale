@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Logo } from './Logo'
 
 const links = [
   {
@@ -54,6 +55,15 @@ const links = [
       </svg>
     ),
   },
+  {
+    href: '/assistant',
+    label: 'Assistant',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    ),
+  },
 ]
 
 export function Nav() {
@@ -64,10 +74,8 @@ export function Nav() {
       className="w-52 shrink-0 flex flex-col gap-1 p-4 border-r"
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
     >
-      <div className="mb-6 px-2">
-        <span className="text-lg font-bold tracking-tight" style={{ color: 'var(--accent)' }}>
-          OpenWhale
-        </span>
+      <div className="mb-6 px-2" style={{ color: 'var(--accent)' }}>
+        <Logo size={28} />
       </div>
       {links.map(({ href, label, icon }) => {
         const active = pathname.startsWith(href)

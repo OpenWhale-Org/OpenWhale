@@ -10,12 +10,34 @@ import type { IAccount } from './account.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { ParamFieldDef } from './definition.js'
 
+/**
+ * Monitor dependency declaration.
+ * - string shorthand: `'user-trades'` → name = label = 'user-trades', resolved with current namespace
+ * - object form: `{ name: 'user-trades', label: 'trades' }` → custom label for in-strategy access
+ * - cross-plugin: `{ name: 'chainlink/price', label: 'price' }` → name contains '/', used as-is
+ */
+export type MonitorDeclaration = string | { name: string; label: string }
+
+/**
+ * Executor dependency declaration.
+ * Same rules as MonitorDeclaration.
+ */
+export type ExecutorDeclaration = string | { name: string; label: string }
+
 export interface StrategyContext {
   instanceId: string
   triggerId: string
-  /** Flattened monitor data at the time of trigger, keyed by 'monitorName:key'. Empty for pure cron triggers. */
+  /**
+   * Flattened monitor data at the time of trigger, keyed by '{label}:{key}'.
+   * Use getData(label, key) for convenient access.
+   */
   monitorData: Record<string, Record<string, unknown>>
   timestamp: number
+  /**
+   * Retrieve trigger data for a specific monitor label and key.
+   * Returns undefined if this monitor/key did not contribute to the trigger.
+   */
+  getData(monitorLabel: string, key: string): Record<string, unknown> | undefined
 }
 
 export interface StrategyMetrics {
@@ -69,8 +91,15 @@ export type AccountTypeDeclaration = string | { type: string; label: string }
 
 export interface IStrategy {
   readonly strategyId: string
-  /** Monitor names this strategy depends on. TriggerManager injects readers for these at startup. */
-  readonly monitors: readonly string[]
+  /** Monitor declarations this strategy depends on. */
+  readonly monitors: readonly MonitorDeclaration[]
+  /** Executor declarations this strategy depends on. */
+  readonly executors: readonly ExecutorDeclaration[]
+  /**
+   * Resolved monitor registry keys — monitors with namespace prefix applied.
+   * TriggerManager uses this to look up monitors in the registry.
+   */
+  readonly resolvedMonitors: readonly string[]
   /** Account type declarations. Framework validates and injects accounts at activate() time. */
   readonly accountTypes: readonly AccountTypeDeclaration[]
   /** Base params schema (required fields, no defaults). */
@@ -89,4 +118,12 @@ export interface IStrategy {
   setHttpClient(client: HttpClient): void
   setParams(params: StrategyParams): void
   setAccounts(accounts: IAccount[]): void
+  setInstanceId(instanceId: string): void
+  /** Called by loadPlugin() to inject the plugin namespace (e.g. 'hyperliquid'). */
+  setPrefixedNames(namespace: string): void
+  /** Resolve a monitor declaration (label or index) to its registry key. Used in triggers(). */
+  monitor(labelOrIndex: string | number): string
+  /** Resolve an executor declaration (label or index) to its registry key. Used in evaluate(). */
+  executor(labelOrIndex: string | number): string
 }
+

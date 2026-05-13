@@ -6,25 +6,30 @@ import { PerpTradingExecutor } from './executor.js'
 import { CopyTradingStrategy } from './strategy.js'
 
 export interface HyperliquidPluginConfig {
-  /** Read-only wallet address used by the monitor and executor (no private key needed). */
+  /** Wallet address used by the monitor. */
   walletAddress: string
+  /** Private key for signing orders. If omitted, the executor will be read-only and order placement will fail. */
+  privateKey?: string
 }
 
 /**
  * Hyperliquid plugin factory.
  *
- * Registers:
- *   - Monitor:   hl-user-trades  (UserTradesMonitor)
- *   - Executor:  hl-perp-trading (PerpTradingExecutor)
- *   - Strategy:  hl-copy-trading (CopyTradingStrategy)
- *   - Account:   hyperliquid     (HyperliquidAccount factory)
+ * Component logical names (auto-prefixed to 'hyperliquid/...' by loadPlugin):
+ *   - Monitor:   user-trades  → hyperliquid/user-trades
+ *   - Executor:  perp-trading → hyperliquid/perp-trading
+ *   - Strategy:  copy-trading → hyperliquid/copy-trading
+ *   - Account:   hyperliquid
  *
  * Usage:
- *   pluginManager.load(hyperliquidPlugin, { walletAddress: '0x...' })
+ *   runtime.loadPlugin(hyperliquidPlugin, { walletAddress: '0x...' })
  */
 export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (context): OpenWhalePlugin => {
   const now = new Date().toISOString()
   const readAdapter = new HyperliquidAdapter({ walletAddress: context.config.walletAddress })
+  const writeAdapter = context.config.privateKey
+    ? new HyperliquidAdapter({ walletAddress: context.config.walletAddress, privateKey: context.config.privateKey })
+    : readAdapter
 
   return {
     name: 'hyperliquid',
@@ -33,7 +38,7 @@ export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (contex
     monitors: [
       {
         definition: {
-          id: 'hl-user-trades',
+          id: 'user-trades',
           name: 'Hyperliquid User Trades',
           description: 'Streams real-time fills for any Hyperliquid address',
           source: 'plugin',
@@ -48,7 +53,7 @@ export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (contex
     executors: [
       {
         definition: {
-          id: 'hl-perp-trading',
+          id: 'perp-trading',
           name: 'Hyperliquid Perp Trading',
           description: 'Places, cancels, and manages perpetual orders on Hyperliquid',
           source: 'plugin',
@@ -57,20 +62,20 @@ export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (contex
           createdAt: now,
           updatedAt: now,
         },
-        instance: new PerpTradingExecutor(readAdapter),
+        instance: new PerpTradingExecutor(writeAdapter),
       },
     ],
 
     strategies: [
       {
         definition: {
-          id: 'hl-copy-trading',
+          id: 'copy-trading',
           name: 'Hyperliquid Copy Trading',
           description: "Mirrors another trader's perpetual positions at a configurable ratio",
           source: 'plugin',
           pluginName: 'hyperliquid',
-          monitorIds: ['hl-user-trades'],
-          executorIds: ['hl-perp-trading'],
+          monitorIds: ['user-trades'],
+          executorIds: ['perp-trading'],
           createdAt: now,
           updatedAt: now,
         },

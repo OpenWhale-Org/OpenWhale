@@ -2,6 +2,7 @@ import type { StrategyInstance } from '../types/instance.js'
 import type { ExecutionQueue } from '../types/executor.js'
 import type { IRuntime, RuntimeOptions } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
+import type { Trigger } from '../types/trigger.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { IStrategy } from '../types/strategy.js'
@@ -61,19 +62,11 @@ export class OpenWhaleRuntime implements IRuntime {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor<string, any>): void {
     this.monitorRegistry.register(definition, instance)
-    // Also register by monitorName so strategies can declare dependencies by logical name
-    if (instance.monitorName && instance.monitorName !== definition.id) {
-      this.monitorRegistry.register({ ...definition, id: instance.monitorName }, instance)
-    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor<any>): void {
     this.executorRegistry.register(definition, instance)
-    // Also register by executorName so queue routing and executorId references work by logical name
-    if (instance.executorName && instance.executorName !== definition.id) {
-      this.executorRegistry.register({ ...definition, id: instance.executorName }, instance)
-    }
   }
 
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void {
@@ -95,14 +88,50 @@ export class OpenWhaleRuntime implements IRuntime {
 
   loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void {
     const plugin = factory({ credentials: this.credentialStore!, config })
-    for (const { definition, instance } of plugin.monitors) this.registerMonitor(definition, instance)
-    for (const { definition, instance } of plugin.executors) this.registerExecutor(definition, instance)
-    for (const { definition, factory: sf } of plugin.strategies) this.registerStrategy(definition, sf)
-    for (const { accountType, factory: af } of plugin.accounts) this.registerAccountFactory(accountType, af)
+    const ns = plugin.name  // e.g. 'hyperliquid'
+    const p = (id: string) => `${ns}/${id}`
+
+    // Build a map from logical name → prefixed id for cross-reference rewriting
+    const monitorIds = new Map(plugin.monitors.map(({ instance }) => [instance.monitorName, p(instance.monitorName)]))
+    const executorIds = new Map(plugin.executors.map(({ instance }) => [instance.executorName, p(instance.executorName)]))
+
+    for (const { definition, instance } of plugin.monitors) {
+      this.registerMonitor({ ...definition, id: p(instance.monitorName) }, instance)
+    }
+    for (const { definition, instance } of plugin.executors) {
+      this.registerExecutor({ ...definition, id: p(instance.executorName) }, instance)
+    }
+    for (const { definition, factory: sf } of plugin.strategies) {
+      // Rewrite monitorIds/executorIds references to prefixed form
+      const rewritten: StrategyDefinition = {
+        ...definition,
+        id: p(definition.id),
+        monitorIds: definition.monitorIds.map(id => monitorIds.get(id) ?? id),
+        executorIds: definition.executorIds.map(id => executorIds.get(id) ?? id),
+      }
+      // Wrap factory to rewrite strategy's monitors/executorId references at runtime
+      const wrappedFactory = () => {
+        const strategy = sf()
+        strategy.setPrefixedNames(ns)
+        return strategy
+      }
+      this.registerStrategy(rewritten, wrappedFactory)
+    }
+    for (const { accountType, factory: af } of plugin.accounts) {
+      this.registerAccountFactory(accountType, af)
+    }
+  }
+
+  addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
+    this.triggerManager.addStrategyRunHandler(handler)
+  }
+
+  removeStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
+    this.triggerManager.removeStrategyRunHandler(handler)
   }
 
   setStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
-    this.triggerManager.setStrategyRunHandler(handler)
+    this.triggerManager.addStrategyRunHandler(handler)
   }
 
   async start(): Promise<void> {
@@ -127,7 +156,7 @@ export class OpenWhaleRuntime implements IRuntime {
     // Start executors from registry
     for (const def of this.executorRegistry.list()) {
       const executor = this.executorRegistry.get(def.id)
-      if (executor) void executor.run(this.queue)
+      if (executor) void executor.run(this.queue, def.id)
     }
   }
 
@@ -186,14 +215,38 @@ export class OpenWhaleRuntime implements IRuntime {
     const strategy = strategyFactory()
     const parsedParams = this.parseParams(strategy, instance)
     const accounts = await this.ensureAccounts(instance, strategy)
-    const triggers = strategy.triggers(parsedParams).map((t, i) => ({
+
+    // Build label → registry key map from strategy's monitor declarations
+    const monitorLabelToKey = new Map<string, string>()
+    strategy.monitors.forEach((decl, i) => {
+      const label = typeof decl === 'string' ? decl : decl.label
+      const registryKey = strategy.resolvedMonitors[i]!
+      monitorLabelToKey.set(label, registryKey)
+    })
+
+    // triggers() uses this.monitor(label) which returns registry keys — no rewriting needed
+    const rawTriggers = strategy.triggers(parsedParams)
+    const triggers = rawTriggers.map((t, i) => ({
       ...t,
       id: `${instance.id}-trigger-${i}`,
       strategyInstanceId: instance.id,
+      // Rewrite trigger condition monitorNames from registry keys back to labels
+      // so TriggerState keys are label-based (matching context.getData() and monitorData keys)
+      conditions: t.conditions.map(c => {
+        if (c.type !== 'monitor') return c
+        const keyToLabel = new Map(Array.from(monitorLabelToKey, ([l, k]) => [k, l]))
+        return {
+          ...c,
+          sources: c.sources.map(s => ({
+            ...s,
+            monitorName: keyToLabel.get(s.monitorName) ?? s.monitorName,
+          })),
+        }
+      }) as Trigger['conditions'],
     }))
 
     this.instances.set(instance.id, instance)
-    this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts)
+    this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts, monitorLabelToKey)
 
     if (persist) await this.instanceStore.save(instance)
   }

@@ -4,7 +4,7 @@
  * Next.js hot-reload creates new module instances in development, so we store
  * the runtime on the global object to avoid re-initialising on every reload.
  */
-import { OpenWhaleRuntime, SQLiteAdapter, DBCredentialStore } from '@openwhale/core'
+import { OpenWhaleRuntime, SQLiteAdapter, DBCredentialStore, getLogger } from '@openwhale/core'
 import { hyperliquidPlugin } from '@openwhale/hyperliquid'
 import path from 'path'
 import os from 'os'
@@ -17,6 +17,9 @@ declare global {
 }
 
 function createRuntime(): OpenWhaleRuntime {
+  // Set log level — getLogger() returns the pino root instance, level can be changed at runtime
+  getLogger().level = process.env['LOG_LEVEL'] ?? 'debug'
+
   const dbPath =
     process.env['OPENWHALE_DB_PATH'] ||
     path.join(os.homedir(), '.openwhale', 'openwhale.db')
@@ -30,6 +33,7 @@ function createRuntime(): OpenWhaleRuntime {
 
   runtime.loadPlugin(hyperliquidPlugin, {
     walletAddress: process.env['HL_WALLET_ADDRESS'] ?? '',
+    privateKey: process.env['HL_PRIVATE_KEY'],
   })
 
   return runtime

@@ -24,6 +24,10 @@ interface InstanceEntry {
   instanceId: string
   triggers: Trigger[]
   strategy: IStrategy
+  /** Maps monitor label → registry key, for subscribe/unsubscribe lookups. */
+  monitorLabelToKey: Map<string, string>
+  /** Maps registry key → monitor label, for matching incoming monitor emits. */
+  monitorKeyToLabel: Map<string, string>
 }
 
 export class TriggerManager {
@@ -34,7 +38,8 @@ export class TriggerManager {
   private readonly cronTasks: cron.ScheduledTask[] = []
   private readonly triggerStates = new Map<string, TriggerState>()
   private running = false
-  private onStrategyRun: ((event: StrategyRunEvent) => void) | undefined
+  private queue: ExecutionQueue | undefined
+  private readonly strategyRunHandlers: ((event: StrategyRunEvent) => void)[] = []
 
   constructor(
     monitorRegistry: MonitorRegistry,
@@ -46,8 +51,18 @@ export class TriggerManager {
     this.database = database
   }
 
+  addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
+    this.strategyRunHandlers.push(handler)
+  }
+
+  removeStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
+    const idx = this.strategyRunHandlers.indexOf(handler)
+    if (idx !== -1) this.strategyRunHandlers.splice(idx, 1)
+  }
+
+  /** @deprecated Use addStrategyRunHandler instead */
   setStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
-    this.onStrategyRun = handler
+    this.strategyRunHandlers.push(handler)
   }
 
   registerInstance(
@@ -56,13 +71,25 @@ export class TriggerManager {
     triggers: Trigger[],
     params: StrategyParams,
     accounts: IAccount[],
+    monitorLabelToKey: Map<string, string>,
   ): void {
     strategy.setParams(params)
     strategy.setAccounts(accounts)
+    strategy.setInstanceId(instanceId)
     if (this.credentialStore) strategy.setCredentialStore(this.credentialStore)
     if (this.database) strategy.setStore(new DBStrategyStore(instanceId, this.database))
     strategy.setHttpClient(new HttpClient(strategy.strategyId))
-    this.instances.set(instanceId, { instanceId, triggers, strategy })
+    const monitorKeyToLabel = new Map(Array.from(monitorLabelToKey, ([label, key]) => [key, label]))
+    const entry: InstanceEntry = { instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel }
+    this.instances.set(instanceId, entry)
+
+    // If already running, immediately wire up the new instance
+    if (this.running && this.queue) {
+      this.injectMonitorReadersForEntry(entry)
+      this.initTriggerStatesForEntry(entry)
+      this.subscribeMonitorsForEntry(entry)
+      this.scheduleCronConditionsForEntry(entry, this.queue)
+    }
   }
 
   unregisterInstance(instanceId: string): void {
@@ -73,6 +100,7 @@ export class TriggerManager {
   start(queue: ExecutionQueue): void {
     if (this.running) return
     this.running = true
+    this.queue = queue
     this.injectMonitorReaders()
     this.initTriggerStates()
     this.setupMonitorHandlers(queue)
@@ -91,37 +119,41 @@ export class TriggerManager {
   // ── Start / stop helpers ──────────────────────────────────────────────────
 
   private injectMonitorReaders(): void {
-    for (const { instanceId, strategy } of this.instances.values()) {
-      strategy.monitors.forEach(monitorName => {
-        const monitor = this.monitorRegistry.get(monitorName)
-        if (!monitor) throw new Error(
-          `Instance "${instanceId}": strategy "${strategy.strategyId}" declares monitor dependency "${monitorName}" but it is not registered`
-        )
-        strategy.setMonitorReader(monitorName, monitor.getReader())
-      })
+    for (const entry of this.instances.values()) this.injectMonitorReadersForEntry(entry)
+  }
+
+  private injectMonitorReadersForEntry(entry: InstanceEntry): void {
+    for (const [, registryKey] of entry.monitorLabelToKey) {
+      const monitor = this.monitorRegistry.get(registryKey)
+      if (!monitor) throw new Error(
+        `Instance "${entry.instanceId}": strategy "${entry.strategy.strategyId}" declares monitor "${registryKey}" but it is not registered`
+      )
+      entry.strategy.setMonitorReader(registryKey, monitor.getReader())
     }
   }
 
   private initTriggerStates(): void {
-    for (const entry of this.instances.values()) {
-      entry.triggers
-        .filter(t => t.enabled)
-        .forEach(t => this.triggerStates.set(t.id, new TriggerState(t.conditions.length)))
-    }
+    for (const entry of this.instances.values()) this.initTriggerStatesForEntry(entry)
+  }
+
+  private initTriggerStatesForEntry(entry: InstanceEntry): void {
+    entry.triggers
+      .filter(t => t.enabled)
+      .forEach(t => this.triggerStates.set(t.id, new TriggerState(t.conditions.length)))
   }
 
   private setupMonitorHandlers(queue: ExecutionQueue): void {
     for (const def of this.monitorRegistry.list()) {
       const monitor = this.monitorRegistry.get(def.id)
       if (!monitor) continue
-      monitor.setEmitHandler((key: string, data: unknown) =>
+      monitor.addEmitHandler((key: string, data: unknown) =>
         this.onMonitorEmit(def.id, key, data as Record<string, unknown>, queue)
       )
     }
   }
 
   private async onMonitorEmit(
-    monitorName: string,
+    registryKey: string,
     key: string,
     data: Record<string, unknown>,
     queue: ExecutionQueue,
@@ -129,10 +161,12 @@ export class TriggerManager {
     const now = Date.now()
     const promises: Promise<void>[] = []
     for (const entry of this.instances.values()) {
+      // Translate registry key to the label used in this instance's trigger conditions
+      const label = entry.monitorKeyToLabel.get(registryKey) ?? registryKey
       entry.triggers.filter(t => t.enabled).forEach(trigger => {
         const triggerState = this.triggerStates.get(trigger.id)
         if (!triggerState) return
-        this.applyMonitorEmitToTrigger(trigger, triggerState, monitorName, key, data, now)
+        this.applyMonitorEmitToTrigger(trigger, triggerState, label, key, data, now)
         promises.push(this.checkAndFire(entry.instanceId, trigger, triggerState, entry.strategy, queue, now))
       })
     }
@@ -142,7 +176,7 @@ export class TriggerManager {
   private applyMonitorEmitToTrigger(
     trigger: Trigger,
     triggerState: TriggerState,
-    monitorName: string,
+    label: string,
     key: string,
     data: Record<string, unknown>,
     now: number,
@@ -150,7 +184,7 @@ export class TriggerManager {
     trigger.conditions.forEach((condition, i) => {
       if (condition.type !== 'monitor') return
       condition.sources
-        .filter(s => s.monitorName === monitorName)
+        .filter(s => s.monitorName === label)
         .filter(s => s.key === '*' || s.key === key)
         .filter(s => !s.filter || evaluateFilter(s.filter, data))
         .forEach(s => triggerState.satisfyMonitorSource(i, sourceKey(s, key), data, now))
@@ -158,14 +192,16 @@ export class TriggerManager {
   }
 
   private subscribeMonitors(): void {
-    for (const entry of this.instances.values()) {
-      entry.triggers.filter(t => t.enabled).forEach(trigger =>
-        trigger.conditions
-          .filter((c): c is MonitorCondition => c.type === 'monitor')
-          .flatMap(c => c.sources)
-          .forEach(source => this.subscribeSource(source))
-      )
-    }
+    for (const entry of this.instances.values()) this.subscribeMonitorsForEntry(entry)
+  }
+
+  private subscribeMonitorsForEntry(entry: InstanceEntry): void {
+    entry.triggers.filter(t => t.enabled).forEach(trigger =>
+      trigger.conditions
+        .filter((c): c is MonitorCondition => c.type === 'monitor')
+        .flatMap(c => c.sources)
+        .forEach(source => this.subscribeSource(source, entry.monitorLabelToKey))
+    )
   }
 
   private unsubscribeMonitors(): void {
@@ -174,13 +210,14 @@ export class TriggerManager {
         trigger.conditions
           .filter((c): c is MonitorCondition => c.type === 'monitor')
           .flatMap(c => c.sources)
-          .forEach(source => this.unsubscribeSource(source))
+          .forEach(source => this.unsubscribeSource(source, entry.monitorLabelToKey))
       )
     }
   }
 
-  private subscribeSource(source: MonitorSource): void {
-    const monitor = this.monitorRegistry.get(source.monitorName)
+  private subscribeSource(source: MonitorSource, labelToKey: Map<string, string>): void {
+    const registryKey = labelToKey.get(source.monitorName) ?? source.monitorName
+    const monitor = this.monitorRegistry.get(registryKey)
     if (!monitor) return
     if (source.key === '*') {
       monitor.subscribeAll()
@@ -190,8 +227,9 @@ export class TriggerManager {
     // Standalone monitors manage their own lifecycle — no subscribe(key) needed
   }
 
-  private unsubscribeSource(source: MonitorSource): void {
-    const monitor = this.monitorRegistry.get(source.monitorName)
+  private unsubscribeSource(source: MonitorSource, labelToKey: Map<string, string>): void {
+    const registryKey = labelToKey.get(source.monitorName) ?? source.monitorName
+    const monitor = this.monitorRegistry.get(registryKey)
     if (!monitor) return
     if (source.key === '*') {
       monitor.unsubscribeAll()
@@ -201,13 +239,15 @@ export class TriggerManager {
   }
 
   private scheduleCronConditions(queue: ExecutionQueue): void {
-    for (const entry of this.instances.values()) {
-      entry.triggers.filter(t => t.enabled).forEach(trigger =>
-        trigger.conditions.forEach((condition, i) => {
-          if (condition.type === 'cron') this.scheduleCron(entry.instanceId, trigger, i, condition, entry.strategy, queue)
-        })
-      )
-    }
+    for (const entry of this.instances.values()) this.scheduleCronConditionsForEntry(entry, queue)
+  }
+
+  private scheduleCronConditionsForEntry(entry: InstanceEntry, queue: ExecutionQueue): void {
+    entry.triggers.filter(t => t.enabled).forEach(trigger =>
+      trigger.conditions.forEach((condition, i) => {
+        if (condition.type === 'cron') this.scheduleCron(entry.instanceId, trigger, i, condition, entry.strategy, queue)
+      })
+    )
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
@@ -241,11 +281,20 @@ export class TriggerManager {
     if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
     const monitorData = triggerState.collectMonitorData(trigger.conditions)
     triggerState.reset()
-    const context: StrategyContext = { instanceId, triggerId: trigger.id, monitorData, timestamp: now }
+    const context: StrategyContext = {
+      instanceId,
+      triggerId: trigger.id,
+      monitorData,
+      timestamp: now,
+      getData(monitorLabel: string, key: string) {
+        return monitorData[`${monitorLabel}:${key}`]
+      },
+    }
     const instructions = await strategy.run(context)
     const tagged = instructions.map(i => ({ ...i, instanceId }))
     await queue.pushBatch(tagged)
-    this.onStrategyRun?.({ instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now })
+    const event: StrategyRunEvent = { instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now }
+    for (const handler of this.strategyRunHandlers) handler(event)
   }
 
 }

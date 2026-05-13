@@ -1,7 +1,6 @@
 import { BaseStrategy, createLogger } from '@openwhale/core'
-import type { StrategyContext, StrategyParams, ExecutionInstruction, Trigger } from '@openwhale/core'
+import type { StrategyContext, StrategyParams, Trigger } from '@openwhale/core'
 import { z } from 'zod'
-import { nanoid } from 'nanoid'
 
 const log = createLogger('CopyTradingStrategy')
 
@@ -24,7 +23,9 @@ const log = createLogger('CopyTradingStrategy')
 export class CopyTradingStrategy extends BaseStrategy {
   readonly strategyId = 'copy-trading'
 
-  readonly monitors = ['user-trades'] as const
+  readonly monitors = [{ name: 'user-trades', label: 'trades' }] as const
+
+  readonly executors = [{ name: 'perp-trading', label: 'perp' }] as const
 
   readonly accountTypes = [{ type: 'hyperliquid', label: 'main' }] as const
 
@@ -54,21 +55,20 @@ export class CopyTradingStrategy extends BaseStrategy {
         conditions: [
           {
             type: 'monitor',
-            sources: [{ monitorName: 'user-trades', key: targetAddress }],
+            sources: [{ monitorName: this.monitor('trades'), key: targetAddress }],
           },
         ],
       },
     ]
   }
 
-  async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
+  async evaluate(context: StrategyContext): Promise<ReturnType<BaseStrategy['instruction']>[]> {
     const { targetAddress, ratio, maxPositionUsd } = this.baseParamsSchema.parse(this.params.base)
     const { minTradeUsd, slippageTolerance } = this.tunableParamsSchema.parse(this.params.tunable)
 
     log.debug({ triggerId: context.triggerId, targetAddress }, 'Evaluate triggered')
 
-    // The monitor emits one trade per event — retrieve it from monitorData
-    const tradeData = context.monitorData[`user-trades:${targetAddress}`]
+    const tradeData = context.getData('trades', targetAddress)
     if (!tradeData) {
       log.warn({ triggerId: context.triggerId }, 'No trade data in context — skipping')
       return []
@@ -117,18 +117,13 @@ export class CopyTradingStrategy extends BaseStrategy {
       return []
     }
 
-    const instruction: ExecutionInstruction = {
-      executorId: 'perp-trading',
-      messageId: nanoid(),
-      action: 'placeOrder',
-      params: {
-        symbol: trade.symbol,
-        side: trade.side,
-        type: 'market',
-        amount: parseFloat(copyAmount.toFixed(6)),
-        slippage: slippageTolerance,
-      },
-    }
+    const instruction = this.instruction('perp', 'placeOrder', {
+      symbol: trade.symbol,
+      side: trade.side,
+      type: 'market',
+      amount: parseFloat(copyAmount.toFixed(6)),
+      slippage: slippageTolerance,
+    })
 
     log.info(
       { symbol: trade.symbol, side: trade.side, amount: instruction.params.amount, cappedNotional, slippageTolerance },

@@ -127,7 +127,7 @@ export enum MonitorMode {
 export abstract class BaseMonitor<TKey extends string = string, TData = Record<string, unknown>> {
   private readonly refCounts = new Map<string, number>()
   private wildcardRefCount = 0
-  private emitHandler?: EmitHandler<TData>
+  private readonly emitHandlers: EmitHandler<TData>[] = []
   protected readonly dataDir: string
   private get log() { return createLogger(this.monitorName) }
 
@@ -301,15 +301,25 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
     return new MonitorDataReaderImpl<TData>(monitorDir)
   }
 
+  addEmitHandler(handler: EmitHandler<TData>): void {
+    this.emitHandlers.push(handler)
+  }
+
+  removeEmitHandler(handler: EmitHandler<TData>): void {
+    const idx = this.emitHandlers.indexOf(handler)
+    if (idx !== -1) this.emitHandlers.splice(idx, 1)
+  }
+
+  /** @deprecated Use addEmitHandler instead */
   setEmitHandler(handler: EmitHandler<TData>): void {
-    this.emitHandler = handler
+    this.emitHandlers.push(handler)
   }
 
   protected async emit(key: TKey, data: TData): Promise<void> {
-    if (!this.hasSubscribers(key) && !this.hasWildcardSubscribers && this.emitHandler === undefined) return
+    if (!this.hasSubscribers(key) && !this.hasWildcardSubscribers && this.emitHandlers.length === 0) return
     this.onBeforeEmit(key, data)
-    if (this.emitHandler) {
-      await this.emitHandler(key, data)
+    for (const handler of this.emitHandlers) {
+      await handler(key, data)
     }
     this.onAfterEmit(key, data)
   }
