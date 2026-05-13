@@ -29,28 +29,14 @@ OpenWhale is built differently:
 ### A minimal strategy
 
 ```typescript
-import { BaseStrategy, type StrategyContext } from '@openwhale/core'
-import { z } from 'zod'
-
 class MomentumStrategy extends BaseStrategy {
   readonly strategyId = 'momentum'
-  readonly monitors = [{ name: 'price', label: 'price' }] as const
-  readonly executors = [{ name: 'perp-trading', label: 'perp' }] as const
-  readonly accountTypes = [{ type: 'hyperliquid', label: 'main' }] as const
-
-  readonly baseParamsSchema = z.object({
-    symbol: z.string().meta({ displayName: 'Symbol', placeholder: 'BTC/USDC:USDC' }),
-    threshold: z.number().meta({ displayName: 'Price Threshold' }),
-  })
 
   async evaluate(context: StrategyContext) {
-    const { symbol, threshold } = this.baseParamsSchema.parse(this.params.base)
+    const { symbol, threshold } = this.params.base
     const tick = context.getData('price', symbol)
     if (!tick || tick.price < threshold) return []
-
-    return [this.instruction('perp', 'placeOrder', {
-      symbol, side: 'buy', type: 'market', amount: 0.01,
-    })]
+    return [this.instruction('perp', 'placeOrder', { symbol, side: 'buy', type: 'market', amount: 0.01 })]
   }
 }
 ```
@@ -58,63 +44,23 @@ class MomentumStrategy extends BaseStrategy {
 ### Assembling the runtime
 
 ```typescript
-import { OpenWhaleRuntime, SQLiteAdapter, DBCredentialStore } from '@openwhale/core'
-import { hyperliquidPlugin } from '@openwhale/hyperliquid'
-
-const database = new SQLiteAdapter({ filePath: './data/openwhale.db' })
-const credentialStore = new DBCredentialStore(process.env.MASTER_KEY!, database)
 const runtime = new OpenWhaleRuntime({ database, credentialStore })
-
-runtime.loadPlugin(hyperliquidPlugin, { /* config */ })
-
+runtime.loadPlugin(hyperliquidPlugin)
 await runtime.start()
-await runtime.activate({
-  id: 'instance-1',
-  strategyId: 'hyperliquid/copy-trading',
-  accounts: ['HL Main'],
-  params: {
-    base: { targetAddress: '0x...', ratio: 0.5, maxPositionUsd: 1000 },
-  },
-  enabled: true,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-})
+await runtime.activate({ strategyId: 'hyperliquid/copy-trading', params: { base: { targetAddress: '0x...', ratio: 0.5 } } })
 ```
 
 ### AI-driven strategy with structured output
 
 ```typescript
-class AiStrategy extends BaseStrategy {
-  readonly strategyId = 'ai-momentum'
-
-  constructor() {
-    super({ llm: { defaultModel: 'anthropic:claude-sonnet-4-6' } })
-  }
-
-  async evaluate(context: StrategyContext) {
-    const marketData = context.getData('price', 'BTC/USDC:USDC')
-
-    const decision = await this.llm({
-      messages: [
-        { role: 'system', content: 'You are a trading analyst. Respond with a structured decision.' },
-        { role: 'user', content: JSON.stringify(marketData) },
-      ],
-      schema: z.object({
-        action: z.enum(['buy', 'sell', 'hold']),
-        reason: z.string(),
-        confidence: z.number().min(0).max(1),
-      }),
-    })
-
-    if (decision.action === 'hold' || decision.confidence < 0.7) return []
-
-    return [this.instruction('perp', 'placeOrder', {
-      symbol: 'BTC/USDC:USDC',
-      side: decision.action,
-      type: 'market',
-      amount: 0.01,
-    })]
-  }
+async evaluate(context: StrategyContext) {
+  const data = context.getData('price', 'BTC/USDC:USDC')
+  const { action, confidence } = await this.llm({
+    messages: [{ role: 'user', content: JSON.stringify(data) }],
+    schema: z.object({ action: z.enum(['buy', 'sell', 'hold']), confidence: z.number() }),
+  })
+  if (action === 'hold' || confidence < 0.7) return []
+  return [this.instruction('perp', 'placeOrder', { symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01 })]
 }
 ```
 
