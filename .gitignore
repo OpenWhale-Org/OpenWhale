@@ -8,3 +8,4 @@ dist/
 .vscode/
 .DS_Store
 .claude/
+temp/
