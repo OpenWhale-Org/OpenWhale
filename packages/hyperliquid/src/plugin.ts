@@ -8,8 +8,6 @@ import { CopyTradingStrategy } from './strategy.js'
 export interface HyperliquidPluginConfig {
   /** Wallet address used by the monitor. */
   walletAddress: string
-  /** Private key for signing orders. If omitted, the executor will be read-only and order placement will fail. */
-  privateKey?: string
 }
 
 /**
@@ -27,9 +25,6 @@ export interface HyperliquidPluginConfig {
 export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (context): OpenWhalePlugin => {
   const now = new Date().toISOString()
   const readAdapter = new HyperliquidAdapter({ walletAddress: context.config.walletAddress })
-  const writeAdapter = context.config.privateKey
-    ? new HyperliquidAdapter({ walletAddress: context.config.walletAddress, privateKey: context.config.privateKey })
-    : readAdapter
 
   return {
     name: 'hyperliquid',
@@ -62,7 +57,7 @@ export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (contex
           createdAt: now,
           updatedAt: now,
         },
-        instance: new PerpTradingExecutor(writeAdapter),
+        instance: new PerpTradingExecutor(),
       },
     ],
 
@@ -86,9 +81,9 @@ export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (contex
     accounts: [
       {
         accountType: 'hyperliquid',
-        factory: (data) =>
+        factory: (name, data) =>
           new HyperliquidAccount(
-            'hyperliquid',
+            name,
             new HyperliquidAdapter({
               walletAddress: data['walletAddress'] as string,
               privateKey: data['privateKey'] as string,

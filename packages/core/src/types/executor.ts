@@ -1,4 +1,6 @@
 import type { ZodType } from 'zod'
+import type { IAccount } from './account.js'
+import type { AccountTypeDeclaration } from './strategy.js'
 
 export interface ExecutionInstruction {
   executorId: string
@@ -8,6 +10,19 @@ export interface ExecutionInstruction {
   params: Record<string, unknown>
   /** Strategy instance that emitted this instruction. Injected by TriggerManager. */
   instanceId?: string
+  /**
+   * Credential names of accounts to use for this instruction, in the order declared by
+   * the executor's accountTypes. Validated against accountTypes at execution time.
+   */
+  accountNames?: string[]
+}
+
+export interface IExecutor {
+  readonly executorName: string
+  readonly supportedActions: string[]
+  /** Account type declarations. Framework validates and injects accounts at activate() time. */
+  readonly accountTypes: readonly AccountTypeDeclaration[]
+  setAccounts(instanceId: string, accounts: IAccount[]): void
 }
 
 export interface ExecutionResult<TInstruction extends ExecutionInstruction = ExecutionInstruction> {

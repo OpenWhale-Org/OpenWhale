@@ -2,11 +2,14 @@
  * Example: Hyperliquid CopyTrading
  *
  * Shows how to build a copy-trading bot using @openwhale/hyperliquid:
- *   1. Initialize HyperliquidAdapter
+ *   1. Initialize HyperliquidAdapter (read-only, for the monitor)
  *   2. Register UserTradesMonitor (watch target address fills)
- *   3. Register PerpTradingExecutor (execute orders)
- *   4. Register HyperliquidAccount (account queries)
+ *   3. Register PerpTradingExecutor (executes orders using the account's adapter)
+ *   4. Register AccountFactory (framework creates HyperliquidAccount from stored credentials)
  *   5. Activate a CopyTradingStrategy instance
+ *
+ * The executor's private key comes from the credential stored in CredentialStore,
+ * not from an environment variable. Only the monitor needs a read-only wallet address.
  *
  * ── Required environment variables ───────────────────────────────────────────
  *
@@ -15,24 +18,23 @@
  *
  *   HL_WALLET_ADDRESS          required  your Hyperliquid wallet address (0x...)
  *
- *   HL_PRIVATE_KEY             required  corresponding private key (0x...) used to sign order requests
+ *   HL_PRIVATE_KEY             required  corresponding private key (0x...) — stored in CredentialStore,
+ *                                        never passed directly to the executor
  *                                        ⚠️  do not commit to version control; store in a .env file
+ *
+ *   HL_TARGET_ADDRESS          required  address to copy trades from
  *
  * ── Optional environment variables ───────────────────────────────────────────
  *
  *   OPENWHALE_DATA_DIR         optional  data directory; defaults to ~/.openwhale
+ *   MOCK_EXECUTOR              optional  set to 'true' to log instructions without placing real orders
  *
  * ── How to run ────────────────────────────────────────────────────────────────
  *
- *   # install dependencies
- *   pnpm install
- *
- *   # set environment variables (or create a .env file and load with dotenv)
  *   export OPENWHALE_ENCRYPTION_KEY="$(openssl rand -hex 32)"
  *   export HL_WALLET_ADDRESS="0xYourWalletAddress"
  *   export HL_PRIVATE_KEY="0xYourPrivateKey"
- *
- *   # run
+ *   export HL_TARGET_ADDRESS="0xTargetAddress"
  *   npx tsx packages/hyperliquid/examples/copy-trading.ts
  */
 
@@ -46,15 +48,17 @@ import { CopyTradingStrategy } from '../src/strategy.js'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
-// ── Target copy-trading address (from env) ────────────────────────────────────
 const TARGET_ADDRESS = process.env['HL_TARGET_ADDRESS'] ?? ''
 
 const mockLog = createLogger('MockExecutor')
 const log = createLogger('CopyTradingExample')
 
+// Mock executor for dry-run mode — mirrors PerpTradingExecutor's accountTypes so
+// the framework injects accounts and validation passes, but no real orders are placed.
 class MockExecutor extends BaseExecutor<ExecutionInstruction> {
   get executorName() { return 'perp-trading' }
   get supportedActions() { return ['placeOrder', 'cancelOrder', 'setLeverage'] }
+  override get accountTypes() { return [{ type: 'hyperliquid', label: 'trading' }] as const }
 
   async execute(instruction: ExecutionInstruction): Promise<ExecutionResult<ExecutionInstruction>> {
     mockLog.info({ action: instruction.action, params: instruction.params, messageId: instruction.messageId }, '[MOCK] Would execute instruction')
@@ -79,34 +83,33 @@ async function main() {
   const database = new SQLiteAdapter({ filePath: dbPath })
   await database.initialize()
 
-  // DBCredentialStore(masterKey, db)
   const credentialStore = new DBCredentialStore(encryptionKey, database)
 
-  // Store Hyperliquid credentials in the encrypted database (written on first run; overwritten on subsequent runs).
+  // Store Hyperliquid credentials (written on first run; overwritten on subsequent runs).
   // The credential name 'HL Main' must match the name in StrategyInstance.accounts.
   await credentialStore.set('HL Main', 'hyperliquid', { walletAddress, privateKey })
 
-  // ── 3. Initialize HyperliquidAdapter ─────────────────────────────────────
-  // Adapter is the low-level layer; Account and Executor share the same instance to avoid duplicate connections
-  const hlAdapter = new HyperliquidAdapter({ walletAddress, privateKey })
+  // ── 3. Initialize read-only adapter for the monitor ──────────────────────
+  // The executor gets its adapter from the account (via CredentialStore), not from here.
+  const readAdapter = new HyperliquidAdapter({ walletAddress })
 
   // ── 4. Assemble Runtime ───────────────────────────────────────────────────
   const runtime = new OpenWhaleRuntime({ database, credentialStore, dataDir })
 
-  // Register Monitor: watch real-time fills for the target address
   const now = new Date().toISOString()
+
+  // Register Monitor: watch real-time fills for the target address
   runtime.registerMonitor(
     { id: 'user-trades', name: 'User Trades Monitor', source: 'builtin', createdAt: now, updatedAt: now },
-    new UserTradesMonitor(hlAdapter),
+    new UserTradesMonitor(readAdapter),
   )
 
-  // Register Executor: MOCK_EXECUTOR=true prints instructions only; otherwise places real orders
+  // Register Executor: MOCK_EXECUTOR=true logs instructions only; otherwise places real orders
   const isMock = process.env['MOCK_EXECUTOR'] === 'true'
-  const executor = isMock ? new MockExecutor() : new PerpTradingExecutor(hlAdapter)
-  const executorName = isMock ? 'Mock Perp Trading Executor' : 'Perp Trading Executor'
+  const executor = isMock ? new MockExecutor() : new PerpTradingExecutor()
   log.info({ mock: isMock }, 'Executor mode')
   runtime.registerExecutor(
-    { id: 'perp-trading', name: executorName, source: 'builtin', supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'], createdAt: now, updatedAt: now },
+    { id: 'perp-trading', name: isMock ? 'Mock Perp Trading Executor' : 'Perp Trading Executor', source: 'builtin', supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'], createdAt: now, updatedAt: now },
     executor,
   )
 
@@ -116,9 +119,10 @@ async function main() {
     () => new CopyTradingStrategy(),
   )
 
-  // Register AccountFactory: framework reads credentials from CredentialStore and calls this factory at activate()
-  runtime.registerAccountFactory('hyperliquid', (data) =>
-    new HyperliquidAccount('HL Main', new HyperliquidAdapter({
+  // Register AccountFactory: framework reads credentials from CredentialStore and calls this
+  // factory at activate() time, passing the credential name and decrypted data.
+  runtime.registerAccountFactory('hyperliquid', (name, data) =>
+    new HyperliquidAccount(name, new HyperliquidAdapter({
       walletAddress: data['walletAddress'] as string,
       privateKey: data['privateKey'] as string,
     }))
@@ -132,16 +136,16 @@ async function main() {
     id: 'copy-trading-instance-1',
     name: `Copy ${TARGET_ADDRESS.slice(0, 8)}...`,
     strategyId: 'copy-trading',
-    accounts: ['HL Main'],   // matches the credential name in credentialStore
+    accounts: ['HL Main'],   // credential name — framework resolves to HyperliquidAccount at activate()
     params: {
       base: {
         targetAddress: TARGET_ADDRESS,
-        ratio: 0.5,           // copy ratio: 50% of target position size
-        maxPositionUsd: 1000, // max 1000 USD per position
+        ratio: 0.5,
+        maxPositionUsd: 1000,
       },
       tunable: {
-        minTradeUsd: 10,          // ignore fills below 20 USD
-        slippageTolerance: 0.005, // 0.5% slippage tolerance
+        minTradeUsd: 10,
+        slippageTolerance: 0.005,
       },
     },
     enabled: true,
@@ -156,7 +160,7 @@ async function main() {
   process.on('SIGINT', async () => {
     console.log('\nShutting down...')
     await runtime.stop()
-    await hlAdapter.close()
+    await readAdapter.close()
     await database.close()
     process.exit(0)
   })

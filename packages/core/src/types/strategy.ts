@@ -100,6 +100,11 @@ export interface IStrategy {
    * TriggerManager uses this to look up monitors in the registry.
    */
   readonly resolvedMonitors: readonly string[]
+  /**
+   * Resolved executor registry keys — executors with namespace prefix applied.
+   * Runtime uses this to look up executors in the registry.
+   */
+  readonly resolvedExecutors: readonly string[]
   /** Account type declarations. Framework validates and injects accounts at activate() time. */
   readonly accountTypes: readonly AccountTypeDeclaration[]
   /** Base params schema (required fields, no defaults). */

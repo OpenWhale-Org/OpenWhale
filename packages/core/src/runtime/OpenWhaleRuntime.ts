@@ -248,6 +248,9 @@ export class OpenWhaleRuntime implements IRuntime {
     this.instances.set(instance.id, instance)
     this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts, monitorLabelToKey)
 
+    // Inject accounts into each executor this strategy uses
+    await this.injectExecutorAccounts(instance, strategy, accounts)
+
     if (persist) await this.instanceStore.save(instance)
   }
 
@@ -257,6 +260,38 @@ export class OpenWhaleRuntime implements IRuntime {
     // Fill tunable defaults via Zod parse
     const parsedTunable = strategy.tunableParamsSchema.parse(tunable) as RawCredentialData
     return { base, tunable: parsedTunable }
+  }
+
+  /**
+   * For each executor declared by the strategy, resolve the accounts it needs from the
+   * already-resolved strategy accounts (matched by accountType), then call setAccounts().
+   */
+  private async injectExecutorAccounts(
+    instance: StrategyInstance,
+    strategy: IStrategy,
+    strategyAccounts: IAccount[],
+  ): Promise<void> {
+    for (let i = 0; i < strategy.executors.length; i++) {
+      const resolvedId = strategy.resolvedExecutors[i]!
+      const executor = this.executorRegistry.get(resolvedId)
+      if (!executor || executor.accountTypes.length === 0) continue
+
+      // Match executor's accountTypes against the strategy accounts pool by type
+      const executorAccounts: IAccount[] = []
+      for (const decl of executor.accountTypes) {
+        const expectedType = typeof decl === 'string' ? decl : decl.type
+        const match = strategyAccounts.find((a) => a.accountType === expectedType)
+        if (!match) {
+          throw new Error(
+            `Executor "${resolvedId}" requires an account of type "${expectedType}" ` +
+            `but no such account was found in instance "${instance.id}" accounts`
+          )
+        }
+        executorAccounts.push(match)
+      }
+
+      executor.setAccounts(instance.id, executorAccounts)
+    }
   }
 
   private async ensureAccounts(instance: StrategyInstance, strategy: IStrategy): Promise<IAccount[]> {
@@ -290,7 +325,7 @@ export class OpenWhaleRuntime implements IRuntime {
         if (!factory) {
           throw new Error(`No AccountFactory registered for type: "${type}" (credential: "${name}")`)
         }
-        this.accountRegistry.set(name, factory(data))
+        this.accountRegistry.set(name, factory(name, data))
       }
       accounts.push(this.accountRegistry.get(name)!)
     }

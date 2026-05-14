@@ -1,7 +1,7 @@
 import { BaseExecutor, createLogger } from '@openwhale/core'
 import type { ExecutionInstruction, ExecutionResult } from '@openwhale/core'
 import { z } from 'zod'
-import type { HyperliquidAdapter } from './adapter.js'
+import { HyperliquidAccount } from './account.js'
 
 const log = createLogger('PerpTradingExecutor')
 
@@ -49,7 +49,7 @@ type PerpInstruction = z.infer<typeof instructionSchema>
 // ── Executor ──────────────────────────────────────────────────────────────────
 
 export class PerpTradingExecutor extends BaseExecutor<PerpInstruction & ExecutionInstruction> {
-  constructor(private readonly adapter: HyperliquidAdapter) {
+  constructor() {
     super()
   }
 
@@ -61,8 +61,16 @@ export class PerpTradingExecutor extends BaseExecutor<PerpInstruction & Executio
     return ['placeOrder', 'cancelOrder', 'setLeverage']
   }
 
+  override get accountTypes() {
+    return [{ type: 'hyperliquid', label: 'trading' }] as const
+  }
+
   protected get instructionSchema() {
     return instructionSchema as any
+  }
+
+  private get adapter() {
+    return this.account<HyperliquidAccount>('trading').getAdapter()
   }
 
   async execute(instruction: PerpInstruction & ExecutionInstruction): Promise<ExecutionResult<PerpInstruction & ExecutionInstruction>> {

@@ -43,5 +43,5 @@ export interface IAccount {
   history(limit?: number): Promise<IHistoryRecord[]>
 }
 
-/** Factory function that creates an IAccount from decrypted credential data. */
-export type AccountFactory = (data: RawCredentialData) => IAccount
+/** Factory function that creates an IAccount from decrypted credential data and its name. */
+export type AccountFactory = (name: string, data: RawCredentialData) => IAccount

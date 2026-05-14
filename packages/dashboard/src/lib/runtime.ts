@@ -33,7 +33,6 @@ function createRuntime(): OpenWhaleRuntime {
 
   runtime.loadPlugin(hyperliquidPlugin, {
     walletAddress: process.env['HL_WALLET_ADDRESS'] ?? '',
-    privateKey: process.env['HL_PRIVATE_KEY'],
   })
 
   return runtime

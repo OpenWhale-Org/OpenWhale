@@ -12,6 +12,11 @@ export class HyperliquidAccount implements IAccount {
     this.name = name
   }
 
+  /** Returns the underlying adapter for use by executors that need direct exchange access. */
+  getAdapter(): HyperliquidAdapter {
+    return this.adapter
+  }
+
   async balance(): Promise<IBalance> {
     const balances = await this.adapter.fetchBalance()
     const usd = balances.find(b => b.currency === 'USDC' || b.currency === 'USD') ?? balances[0]

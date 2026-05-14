@@ -1,4 +1,5 @@
 import { ensureStarted } from '@/lib/runtime'
+import type { StrategyRunEvent } from '@openwhale/core'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +49,7 @@ export async function GET() {
       }
 
       // Strategy run events
-      const strategyRunHandler = (event: Parameters<typeof runtime.addStrategyRunHandler>[0]) => {
+      const strategyRunHandler = (event: StrategyRunEvent) => {
         send({ type: 'strategy_run', ...event })
       }
       runtime.addStrategyRunHandler(strategyRunHandler)

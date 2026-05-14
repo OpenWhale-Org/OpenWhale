@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import type { ExecutionInstruction, ExecutionQueue, ExecutionResult, ExecutorOptions, InstructionSchema, RetryOptions } from '../types/executor.js'
+import type { AccountTypeDeclaration } from '../types/strategy.js'
+import type { IAccount } from '../types/account.js'
 import { getDataDir, getExecutionPath } from '../utils/paths.js'
 import { createLogger } from '../utils/logger.js'
 
@@ -95,6 +97,9 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
   // crashes before ACKing, instance B will reclaim and re-execute it without knowing A already succeeded.
   // For now, idempotency is not implemented. Executors should handle it in their own execute() logic.
 
+  /** Per-instance account registry: instanceId → IAccount[] (in accountTypes order). */
+  private readonly instanceAccounts = new Map<string, IAccount[]>()
+
   protected constructor(options?: Partial<ExecutorOptions>) {
     this.dataDir = getDataDir(options?.dataDir)
     this.timeout = options?.timeout ?? 0
@@ -106,6 +111,50 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
   abstract get executorName(): string
   abstract get supportedActions(): string[]
   abstract execute(instruction: TInstruction): Promise<ExecutionResult<TInstruction>>
+
+  /**
+   * Account type declarations for this executor.
+   * Override in subclasses that require accounts (e.g. for signing orders).
+   * Framework validates injected accounts against this list at execution time.
+   */
+  get accountTypes(): readonly AccountTypeDeclaration[] {
+    return []
+  }
+
+  /**
+   * Called by the framework when a strategy instance that uses this executor is activated.
+   * Stores the resolved accounts keyed by instanceId for use during execute().
+   */
+  setAccounts(instanceId: string, accounts: IAccount[]): void {
+    this.instanceAccounts.set(instanceId, accounts)
+  }
+
+  /**
+   * Access an account injected for the current instruction's instance, by index or label.
+   * Must be called from within execute() where this.currentInstruction is set.
+   *
+   * @example
+   * const account = this.account<HyperliquidAccount>('trading')
+   */
+  protected account<T extends IAccount = IAccount>(indexOrLabel: number | string): T {
+    const accounts = this.currentAccounts
+    if (!accounts) throw new Error('No accounts available for this instruction — check accountTypes declaration and instruction.accountNames')
+    if (typeof indexOrLabel === 'number') {
+      const acc = accounts[indexOrLabel]
+      if (!acc) throw new Error(`Executor account at index ${indexOrLabel} not found`)
+      return acc as T
+    }
+    const idx = this.accountTypes.findIndex(
+      (decl) => typeof decl === 'object' && decl.label === indexOrLabel
+    )
+    if (idx === -1) throw new Error(`Executor account with label '${indexOrLabel}' not declared in accountTypes`)
+    const acc = accounts[idx]
+    if (!acc) throw new Error(`Executor account with label '${indexOrLabel}' not found`)
+    return acc as T
+  }
+
+  /** Set during runWithRetry so account() can access the right instance's accounts. */
+  private currentAccounts: IAccount[] | undefined
 
   /**
    * Optional: provide a Zod schema to validate and narrow the instruction at runtime.
@@ -136,6 +185,15 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     await queue.consume(consumeId ?? this.executorName, async (raw) => {
       if (!this.supportedActions.includes(raw.action)) return
 
+      // Validate and resolve accounts if this executor declares accountTypes
+      if (this.accountTypes.length > 0) {
+        const accountError = this.validateAccounts(raw)
+        if (accountError) {
+          await this.recordSafe({ instruction: raw as TInstruction, status: 'failed', error: accountError, executedAt: new Date() })
+          return
+        }
+      }
+
       // TODO: improve Record to track the full lifecycle (execution start -> execution end)
       const schema = this.instructionSchema
       if (schema) {
@@ -149,21 +207,58 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
           })
           return
         }
-        await this.runWithRetry({ ...parsed.data, executorId: raw.executorId, messageId: raw.messageId, instanceId: raw.instanceId } as TInstruction)
+        await this.runWithRetry({ ...parsed.data, executorId: raw.executorId, messageId: raw.messageId, instanceId: raw.instanceId, accountNames: raw.accountNames } as TInstruction)
       } else {
         await this.runWithRetry(raw as TInstruction)
       }
     })
   }
 
+  /**
+   * Validates instruction.accountNames against this.accountTypes.
+   * Returns an error string if invalid, undefined if valid.
+   */
+  private validateAccounts(raw: ExecutionInstruction): string | undefined {
+    const { accountNames, instanceId } = raw
+    const expected = this.accountTypes.length
+
+    if (!accountNames || accountNames.length === 0)
+      return `Executor "${this.executorName}" requires ${expected} account(s) but instruction carries none`
+
+    if (accountNames.length !== expected)
+      return `Executor "${this.executorName}" requires ${expected} account(s) but instruction carries ${accountNames.length}`
+
+    // Verify each account exists and matches the declared type
+    const accounts = instanceId ? this.instanceAccounts.get(instanceId) : undefined
+    if (!accounts)
+      return `No accounts injected for instance "${instanceId ?? '(unknown)'}" — was the instance activated?`
+
+    for (let i = 0; i < this.accountTypes.length; i++) {
+      const decl = this.accountTypes[i]!
+      const expectedType = typeof decl === 'string' ? decl : decl.type
+      const acc = accounts[i]
+      if (!acc) return `Account[${i}] not found for instance "${instanceId}"`
+      if (acc.accountType !== expectedType)
+        return `Account[${i}] type mismatch: executor expects "${expectedType}" but got "${acc.accountType}" (name: "${acc.name}")`
+    }
+
+    return undefined
+  }
+
   private async runWithRetry(instruction: TInstruction): Promise<void> {
     const { maxRetries, retryDelay, maxRetryDelay } = this.retry
     let lastError: unknown
+
+    // Set currentAccounts so account() works inside execute()
+    this.currentAccounts = instruction.instanceId
+      ? this.instanceAccounts.get(instruction.instanceId)
+      : undefined
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const result = await this.executeWithTimeout(instruction)
         await this.recordSafe(result)
+        this.currentAccounts = undefined
         return
       } catch (err) {
         lastError = err
@@ -185,6 +280,7 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
       error: lastError instanceof Error ? lastError.message : String(lastError),
       executedAt: new Date(),
     })
+    this.currentAccounts = undefined
   }
 
   private async executeWithTimeout(instruction: TInstruction): Promise<ExecutionResult<TInstruction>> {

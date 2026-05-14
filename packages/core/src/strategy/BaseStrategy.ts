@@ -219,6 +219,10 @@ export abstract class BaseStrategy implements IStrategy {
     return this.monitors.map(m => this._resolveDeclarationName(typeof m === 'string' ? m : m.name))
   }
 
+  get resolvedExecutors(): readonly string[] {
+    return this.executors.map(e => this._resolveDeclarationName(typeof e === 'string' ? e : e.name))
+  }
+
   /**
    * Called by loadPlugin() to inject the plugin namespace (e.g. 'hyperliquid').
    * After this, monitor/executor names without '/' are resolved as '{namespace}/{name}'.
@@ -395,20 +399,26 @@ export abstract class BaseStrategy implements IStrategy {
   /**
    * Build an ExecutionInstruction for a declared executor.
    *
+   * @param accountLabels - Labels (or indices) of accounts from this strategy's accountTypes
+   *   to pass to the executor, in the order the executor's accountTypes expects them.
+   *
    * @example
-   * return [this.instruction('perp', 'placeOrder', { symbol: 'BTC', side: 'buy', ... })]
+   * return [this.instruction('perp', 'placeOrder', { symbol: 'BTC', side: 'buy', ... }, ['main'])]
    */
   protected instruction(
     executorLabelOrIndex: string | number,
     action: string,
     params: Record<string, unknown>,
+    accountLabels?: (string | number)[],
   ): ExecutionInstruction {
+    const accountNames = accountLabels?.map((labelOrIdx) => this.account(labelOrIdx).name)
     return {
       executorId: this.executor(executorLabelOrIndex),
       messageId: nanoid(),
       action,
       params,
       ...(this.instanceId ? { instanceId: this.instanceId } : {}),
+      ...(accountNames && accountNames.length > 0 ? { accountNames } : {}),
     }
   }
 

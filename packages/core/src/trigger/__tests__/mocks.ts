@@ -62,6 +62,14 @@ export class MockStrategy implements IStrategy {
     })
   }
 
+  get resolvedExecutors(): readonly string[] {
+    return this.executors.map(e => {
+      const name = typeof e === 'string' ? e : e.name
+      if (name.includes('/')) return name
+      return this.namespace ? `${this.namespace}/${name}` : name
+    })
+  }
+
   monitor(labelOrIndex: string | number): string {
     const decl = typeof labelOrIndex === 'number'
       ? this.monitors[labelOrIndex]

@@ -123,7 +123,7 @@ export class CopyTradingStrategy extends BaseStrategy {
       type: 'market',
       amount: parseFloat(copyAmount.toFixed(6)),
       slippage: slippageTolerance,
-    })
+    }, ['main'])
 
     log.info(
       { symbol: trade.symbol, side: trade.side, amount: instruction.params.amount, cappedNotional, slippageTolerance },
