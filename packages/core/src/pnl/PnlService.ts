@@ -222,12 +222,17 @@ export class PnlService {
     ev: { id?: string; symbol: string; amount: number; asset: string; timestamp: number },
   ): Promise<void> {
     const eventKey = ev.id ?? `${ev.timestamp}:${ev.symbol}:${ev.amount}`
+    // Entitlement freezes at the settlement boundary, but the venue stamps the
+    // income slightly AFTER it — by then a settlement-scalping instance has
+    // already closed and its net at ev.timestamp reads zero. Split by the
+    // position held AT the boundary instead.
+    const boundary = Math.min(ev.timestamp, Math.floor(ev.timestamp / 3600_000) * 3600_000)
     const exposures = await this.db.all<{ instance_id: string; net: number }>(
       `SELECT instance_id, SUM(CASE WHEN side = 'buy' THEN qty ELSE -qty END) AS net
          FROM pnl_fills
         WHERE account = ? AND symbol = ? AND ts <= ? AND instance_id IS NOT NULL
         GROUP BY instance_id`,
-      [account, ev.symbol, ev.timestamp])
+      [account, ev.symbol, boundary])
     const holders = exposures.filter(e => Math.abs(e.net) > EPS)
     const totalAbs = holders.reduce((s, e) => s + Math.abs(e.net), 0)
 
