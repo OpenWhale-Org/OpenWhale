@@ -1129,12 +1129,15 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
                 (slot.kind === undefined || a.kind === slot.kind) &&
                 (slot.type === undefined || a.type === slot.type),
               )
-              // Legacy fallback: bare credentials still bind (kind's canonical reader)
+              // Credentials also bind: kind slots as the legacy fallback; kindless
+              // type-pinned slots (raw executor slots) bind credentials DIRECTLY —
+              // that is their only form, so match on the pinned type alone.
               const typesForKind = new Set(
                 credentialTypes.filter(t => slot.kind && t.kinds.includes(slot.kind!)).map(t => t.type),
               )
               const legacyEligible = credentials.filter(c =>
-                typesForKind.has(c.type) && (slot.type === undefined || c.type === slot.type),
+                (slot.kind ? typesForKind.has(c.type) : slot.type !== undefined) &&
+                (slot.type === undefined || c.type === slot.type),
               )
               return (
                 <div key={slot.label} className="flex items-center gap-3 px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
@@ -1162,7 +1165,7 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
                       </optgroup>
                     )}
                     {legacyEligible.length > 0 && (
-                      <optgroup label="Credentials (legacy direct binding)">
+                      <optgroup label={slot.kind ? 'Credentials (legacy direct binding)' : 'Credentials'}>
                         {legacyEligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
                       </optgroup>
                     )}
