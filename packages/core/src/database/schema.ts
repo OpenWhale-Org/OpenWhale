@@ -120,6 +120,65 @@ CREATE TABLE IF NOT EXISTS strategy_store (
 );
 
 CREATE INDEX IF NOT EXISTS idx_strategy_store_instance ON strategy_store (instance_id);
+
+-- ── PnL attribution ledger ────────────────────────────────────────────────────
+-- The attribution atom is the ORDER: executors claim the venue order ids they
+-- place under an instance; a background collector pulls the venue's fills and
+-- funding history and joins them back through the claims. Symbols shared by
+-- several instances therefore stay separable — the SOXL problem.
+
+CREATE TABLE IF NOT EXISTS pnl_order_claims (
+  account     TEXT NOT NULL,           -- credential name the order was placed with
+  order_id    TEXT NOT NULL,
+  instance_id TEXT NOT NULL,
+  symbol      TEXT NOT NULL,
+  executor    TEXT,
+  ts          INTEGER NOT NULL,
+  PRIMARY KEY (account, order_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pnl_claims_instance ON pnl_order_claims (instance_id);
+CREATE INDEX IF NOT EXISTS idx_pnl_claims_account_symbol ON pnl_order_claims (account, symbol);
+
+CREATE TABLE IF NOT EXISTS pnl_fills (
+  account      TEXT NOT NULL,
+  fill_id      TEXT NOT NULL,
+  order_id     TEXT NOT NULL,
+  instance_id  TEXT,                   -- NULL = unclaimed (manual / unknown origin)
+  symbol       TEXT NOT NULL,
+  side         TEXT NOT NULL,
+  qty          REAL NOT NULL,
+  price        REAL NOT NULL,
+  realized_pnl REAL,
+  fee          REAL,
+  fee_asset    TEXT,
+  ts           INTEGER NOT NULL,
+  PRIMARY KEY (account, fill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pnl_fills_instance ON pnl_fills (instance_id, ts);
+CREATE INDEX IF NOT EXISTS idx_pnl_fills_account_symbol ON pnl_fills (account, symbol, ts);
+
+-- Funding is position-level, not order-level: one venue event may split into
+-- several rows, one per instance holding claimed exposure at that moment
+-- (share ∝ |net position|). instance_id '' = the unattributed remainder.
+CREATE TABLE IF NOT EXISTS pnl_funding (
+  account     TEXT NOT NULL,
+  event_key   TEXT NOT NULL,           -- venue event id, or ts:symbol:amount
+  instance_id TEXT NOT NULL DEFAULT '',
+  symbol      TEXT NOT NULL,
+  amount      REAL NOT NULL,           -- this row's share (positive = received)
+  asset       TEXT NOT NULL,
+  shared      INTEGER NOT NULL DEFAULT 0,
+  ts          INTEGER NOT NULL,
+  PRIMARY KEY (account, event_key, instance_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pnl_funding_instance ON pnl_funding (instance_id, ts);
+
+CREATE TABLE IF NOT EXISTS pnl_watermarks (
+  account TEXT NOT NULL,
+  scope   TEXT NOT NULL,               -- 'fills:<symbol>' | 'funding'
+  ts      INTEGER NOT NULL,
+  PRIMARY KEY (account, scope)
+);
 `
 
 /**

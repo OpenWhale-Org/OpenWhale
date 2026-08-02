@@ -1,4 +1,4 @@
-import type { ExchangePosition, ExchangeOrder, FundingRateData, OpenInterestData, PerpOrderParams } from './exchange.js'
+import type { ExchangePosition, ExchangeOrder, ExchangeFill, FundingEvent, FundingRateData, OpenInterestData, PerpOrderParams } from './exchange.js'
 import type { SpotExchangeAdapter } from './spot.js'
 
 /** One leverage bracket: positions up to maxNotionalUsd may use up to maxLeverage. */
@@ -57,6 +57,20 @@ export interface PerpExchangeAdapter extends SpotExchangeAdapter {
   fetchLeverageTiers?(symbol: string): Promise<LeverageTier[]>
 
   // ── Account (perp-specific) ───────────────────────────────────────────────
+
+  /**
+   * Fills for ONE symbol since a watermark, oldest first. The venue is the
+   * ground truth for realized PnL and fees; per-instance attribution joins
+   * these to claimed order ids. Optional — venues without a trade-history
+   * API omit it and PnL collection degrades to claims-only.
+   */
+  fetchFills?(symbol: string, since?: number, limit?: number): Promise<ExchangeFill[]>
+
+  /**
+   * Funding payments across the account since a watermark, oldest first.
+   * Optional — used to attribute funding to instances by open-exposure share.
+   */
+  fetchFundingHistory?(since?: number, limit?: number): Promise<FundingEvent[]>
 
   /**
    * Fetch position list.

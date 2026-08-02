@@ -345,6 +345,63 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
       // Disk full, permission error, etc. — log but don't crash the queue loop.
       this.log.error({ status: result.status, error: result.error }, 'Failed to record execution result')
     }
+    try {
+      this.autoClaimOrders(result)
+    } catch (err) {
+      this.log.warn({ err }, 'PnL order-claim scan failed — those orders will show as unattributed')
+    }
+  }
+
+  // ── PnL order claims ──────────────────────────────────────────────────────
+
+  private claimSink: ((claim: {
+    instanceId: string; account: string; symbol: string; orderId: string; executor?: string; ts: number
+  }) => void) | null = null
+
+  /** Runtime-injected: claims flow into the PnL attribution ledger. */
+  setClaimSink(sink: typeof this.claimSink): void {
+    this.claimSink = sink
+  }
+
+  /**
+   * Walk the recorded result data for `{ orderId, symbol }` shapes and claim
+   * each order under the instruction's instance. Convention-based on purpose:
+   * every executor here already records placed orders this way, so PnL
+   * attribution needs no per-executor code. Fire-and-forget — never in the
+   * execution hot path.
+   */
+  private autoClaimOrders(result: ExecutionResult<TInstruction>): void {
+    if (!this.claimSink) return
+    const instruction = result.instruction as unknown as {
+      instanceId?: string; accountNames?: string[]
+    }
+    const instanceId = instruction.instanceId
+    if (!instanceId) return
+    const slots = this.instanceSlots.get(instanceId)
+    const firstSession = slots !== undefined
+      ? [...slots.values()].find(s => s.session !== undefined)?.credentialName
+      : undefined
+    const account = instruction.accountNames?.[0] ?? firstSession
+    if (!account) return
+
+    const found: Array<{ orderId: string; symbol: string }> = []
+    const walk = (node: unknown, depth: number): void => {
+      if (depth > 6 || node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const item of node) walk(item, depth + 1); return }
+      const rec = node as Record<string, unknown>
+      const orderId = rec['orderId']
+      const symbol = rec['symbol']
+      if ((typeof orderId === 'string' || typeof orderId === 'number') && typeof symbol === 'string' && String(orderId) !== '') {
+        found.push({ orderId: String(orderId), symbol })
+      }
+      for (const value of Object.values(rec)) walk(value, depth + 1)
+    }
+    walk(result.data, 0)
+
+    const ts = result.executedAt instanceof Date ? result.executedAt.getTime() : Date.now()
+    for (const f of found) {
+      this.claimSink({ instanceId, account, symbol: f.symbol, orderId: f.orderId, executor: this.executorName, ts })
+    }
   }
 
   protected async record(result: ExecutionResult<TInstruction>): Promise<void> {

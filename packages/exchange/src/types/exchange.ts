@@ -117,6 +117,35 @@ export interface ExchangeOrder {
   info?: unknown
 }
 
+/**
+ * One executed fill (trade) of an order — the venue's ground truth for
+ * realized PnL and fees. PnL attribution joins fills to claimed order ids,
+ * so `orderId` is the load-bearing field.
+ */
+export interface ExchangeFill {
+  id: string
+  orderId: string
+  symbol: string
+  side: 'buy' | 'sell'
+  qty: number
+  price: number
+  /** Venue-reported realized position PnL of this fill (excludes fees), when the venue provides it. */
+  realizedPnl?: number
+  fee?: number
+  feeAsset?: string
+  timestamp: number
+}
+
+/** One funding payment (positive = received) charged on a held position. */
+export interface FundingEvent {
+  /** Venue event id when available — used for dedup. */
+  id?: string
+  symbol: string
+  amount: number
+  asset: string
+  timestamp: number
+}
+
 /** Single trade record */
 export interface ExchangeTrade {
   id: string

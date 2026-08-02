@@ -106,6 +106,8 @@ export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 
 // Monitor
 export { BaseMonitor, MonitorMode } from './monitor/BaseMonitor.js'
+export { PnlService } from './pnl/PnlService.js'
+export type { OrderClaim, PnlSummary, PnlFillRow, PnlPositionRow, PnlSessionLike } from './pnl/PnlService.js'
 export { MonitorDataReaderImpl } from './monitor/MonitorDataReader.js'
 export { MonitorInstanceManager, ContractMonitor } from './monitor/MonitorInstanceManager.js'
 export { DBMonitorInstanceStore, MemoryMonitorInstanceStore } from './monitor/MonitorInstanceStore.js'

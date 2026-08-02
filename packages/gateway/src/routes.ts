@@ -290,6 +290,47 @@ export function buildRouter(): Router {
     res.json([...live, ...persisted].sort((a, b) => b.startedAt - a.startedAt).slice(0, 100))
   }))
 
+  // ── PnL attribution (order-claim ledger) ─────────────────────────────────
+
+  router.get('/api/pnl/summary', h(async (_req, res) => {
+    const runtime = await ensureStarted()
+    res.json(await runtime.allInstancePnl())
+  }))
+
+  router.get('/api/instances/:id/pnl', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      res.json(await runtime.instancePnl(req.params['id']!))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  router.get('/api/instances/:id/fills', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const limit = Math.min(1000, Math.max(1, Number(req.query['n']) || 200))
+    try {
+      res.json(await runtime.instanceFills(req.params['id']!, limit))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  router.get('/api/instances/:id/positions', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      res.json(await runtime.instancePositions(req.params['id']!))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  router.post('/api/pnl/collect', h(async (_req, res) => {
+    const runtime = await ensureStarted()
+    await runtime.collectPnlNow()
+    res.json({ ok: true })
+  }))
+
   router.get('/api/instances/:id/scope', h(async (req, res) => {
     const runtime = await ensureStarted()
     res.json(runtime.instanceScope(req.params['id']!))

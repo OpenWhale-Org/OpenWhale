@@ -388,13 +388,22 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
               {visible.map((s) => {
                 if (s.candles?.length) {
                   const c = s.candles.reduce((best, cc) => Math.abs(cc.x - hoveredX!) < Math.abs(best.x - hoveredX!) ? cc : best, s.candles[0]!)
+                  // Change = close vs open; range = the candle's full travel,
+                  // both relative to the open — the numbers a settlement
+                  // microstructure reader actually compares candles by.
+                  const changePct = c.o !== 0 ? ((c.c - c.o) / c.o) * 100 : 0
+                  const rangePct = c.o !== 0 ? ((c.h - c.l) / c.o) * 100 : 0
                   return (
-                    <div key={s.label} className="flex items-center gap-2 py-0.5">
+                    <div key={s.label} className="flex items-center gap-2 py-0.5 flex-wrap">
                       <span style={{ color: 'var(--muted)' }}>{s.label}</span>
                       <span>O {formatValue(c.o, unit, geom.tickDecimals)}</span>
                       <span style={{ color: CANDLE_UP }}>H {formatValue(c.h, unit, geom.tickDecimals)}</span>
                       <span style={{ color: CANDLE_DOWN }}>L {formatValue(c.l, unit, geom.tickDecimals)}</span>
                       <span>C {formatValue(c.c, unit, geom.tickDecimals)}</span>
+                      <span style={{ color: changePct >= 0 ? CANDLE_UP : CANDLE_DOWN }}>
+                        Δ {changePct >= 0 ? '+' : ''}{changePct.toFixed(3)}%
+                      </span>
+                      <span style={{ color: 'var(--muted)' }}>R {rangePct.toFixed(3)}%</span>
                     </div>
                   )
                 }

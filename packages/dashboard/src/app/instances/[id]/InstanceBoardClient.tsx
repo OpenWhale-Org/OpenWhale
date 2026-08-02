@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, buildParamsFromFields, fieldValuesFromParams, iconFor, patchInstanceMeta } from '../InstancesClient'
+import { InstancePnlPanel } from './InstancePnlPanel'
 
 /**
  * Full-page board for ONE instance — the same tabs as the list-page card, but
@@ -117,6 +118,8 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
             {' · '}id: {instance.id}
             {bindings.length > 0 && <>{' · '}accounts: {bindings.join(', ')}</>}
           </div>
+
+          <InstancePnlPanel instanceId={instance.id} />
 
           <InstanceParamsPanel instance={instance} />
 

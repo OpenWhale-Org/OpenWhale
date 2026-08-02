@@ -646,6 +646,8 @@ function defaultFieldValues(fields: ParamFieldDef[]): Record<string, string> {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+export interface PnlTotals { realized: number; fees: number; funding: number; net: number; unrealized: number | null }
+
 export function InstancesClient({ initialInstances }: Props) {
   const [instances, setInstances] = useState(initialInstances)
   const [showForm, setShowForm] = useState(false)
@@ -653,13 +655,26 @@ export function InstancesClient({ initialInstances }: Props) {
   const [loading, setLoading] = useState(false)
   const [actionError, setActionError] = useState('')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+  const [pnl, setPnl] = useState<Record<string, PnlTotals>>({})
+
+  const loadPnl = useCallback(async () => {
+    const res = await fetch('/api/pnl/summary')
+    if (res.ok) setPnl(await res.json() as Record<string, PnlTotals>)
+  }, [])
+
+  useEffect(() => {
+    void loadPnl()
+    const timer = setInterval(() => void loadPnl(), 30_000)
+    return () => clearInterval(timer)
+  }, [loadPnl])
 
   const refresh = useCallback(async () => {
     setLoading(true)
     const res = await fetch('/api/instances')
     if (res.ok) setInstances(await res.json())
+    void loadPnl()
     setLoading(false)
-  }, [])
+  }, [loadPnl])
 
   async function act(id: string, verb: 'activate' | 'deactivate' | 'duplicate') {
     setActionError('')
@@ -795,6 +810,7 @@ export function InstancesClient({ initialInstances }: Props) {
                   >
                     <InstanceCard
                       instance={inst}
+                      pnl={pnl[inst.id]}
                       folders={folderNames}
                       onActivate={() => act(inst.id, 'activate')}
                       onDeactivate={() => act(inst.id, 'deactivate')}
@@ -1339,8 +1355,9 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 // ── Instance card ─────────────────────────────────────────────────────────────
 
-function InstanceCard({ instance, folders, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
+function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
   instance: StrategyInstanceView
+  pnl?: PnlTotals
   folders: string[]
   onActivate: () => void
   onDeactivate: () => void
@@ -1387,6 +1404,24 @@ function InstanceCard({ instance, folders, onActivate, onDeactivate, onDuplicate
             >
               {instance.active ? 'active' : 'stopped'}
             </span>
+            {pnl && (
+              <span
+                className="text-xs font-mono px-2 py-0.5 rounded-full"
+                title={`realized ${pnl.realized.toFixed(2)} · fees ${pnl.fees.toFixed(2)} · funding ${pnl.funding.toFixed(2)}${pnl.unrealized !== null ? ` · unrealized ${pnl.unrealized.toFixed(2)}` : ''}`}
+                style={{
+                  background: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  color: pnl.net > 0.005 ? 'var(--success)' : pnl.net < -0.005 ? 'var(--danger)' : 'var(--muted)',
+                }}
+              >
+                {pnl.net > 0 ? '+' : ''}{pnl.net.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {pnl.unrealized !== null && Math.abs(pnl.unrealized) > 0.005 && (
+                  <span style={{ color: pnl.unrealized > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {' '}u{pnl.unrealized > 0 ? '+' : ''}{pnl.unrealized.toFixed(2)}
+                  </span>
+                )}
+              </span>
+            )}
             <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>
               {expanded ? '▲' : '▼'}
             </span>

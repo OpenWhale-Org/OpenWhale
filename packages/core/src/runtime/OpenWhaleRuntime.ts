@@ -27,6 +27,8 @@ import { appendRunTrace, readRunTraces } from '../strategy/runStore.js'
 import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
 import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
+import { PnlService } from '../pnl/PnlService.js'
+import type { PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow } from '../pnl/PnlService.js'
 import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
@@ -209,6 +211,10 @@ export class OpenWhaleRuntime implements IRuntime {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor<any>): void {
     this.executorRegistry.register(definition, instance)
+    // Late-bound closure: pnlService exists only after start() on DB-backed
+    // runtimes; executors registered earlier still pick it up. Optional call —
+    // executors compiled against an older base class must keep loading.
+    instance.setClaimSink?.((claim) => { void this.pnlService?.recordClaim(claim) })
     // Hot install/replace while running: boot-time startInner won't run again,
     // so the NEW executor object must take over the queue consumer here — and
     // any consumer loop still owned by a replaced object must stop first
@@ -606,6 +612,37 @@ export class OpenWhaleRuntime implements IRuntime {
     return readRunTraces(this.dataDir, instanceId, limit)
   }
 
+  // ── PnL attribution ─────────────────────────────────────────────────────────
+
+  private pnlService: PnlService | undefined
+
+  /** Per-instance realized PnL / fees / funding summary from the attribution ledger. */
+  async instancePnl(instanceId: string): Promise<PnlSummary> {
+    if (!this.pnlService) throw new Error('PnL attribution requires a database-backed runtime')
+    return this.pnlService.instancePnl(instanceId)
+  }
+
+  /** Net totals for every instance at once — powers the list-page badges. */
+  async allInstancePnl(): Promise<Record<string, { realized: number; fees: number; funding: number; net: number; unrealized: number | null }>> {
+    if (!this.pnlService) return {}
+    return this.pnlService.allInstanceTotals()
+  }
+
+  async instanceFills(instanceId: string, limit = 200): Promise<PnlFillRow[]> {
+    if (!this.pnlService) throw new Error('PnL attribution requires a database-backed runtime')
+    return this.pnlService.instanceFills(instanceId, limit)
+  }
+
+  async instancePositions(instanceId: string): Promise<PnlPositionRow[]> {
+    if (!this.pnlService) throw new Error('PnL attribution requires a database-backed runtime')
+    return this.pnlService.instancePositions(instanceId)
+  }
+
+  /** Force a collection pass now (dashboard refresh button). */
+  async collectPnlNow(): Promise<void> {
+    await this.pnlService?.collect()
+  }
+
   // ── Scripts — on-demand plugin utilities ─────────────────────────────────────
 
   private readonly scriptRegistry = new Map<string, { def: ScriptDefinition; owner: string }>()
@@ -967,6 +1004,25 @@ export class OpenWhaleRuntime implements IRuntime {
     // Initialize database schema if a database adapter is provided
     if (this.database) await this.database.initialize()
 
+    // PnL attribution: executors claim their venue order ids; the collector
+    // joins the venue's fills/funding back through the claims. Requires the
+    // DB (the ledger lives there) — memory-mode runtimes skip it.
+    if (this.database && !this.pnlService) {
+      const db = this.database
+      this.pnlService = new PnlService({
+        db,
+        resolveSession: async (account: string) => {
+          try {
+            const { type } = await this.readCredential(account)
+            return await this.adapterRegistry.resolve<PnlSessionLike>('exchange/perp' as NamespacedKind, type, account)
+          } catch {
+            return null   // credential gone or venue lacks a perp cell — claims-only mode
+          }
+        },
+      })
+    }
+    this.pnlService?.start()
+
     // Load compiled components
     if (this.compiledLoader) await this.compiledLoader.loadAll()
 
@@ -1008,6 +1064,7 @@ export class OpenWhaleRuntime implements IRuntime {
   async stop(): Promise<void> {
     if (!this.running) return
     this.running = false
+    this.pnlService?.stop()
     if (this.accountSnapshotTimer) {
       clearInterval(this.accountSnapshotTimer)
       this.accountSnapshotTimer = undefined

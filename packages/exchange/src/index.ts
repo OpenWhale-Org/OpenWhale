@@ -1,7 +1,7 @@
 // Data types
 export type {
   Ticker, Kline, OrderBook, MarketInfo,
-  ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade,
+  ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade, ExchangeFill, FundingEvent,
   FundingRateData, OpenInterestData, SpotOrderParams, PerpOrderParams,
 } from './types/exchange.js'
 export type { SpotExchangeAdapter } from './types/spot.js'

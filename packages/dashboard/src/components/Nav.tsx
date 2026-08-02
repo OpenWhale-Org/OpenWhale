@@ -136,7 +136,9 @@ export function Nav() {
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
     >
       {links.map(({ href, label, icon }) => {
-        const active = pathname.startsWith(href)
+        // Boundary-aware prefix: '/monitor' must match '/monitor/x' but not
+        // '/monitor-data' — bare startsWith lit up Monitor alongside Explorer.
+        const active = pathname === href || pathname.startsWith(href + '/')
         return (
           <Link
             key={href}

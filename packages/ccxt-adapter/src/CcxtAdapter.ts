@@ -2,7 +2,7 @@ import * as ccxt from 'ccxt'
 import type {
   PerpExchangeAdapter,
   Ticker, Kline, OrderBook, MarketInfo,
-  ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade,
+  ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade, ExchangeFill, FundingEvent,
   FundingRateData, OpenInterestData, PerpOrderParams,
 } from '@openwhaleorg/exchange'
 import { RetryableAdapterError, TerminalAdapterError } from '@openwhaleorg/core'
@@ -217,6 +217,52 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   async fetchMyTrades(symbol?: string, limit = 50): Promise<ExchangeTrade[]> {
     const trades = await this.guard(() => this.exchange.fetchMyTrades(symbol, undefined, limit))
     return trades.map(this.mapTrade)
+  }
+
+  /**
+   * Fills with venue-reported realized PnL — the PnL attribution feed.
+   * Distinct from fetchMyTrades: takes a `since` watermark, returns oldest
+   * first, and surfaces realizedPnl/fee per fill (binance futures carries
+   * realizedPnl in the raw payload; venues without it leave it undefined).
+   */
+  async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
+    const trades = await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit))
+    return trades
+      .map((t): ExchangeFill => {
+        const info = (t.info ?? {}) as Record<string, unknown>
+        const rawPnl = Number(info['realizedPnl'] ?? info['closedPnl'])
+        return {
+          id: String(t.id),
+          orderId: String(t.order ?? ''),
+          symbol: t.symbol ?? symbol,
+          side: t.side === 'sell' ? 'sell' : 'buy',
+          qty: t.amount ?? 0,
+          price: t.price ?? 0,
+          ...(Number.isFinite(rawPnl) ? { realizedPnl: rawPnl } : {}),
+          ...(t.fee?.cost !== undefined ? { fee: t.fee.cost } : {}),
+          ...(t.fee?.currency !== undefined ? { feeAsset: t.fee.currency } : {}),
+          timestamp: t.timestamp ?? 0,
+        }
+      })
+      .sort((a, b) => a.timestamp - b.timestamp)
+  }
+
+  /**
+   * Account funding payments since a watermark, oldest first. On Binance the
+   * portfolioMargin option routes this to the papi income endpoint like every
+   * other private call.
+   */
+  async fetchFundingHistory(since?: number, limit = 500): Promise<FundingEvent[]> {
+    const rows = await this.guard(() => this.exchange.fetchFundingHistory(undefined, since, limit))
+    return rows
+      .map((r): FundingEvent => ({
+        ...(r.id !== undefined ? { id: String(r.id) } : {}),
+        symbol: r.symbol ?? '',
+        amount: r.amount ?? 0,
+        asset: r.code ?? 'USDT',
+        timestamp: r.timestamp ?? 0,
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp)
   }
 
   // ── Trading ─────────────────────────────────────────────────────────────────
