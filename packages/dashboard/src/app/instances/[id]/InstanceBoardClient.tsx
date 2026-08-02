@@ -127,6 +127,8 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
 
           <InstancePnlPanel instanceId={instance.id} />
 
+          <InstanceAccountsPanel instance={instance} onSaved={pull} />
+
           <InstanceParamsPanel instance={instance} />
 
           <div
@@ -136,6 +138,133 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
             <InstanceDetail instanceId={instance.id} tall />
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Account slot bindings — the same eligibility rules as the create form
+ * (matching kind/venue accounts, legacy credentials as fallback). Bindings
+ * feed session materialization at activation, so they are editable only while
+ * the instance is stopped; active instances show them read-only.
+ */
+function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstanceView; onSaved: () => Promise<void> }) {
+  const [open, setOpen] = useState(true)
+  const [slots, setSlots] = useState<Array<{ label: string; kind?: string; type?: string }> | null>(null)
+  const [accounts, setAccounts] = useState<Array<{ name: string; kind?: string; type?: string; status: string }>>([])
+  const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([])
+  const [credentialTypes, setCredentialTypes] = useState<Array<{ type: string; kinds: string[] }>>([])
+  const [bindings, setBindings] = useState<Record<string, string>>({})
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    let gone = false
+    void Promise.all([
+      fetch('/api/strategies').then(r => r.json() as Promise<StrategyDefinition[]>),
+      fetch('/api/accounts').then(r => r.json() as Promise<{ accounts: Array<{ name: string; kind?: string; type?: string; status: string }> }>),
+      fetch('/api/credentials').then(r => r.json() as Promise<Array<{ id: string; name: string; type: string }>>),
+      fetch('/api/credential-types').then(r => r.json() as Promise<Array<{ type: string; kinds: string[] }>>),
+    ]).then(([s, a, c, ct]) => {
+      if (gone) return
+      setSlots(s.find(d => d.id === instance.strategyId)?.accountRequirements ?? [])
+      setAccounts(a.accounts ?? [])
+      setCredentials(c)
+      setCredentialTypes(ct)
+      setBindings(instance.credentials ?? {})
+      setDirty(false)
+    })
+    return () => { gone = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instance.strategyId, instance.active])
+
+  if (!slots || slots.length === 0) return null
+
+  async function save() {
+    setSaving(true)
+    setNotice('')
+    const res = await fetch(`/api/instances/${instance.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials: bindings }),
+    })
+    setSaving(false)
+    if (res.ok) { setDirty(false); setNotice('Saved ✓'); await onSaved() }
+    else setNotice(`Save failed: ${await res.text()}`)
+  }
+
+  return (
+    <div className="rounded-lg mb-4 overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
+        <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
+          <span>{open ? '▾' : '▸'}</span>
+          <span>Accounts</span>
+          <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
+            {instance.active ? '(active: read-only — deactivate to rebind)' : '(stopped: rebind and save)'}
+          </span>
+          {dirty && !instance.active && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
+        </button>
+        {notice && <span className="text-xs" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        {!instance.active && (
+          <button
+            onClick={() => void save()}
+            disabled={saving || !dirty}
+            className="px-3 py-1.5 rounded-md text-xs shrink-0"
+            style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="px-4 pb-4 flex flex-col gap-2">
+          {slots.map((slot) => {
+            const eligible = accounts.filter(a =>
+              a.status === 'ready' &&
+              (slot.kind === undefined || a.kind === slot.kind) &&
+              (slot.type === undefined || a.type === slot.type),
+            )
+            const typesForKind = new Set(
+              credentialTypes.filter(t => slot.kind && t.kinds.includes(slot.kind!)).map(t => t.type),
+            )
+            const legacyEligible = credentials.filter(c =>
+              typesForKind.has(c.type) && (slot.type === undefined || c.type === slot.type),
+            )
+            return (
+              <div key={slot.label} className="flex items-center gap-3 px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                <div className="flex flex-col min-w-32">
+                  <span className="text-sm font-mono">{slot.label}</span>
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>{slot.type ?? slot.kind}</span>
+                </div>
+                <select
+                  value={bindings[slot.label] ?? ''}
+                  disabled={instance.active}
+                  onChange={(e) => { setBindings(prev => ({ ...prev, [slot.label]: e.target.value })); setDirty(true) }}
+                  className="flex-1 rounded-md px-3 py-2 text-sm"
+                  style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)', opacity: instance.active ? 0.75 : 1 }}
+                >
+                  <option value="">
+                    {eligible.length === 0 && legacyEligible.length === 0
+                      ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
+                      : 'choose account…'}
+                  </option>
+                  {eligible.length > 0 && (
+                    <optgroup label="Accounts">
+                      {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.type ?? a.kind})</option>)}
+                    </optgroup>
+                  )}
+                  {legacyEligible.length > 0 && (
+                    <optgroup label="Credentials (legacy direct binding)">
+                      {legacyEligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
