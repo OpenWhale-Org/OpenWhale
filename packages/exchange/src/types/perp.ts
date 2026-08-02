@@ -93,6 +93,16 @@ export interface PerpExchangeAdapter extends SpotExchangeAdapter {
    * Optional: venues with no hedge mode at all omit it (callers treat that as
    * one-way).
    */
+  /**
+   * Unified/portfolio-margin account equity, when the venue has one. Wallet
+   * balances lie on these accounts — collateral lives in other assets and the
+   * settlement currency's wallet can be NEGATIVE (a loan), so summing stables
+   * reads a healthy account as broke. equityUsd is the haircut-adjusted
+   * account equity (unrealized PnL included); availableUsd is the margin
+   * headroom for NEW positions (equity − initial margin, floored at 0).
+   * Absent or resolving null on ordinary accounts.
+   */
+  fetchPortfolioEquity?(): Promise<{ equityUsd: number; availableUsd: number } | null>
   fetchPositionMode?(symbol?: string): Promise<{ hedged: boolean }>
 
   /**

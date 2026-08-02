@@ -291,6 +291,27 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     this.exchange.rateLimit = ms
   }
 
+  /**
+   * Binance portfolio-margin (统一账户) equity via GET /papi/v1/account.
+   * accountEquity is the collateral-haircut-adjusted equity in USD with
+   * unrealized PnL included — the number the venue's own risk engine (uniMMR)
+   * runs on; the USDT wallet meanwhile can sit deeply negative as a loan.
+   */
+  async fetchPortfolioEquity(): Promise<{ equityUsd: number; availableUsd: number } | null> {
+    if (this.exchange.options['portfolioMargin'] !== true) return null
+    if (!String(this.exchange.id).startsWith('binance')) return null
+    const papi = this.exchange as unknown as { papiGetAccount?: () => Promise<Record<string, unknown>> }
+    if (typeof papi.papiGetAccount !== 'function') return null
+    const acc = await this.guard(() => papi.papiGetAccount!())
+    const equityUsd = Number(acc['accountEquity'])
+    const initialMargin = Number(acc['accountInitialMargin'])
+    if (!Number.isFinite(equityUsd)) return null
+    return {
+      equityUsd,
+      availableUsd: Math.max(0, equityUsd - (Number.isFinite(initialMargin) ? initialMargin : 0)),
+    }
+  }
+
   async fetchPositionMode(symbol?: string): Promise<{ hedged: boolean }> {
     if (!this.exchange.has['fetchPositionMode']) return { hedged: false }
     const mode = await this.guard(() => this.exchange.fetchPositionMode(symbol))

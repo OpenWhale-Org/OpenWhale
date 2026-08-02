@@ -43,6 +43,10 @@ export class PerpAccount {
   // ── Account reads ───────────────────────────────────────────────────────────
 
   async balance(): Promise<IAccountBalance> {
+    // Unified/portfolio-margin accounts first: their wallet rows LIE (the
+    // settlement currency can be a negative loan while collateral sits in
+    // other assets) — the venue's adjusted equity is the only honest number.
+    const pm = await this.session.fetchPortfolioEquity?.().catch(() => null)
     const balances = await this.session.fetchBalance()
     const tokens = balances.map(b => ({
       token: b.currency,
@@ -52,14 +56,16 @@ export class PerpAccount {
       ...(this.stableTokens.has(b.currency) ? { usdValue: b.total } : {}),
     }))
     // Aggregate = sum of priceable tokens (perp collateral is normally a stable)
-    const usd = tokens.reduce(
-      (acc, t) => {
-        if (t.usdValue === undefined) return acc
-        const rate = t.total > 0 ? t.usdValue / t.total : 1
-        return { available: acc.available + t.free * rate, total: acc.total + t.usdValue }
-      },
-      { available: 0, total: 0 },
-    )
+    const usd = pm
+      ? { available: pm.availableUsd, total: pm.equityUsd }
+      : tokens.reduce(
+        (acc, t) => {
+          if (t.usdValue === undefined) return acc
+          const rate = t.total > 0 ? t.usdValue / t.total : 1
+          return { available: acc.available + t.free * rate, total: acc.total + t.usdValue }
+        },
+        { available: 0, total: 0 },
+      )
     return { usd, tokens }
   }
 
@@ -83,6 +89,15 @@ export class PerpAccount {
    * double-count slightly — venue readers can override).
    */
   async snapshot(): Promise<{ equity: number; available?: number; unrealizedPnl?: number }> {
+    // Portfolio-margin equity already INCLUDES unrealized PnL — adding it
+    // again double-counts (and the wallet-sum path read a healthy 统一账户
+    // as −$2.2k equity live).
+    const pm = await this.session.fetchPortfolioEquity?.().catch(() => null)
+    if (pm) {
+      const positions = await this.session.fetchPositions()
+      const unrealized = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0)
+      return { equity: pm.equityUsd, available: pm.availableUsd, unrealizedPnl: unrealized }
+    }
     const [balance, positions] = await Promise.all([this.balance(), this.session.fetchPositions()])
     const unrealized = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0)
     return { equity: balance.usd.total + unrealized, available: balance.usd.available, unrealizedPnl: unrealized }
