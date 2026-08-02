@@ -125,16 +125,6 @@ const links = [
       </svg>
     ),
   },
-  {
-    href: '/ui-design',
-    label: 'UI Design',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="13.5" cy="6.5" r="2.5" />
-        <path d="M12 2a10 10 0 1 0 10 10c0-1.7-1.3-3-3-3h-2a3 3 0 0 1-3-3c0-.8.3-1.5.8-2A2.9 2.9 0 0 0 12 2z" />
-      </svg>
-    ),
-  },
 ]
 
 export function Nav() {
