@@ -76,7 +76,13 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
               >
                 <span>{iconFor(instance)}</span>
               </IconMenu>
-              {instance.name}
+              <EditableName
+                name={instance.name}
+                onSave={async (name) => {
+                  await patchInstanceMeta(instance.id, { name })
+                  await pull()
+                }}
+              />
             </h1>
             <div className="flex items-center gap-2 mt-2">
               <span
@@ -132,6 +138,49 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Click-to-edit title — cosmetic meta, so it saves even while the instance is
+ * active. Enter/blur commits, Esc cancels.
+ */
+function EditableName({ name, onSave }: { name: string; onSave: (name: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+
+  async function commit() {
+    setEditing(false)
+    const next = draft.trim()
+    if (next && next !== name) await onSave(next)
+    else setDraft(name)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        className="flex items-center gap-2 text-left group"
+        title="Click to rename"
+        onClick={() => { setDraft(name); setEditing(true) }}
+      >
+        {name}
+        <span className="text-sm opacity-0 group-hover:opacity-60" style={{ color: 'var(--muted)' }}>✎</span>
+      </button>
+    )
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') void commit()
+        if (e.key === 'Escape') { setDraft(name); setEditing(false) }
+      }}
+      className="text-2xl font-semibold px-2 py-0.5 rounded-md"
+      style={{ background: 'var(--background)', border: '1px solid var(--accent)', color: 'var(--foreground)', minWidth: 320 }}
+    />
   )
 }
 
