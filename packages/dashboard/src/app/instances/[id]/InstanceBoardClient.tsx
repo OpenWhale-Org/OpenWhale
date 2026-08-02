@@ -151,7 +151,7 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
  */
 function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstanceView; onSaved: () => Promise<void> }) {
   const [open, setOpen] = useState(true)
-  const [slots, setSlots] = useState<Array<{ label: string; kind?: string; type?: string }> | null>(null)
+  const [slots, setSlots] = useState<Array<{ label: string; kind?: string; type?: string; optional?: boolean }> | null>(null)
   const [accounts, setAccounts] = useState<Array<{ name: string; kind?: string; type?: string; status: string }>>([])
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([])
   const [credentialTypes, setCredentialTypes] = useState<Array<{ type: string; kinds: string[] }>>([])
@@ -188,7 +188,7 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
     const res = await fetch(`/api/instances/${instance.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credentials: bindings }),
+      body: JSON.stringify({ credentials: Object.fromEntries(Object.entries(bindings).filter(([, v]) => v)) }),
     })
     setSaving(false)
     if (res.ok) { setDirty(false); setNotice('Saved ✓'); await onSaved() }
@@ -246,9 +246,11 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
                   style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)', opacity: instance.active ? 0.75 : 1 }}
                 >
                   <option value="">
-                    {eligible.length === 0 && legacyEligible.length === 0
-                      ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
-                      : 'choose account…'}
+                    {slot.optional
+                      ? 'not bound (optional)'
+                      : eligible.length === 0 && legacyEligible.length === 0
+                        ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
+                        : 'choose account…'}
                   </option>
                   {eligible.length > 0 && (
                     <optgroup label="Accounts">

@@ -999,7 +999,8 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim(),
-          credentials: slotBindings,
+          // Optional slots may sit unbound — an empty binding means "not bound"
+          credentials: Object.fromEntries(Object.entries(slotBindings).filter(([, v]) => v)),
           llm,
           params,
         }),
@@ -1012,7 +1013,9 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
         description: description.trim() || undefined,
         strategyId: selectedStrategy,
         icon: randomIcon(),
-        ...(Object.keys(slotBindings).length > 0 ? { credentials: slotBindings } : {}),
+        ...(Object.values(slotBindings).some(v => v)
+          ? { credentials: Object.fromEntries(Object.entries(slotBindings).filter(([, v]) => v)) }
+          : {}),
         ...(Object.keys(llm).length > 0 ? { llm } : {}),
         params,
         enabled,
@@ -1142,14 +1145,16 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
                   <select
                     value={slotBindings[slot.label] ?? ''}
                     onChange={(e) => setSlotBindings((prev) => ({ ...prev, [slot.label]: e.target.value }))}
-                    required
+                    required={!slot.optional}
                     className="flex-1 rounded-md px-3 py-2 text-sm"
                     style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
                   >
                     <option value="">
-                      {eligible.length === 0 && legacyEligible.length === 0
-                        ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
-                        : 'choose account…'}
+                      {slot.optional
+                        ? 'not bound (optional)'
+                        : eligible.length === 0 && legacyEligible.length === 0
+                          ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
+                          : 'choose account…'}
                     </option>
                     {eligible.length > 0 && (
                       <optgroup label="Accounts">
