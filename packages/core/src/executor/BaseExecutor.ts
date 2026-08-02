@@ -116,6 +116,13 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     return slot.session as T
   }
 
+  /** Raw data of an OPTIONAL slot — undefined when the instance left it unbound. */
+  protected rawIfBound(label: string): RawCredentialData | undefined {
+    const ctx = this.executionContext.getStore()
+    if (!ctx) throw new Error('rawIfBound() called outside execute()')
+    return ctx.slots.get(label)?.raw
+  }
+
   /** Decrypted credential data of a raw slot, for the current instruction. */
   protected raw(label: string): RawCredentialData {
     const ctx = this.executionContext.getStore()
@@ -255,7 +262,7 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
       return `No credentials materialized for instance "${instanceId ?? '(unknown)'}" — was the instance activated?`
 
     for (const decl of this.credentials) {
-      if (!slots.has(decl.label))
+      if (!slots.has(decl.label) && !decl.optional)
         return `Credential slot '${decl.label}' of executor "${this.executorName}" is not bound for instance "${instanceId}"`
     }
 

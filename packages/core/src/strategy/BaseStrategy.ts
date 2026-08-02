@@ -1,5 +1,5 @@
 import type { ExecutionInstruction } from '../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace } from '../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace, DynamicSourceHooks } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
@@ -481,6 +481,31 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   private runSink: ((run: StrategyRunTrace) => void) | null = null
 
   /** Runtime-injected persistence for finished runs; must never throw into the run path. */
+  private dynamicSources?: DynamicSourceHooks
+
+  setDynamicSources(hooks: DynamicSourceHooks): void {
+    this.dynamicSources = hooks
+  }
+
+  /**
+   * Start collecting a monitor key discovered at RUNTIME — auto-detected
+   * pairs' spread feeds, for instance — and optionally wake evaluate on its
+   * pushes. No-op on runtimes without dynamic-source support; idempotence is
+   * the caller's job (each call adds a refcounted subscription).
+   */
+  protected addMonitorSource(labelOrIndex: string | number, key: string, opts?: { trigger?: boolean }): boolean {
+    if (!this.dynamicSources) return false
+    const monitorName = this.monitor(labelOrIndex as never)
+    this.dynamicSources.addSubscription({ monitorName, key })
+    if (opts?.trigger) {
+      this.dynamicSources.addTrigger({
+        enabled: true,
+        conditions: [{ type: 'monitor', sources: [{ monitorName, key }] }],
+      })
+    }
+    return true
+  }
+
   setRunSink(sink: ((run: StrategyRunTrace) => void) | null): void {
     this.runSink = sink
   }

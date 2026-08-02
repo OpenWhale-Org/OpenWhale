@@ -278,7 +278,7 @@ export interface StrategyDefinition {
    * accepts any credential whose type has a factory for it; `type` pins an
    * exact credential type (venue-locked Reader subclasses).
    */
-  accountRequirements?: Array<{ label: string; kind?: string; type?: string; capability?: string }>
+  accountRequirements?: Array<{ label: string; kind?: string; type?: string; capability?: string; optional?: boolean }>
   /** LLM slots (label + defaults) — derived from the class's llms declarations. */
   llmRequirements?: Array<{ label: string; model: string; credentialName?: string; settings?: Record<string, unknown> }>
   /** Field descriptors for generic UI rendering. Derived from the params schemas at registration. */

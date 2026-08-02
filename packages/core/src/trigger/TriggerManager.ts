@@ -101,6 +101,10 @@ export class TriggerManager {
     if (this.credentialStore) strategy.setCredentialStore(this.credentialStore)
     if (this.database) strategy.setStore(new DBStrategyStore(instanceId, this.database))
     strategy.setHttpClient(new HttpClient(strategy.strategyId))
+    strategy.setDynamicSources?.({
+      addSubscription: source => this.addSubscription(instanceId, source),
+      addTrigger: trigger => this.addTrigger(instanceId, trigger),
+    })
     const monitorKeyToLabel = new Map(Array.from(monitorLabelToKey, ([label, key]) => [key, label]))
     const entry: InstanceEntry = {
       instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel, executorLabelToKey,
@@ -119,6 +123,47 @@ export class TriggerManager {
       this.attachEmitHandlersForEntry(entry, this.queue)
       this.subscribeMonitorsForEntry(entry)
       this.scheduleCronConditionsForEntry(entry, this.queue)
+    }
+  }
+
+  /**
+   * Add a data subscription to a LIVE instance. Strategies that discover
+   * worthwhile monitor keys at runtime — an auto-detected trading pair whose
+   * spread feed must start collecting before any trigger can judge it — hand
+   * them in here. The source joins the entry's subscription list, so
+   * unregisterInstance releases it exactly like an activation-time one.
+   */
+  addSubscription(instanceId: string, source: MonitorSource): void {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return
+    entry.subscriptions.push(source)
+    if (this.running) this.subscribeSource(source, entry.monitorLabelToKey)
+  }
+
+  /**
+   * Add a trigger to a LIVE instance. Monitor conditions only — cron
+   * conditions are scheduled once at registration and a dynamic path would
+   * double-schedule; a strategy that wants dynamic cron cadence should
+   * declare it up front and gate in evaluate.
+   */
+  addTrigger(instanceId: string, trigger: Omit<Trigger, 'id' | 'strategyInstanceId'>): void {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return
+    if (trigger.conditions.some(c => c.type === 'cron')) {
+      throw new Error('Dynamic triggers support monitor conditions only')
+    }
+    const full: Trigger = {
+      ...trigger,
+      id: `${instanceId}-trigger-dyn-${entry.triggers.length}`,
+      strategyInstanceId: instanceId,
+    }
+    entry.triggers.push(full)
+    if (full.enabled) this.triggerStates.set(full.id, new TriggerState(full.conditions.length))
+    if (this.running) {
+      for (const condition of full.conditions) {
+        if (condition.type !== 'monitor') continue
+        for (const source of condition.sources) this.subscribeSource(source, entry.monitorLabelToKey)
+      }
     }
   }
 

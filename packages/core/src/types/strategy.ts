@@ -142,6 +142,12 @@ export interface StrategyRunTrace {
   steps: Array<{ ts: number; step: string; data?: Record<string, unknown> }>
 }
 
+/** Runtime-injected hooks for mid-run monitor sources (see IStrategy.setDynamicSources). */
+export interface DynamicSourceHooks {
+  addSubscription(source: MonitorSource): void
+  addTrigger(trigger: Omit<Trigger, 'id' | 'strategyInstanceId'>): void
+}
+
 export interface IStrategy {
   readonly strategyId: string
   /** Monitor declarations this strategy depends on. */
@@ -209,6 +215,12 @@ export interface IStrategy {
    * so strategy bundles compiled against an older base keep loading.
    */
   setRunSink?(sink: ((run: StrategyRunTrace) => void) | null): void
+  /**
+   * Runtime hooks for sources discovered AFTER activation: start collecting a
+   * monitor key mid-run and optionally wake on its pushes. Injected by the
+   * TriggerManager at registration; absent on older runtimes.
+   */
+  setDynamicSources?(hooks: DynamicSourceHooks): void
   /** Validate a monitor declaration (label or index) and return its label. Used in triggers(). */
   monitor(labelOrIndex: string | number): string
   /** Validate an executor declaration (label or index) and return its label. Used in evaluate(). */

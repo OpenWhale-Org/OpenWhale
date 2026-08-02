@@ -1567,6 +1567,8 @@ export class OpenWhaleRuntime implements IRuntime {
         const name = this.boundCredential(instance, slotPath)
           ?? await this.defaultExecutorBinding(instance, strategy, decl)
         if (!name) {
+          // Optional slots stay unmaterialized — the executor degrades gracefully
+          if (decl.optional) continue
           throw new Error(
             `Executor slot '${slotPath}' of instance "${instance.id}" has no credential bound ` +
             `and no strategy binding satisfies it (set credentials['${slotPath}'])`

@@ -210,7 +210,12 @@ export interface AccountSlot<C extends ReaderClass = ReaderClass> {
   label: string
 }
 
-/** Executor-side credential slots — sessions by kind, or raw data by explicit opt-in. */
+/**
+ * Executor-side credential slots — sessions by kind, or raw data by explicit
+ * opt-in. `optional: true` lets activation proceed with the slot unbound; the
+ * executor must then handle instructions without it (side-channel executors
+ * like notifiers, gated by a strategy toggle).
+ */
 export type ExecutorCredentialSlot =
-  | { label: string; kind: NamespacedKind; type?: string }
-  | { label: string; type: string; raw: true }
+  | { label: string; kind: NamespacedKind; type?: string; optional?: true }
+  | { label: string; type: string; raw: true; optional?: true }
