@@ -9,7 +9,6 @@ const RANGES = [
   { label: '30d', hours: 24 * 30 },
 ] as const
 
-const W = 640
 const H = 180
 const PAD = { top: 12, right: 64, bottom: 22, left: 8 }
 
@@ -36,6 +35,21 @@ export function EquityChart({ account }: { account: string }) {
   const [series, setSeries] = useState<AccountSnapshotRecord[] | null>(null)
   const [hover, setHover] = useState<number | null>(null)   // index into series
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  // viewBox width follows the CONTAINER so coordinates render 1:1 — a fixed
+  // 640-wide viewBox scaled to a full-width panel stretched the whole chart
+  // (fonts, strokes, spacing) ~2.6× tall.
+  const [W, setW] = useState(640)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width
+      if (w && w > 120) setW(Math.round(w))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -66,7 +80,7 @@ export function EquityChart({ account }: { account: string }) {
     // 3 recessive horizontal gridlines with value labels
     const gridValues = [0.25, 0.5, 0.75].map(f => vMin + f * (vMax - vMin))
     return { x, y, points, path, gridValues, t0, t1 }
-  }, [series])
+  }, [series, W])
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     if (!geom || !series || series.length === 0 || !svgRef.current) return
@@ -143,12 +157,12 @@ export function EquityChart({ account }: { account: string }) {
           No snapshots yet — equity is sampled every few minutes while the runtime is up.
         </p>
       ) : (
-        <div className="relative">
+        <div className="relative" ref={wrapRef}>
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             className="w-full"
-            style={{ display: 'block' }}
+            style={{ display: 'block', height: H }}
             onMouseMove={onMove}
             onMouseLeave={() => setHover(null)}
           >

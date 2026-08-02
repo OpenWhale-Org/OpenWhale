@@ -1,5 +1,5 @@
 import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
-import type { ExchangeOrder, FundingRateData, PerpOrderParams } from '@openwhaleorg/exchange'
+import type { ExchangeOrder, ExchangePosition, FundingRateData, PerpOrderParams } from '@openwhaleorg/exchange'
 
 export interface HyperliquidCredentials {
   walletAddress: string
@@ -68,6 +68,48 @@ export class HyperliquidAdapter extends CcxtAdapter {
       this.hip3Dexes = this.hip3Dexes ?? []
     }
     return this.hip3Dexes
+  }
+
+  /** The builder dex a market lives on ('xyz:SKHX' → 'xyz'), undefined for the main universe. */
+  private hip3DexOf(symbol: string): string | undefined {
+    try {
+      const name = (this.exchange.market(symbol) as { info?: { name?: string } }).info?.name
+      const colon = name?.indexOf(':') ?? -1
+      return name !== undefined && colon > 0 ? name.slice(0, colon) : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Quirk: ccxt's fetchPositions reads clearinghouseState without a dex param
+   * — main universe only, so HIP-3 (builder-dex) positions are invisible: an
+   * account holding only XYZ-* contracts reads as flat. Aggregate the per-dex
+   * clearinghouses exactly like fetchFundingRates does. A symbols filter
+   * narrows the sweep to the dexes those symbols live on (position reconciles
+   * pass symbols, so the hot path costs at most one extra call); a full read
+   * sweeps every builder dex. Per-dex failures are non-fatal.
+   */
+  override async fetchPositions(symbols?: string[]): Promise<ExchangePosition[]> {
+    await this.guard(() => this.exchange.loadMarkets())
+    const wantedDexes = symbols?.length
+      ? [...new Set(symbols.map(s => this.hip3DexOf(s)).filter((d): d is string => d !== undefined))]
+      : await this.listHip3Dexes()
+    const needMain = !symbols?.length || symbols.some(s => this.hip3DexOf(s) === undefined)
+    const [main, ...perDex] = await Promise.all([
+      needMain ? super.fetchPositions(symbols) : Promise.resolve([] as ExchangePosition[]),
+      ...wantedDexes.map(async (dex) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const raw = await this.guard(() => this.exchange.fetchPositions(undefined, { dex })) as any[]
+          return raw.map(this.mapPosition)
+        } catch {
+          return [] as ExchangePosition[]
+        }
+      }),
+    ])
+    const all = [...main, ...perDex.flat()]
+    return symbols?.length ? all.filter(p => symbols.includes(p.symbol)) : all
   }
 
   /**
