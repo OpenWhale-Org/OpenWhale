@@ -19,6 +19,7 @@ OpenWhale is a TypeScript framework for building automated economic strategies. 
 - **The adapter matrix** — venues plug in as cells of a *(kind × venue)* matrix (`exchange/perp × binance`, `exchange/spot × hyperliquid`, …). Domain packages define the vocabulary, venue packages fill the cells, and a data-driven ccxt roster ships twelve venues out of the box.
 - **AI as a programmer** — LLM inference with structured output is built into the strategy layer, and the repo ships a `skills/openwhale-dev` skill that teaches any Claude the full framework contract so it can produce installable plugins with tests.
 - **Deep observability** — every strategy run leaves a persistent decision trace: what it saw, which gate said no, what it emitted. Deactivate an instance or restart the gateway and the audit trail survives.
+- **PnL attribution built in** — executors auto-claim the orders they place; a background collector joins venue fills (ground-truth realized PnL and fees) and funding income back to the claiming instance. Two instances trading the same symbol on the same account stay separable.
 - **Type-safe plugin architecture** — every component implements a strict TypeScript interface. IDE support, safe refactoring, and AI-generated code the compiler validates.
 
 ---
@@ -50,7 +51,8 @@ Executor (venue actions via adapter sessions)
 
 ## The dashboard
 
-- **Instances** — cards with folders, drag-drop ordering, and emoji icons; four live tabs per instance (Live Events scoped to the instance's own monitors, Executions, Runs, Logs). A full-page **Board** per instance adds an editable parameter panel.
+- **Instances** — cards with folders, drag-drop ordering, emoji icons, and a live net-PnL badge per card; four live tabs per instance (Live Events scoped to the instance's own monitors, Executions, Runs, Logs). A full-page **Board** per instance adds click-to-rename, account rebinding, an editable parameter panel, and a PnL panel.
+- **Per-instance PnL** — realized / fees / funding / net / unrealized cards backed by the attribution ledger, with drill-down tabs for by-symbol totals, raw venue fills, and fill-derived open positions priced at the venue mark. Funding events split across instances by the position each held at the settlement boundary.
 - **Run tracing** — every run records its steps: gates, skips, sizing, emitted instructions, captured log lines. Runs with instructions or errors persist to disk; idle runs are heartbeat-sampled. Filter by outcome, search by content.
 - **Monitor boards** — monitors declare dashboard panels via the `plots()` convention: line/bar/candles plus a sortable `table` kind, single- and multi-select pickers, record-window control.
 - **Params as forms** — zod `.meta()` drives the UI: sections, sliders, unit suffixes, conditional visibility, searchable market pickers (single and multi), per-value availability verdicts against the bound venue, editable row-table *list* params for ladders, and sandboxed interactive *illustrations* that redraw live as you edit values.
@@ -235,7 +237,7 @@ Before exposing the gateway to a network:
 
 | Package | Description |
 |---------|-------------|
-| [`@openwhaleorg/core`](./packages/core) | Domain-agnostic engine: credential materialization, adapter matrix, first-class Accounts, monitor contract/implementation/instance model, Strategy/Executor/Trigger, run-trace persistence, Scripts, `definePlugin` + `@Ow*` decorators, CompiledLoader |
+| [`@openwhaleorg/core`](./packages/core) | Domain-agnostic engine: credential materialization, adapter matrix, first-class Accounts, monitor contract/implementation/instance model, Strategy/Executor/Trigger, run-trace persistence, PnL attribution (order claims + fill/funding collector), Scripts, `definePlugin` + `@Ow*` decorators, CompiledLoader |
 | [`@openwhaleorg/exchange`](./packages/exchange) | Exchange domain package: kinds `exchange/perp` + `exchange/spot`, Perp/SpotAccount read views, shared trading executors, public market monitors (ticker/orderbook/volume/kline/funding-rates) with dashboard plots |
 | [`@openwhaleorg/ccxt-adapter`](./packages/ccxt-adapter) | Generic ccxt implementation of the exchange adapter interfaces + the data-driven venue roster |
 | [`@openwhaleorg/hyperliquid`](./packages/hyperliquid) / [`binance`](./packages/binance) / [`aster`](./packages/aster) | Venue plugins: credential types + adapter cells (+ venue-specialized accounts, Portfolio Margin support on Binance) |
