@@ -1,4 +1,4 @@
-import type { OpenWhaleRuntime } from '@openwhale/core'
+import type { OpenWhaleRuntime } from '@openwhaleorg/core'
 
 export interface McpServerOptions {
   runtime: OpenWhaleRuntime

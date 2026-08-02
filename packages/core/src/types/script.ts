@@ -1,0 +1,56 @@
+import type { ZodObject, ZodRawShape } from 'zod'
+import type { ParamFieldDef } from './definition.js'
+
+/**
+ * Scripts — operator utilities a plugin ships alongside its strategies: plan
+ * previews, fit inspectors, one-off reports. A script is trusted plugin code
+ * that runs server-side against the live runtime and returns a text report;
+ * the dashboard renders a params form (from paramsSchema) and the output.
+ *
+ * Deliberately NOT instances: no lifecycle, no persistence, no triggers —
+ * run-on-click only. Anything that needs to run on a schedule belongs in a
+ * monitor or strategy instead.
+ */
+
+export interface ScriptResult {
+  /** Preformatted report, rendered monospace on the dashboard. */
+  text: string
+  /** Structured payload for programmatic callers (shown as collapsible JSON). */
+  json?: unknown
+}
+
+export interface ScriptContext {
+  /** Validated against paramsSchema (defaults applied). */
+  params: Record<string, unknown>
+  /**
+   * The live OpenWhaleRuntime. Typed loosely so plugin packages don't need
+   * the runtime's full type surface — cast to what the script actually uses
+   * (listInstanceViews, getStrategy, …).
+   */
+  runtime: unknown
+}
+
+export interface ScriptDefinition {
+  /** Qualified to '<plugin>/<id>' at load. */
+  id: string
+  name: string
+  description?: string
+  paramsSchema?: ZodObject<ZodRawShape>
+  /**
+   * Live-resolved select options, keyed by param name — for params whose
+   * candidates only exist at runtime (instance ids, account names). Resolved
+   * on every listing, so the dropdown always reflects the current world;
+   * the param itself stays a plain string in the schema.
+   */
+  paramOptions?(runtime: unknown): Promise<Record<string, Array<{ value: string; label: string }>>>
+  run(ctx: ScriptContext): Promise<ScriptResult>
+}
+
+/** Serializable listing entry (dashboard Scripts page). */
+export interface ScriptInfo {
+  id: string
+  name: string
+  description?: string
+  pluginName: string
+  paramsFields?: ParamFieldDef[]
+}

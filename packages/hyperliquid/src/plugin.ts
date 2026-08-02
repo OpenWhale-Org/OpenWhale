@@ -1,102 +1,69 @@
-import type { OpenWhalePlugin, PluginFactory } from '@openwhale/core'
+import { z } from 'zod'
+import { definePlugin } from '@openwhaleorg/core'
+import type { RawCredentialData } from '@openwhaleorg/core'
 import { HyperliquidAdapter } from './adapter.js'
-import { HyperliquidAccount } from './account.js'
 import { UserTradesMonitor } from './monitor.js'
-import { PerpTradingExecutor } from './executor.js'
 import { CopyTradingStrategy } from './strategy.js'
 
-export interface HyperliquidPluginConfig {
-  /** Wallet address used by the monitor. */
-  walletAddress: string
-  /** Private key for signing orders. If omitted, the executor will be read-only and order placement will fail. */
-  privateKey?: string
-}
+const build = (data: RawCredentialData) => new HyperliquidAdapter({
+  walletAddress: data['walletAddress'] as string,
+  ...(data['privateKey'] ? { privateKey: data['privateKey'] as string } : {}),
+  testnet: (data['testnet'] as boolean | undefined) ?? false,
+})
 
 /**
- * Hyperliquid plugin factory.
+ * Hyperliquid venue plugin — a pure manifest.
  *
- * Component logical names (auto-prefixed to 'hyperliquid/...' by loadPlugin):
- *   - Monitor:   user-trades  → hyperliquid/user-trades
- *   - Executor:  perp-trading → hyperliquid/perp-trading
- *   - Strategy:  copy-trading → hyperliquid/copy-trading
- *   - Account:   hyperliquid
+ *   - credential type 'hyperliquid': schema-driven form, connectivity test
+ *   - adapter cells for 'exchange/perp' and 'exchange/spot' (one wallet, both
+ *     kinds; the keyless perp form is a public ccxt adapter — always mainnet)
+ *   - monitor 'hyperliquid/user-trades' — watches ANY address's fills
+ *     (credential-less, so a default instance auto-activates)
+ *   - strategy 'hyperliquid/copy-trading' — executes through the shared
+ *     'exchange/perp-trading' executor on any bound perp account
  *
- * Usage:
- *   runtime.loadPlugin(hyperliquidPlugin, { walletAddress: '0x...' })
+ * Requires the exchange domain plugin (kind 'exchange/perp' vocabulary).
  */
-export const hyperliquidPlugin: PluginFactory<HyperliquidPluginConfig> = (context): OpenWhalePlugin => {
-  const now = new Date().toISOString()
-  const readAdapter = new HyperliquidAdapter({ walletAddress: context.config.walletAddress })
-  const writeAdapter = context.config.privateKey
-    ? new HyperliquidAdapter({ walletAddress: context.config.walletAddress, privateKey: context.config.privateKey })
-    : readAdapter
+export const hyperliquidPlugin = definePlugin({
+  name: 'hyperliquid',
+  version: '1.0.0',
 
-  return {
-    name: 'hyperliquid',
-    version: '1.0.0',
-
-    monitors: [
-      {
-        definition: {
-          id: 'user-trades',
-          name: 'Hyperliquid User Trades',
-          description: 'Streams real-time fills for any Hyperliquid address',
-          source: 'plugin',
-          pluginName: 'hyperliquid',
-          createdAt: now,
-          updatedAt: now,
-        },
-        instance: new UserTradesMonitor(readAdapter),
+  adapters: [
+    {
+      kind: 'exchange/perp', type: 'hyperliquid',
+      // Keyless form is the HIP-3-aware public adapter: fetchFundingRates
+      // aggregates every builder dex, not just the main universe.
+      create: (data?) => data ? build(data) : new HyperliquidAdapter(),
+    },
+    {
+      // HL spot shares the same API surface — one wallet, both kinds.
+      // No keyless form: public spot data has no consumer yet, and the
+      // implementation is the caller-validates side of the contract.
+      kind: 'exchange/spot', type: 'hyperliquid',
+      create: (data?) => {
+        if (!data) throw new Error('hyperliquid exchange/spot has no keyless form — bind a credential')
+        return build(data)
       },
-    ],
+    },
+  ],
 
-    executors: [
-      {
-        definition: {
-          id: 'perp-trading',
-          name: 'Hyperliquid Perp Trading',
-          description: 'Places, cancels, and manages perpetual orders on Hyperliquid',
-          source: 'plugin',
-          pluginName: 'hyperliquid',
-          supportedActions: ['placeOrder', 'cancelOrder', 'setLeverage'],
-          createdAt: now,
-          updatedAt: now,
-        },
-        instance: new PerpTradingExecutor(writeAdapter),
-      },
-    ],
+  credentialTypes: [
+    {
+      type: 'hyperliquid',
+      displayName: 'Hyperliquid',
+      documentationUrl: 'https://hyperliquid.gitbook.io/hyperliquid-docs',
+      schema: z.object({
+        walletAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).meta({ displayName: 'Wallet Address', placeholder: '0x...' }),
+        privateKey: z.string().optional().meta({ displayName: 'Private Key', password: true, description: 'Leave empty for read-only' }),
+        testnet: z.boolean().default(false).meta({ displayName: 'Testnet' }),
+      }),
+      test: async (data) => { await build(data).fetchBalance() },
+    },
+  ],
 
-    strategies: [
-      {
-        definition: {
-          id: 'copy-trading',
-          name: 'Hyperliquid Copy Trading',
-          description: "Mirrors another trader's perpetual positions at a configurable ratio",
-          source: 'plugin',
-          pluginName: 'hyperliquid',
-          monitorIds: ['user-trades'],
-          executorIds: ['perp-trading'],
-          createdAt: now,
-          updatedAt: now,
-        },
-        factory: () => new CopyTradingStrategy(),
-      },
-    ],
+  monitors: [UserTradesMonitor],
 
-    accounts: [
-      {
-        accountType: 'hyperliquid',
-        factory: (data) =>
-          new HyperliquidAccount(
-            'hyperliquid',
-            new HyperliquidAdapter({
-              walletAddress: data['walletAddress'] as string,
-              privateKey: data['privateKey'] as string,
-            }),
-          ),
-      },
-    ],
-  }
-}
+  strategies: [CopyTradingStrategy],
+})
 
 export default hyperliquidPlugin

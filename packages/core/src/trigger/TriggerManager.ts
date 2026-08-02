@@ -1,16 +1,19 @@
 import cron from 'node-cron'
 import { MonitorMode, type BaseMonitor } from '../monitor/BaseMonitor.js'
+import type { EmitHandler } from '../types/monitor.js'
 import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
 import type { CronCondition, MonitorCondition, MonitorSource, Trigger, TriggerFilter } from '../types/trigger.js'
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { StrategyParams } from '../types/instance.js'
-import type { IAccount } from '../types/account.js'
 import type { MonitorRegistry } from '../registry/Registry.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import { HttpClient } from '../strategy/HttpClient.js'
 import { TriggerState } from './TriggerState.js'
+import { createLogger } from '../utils/logger.js'
+
+const log = createLogger('TriggerManager')
 
 export interface StrategyRunEvent {
   instanceId: string
@@ -28,6 +31,14 @@ interface InstanceEntry {
   monitorLabelToKey: Map<string, string>
   /** Maps registry key → monitor label, for matching incoming monitor emits. */
   monitorKeyToLabel: Map<string, string>
+  /** Maps executor label → registry key; instructions carry labels until they are queued. */
+  executorLabelToKey: Map<string, string>
+  /**
+   * Monitors kept running for their data alone. Subscribed and unsubscribed
+   * with the trigger sources, but referenced by no condition — so their emits
+   * satisfy nothing and fire nothing.
+   */
+  subscriptions: MonitorSource[]
 }
 
 export class TriggerManager {
@@ -35,7 +46,16 @@ export class TriggerManager {
   private readonly monitorRegistry: MonitorRegistry
   private readonly credentialStore: CredentialStore | undefined
   private readonly database: DatabaseAdapter | undefined
-  private readonly cronTasks: cron.ScheduledTask[] = []
+  /** Scheduled cron tasks keyed by instanceId, so deactivation can stop exactly its own. */
+  private readonly cronTasks = new Map<string, cron.ScheduledTask[]>()
+  /**
+   * Emit handlers we attached, keyed by monitor registry key, so stop() can
+   * detach them. The monitor object is kept because the registry entry may be
+   * hot-replaced (CompiledLoader recompile) — detach must target the instance
+   * the handler was attached to, and a replaced instance needs a re-attach.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly attachedEmitHandlers = new Map<string, { monitor: BaseMonitor<string, any>; handler: EmitHandler }>()
   private readonly triggerStates = new Map<string, TriggerState>()
   private running = false
   private queue: ExecutionQueue | undefined
@@ -70,31 +90,75 @@ export class TriggerManager {
     strategy: IStrategy,
     triggers: Trigger[],
     params: StrategyParams,
-    accounts: IAccount[],
+    readers: unknown[],
+    credentialNames: string[],
     monitorLabelToKey: Map<string, string>,
+    executorLabelToKey: Map<string, string>,
   ): void {
     strategy.setParams(params)
-    strategy.setAccounts(accounts)
+    strategy.setReaders(readers, credentialNames)
     strategy.setInstanceId(instanceId)
     if (this.credentialStore) strategy.setCredentialStore(this.credentialStore)
     if (this.database) strategy.setStore(new DBStrategyStore(instanceId, this.database))
     strategy.setHttpClient(new HttpClient(strategy.strategyId))
     const monitorKeyToLabel = new Map(Array.from(monitorLabelToKey, ([label, key]) => [key, label]))
-    const entry: InstanceEntry = { instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel }
+    const entry: InstanceEntry = {
+      instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel, executorLabelToKey,
+      subscriptions: strategy.subscriptions?.(params) ?? [],
+    }
+
+    // Re-registration (e.g. re-activate with new params) must first release the
+    // old entry's cron tasks and monitor subscriptions or they leak.
+    if (this.instances.has(instanceId)) this.unregisterInstance(instanceId)
     this.instances.set(instanceId, entry)
 
     // If already running, immediately wire up the new instance
     if (this.running && this.queue) {
       this.injectMonitorReadersForEntry(entry)
       this.initTriggerStatesForEntry(entry)
+      this.attachEmitHandlersForEntry(entry, this.queue)
       this.subscribeMonitorsForEntry(entry)
       this.scheduleCronConditionsForEntry(entry, this.queue)
     }
   }
 
   unregisterInstance(instanceId: string): void {
-    this.instances.get(instanceId)?.triggers.forEach(t => this.triggerStates.delete(t.id))
+    const entry = this.instances.get(instanceId)
+    if (!entry) return
+    entry.triggers.forEach(t => this.triggerStates.delete(t.id))
+    if (this.running) this.unsubscribeMonitorsForEntry(entry)
+    this.cronTasks.get(instanceId)?.forEach(t => t.stop())
+    this.cronTasks.delete(instanceId)
     this.instances.delete(instanceId)
+  }
+
+  getStrategy(instanceId: string): IStrategy | undefined {
+    return this.instances.get(instanceId)?.strategy
+  }
+
+  /**
+   * Everything this instance listens to — trigger sources and data-only
+   * subscriptions alike — as (registry key, monitor key) pairs. The dashboard
+   * uses it to show an instance ONLY the events it actually consumes instead
+   * of the venue-wide firehose.
+   */
+  getMonitorScope(instanceId: string): Array<{ monitor: string; key: string }> {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return []
+    const out: Array<{ monitor: string; key: string }> = []
+    for (const source of this.monitorSourcesForEntry(entry)) {
+      out.push({
+        monitor: entry.monitorLabelToKey.get(source.monitorName) ?? source.monitorName,
+        key: source.key,
+      })
+    }
+    return out
+  }
+
+  /** Registry keys of the executors an instance uses (for account cleanup on release). */
+  getExecutorKeys(instanceId: string): string[] {
+    const entry = this.instances.get(instanceId)
+    return entry ? Array.from(entry.executorLabelToKey.values()) : []
   }
 
   start(queue: ExecutionQueue): void {
@@ -111,9 +175,13 @@ export class TriggerManager {
   stop(): void {
     if (!this.running) return
     this.running = false
-    this.cronTasks.forEach(t => t.stop())
-    this.cronTasks.length = 0
+    for (const tasks of this.cronTasks.values()) tasks.forEach(t => t.stop())
+    this.cronTasks.clear()
     this.unsubscribeMonitors()
+    for (const { monitor, handler } of this.attachedEmitHandlers.values()) {
+      monitor.removeEmitHandler(handler)
+    }
+    this.attachedEmitHandlers.clear()
   }
 
   // ── Start / stop helpers ──────────────────────────────────────────────────
@@ -123,12 +191,13 @@ export class TriggerManager {
   }
 
   private injectMonitorReadersForEntry(entry: InstanceEntry): void {
-    for (const [, registryKey] of entry.monitorLabelToKey) {
+    for (const [label, registryKey] of entry.monitorLabelToKey) {
       const monitor = this.monitorRegistry.get(registryKey)
       if (!monitor) throw new Error(
         `Instance "${entry.instanceId}": strategy "${entry.strategy.strategyId}" declares monitor "${registryKey}" but it is not registered`
       )
-      entry.strategy.setMonitorReader(registryKey, monitor.getReader())
+      // Readers are keyed by label — the strategy's own vocabulary
+      entry.strategy.setMonitorReader(label, monitor.getReader())
     }
   }
 
@@ -144,11 +213,30 @@ export class TriggerManager {
 
   private setupMonitorHandlers(queue: ExecutionQueue): void {
     for (const def of this.monitorRegistry.list()) {
-      const monitor = this.monitorRegistry.get(def.id)
-      if (!monitor) continue
-      monitor.addEmitHandler((key: string, data: unknown) =>
-        this.onMonitorEmit(def.id, key, data as Record<string, unknown>, queue)
-      )
+      this.attachEmitHandler(def.id, queue)
+    }
+  }
+
+  /** Attach our emit handler to a monitor exactly once, remembering it for stop(). */
+  private attachEmitHandler(registryKey: string, queue: ExecutionQueue): void {
+    const monitor = this.monitorRegistry.get(registryKey)
+    if (!monitor) return
+    const existing = this.attachedEmitHandlers.get(registryKey)
+    if (existing) {
+      if (existing.monitor === monitor) return
+      // Registry entry was hot-replaced — detach from the old instance and re-attach
+      existing.monitor.removeEmitHandler(existing.handler)
+    }
+    const handler: EmitHandler = (key: string, data: unknown) =>
+      this.onMonitorEmit(registryKey, key, data as Record<string, unknown>, queue)
+    monitor.addEmitHandler(handler)
+    this.attachedEmitHandlers.set(registryKey, { monitor, handler })
+  }
+
+  /** Ensure handlers exist for the monitors a late-registered instance uses (e.g. hot-loaded monitors). */
+  private attachEmitHandlersForEntry(entry: InstanceEntry, queue: ExecutionQueue): void {
+    for (const registryKey of entry.monitorLabelToKey.values()) {
+      this.attachEmitHandler(registryKey, queue)
     }
   }
 
@@ -167,7 +255,7 @@ export class TriggerManager {
         const triggerState = this.triggerStates.get(trigger.id)
         if (!triggerState) return
         this.applyMonitorEmitToTrigger(trigger, triggerState, label, key, data, now)
-        promises.push(this.checkAndFire(entry.instanceId, trigger, triggerState, entry.strategy, queue, now))
+        promises.push(this.checkAndFire(entry, trigger, triggerState, queue, now))
       })
     }
     await Promise.all(promises)
@@ -196,23 +284,36 @@ export class TriggerManager {
   }
 
   private subscribeMonitorsForEntry(entry: InstanceEntry): void {
-    entry.triggers.filter(t => t.enabled).forEach(trigger =>
-      trigger.conditions
-        .filter((c): c is MonitorCondition => c.type === 'monitor')
-        .flatMap(c => c.sources)
-        .forEach(source => this.subscribeSource(source, entry.monitorLabelToKey))
-    )
+    for (const source of this.monitorSourcesForEntry(entry)) {
+      this.subscribeSource(source, entry.monitorLabelToKey)
+    }
   }
 
   private unsubscribeMonitors(): void {
-    for (const entry of this.instances.values()) {
-      entry.triggers.forEach(trigger =>
-        trigger.conditions
-          .filter((c): c is MonitorCondition => c.type === 'monitor')
-          .flatMap(c => c.sources)
-          .forEach(source => this.unsubscribeSource(source, entry.monitorLabelToKey))
-      )
+    for (const entry of this.instances.values()) this.unsubscribeMonitorsForEntry(entry)
+  }
+
+  private unsubscribeMonitorsForEntry(entry: InstanceEntry): void {
+    for (const source of this.monitorSourcesForEntry(entry)) {
+      this.unsubscribeSource(source, entry.monitorLabelToKey)
     }
+  }
+
+  /**
+   * Every monitor this instance keeps alive: the ones its triggers listen to,
+   * plus the ones it only wants collecting. Both are subscribed identically —
+   * the difference is that nothing references the latter in a condition, so
+   * their emits reach no trigger state.
+   */
+  private monitorSourcesForEntry(entry: InstanceEntry): MonitorSource[] {
+    return [
+      ...entry.triggers
+        .filter(t => t.enabled)
+        .flatMap(trigger => trigger.conditions
+          .filter((c): c is MonitorCondition => c.type === 'monitor')
+          .flatMap(c => c.sources)),
+      ...entry.subscriptions,
+    ]
   }
 
   private subscribeSource(source: MonitorSource, labelToKey: Map<string, string>): void {
@@ -245,7 +346,7 @@ export class TriggerManager {
   private scheduleCronConditionsForEntry(entry: InstanceEntry, queue: ExecutionQueue): void {
     entry.triggers.filter(t => t.enabled).forEach(trigger =>
       trigger.conditions.forEach((condition, i) => {
-        if (condition.type === 'cron') this.scheduleCron(entry.instanceId, trigger, i, condition, entry.strategy, queue)
+        if (condition.type === 'cron') this.scheduleCron(entry, trigger, i, condition, queue)
       })
     )
   }
@@ -253,11 +354,10 @@ export class TriggerManager {
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   private scheduleCron(
-    instanceId: string,
+    entry: InstanceEntry,
     trigger: Trigger,
     conditionIndex: number,
     condition: CronCondition,
-    strategy: IStrategy,
     queue: ExecutionQueue,
   ): void {
     const task = cron.schedule(condition.expression, async () => {
@@ -265,19 +365,20 @@ export class TriggerManager {
       const triggerState = this.triggerStates.get(trigger.id)
       if (!triggerState) return
       triggerState.satisfyCron(conditionIndex, now)
-      await this.checkAndFire(instanceId, trigger, triggerState, strategy, queue, now)
+      await this.checkAndFire(entry, trigger, triggerState, queue, now)
     })
-    this.cronTasks.push(task)
+    if (!this.cronTasks.has(entry.instanceId)) this.cronTasks.set(entry.instanceId, [])
+    this.cronTasks.get(entry.instanceId)!.push(task)
   }
 
   private async checkAndFire(
-      instanceId: string,
+      entry: InstanceEntry,
       trigger: Trigger,
       triggerState: TriggerState,
-      strategy: IStrategy,
       queue: ExecutionQueue,
       now: number,
   ): Promise<void> {
+    const { instanceId, strategy } = entry
     if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
     const monitorData = triggerState.collectMonitorData(trigger.conditions)
     triggerState.reset()
@@ -290,11 +391,31 @@ export class TriggerManager {
         return monitorData[`${monitorLabel}:${key}`]
       },
     }
-    const instructions = await strategy.run(context)
-    const tagged = instructions.map(i => ({ ...i, instanceId }))
+    let instructions: ExecutionInstruction[]
+    try {
+      instructions = await strategy.run(context)
+    } catch (err) {
+      // Contain strategy failures here: callers are cron callbacks and monitor
+      // emit handlers, where a rejection would otherwise go unhandled.
+      log.error({ instanceId, triggerId: trigger.id, err }, 'Strategy run failed')
+      return
+    }
+    // Instructions leave the strategy with executor LABELS; resolve them to
+    // registry keys here — the only point where instructions enter the queue.
+    const tagged = instructions.map(i => ({
+      ...i,
+      instanceId,
+      executorId: entry.executorLabelToKey.get(i.executorId) ?? i.executorId,
+    }))
     await queue.pushBatch(tagged)
     const event: StrategyRunEvent = { instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now }
-    for (const handler of this.strategyRunHandlers) handler(event)
+    for (const handler of this.strategyRunHandlers) {
+      try {
+        handler(event)
+      } catch (err) {
+        log.error({ instanceId, err }, 'StrategyRunEvent handler failed')
+      }
+    }
   }
 
 }

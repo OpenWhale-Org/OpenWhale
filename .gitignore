@@ -9,3 +9,14 @@ dist/
 .DS_Store
 .claude/
 temp/
+
+# Private strategy packages — developed out-of-tree and installed as local
+# plugins, NEVER committed here. Ignored so an
+# accidental copy under packages/ can't be staged.
+packages/private-*/
+
+# Local-only: deployment script and internal design notes carry
+# machine-specific paths; typecheck build output is derived.
+/scripts/deploy.sh
+/docs/architecture.md
+packages/dashboard/.next-typecheck/

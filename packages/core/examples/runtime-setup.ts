@@ -1,10 +1,10 @@
 /**
- * Example: 完整 Runtime 组装
+ * Example: Full runtime setup
  *
- * 展示如何将 Monitor、Executor、Strategy 注册到 OpenWhaleRuntime，
- * 并激活 StrategyInstance 让整个系统运转起来。
+ * Shows how to register Monitor, Executor, and Strategy with OpenWhaleRuntime,
+ * then activate a StrategyInstance to get the whole system running.
  *
- * 运行方式（需要先 build）：
+ * How to run (build first):
  *   npx tsx packages/core/examples/runtime-setup.ts
  */
 
@@ -19,8 +19,8 @@ import { MomentumStrategy } from './MomentumStrategy.js'
 import { AiTradingStrategy } from './AiTradingStrategy.js'
 
 async function main() {
-  // ── 1. 初始化数据库 + CredentialStore ────────────────────────────────────
-  // 加密密钥从环境变量读取，生产环境应使用 KMS 或 Vault
+  // ── 1. Initialize database + CredentialStore ─────────────────────────────
+  // Encryption key from env; use KMS or Vault in production
   const encryptionKey = process.env['OPENWHALE_ENCRYPTION_KEY']
   if (!encryptionKey) throw new Error('OPENWHALE_ENCRYPTION_KEY is required')
 
@@ -30,15 +30,15 @@ async function main() {
 
   const credentials = new DBCredentialStore(encryptionKey, database)
 
-  // 首次运行时存储 API Key（之后注释掉）：
+  // Store API key on first run (comment out afterwards):
   // await credentials.set('openai-api-key', 'api-key', { value: process.env['OPENAI_API_KEY'] ?? '' })
 
-  // ── 2. 创建 Runtime ───────────────────────────────────────────────────────
+  // ── 2. Create Runtime ─────────────────────────────────────────────────────
   const runtime = new OpenWhaleRuntime({ credentialStore: credentials, database })
 
   const now = new Date().toISOString()
 
-  // ── 3. 注册 Monitor ───────────────────────────────────────────────────────
+  // ── 3. Register Monitor ───────────────────────────────────────────────────
   runtime.registerMonitor(
     {
       id: 'price',
@@ -47,10 +47,10 @@ async function main() {
       createdAt: now,
       updatedAt: now,
     },
-    new PriceMonitor(5000),  // 5 秒轮询
+    new PriceMonitor(5000),  // poll every 5 seconds
   )
 
-  // ── 4. 注册 Executor ──────────────────────────────────────────────────────
+  // ── 4. Register Executor ──────────────────────────────────────────────────
   runtime.registerExecutor(
     {
       id: 'trade',
@@ -63,8 +63,8 @@ async function main() {
     new TradeExecutor(),
   )
 
-  // ── 5. 注册 Strategy ──────────────────────────────────────────────────────
-  // registerStrategy 接收工厂函数，每次 activate 时创建新实例
+  // ── 5. Register Strategy ──────────────────────────────────────────────────
+  // registerStrategy takes a factory function; a new instance is created per activate()
   runtime.registerStrategy(
     {
       id: 'momentum',
@@ -91,30 +91,30 @@ async function main() {
     () => new AiTradingStrategy(),
   )
 
-  // ── 6. 激活 StrategyInstance ──────────────────────────────────────────────
-  // triggers 由 strategy.triggers(params) 动态生成，不在 instance 中声明
+  // ── 6. Activate StrategyInstances ────────────────────────────────────────
+  // triggers are generated dynamically by strategy.triggers(params); not declared on the instance
 
-  // Instance A：BTC 价格变动时触发 MomentumStrategy
+  // Instance A: trigger MomentumStrategy on BTC price changes
   await runtime.activate({
     id: 'instance-momentum-btc',
     name: 'BTC Momentum',
     strategyId: 'momentum',
-    accounts: [],  // MomentumStrategy 不需要账户
+    accounts: [],  // MomentumStrategy does not require accounts
     params: {
       base:    { symbol: 'BTC' },
-      tunable: {},  // 使用 tunableParamsSchema 中的默认值
+      tunable: {},  // use defaults from tunableParamsSchema
     },
     enabled: true,
     createdAt: now,
     updatedAt: now,
   })
 
-  // Instance B：每分钟触发 AiTradingStrategy（监控 BTC + ETH）
+  // Instance B: trigger AiTradingStrategy every minute (watching BTC + ETH)
   await runtime.activate({
     id: 'instance-ai-trading',
     name: 'AI Trading (1m)',
     strategyId: 'ai-trading',
-    accounts: [],  // 如需账户操作，填入 credential 名称，如 ['my-exchange']
+    accounts: [],  // fill with credential names if account operations are needed, e.g. ['my-exchange']
     params: {
       base:    { watchlist: ['BTC', 'ETH'] },
       tunable: {},
@@ -124,11 +124,11 @@ async function main() {
     updatedAt: now,
   })
 
-  // ── 7. 启动 ───────────────────────────────────────────────────────────────
+  // ── 7. Start ──────────────────────────────────────────────────────────────
   await runtime.start()
   console.log('OpenWhale runtime started. Press Ctrl+C to stop.')
 
-  // 优雅退出
+  // graceful shutdown
   process.on('SIGINT', async () => {
     console.log('\nShutting down...')
     await runtime.stop()

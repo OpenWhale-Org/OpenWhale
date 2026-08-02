@@ -8,8 +8,13 @@ interface InstanceRow {
   description: string | null
   strategy_id: string
   accounts: string | null
+  credentials: string | null
+  llm: string | null
   params: string | null
   enabled: number
+  icon: string | null
+  folder: string | null
+  sort_order: number | null
   created_at: string
   updated_at: string
 }
@@ -25,7 +30,12 @@ function rowToInstance(row: InstanceRow): StrategyInstance {
   }
   if (row.description !== null) instance.description = row.description
   if (row.accounts !== null) instance.accounts = JSON.parse(row.accounts) as string[]
+  if (row.credentials !== null) instance.credentials = JSON.parse(row.credentials) as NonNullable<StrategyInstance['credentials']>
+  if (row.llm !== null) instance.llm = JSON.parse(row.llm) as NonNullable<StrategyInstance['llm']>
   if (row.params !== null) instance.params = JSON.parse(row.params) as NonNullable<StrategyInstance['params']>
+  if (row.icon !== null && row.icon !== undefined) instance.icon = row.icon
+  if (row.folder !== null && row.folder !== undefined) instance.folder = row.folder
+  if (row.sort_order !== null && row.sort_order !== undefined) instance.sortOrder = row.sort_order
   return instance
 }
 
@@ -34,15 +44,20 @@ export class DBStrategyInstanceStore {
 
   async save(instance: StrategyInstance): Promise<void> {
     await this.db.run(
-      `INSERT INTO strategy_instances (id, name, description, strategy_id, accounts, params, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO strategy_instances (id, name, description, strategy_id, accounts, credentials, llm, params, enabled, icon, folder, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name        = excluded.name,
          description = excluded.description,
          strategy_id = excluded.strategy_id,
          accounts    = excluded.accounts,
+         credentials = excluded.credentials,
+         llm         = excluded.llm,
          params      = excluded.params,
          enabled     = excluded.enabled,
+         icon        = excluded.icon,
+         folder      = excluded.folder,
+         sort_order  = excluded.sort_order,
          updated_at  = excluded.updated_at`,
       [
         instance.id,
@@ -50,8 +65,13 @@ export class DBStrategyInstanceStore {
         instance.description ?? null,
         instance.strategyId,
         instance.accounts ? JSON.stringify(instance.accounts) : null,
+        instance.credentials ? JSON.stringify(instance.credentials) : null,
+        instance.llm ? JSON.stringify(instance.llm) : null,
         instance.params ? JSON.stringify(instance.params) : null,
         instance.enabled ? 1 : 0,
+        instance.icon ?? null,
+        instance.folder ?? null,
+        instance.sortOrder ?? null,
         instance.createdAt,
         instance.updatedAt,
       ]

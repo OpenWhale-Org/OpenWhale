@@ -1,7 +1,8 @@
 export { HyperliquidAdapter } from './adapter.js'
-export { HyperliquidAccount } from './account.js'
 export { UserTradesMonitor } from './monitor.js'
-export { PerpTradingExecutor } from './executor.js'
 export { CopyTradingStrategy } from './strategy.js'
 export { hyperliquidPlugin } from './plugin.js'
-export type { HyperliquidPluginConfig } from './plugin.js'
+
+// Plugin-package convention: the entry default-exports the plugin factory
+// so runtime.loadPluginFromPath (dashboard install) can load it.
+export { default } from './plugin.js'

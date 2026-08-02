@@ -2,6 +2,11 @@
   "name": "openwhale",
   "private": true,
   "scripts": {
+    "dev": "pnpm -r --parallel --filter @openwhaleorg/gateway --filter @openwhaleorg/dashboard run dev",
+    "dev:gateway": "pnpm --filter @openwhaleorg/gateway dev",
+    "dev:dashboard": "pnpm --filter @openwhaleorg/dashboard dev",
+    "start": "pnpm build && pnpm -r --parallel --filter @openwhaleorg/gateway --filter @openwhaleorg/dashboard run start",
+    "engine": "pnpm --filter @openwhaleorg/hyperliquid example:copy-trading",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",

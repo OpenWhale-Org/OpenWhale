@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
+import { AsyncLocalStorage } from 'async_hooks'
 import type { DatabaseAdapter, Row } from './DatabaseAdapter.js'
-import { SCHEMA_SQL } from './schema.js'
+import { SCHEMA_SQL, MIGRATION_SQL } from './schema.js'
 
 export interface SQLiteAdapterOptions {
   /** Absolute path to the .db file. Directories are created automatically. */
@@ -21,6 +22,10 @@ export interface SQLiteAdapterOptions {
 export class SQLiteAdapter implements DatabaseAdapter {
   private db: Database.Database | null = null
   private readonly options: Required<SQLiteAdapterOptions>
+  /** Serializes transaction() calls — see the comment in transaction(). */
+  private txQueue: Promise<unknown> = Promise.resolve()
+  /** Tracks "we are inside a transaction() fn" so nested calls join the outer transaction. */
+  private readonly txContext = new AsyncLocalStorage<boolean>()
 
   constructor(options: SQLiteAdapterOptions) {
     this.options = {
@@ -36,6 +41,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.db = new Database(this.options.filePath)
     this.db.pragma(`busy_timeout = ${this.options.busyTimeout}`)
     this.db.exec(SCHEMA_SQL)
+    for (const migration of MIGRATION_SQL) {
+      try {
+        this.db.exec(migration)
+      } catch {
+        // Already applied (duplicate column) — additive migrations only
+      }
+    }
   }
 
   async run(sql: string, params: unknown[] = []): Promise<number> {
@@ -55,18 +67,29 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    const db = this.getDb()
-    // better-sqlite3 transactions are synchronous; we wrap the async fn
-    // by running it inside a deferred transaction boundary.
-    db.exec('BEGIN')
-    try {
-      const result = await fn()
-      db.exec('COMMIT')
-      return result
-    } catch (err) {
-      db.exec('ROLLBACK')
-      throw err
-    }
+    // A nested transaction() (fn calling transaction() again) would deadlock on
+    // the queue below — join the already-open transaction instead.
+    if (this.txContext.getStore()) return fn()
+
+    // All queries share one connection, so a second transaction() starting while
+    // an async fn is awaiting would hit "cannot start a transaction within a
+    // transaction" (and its statements would join the open one). Chain them.
+    const run = this.txQueue.then(() =>
+      this.txContext.run(true, async () => {
+        const db = this.getDb()
+        db.exec('BEGIN')
+        try {
+          const result = await fn()
+          db.exec('COMMIT')
+          return result
+        } catch (err) {
+          db.exec('ROLLBACK')
+          throw err
+        }
+      })
+    )
+    this.txQueue = run.catch(() => undefined)
+    return run
   }
 
   async close(): Promise<void> {

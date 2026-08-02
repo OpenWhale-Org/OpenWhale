@@ -54,6 +54,50 @@ describe('TriggerManager', () => {
     manager.stop()
   })
 
+  // ── Subscribe without being triggered ───────────────────────────────────────
+
+  describe('subscriptions (collect without waking)', () => {
+    it('subscribes a declared monitor that no condition references', () => {
+      const spy = vi.spyOn(monitor, 'subscribeAll')
+      const collector = new MockStrategy({
+        id: 'collector', monitors: ['price'], instructions: [makeInstruction()],
+        subscriptions: [{ monitorName: 'price', key: '*' }],
+      })
+      manager.registerInstance('instance-1', collector, [], { base: {}, tunable: {} }, [], [], makeLabelMap(collector), new Map())
+      manager.start(queue)
+      expect(spy).toHaveBeenCalled()
+    })
+
+    it('does NOT run the strategy when that monitor emits', async () => {
+      const collector = new MockStrategy({
+        id: 'collector', monitors: ['price'], instructions: [makeInstruction()],
+        subscriptions: [{ monitorName: 'price', key: '*' }],
+      })
+      manager.registerInstance('instance-1', collector, [], { base: {}, tunable: {} }, [], [], makeLabelMap(collector), new Map())
+      manager.start(queue)
+
+      await monitor.emit('BTC', { price: 1 })
+
+      // The whole point: the data keeps arriving, the strategy stays asleep.
+      // A strategy whose real schedule is a cron would otherwise race itself,
+      // since two triggers can reach run() concurrently.
+      expect(collector.contexts).toHaveLength(0)
+      expect(queue.received).toHaveLength(0)
+    })
+
+    it('releases the subscription with the instance', () => {
+      const spy = vi.spyOn(monitor, 'unsubscribeAll')
+      const collector = new MockStrategy({
+        id: 'collector', monitors: ['price'],
+        subscriptions: [{ monitorName: 'price', key: '*' }],
+      })
+      manager.registerInstance('instance-1', collector, [], { base: {}, tunable: {} }, [], [], makeLabelMap(collector), new Map())
+      manager.start(queue)
+      manager.unregisterInstance('instance-1')
+      expect(spy).toHaveBeenCalled()
+    })
+  })
+
   // ── Monitor condition ───────────────────────────────────────────────────────
 
   describe('monitor condition', () => {
@@ -61,7 +105,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -75,7 +119,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('ETH', { price: 3000 })
@@ -87,7 +131,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -99,7 +143,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -116,7 +160,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: '*' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('ETH', { price: 3000 })
@@ -128,7 +172,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: '*' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('SOL', { price: 150 })
@@ -147,7 +191,7 @@ describe('TriggerManager', () => {
           sources: [{ monitorName: 'price', key: 'BTC', filter: { field: 'price', op: 'gt', value: 40000 } }],
         }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -162,7 +206,7 @@ describe('TriggerManager', () => {
           sources: [{ monitorName: 'price', key: 'BTC', filter: { field: 'price', op: 'gt', value: 60000 } }],
         }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -186,7 +230,7 @@ describe('TriggerManager', () => {
           { type: 'monitor', sources: [{ monitorName: 'volume', key: 'BTC' }] },
         ],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -207,7 +251,7 @@ describe('TriggerManager', () => {
           { type: 'monitor', sources: [{ monitorName: 'volume', key: 'BTC' }] },
         ],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -227,7 +271,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'cron', expression: '* * * * *' }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       // Advance time by 1 minute to trigger cron
@@ -246,7 +290,7 @@ describe('TriggerManager', () => {
         enabled: false,
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -262,7 +306,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'monitor', sources: [{ monitorName: 'price', key: 'BTC' }] }],
       })
-      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(strategy))
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
       manager.start(queue)
 
       await monitor.fire('BTC', { price: 50000 })
@@ -282,7 +326,7 @@ describe('TriggerManager', () => {
       const trigger = makeTrigger({
         conditions: [{ type: 'cron', expression: '* * * * *' }],
       })
-      manager.registerInstance('instance-1', missingStrategy, [trigger], { base: {}, tunable: {} }, [], makeLabelMap(missingStrategy))
+      manager.registerInstance('instance-1', missingStrategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(missingStrategy), new Map())
 
       expect(() => manager.start(queue)).toThrow(/nonexistent.*not registered/i)
     })

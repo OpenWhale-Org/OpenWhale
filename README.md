@@ -8,37 +8,89 @@
 ![TypeScript](https://img.shields.io/badge/language-TypeScript-3178c6)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
-OpenWhale is a TypeScript framework for building automated economic strategies. Monitor, Strategy, and Executor are fully decoupled — the same strategy code runs on any exchange, plugs into any data source, and can be generated or evolved by an AI at runtime.
+OpenWhale is a TypeScript framework for building automated economic strategies. Monitors, Strategies, and Executors are fully decoupled — the same strategy code runs on any venue, plugs into any data source, and can be written, audited, and evolved by an AI.
 
 ---
 
 ## Why OpenWhale
 
-- **Fully decoupled layers** — Monitor, Strategy, and Executor are independent. Replace any layer without touching the others.
-- **Exchange-agnostic strategies** — Strategy code has zero knowledge of which exchange it runs on. One strategy, any platform.
-- **AI as a programmer** — LLM inference is built into the strategy layer. AI generates type-safe TypeScript strategies that are compiled, hot-loaded, and can evolve automatically — no token cost per tick.
-- **Structured trigger system** — Combine Cron schedules with multi-source Monitor conditions (AND logic, time window). Express "fire only when A and B both happen within 60 seconds" without polling.
-- **Type-safe plugin architecture** — Every Monitor, Executor, and Strategy implements a strict TypeScript interface. IDE support, safe refactoring, and AI-generated code that the type system validates at compile time.
+- **Fully decoupled layers** — Monitors collect, Strategies decide, Executors act. Replace any layer without touching the others.
+- **Venue-agnostic by construction** — a strategy never names an exchange. It declares *account slots*; the venue derives from whichever account you bind at activation. One strategy, any platform.
+- **The adapter matrix** — venues plug in as cells of a *(kind × venue)* matrix (`exchange/perp × binance`, `exchange/spot × hyperliquid`, …). Domain packages define the vocabulary, venue packages fill the cells, and a data-driven ccxt roster ships twelve venues out of the box.
+- **AI as a programmer** — LLM inference with structured output is built into the strategy layer, and the repo ships a `skills/openwhale-dev` skill that teaches any Claude the full framework contract so it can produce installable plugins with tests.
+- **Deep observability** — every strategy run leaves a persistent decision trace: what it saw, which gate said no, what it emitted. Deactivate an instance or restart the gateway and the audit trail survives.
+- **Type-safe plugin architecture** — every component implements a strict TypeScript interface. IDE support, safe refactoring, and AI-generated code the compiler validates.
 
 ---
 
-## Code Examples
+## Core concepts
+
+| Concept | What it is |
+|---|---|
+| **Monitor** | Collects data and emits keyed records (`venue:symbol`, …). Declared as a *contract* with one or more *implementations*; users create per-key *instances*, optionally credential-bound. Emits persist as JSONL and drive triggers. |
+| **Strategy** | Pure decision logic. Declares monitor/executor/account dependencies by label, receives triggers, returns `ExecutionInstruction[]`. Params split into `base` (required) and `tunable` (defaulted, AI-optimizable) zod schemas. |
+| **Executor** | Turns instructions into venue actions through adapter sessions: retry discipline, idempotent client order ids, per-order latency and slippage capture. Strategies stay pure. |
+| **Instance** | A strategy + params + account bindings, activated as a unit. Everything observable hangs off the instance: live events, executions, run traces, logs. |
+| **Account** | A named entity binding a credential to an account implementation (generic or venue-specialized). Strategies read balances and positions only through their bound account's Reader. |
+| **Trigger** | Cron schedules and monitor conditions (multi-source AND within a time window). Subscriptions keep monitors collecting without waking the strategy. |
+
+```
+Monitor (data collection)
+    ↓ emit(key, data)
+TriggerManager (cron + monitor conditions)
+    ↓ StrategyContext
+Strategy (rules / AI inference)  →  run trace persisted
+    ↓ ExecutionInstruction[]
+ExecutionQueue
+    ↓
+Executor (venue actions via adapter sessions)
+```
+
+---
+
+## The dashboard
+
+- **Instances** — cards with folders, drag-drop ordering, and emoji icons; four live tabs per instance (Live Events scoped to the instance's own monitors, Executions, Runs, Logs). A full-page **Board** per instance adds an editable parameter panel.
+- **Run tracing** — every run records its steps: gates, skips, sizing, emitted instructions, captured log lines. Runs with instructions or errors persist to disk; idle runs are heartbeat-sampled. Filter by outcome, search by content.
+- **Monitor boards** — monitors declare dashboard panels via the `plots()` convention: line/bar/candles plus a sortable `table` kind, single- and multi-select pickers, record-window control.
+- **Params as forms** — zod `.meta()` drives the UI: sections, sliders, unit suffixes, conditional visibility, searchable market pickers (single and multi), per-value availability verdicts against the bound venue, editable row-table *list* params for ladders, and sandboxed interactive *illustrations* that redraw live as you edit values.
+- **Scripts** — plugins ship operator utilities (`scripts: [...]`) that run on demand against the live runtime and return a monospace report: plan previews, fit inspectors, one-off audits. Params render as a small form, with live-resolved dropdowns for runtime values such as instance ids.
+- **Compiler & Assistant** — an experimental natural-language strategy compiler, plus the recommended path: point Claude at `skills/openwhale-dev` and have it write the plugin.
+
+---
+
+## Code examples
 
 ### A minimal strategy
 
 ```typescript
-class MomentumStrategy extends BaseStrategy {
+const decls = {
+  monitors: [{ name: 'exchange/ticker', label: 'price' }],
+  executors: [{ name: 'exchange/perp-trading', label: 'perp' }],
+  accounts: [{ account: PerpAccount, label: 'main' }],
+} as const satisfies StrategyDeclarations
+
+class MomentumStrategy extends BaseStrategy<typeof decls> {
   readonly strategyId = 'momentum'
+  override readonly monitors = decls.monitors
+  override readonly executors = decls.executors
+  override readonly accounts = decls.accounts
+
+  readonly baseParamsSchema = z.object({
+    symbol: z.string().meta({ displayName: 'Symbol' }),
+    threshold: z.number().meta({ displayName: 'Entry price' }),
+  })
 
   async evaluate(context: StrategyContext) {
-    const { symbol, threshold } = this.params.base
-    const tick = context.getData('price', symbol)
+    const { symbol, threshold } = this.baseParamsSchema.parse(this.params.base)
+    const tick = context.getData('price', `${this.accountVenue('main')}:${symbol}`)
+    this.trace('tick:read', { tick })                    // lands in the run trace
     if (!tick || tick.price < threshold) return []
 
     return [
-        this.instruction('perp', 'placeOrder', {
-          symbol, side: 'buy', type: 'market', amount: 0.01,
-        })
+      this.instruction('perp', 'placeOrder', {
+        symbol, side: 'buy', type: 'market', amount: 0.01,
+      }),
     ]
   }
 }
@@ -48,11 +100,13 @@ class MomentumStrategy extends BaseStrategy {
 
 ```typescript
 const runtime = new OpenWhaleRuntime({ database, credentialStore })
-runtime.loadPlugin(hyperliquidPlugin)
+runtime.loadPlugin(binancePlugin, {})
+runtime.loadPlugin(hyperliquidPlugin, {})
 await runtime.start()
 await runtime.activate({
-  strategyId: 'hyperliquid/copy-trading',
-  params: { base: { targetAddress: '0x...', ratio: 0.5 } },
+  strategyId: 'my-plugin/momentum',
+  credentials: { main: 'My Binance' },       // the account binding decides the venue
+  params: { base: { symbol: 'BTC/USDT:USDT', threshold: 60000 } },
 })
 ```
 
@@ -60,7 +114,7 @@ await runtime.activate({
 
 ```typescript
 async evaluate(context: StrategyContext) {
-  const data = context.getData('price', 'BTC/USDC:USDC')
+  const data = await this.monitorData('market')?.readLatest(this.accountVenue('main'))
 
   const { action, confidence } = await this.llm({
     messages: [{ role: 'user', content: JSON.stringify(data) }],
@@ -69,107 +123,111 @@ async evaluate(context: StrategyContext) {
       confidence: z.number(),
     }),
   })
-
   if (action === 'hold' || confidence < 0.7) return []
 
   return [
-      this.instruction('perp', 'placeOrder', {
-        symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01,
-      })
+    this.instruction('perp', 'placeOrder', {
+      symbol: 'BTC/USDC:USDC', side: action, type: 'market', amount: 0.01,
+    }),
   ]
+}
+```
+
+### An operator script
+
+```typescript
+export const planPreview: ScriptDefinition = {
+  id: 'plan-preview',
+  name: 'Plan preview',
+  paramsSchema: z.object({ instance: z.string().default('') }),
+  paramOptions: async (runtime) => ({ instance: await listMyInstances(runtime) }),
+  run: async ({ params, runtime }) => ({ text: await renderPlan(runtime, params) }),
 }
 ```
 
 ---
 
-## Features
+## Plugins
 
-- **Plugin architecture** — exchanges, account types, monitors, and executors register through standard interfaces; the framework manages lifecycle and dependency injection
-- **Composable by design** — Monitor / Strategy / Executor mix and match freely; swap `MockExecutor` for simulation with one line
-- **Exchange-agnostic strategies** — strategies access accounts through `IAccount` and express intent through `ExecutionInstruction`, never calling exchange SDKs directly
-- **Built-in LLM inference** — call LLMs with structured output (Zod schema) directly inside strategy `evaluate()`; supports OpenAI, Anthropic, Google, Groq, xAI, and custom providers
-- **Structured trigger system** — Cron + Monitor condition AND combinations with time windows; `TriggerManager` handles all scheduling and state
-- **Auto-derived param UI** — attach `.meta()` to Zod schema fields; Dashboard renders typed form controls automatically, no per-strategy UI code needed
-- **Hot-reload compiled strategies** — AI-generated TypeScript strategies are compiled with esbuild and loaded at runtime without restart
-- **Persistent storage** — Monitor data auto-persisted as JSONL; built-in KV store per strategy instance; SQLite adapter included
+A plugin is a package with a default-exported factory returning its registrations:
+
+```typescript
+export default definePlugin((ctx) => ({
+  name: 'my-plugin',
+  version: '1.0.0',
+  monitorImplementations: [ /* contract / implementation / instance model */ ],
+  executors: [ /* … */ ],
+  strategies: [ /* … */ ],
+  scripts: [ /* operator utilities for the Scripts page */ ],
+  credentialTypes: [ /* venue credential recipes: schema, raw opt-in, connectivity test */ ],
+  adapters: [ /* (kind × venue) matrix cells */ ],
+  accounts: [ /* account implementations */ ],
+}))
+```
+
+Install from the dashboard's Plugins page (npm name or local path) or `runtime.loadPlugin()` in code. Components register namespaced (`my-plugin/momentum`); hot reload is supported.
+
+### Writing plugins with Claude
+
+Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or reference this repo's path in Claude Code), describe the strategy you want, and Claude produces a complete plugin package — monitors, executors, strategies, tests — that installs from the Plugins page.
 
 ---
 
-## Use Cases
+## Use cases
 
 | Scenario | Description |
 |----------|-------------|
-| **Copy Trading** | Monitor a target wallet, mirror its trades proportionally with position caps |
-| **Cross-exchange Arbitrage** | Trigger only when price spread AND funding rate conditions are met simultaneously |
-| **AI Market Making** | LLM analyzes order book depth and volatility, dynamically adjusts bid/ask quotes |
-| **On-chain Event Response** | Listen to smart contract events, trigger on-chain or off-chain actions automatically |
-| **Multi-condition Signal Strategy** | Combine price, volume, and funding rate monitors — fire only when all conditions align within a time window |
-| **NFT / Token Launch Sniping** | Monitor mempool or launchpad events, execute within milliseconds of a trigger |
-| **Yield Optimization** | Monitor APY across protocols, rebalance positions when spread exceeds threshold |
+| **Funding / basis capture** | Cron-triggered cycles around settlement instants, sized by order-book depth, timed against fitted market microstructure |
+| **Pair / spread reversion** | Two-leg hedged ladders driven by a z-scored spread monitor, with dwell confirmation and stop discipline |
+| **Copy trading** | Monitor a target wallet, mirror its trades proportionally with position caps |
+| **AI market analysis** | LLM inference with structured output directly inside `evaluate()` |
+| **Multi-condition signals** | Combine price, volume, and rate monitors — fire only when all conditions align within a time window |
 
 ---
 
-## Architecture
-
-```
-Monitor (data collection)
-    ↓ emit(key, data)
-TriggerManager (trigger evaluation)
-    ↓ StrategyContext
-Strategy (rules / AI inference)
-    ↓ ExecutionInstruction[]
-ExecutionQueue
-    ↓
-Executor (trade execution)
-```
-
-Each layer is a pure interface. Monitors emit keyed data events. TriggerManager evaluates Cron + Monitor conditions and fires a `StrategyContext`. Strategies return `ExecutionInstruction[]` — they never call exchange APIs directly. Executors consume the queue and handle the actual API calls.
-
----
-
-## Quick Start
+## Quick start
 
 ### Prerequisites
 
-- Node.js ≥ 20, pnpm ≥ 8
-- A Hyperliquid account with a wallet address and private key
+- Node.js ≥ 20, pnpm ≥ 9
 
-### Install
+### Gateway + Dashboard
+
+The backend (gateway) owns the runtime and all secrets; the dashboard is a pure frontend.
 
 ```bash
 pnpm install
 pnpm build
+cp .env.example .env           # fill in OPENWHALE_MASTER_KEY + OPENWHALE_ADMIN_USER/PASSWORD
+pnpm dev                       # gateway on :3001 + dashboard on :3000
 ```
 
-### Run the copy trading example
+The gateway **fails closed**: with no user account and no
+`OPENWHALE_ADMIN_USER`/`OPENWHALE_ADMIN_PASSWORD` it refuses to start rather
+than serve an unauthenticated trading API. Set them once, sign in, then remove
+them from the environment.
 
-```bash
-cd packages/hyperliquid
-cp examples/.env.example examples/.env
-```
+Open `http://localhost:3000` to manage strategy instances, accounts, monitors, credentials, scripts, and the AI compiler. The dashboard's only setting is `OPENWHALE_GATEWAY_URL` (defaults to `http://localhost:3001`).
 
-Edit `examples/.env`:
+### Authentication
 
-```env
-HL_WALLET_ADDRESS=0x...        # your wallet address
-HL_PRIVATE_KEY=0x...           # your private key
-HL_TARGET_ADDRESS=0x...        # address to copy trades from
-MASTER_KEY=your-32-byte-hex    # encryption key for credential store
-```
+Auth is enforced by the **gateway**, not the dashboard: that process holds the
+decrypted venue credentials, can place orders, and can install plugins
+(arbitrary code), so a frontend-only login would be bypassed by anyone who can
+reach port 3001. Every `/api/*` route requires a session; the dashboard just
+carries the cookie, and its route guard is a redirect for humans rather than a
+security boundary.
 
-```bash
-pnpm example:copy-trading
-```
+Sessions are opaque tokens in SQLite (revocable, 7-day expiry) and passwords are
+scrypt-hashed. Manage accounts on the **Users** page — there are no roles: anyone
+who can sign in can move real money.
 
-### Dashboard
+Before exposing the gateway to a network:
 
-```bash
-cd packages/dashboard
-cp .env.example .env.local     # fill in OPENWHALE_MASTER_KEY
-pnpm dev
-```
-
-Open `http://localhost:3000` to manage strategy instances, view monitor data, and configure credentials.
+- terminate TLS in front of it (the session cookie is marked `Secure` only when
+  the request arrives over https)
+- keep port 3001 off the public internet if the dashboard proxies for you; set
+  `OPENWHALE_ALLOWED_ORIGIN` only for genuinely cross-origin frontends
 
 ---
 
@@ -177,27 +235,31 @@ Open `http://localhost:3000` to manage strategy instances, view monitor data, an
 
 | Package | Description |
 |---------|-------------|
-| [`@openwhale/core`](./packages/core) | Strategy engine core: Monitor, Trigger, Strategy, Executor, Runtime, Account, CompiledLoader |
-| [`@openwhale/hyperliquid`](./packages/hyperliquid) | Hyperliquid plugin: HyperliquidAdapter (ccxt.pro), HyperliquidAccount, UserTradesMonitor, PerpTradingExecutor, CopyTradingStrategy |
-| [`@openwhale/dashboard`](./packages/dashboard) | Next.js management dashboard: strategy instance management, registry browser, credential management, auto-rendered param forms |
-| `@openwhale/assistant` | Personal assistant layer: session management, LLM conversation, tool calls *(planned)* |
-| `@openwhale/mcp-server` | Expose the strategy engine as an MCP server *(planned)* |
+| [`@openwhaleorg/core`](./packages/core) | Domain-agnostic engine: credential materialization, adapter matrix, first-class Accounts, monitor contract/implementation/instance model, Strategy/Executor/Trigger, run-trace persistence, Scripts, `definePlugin` + `@Ow*` decorators, CompiledLoader |
+| [`@openwhaleorg/exchange`](./packages/exchange) | Exchange domain package: kinds `exchange/perp` + `exchange/spot`, Perp/SpotAccount read views, shared trading executors, public market monitors (ticker/orderbook/volume/kline/funding-rates) with dashboard plots |
+| [`@openwhaleorg/ccxt-adapter`](./packages/ccxt-adapter) | Generic ccxt implementation of the exchange adapter interfaces + the data-driven venue roster |
+| [`@openwhaleorg/hyperliquid`](./packages/hyperliquid) / [`binance`](./packages/binance) / [`aster`](./packages/aster) | Venue plugins: credential types + adapter cells (+ venue-specialized accounts, Portfolio Margin support on Binance) |
+| [`@openwhaleorg/gateway`](./packages/gateway) | Resident backend: runtime singleton, auth, REST + SSE API, compiler service, plugin install — all secrets live here |
+| [`@openwhaleorg/dashboard`](./packages/dashboard) | Next.js frontend: instances (folders/boards), accounts (equity curves), monitor boards, executors, credentials, plugins, scripts, AI compiler |
+| [`@openwhaleorg/compiler`](./packages/compiler) | AI strategy compiler: NL → analyze → codegen → L1–L4 validation ladder → human review → hot load |
+| `@openwhaleorg/assistant` | Personal assistant layer *(planned)* |
+| `@openwhaleorg/mcp-server` | Expose the strategy engine as an MCP server *(planned)* |
 
 ---
 
 ## Roadmap
 
-### M1 — Compiler
+### M1 — Compiler *(shipped)*
 
-A conversational compiler that guides users step by step to define strategy logic, then compiles Monitor / Strategy / Executor components into type-safe TypeScript. Runs static analysis, unit tests, and mock simulation automatically. Hot-loads the result into the runtime — ready to run out of the box.
+A conversational compiler that guides users step by step to define strategy logic, then compiles Monitor / Strategy / Executor components into type-safe TypeScript. Runs a deterministic validation ladder (build → typecheck → registration probe → mock dry-run) automatically. After human review, hot-loads the result into the runtime.
 
 ### M2 — Optimizer
 
-Dual-agent optimization loop: an analysis agent reads runtime performance and historical monitor data to generate an optimization plan; an execution agent adjusts parameters or rewrites strategy code and validates the result through backtesting. Triggered automatically on a schedule, manually from the Dashboard, or conversationally through the Assistant.
+Dual-agent optimization loop: an analysis agent reads runtime performance and historical monitor data to generate an optimization plan; an execution agent adjusts parameters or rewrites strategy code and validates the result through backtesting.
 
 ### M3 — Assistant
 
-A unified conversational interface for the full strategy lifecycle: create and manage instances, trigger the Compiler to build new strategies, trigger the Optimizer to tune existing ones, receive proactive alerts and performance reports. Includes basic information retrieval — market data, on-chain activity, news feeds, signal sources.
+A unified conversational interface for the full strategy lifecycle: create and manage instances, trigger the Compiler and Optimizer, receive proactive alerts and performance reports.
 
 ### M4 — MCP Server
 
@@ -207,10 +269,10 @@ Expose the core engine capabilities as standard MCP tools, enabling external AI 
 
 ## Contributing
 
-OpenWhale is in active early development. The core engine is working, and we're building the rest in the open. If you're a developer interested in composable strategy infrastructure, AI-native trading systems, or just want to run your own automated strategies — we'd love your contributions.
+OpenWhale is in active early development. The core engine is working, and we're building the rest in the open.
 
 - Open an issue to discuss ideas or report bugs
-- Submit a PR for fixes, new exchange plugins, or strategy examples
+- Submit a PR for fixes, new venue plugins, or strategy examples
 - Star the repo if you find it useful — it helps others discover the project
 
 ---

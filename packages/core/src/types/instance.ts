@@ -1,4 +1,5 @@
 import type { RawCredentialData } from './credential.js'
+import type { LlmSlotBinding } from './strategy.js'
 
 export interface StrategyParams {
   base: RawCredentialData
@@ -10,9 +11,26 @@ export interface StrategyInstance {
   name: string
   description?: string
   strategyId: string
-  accounts?: string[]   // Credential name list, ordered by strategy.accountTypes
+  /** Positional credential binding for strategy account slots (legacy style). */
+  accounts?: string[]
+  /**
+   * Named credential bindings: strategy slots by label, executor slots by
+   * 'executorLabel:slotLabel'. Takes precedence over the positional array.
+   */
+  credentials?: Record<string, string>   // Credential name list, ordered by strategy.accountTypes
+  /** Per-label LLM slot overrides: { [llmLabel]: { model?, credentialName?, settings? } } */
+  llm?: Record<string, LlmSlotBinding>
   params?: StrategyParams
   enabled: boolean
+  /** Emoji shown on cards/boards. Assigned at creation (random) when absent. */
+  icon?: string
+  /** Grouping folder on the instances page; undefined = ungrouped. */
+  folder?: string
+  /** Manual ordering inside a folder (ascending). */
+  sortOrder?: number
   createdAt: string
   updatedAt: string
 }
+
+/** Persisted instance + live activation state, as dashboards see it. */
+export type StrategyInstanceView = StrategyInstance & { active: boolean }

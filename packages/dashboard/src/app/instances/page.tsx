@@ -1,14 +1,10 @@
-import type { StrategyInstance } from '@openwhale/core'
 import { InstancesClient } from './InstancesClient'
+import { fetchInstances } from '@/lib/data'
 
-async function getInstances(): Promise<StrategyInstance[]> {
-  const res = await fetch('http://localhost:3000/api/instances', { cache: 'no-store' })
-  if (!res.ok) return []
-  return res.json() as Promise<StrategyInstance[]>
-}
+export const dynamic = 'force-dynamic'
 
 export default async function InstancesPage() {
-  const instances = await getInstances()
+  const instances = await fetchInstances()
   return (
     <div>
       <div className="flex items-center justify-between mb-6">

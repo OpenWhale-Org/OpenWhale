@@ -69,9 +69,7 @@ export class RedisExecutionQueue implements ExecutionQueue {
     await this.redis.xadd(
       this.key(instruction.executorId),
       '*',
-      'executorId', instruction.executorId,
-      'action',     instruction.action,
-      'params',     JSON.stringify(instruction.params),
+      'payload', JSON.stringify(instruction),
     )
   }
 
@@ -81,9 +79,7 @@ export class RedisExecutionQueue implements ExecutionQueue {
       pipeline.xadd(
         this.key(instruction.executorId),
         '*',
-        'executorId', instruction.executorId,
-        'action',     instruction.action,
-        'params',     JSON.stringify(instruction.params),
+        'payload', JSON.stringify(instruction),
       )
     }
     await pipeline.exec()
@@ -114,7 +110,16 @@ export class RedisExecutionQueue implements ExecutionQueue {
 
       for (const [, messages] of results) {
         for (const [id, fields] of messages) {
-          const instruction = parseFields(id, fields)
+          let instruction: ExecutionInstruction
+          try {
+            instruction = parseFields(id, fields)
+          } catch (err) {
+            // Poison message (malformed payload). Ack it away — leaving it in the
+            // PEL would re-kill every consumer that reclaims it, halting the executor.
+            log.error({ err, executorId, messageId: id }, 'Unparseable message — acking and skipping')
+            await this.redis.xack(streamKey, this.consumerGroup, id)
+            continue
+          }
           try {
             await handler(instruction)
             await this.redis.xack(streamKey, this.consumerGroup, id)
@@ -214,7 +219,14 @@ export class RedisExecutionQueue implements ExecutionQueue {
 
       for (const [id, fields] of messages) {
         if (!fields || fields.length === 0) continue // deleted message
-        const instruction = parseFields(id, fields)
+        let instruction: ExecutionInstruction
+        try {
+          instruction = parseFields(id, fields)
+        } catch (err) {
+          log.error({ err, executorId, messageId: id }, 'Unparseable reclaimed message — acking and skipping')
+          await this.redis.xack(streamKey, this.consumerGroup, id)
+          continue
+        }
         log.warn({ executorId, messageId: id }, 'Reclaiming pending message from crashed consumer')
         try {
           await handler(instruction)
@@ -235,13 +247,19 @@ export class RedisExecutionQueue implements ExecutionQueue {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseFields(messageId: string, fields: string[]): ExecutionInstruction {
+function parseFields(streamId: string, fields: string[]): ExecutionInstruction {
   const map: Record<string, string> = {}
   for (let i = 0; i < fields.length - 1; i += 2) {
     map[fields[i]!] = fields[i + 1]!
   }
+  if (map['payload']) {
+    const instruction = JSON.parse(map['payload']) as ExecutionInstruction
+    // Keep the producer-side messageId (used for idempotency); fall back to the stream id
+    return { ...instruction, messageId: instruction.messageId || streamId }
+  }
+  // Legacy entries written before the full-payload format
   return {
-    messageId,
+    messageId: streamId,
     executorId: map['executorId'] ?? '',
     action:     map['action'] ?? '',
     params:     map['params'] ? JSON.parse(map['params']) as Record<string, unknown> : {},

@@ -1,2 +1,5 @@
 packages:
   - 'packages/*'
+  # Local-only private packages follow the packages/private-* convention and
+  # never enter the workspace or the lockfile.
+  - '!packages/private-*'

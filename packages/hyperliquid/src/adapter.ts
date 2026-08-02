@@ -1,281 +1,98 @@
-import * as ccxt from 'ccxt'
-import type {
-  PerpExchangeAdapter,
-  Ticker, Kline, OrderBook,
-  ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade,
-  FundingRateData, SpotOrderParams, PerpOrderParams,
-} from '@openwhale/core'
+import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
+import type { ExchangeOrder, FundingRateData, PerpOrderParams } from '@openwhaleorg/exchange'
 
 export interface HyperliquidCredentials {
   walletAddress: string
   privateKey?: string
+  /** Use the Hyperliquid testnet instead of mainnet. Default: false. */
+  testnet?: boolean
 }
 
-export class HyperliquidAdapter implements PerpExchangeAdapter {
-  private readonly exchange: InstanceType<typeof ccxt.pro.hyperliquid>
-
-  constructor(credentials: HyperliquidCredentials) {
-    const opts: ConstructorParameters<typeof ccxt.pro.hyperliquid>[0] = {
-      walletAddress: credentials.walletAddress,
-      enableRateLimit: true,
-    }
-    if (credentials.privateKey) opts.privateKey = credentials.privateKey
-    this.exchange = new ccxt.pro.hyperliquid(opts)
+/**
+ * Hyperliquid adapter: the generic CcxtAdapter plus venue quirks.
+ * Everything else (mapping, watch loops, error translation, precision)
+ * is inherited.
+ */
+export class HyperliquidAdapter extends CcxtAdapter {
+  /** Keyless form (no credentials) = public data only — used by the market monitors. */
+  constructor(credentials?: Partial<HyperliquidCredentials>) {
+    super({
+      exchangeId: 'hyperliquid',
+      ...(credentials?.walletAddress ? { walletAddress: credentials.walletAddress } : {}),
+      ...(credentials?.privateKey ? { privateKey: credentials.privateKey } : {}),
+      ...(credentials?.testnet !== undefined ? { testnet: credentials.testnet } : {}),
+    })
   }
 
-  // ── Market data ─────────────────────────────────────────────────────────────
+  /** perpDexs list cache — the builder-dex roster changes rarely. */
+  private hip3Dexes: string[] | undefined
+  private hip3DexesFetchedAt = 0
 
-  async fetchTicker(symbol: string): Promise<Ticker> {
-    const t = await this.exchange.fetchTicker(symbol)
-    return {
-      symbol: t.symbol,
-      timestamp: t.timestamp ?? Date.now(),
-      last: t.last ?? 0,
-      bid: t.bid ?? 0,
-      ask: t.ask ?? 0,
-      high: t.high ?? 0,
-      low: t.low ?? 0,
-      volume: t.baseVolume ?? 0,
-      quoteVolume: t.quoteVolume ?? 0,
-    }
-  }
-
-  async fetchOrderBook(symbol: string, depth = 20): Promise<OrderBook> {
-    const ob = await this.exchange.fetchOrderBook(symbol, depth)
-    return {
-      symbol,
-      timestamp: ob.timestamp ?? Date.now(),
-      bids: ob.bids as [number, number][],
-      asks: ob.asks as [number, number][],
-    }
-  }
-
-  async fetchOHLCV(symbol: string, timeframe: string, limit = 100): Promise<Kline[]> {
-    const rows = await this.exchange.fetchOHLCV(symbol, timeframe, undefined, limit)
-    return rows.map((row) => ({
-      timestamp: row[0] ?? 0,
-      open: row[1] ?? 0,
-      high: row[2] ?? 0,
-      low: row[3] ?? 0,
-      close: row[4] ?? 0,
-      volume: row[5] ?? 0,
+  /**
+   * Quirk: ccxt's fetchFundingRates hits metaAndAssetCtxs WITHOUT a dex
+   * param, so it only covers the main universe. HIP-3 (builder-deployed)
+   * markets settle hourly too — aggregate every dex so funding-driven
+   * consumers see them. ccxt already loads HIP-3 markets by default and
+   * accepts `{ dex }` on the same call; each per-dex failure is non-fatal
+   * (a broken builder dex must not blind the main universe).
+   */
+  override async fetchFundingRates(): Promise<FundingRateData[]> {
+    // HIP-3 symbol mapping (hip3TokensByName) is built during loadMarkets —
+    // without it parseFundingRates would emit raw ids for builder-dex coins.
+    // ccxt caches the result, so this is a no-op after the first call.
+    await this.guard(() => this.exchange.loadMarkets())
+    const main = await super.fetchFundingRates()
+    const dexes = await this.listHip3Dexes()
+    const perDex = await Promise.all(dexes.map(async (dex) => {
+      try {
+        const rates = await this.guard(() => this.exchange.fetchFundingRates(undefined, { dex }))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return Object.values(rates).map((r: any) => this.mapFundingRate(r))
+      } catch {
+        return [] as FundingRateData[]
+      }
     }))
+    return [...main, ...perDex.flat()]
   }
 
-  async fetchTrades(symbol: string, limit = 50): Promise<ExchangeTrade[]> {
-    const trades = await this.exchange.fetchTrades(symbol, undefined, limit)
-    return trades.map(this.mapTrade)
-  }
-
-  // ── Account ─────────────────────────────────────────────────────────────────
-
-  async fetchBalance(): Promise<ExchangeBalance[]> {
-    const bal = await this.exchange.fetchBalance()
-    const free = bal.free as Record<string, number> | undefined
-    const used = bal.used as Record<string, number> | undefined
-    const total = bal.total as Record<string, number> | undefined
-    return Object.entries(total ?? {})
-      .filter(([, v]) => v > 0)
-      .map(([currency, v]) => ({
-        currency,
-        free: free?.[currency] ?? 0,
-        used: used?.[currency] ?? 0,
-        total: v,
-      }))
-  }
-
-  async fetchOpenOrders(symbol?: string): Promise<ExchangeOrder[]> {
-    const orders = await this.exchange.fetchOpenOrders(symbol)
-    return orders.map(this.mapOrder)
-  }
-
-  async fetchOrders(symbol?: string, limit = 50): Promise<ExchangeOrder[]> {
-    const orders = await this.exchange.fetchOrders(symbol, undefined, limit)
-    return orders.map(this.mapOrder)
-  }
-
-  // ── Trading ─────────────────────────────────────────────────────────────────
-
-  async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
-    const extra: Record<string, unknown> = { ...(params.params ?? {}) }
-    if (params.reduceOnly !== undefined) extra.reduceOnly = params.reduceOnly
-    if (params.timeInForce !== undefined) extra.timeInForce = params.timeInForce
-
-    // Hyperliquid requires a price for market orders to calculate max slippage.
-    // If not provided, fetch the current mid price and let ccxt apply its default
-    // 5% slippage tolerance.
-    let price = params.price
-    if (params.type === 'market' && price === undefined) {
-      const ticker = await this.exchange.fetchTicker(params.symbol)
-      price = ticker.last ?? ticker.close ?? undefined
+  private async listHip3Dexes(): Promise<string[]> {
+    if (this.hip3Dexes && Date.now() - this.hip3DexesFetchedAt < 6 * 3_600_000) return this.hip3Dexes
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = await this.guard(() => (this.exchange as any).publicPostInfo({ type: 'perpDexs' })) as Array<{ name?: string } | null>
+      this.hip3Dexes = raw
+        .map(d => d?.name)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0)
+      this.hip3DexesFetchedAt = Date.now()
+    } catch {
+      this.hip3Dexes = this.hip3Dexes ?? []
     }
-
-    const order = await this.exchange.createOrder(
-      params.symbol,
-      params.type,
-      params.side,
-      params.amount,
-      price,
-      extra,
-    )
-    return this.mapOrder(order)
+    return this.hip3Dexes
   }
 
-  async cancelOrder(orderId: string, symbol: string): Promise<void> {
-    await this.exchange.cancelOrder(orderId, symbol)
-  }
-
-  async cancelAllOrders(symbol?: string): Promise<void> {
-    // ccxt HL does not support cancelAllOrders — cancel open orders one by one
-    const orders = await this.fetchOpenOrders(symbol)
-    await Promise.all(orders.map(o => this.cancelOrder(o.id, o.symbol)))
-  }
-
-  // ── Perp-specific ────────────────────────────────────────────────────────────
-
-  async fetchFundingRate(symbol: string): Promise<FundingRateData> {
-    // HL does not support fetchFundingRate per symbol — use fetchFundingRates
-    const rates = await this.fetchFundingRates()
-    const rate = rates.find(r => r.symbol === symbol)
-    if (!rate) throw new Error(`Funding rate not found for ${symbol}`)
-    return rate
-  }
-
-  async fetchFundingRates(): Promise<FundingRateData[]> {
-    const rates = await this.exchange.fetchFundingRates()
-    return Object.values(rates).map((r: any) => ({
-      symbol: r.symbol,
-      fundingRate: r.fundingRate ?? 0,
-      fundingTimestamp: r.fundingTimestamp ?? 0,
-      nextFundingTimestamp: r.nextFundingTimestamp ?? 0,
-    }))
-  }
-
-  async fetchPositions(symbols?: string[]): Promise<ExchangePosition[]> {
-    const positions = await this.exchange.fetchPositions(symbols)
-    return positions.map(this.mapPosition)
-  }
-
-  async fetchPosition(symbol: string): Promise<ExchangePosition> {
-    const pos = await this.exchange.fetchPosition(symbol)
-    return this.mapPosition(pos)
-  }
-
-  async setLeverage(symbol: string, leverage: number, params?: Record<string, unknown>): Promise<void> {
-    await this.exchange.setLeverage(leverage, symbol, params)
-  }
-
-  async setMarginMode(symbol: string, marginMode: 'cross' | 'isolated'): Promise<void> {
-    await this.exchange.setMarginMode(marginMode, symbol)
-  }
-
-  // ── WebSocket ────────────────────────────────────────────────────────────────
-
-  async watchTicker(symbol: string, callback: (ticker: Ticker) => void): Promise<void> {
-    while (true) {
-      const t = await this.exchange.watchTicker(symbol)
-      callback({
-        symbol: t.symbol,
-        timestamp: t.timestamp ?? Date.now(),
-        last: t.last ?? 0,
-        bid: t.bid ?? 0,
-        ask: t.ask ?? 0,
-        high: t.high ?? 0,
-        low: t.low ?? 0,
-        volume: t.baseVolume ?? 0,
-        quoteVolume: t.quoteVolume ?? 0,
-      })
+  /**
+   * Quirk: Hyperliquid requires a price for market orders to compute the max
+   * slippage bound. When absent, use the current last price and let ccxt apply
+   * its default slippage tolerance.
+   */
+  override async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
+    if (params.type === 'market' && params.price === undefined) {
+      const ticker = await this.fetchTicker(params.symbol)
+      if (ticker.last > 0) return super.createOrder({ ...params, price: ticker.last })
     }
+    return super.createOrder(params)
   }
 
-  async watchTrades(symbol: string, callback: (trades: ExchangeTrade[]) => void): Promise<void> {
-    while (true) {
-      const trades = await this.exchange.watchTrades(symbol)
-      callback(trades.map(this.mapTrade))
+  /**
+   * Quirk: Hyperliquid's setMarginMode requires a leverage param (ccxt throws
+   * ArgumentsRequired without it) — default to the position's current leverage.
+   */
+  override async setMarginMode(symbol: string, marginMode: 'cross' | 'isolated', params?: Record<string, unknown>): Promise<void> {
+    let leverage = params?.leverage as number | undefined
+    if (leverage === undefined) {
+      const pos = await this.fetchPosition(symbol)
+      leverage = pos.leverage || 1
     }
-  }
-
-  async watchOrderBook(symbol: string, callback: (ob: OrderBook) => void, depth = 20): Promise<void> {
-    while (true) {
-      const ob = await this.exchange.watchOrderBook(symbol, depth)
-      callback({
-        symbol,
-        timestamp: ob.timestamp ?? Date.now(),
-        bids: ob.bids as [number, number][],
-        asks: ob.asks as [number, number][],
-      })
-    }
-  }
-
-  async watchMyTrades(callback: (trades: ExchangeTrade[]) => void, params?: Record<string, unknown>): Promise<void> {
-    while (true) {
-      const trades = await this.exchange.watchMyTrades(undefined, undefined, undefined, params)
-      callback(trades.map(this.mapTrade))
-    }
-  }
-
-  async watchOrders(symbol: string | undefined, callback: (orders: ExchangeOrder[]) => void): Promise<void> {
-    while (true) {
-      const orders = await this.exchange.watchOrders(symbol)
-      callback(orders.map(this.mapOrder))
-    }
-  }
-
-  async close(): Promise<void> {
-    await this.exchange.close()
-  }
-
-  // ── Mappers ──────────────────────────────────────────────────────────────────
-
-  private mapTrade(t: any): ExchangeTrade {
-    const trade: ExchangeTrade = {
-      id: t.id ?? '',
-      symbol: t.symbol ?? '',
-      side: t.side,
-      price: t.price ?? 0,
-      amount: t.amount ?? 0,
-      cost: t.cost ?? 0,
-      timestamp: t.timestamp ?? Date.now(),
-      takerOrMaker: t.takerOrMaker ?? 'taker',
-    }
-    if (t.fee) trade.fee = { cost: t.fee.cost ?? 0, currency: t.fee.currency ?? '' }
-    return trade
-  }
-
-  private mapOrder(o: any): ExchangeOrder {
-    const order: ExchangeOrder = {
-      id: o.id ?? '',
-      symbol: o.symbol ?? '',
-      type: o.type ?? 'market',
-      side: o.side,
-      price: o.price ?? 0,
-      amount: o.amount ?? 0,
-      filled: o.filled ?? 0,
-      remaining: o.remaining ?? 0,
-      status: o.status ?? 'open',
-      timestamp: o.timestamp ?? Date.now(),
-      reduceOnly: o.reduceOnly ?? false,
-      timeInForce: o.timeInForce ?? 'GTC',
-    }
-    if (o.fee) order.fee = { cost: o.fee.cost ?? 0, currency: o.fee.currency ?? '' }
-    return order
-  }
-
-  private mapPosition(p: any): ExchangePosition {
-    return {
-      symbol: p.symbol ?? '',
-      side: p.side ?? 'long',
-      contracts: p.contracts ?? 0,
-      contractSize: p.contractSize ?? 1,
-      entryPrice: p.entryPrice ?? 0,
-      markPrice: p.markPrice ?? 0,
-      notional: p.notional ?? 0,
-      unrealizedPnl: p.unrealizedPnl ?? 0,
-      leverage: p.leverage ?? 1,
-      liquidationPrice: p.liquidationPrice ?? 0,
-      marginMode: p.marginMode ?? 'cross',
-      initialMargin: p.initialMargin ?? 0,
-      maintenanceMargin: p.maintenanceMargin ?? 0,
-    }
+    return super.setMarginMode(symbol, marginMode, { ...params, leverage })
   }
 }

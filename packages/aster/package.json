@@ -1,0 +1,46 @@
+{
+  "name": "@openwhaleorg/aster",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenWhale-Org/OpenWhale",
+    "directory": "packages/aster"
+  },
+  "homepage": "https://github.com/OpenWhale-Org/OpenWhale#readme",
+  "bugs": {
+    "url": "https://github.com/OpenWhale-Org/OpenWhale/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@openwhaleorg/ccxt-adapter": "workspace:*",
+    "@openwhaleorg/exchange": "workspace:*",
+    "zod": "^4.4.1"
+  },
+  "peerDependencies": {
+    "@openwhaleorg/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@openwhaleorg/core": "workspace:*",
+    "@types/node": "^20.0.0"
+  }
+}

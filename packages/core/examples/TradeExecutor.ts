@@ -1,22 +1,22 @@
 /**
  * Example: TradeExecutor
  *
- * 多 action Executor，处理 buy / sell / cancel 三种交易指令。
+ * Multi-action executor handling buy / sell / cancel trade instructions.
  *
- * 关键点：
- * - TInstruction 是 discriminated union，以 action 字段区分
- * - instructionSchema 使用 z.discriminatedUnion 做运行时校验
- *   parse 失败时基类自动记录 failed，不调用 execute()
- * - execute() 中通过 if/switch 收窄类型，params 类型完全安全
- * - onError() 覆盖用于告警（实际项目可接入 PagerDuty / Slack）
- * - 构造函数传入 retry 配置，网络抖动时自动重试
+ * Key points:
+ * - TInstruction is a discriminated union keyed on the action field
+ * - instructionSchema uses z.discriminatedUnion for runtime validation;
+ *   on parse failure the base class records 'failed' and skips execute()
+ * - execute() narrows types via if/switch; params types are fully safe
+ * - onError() is overridden for alerting (in production, hook into PagerDuty / Slack)
+ * - Constructor passes retry config for automatic retries on transient network errors
  */
 
 import { z } from 'zod'
 import { BaseExecutor } from '../src/executor/BaseExecutor.js'
 import type { ExecutionResult } from '../src/types/executor.js'
 
-// ── Instruction 类型定义 ──────────────────────────────────────────────────────
+// ── Instruction type definitions ──────────────────────────────────────────────
 
 const buySchema = z.object({
   executorId: z.literal('trade'),
@@ -24,7 +24,7 @@ const buySchema = z.object({
   action: z.literal('buy'),
   params: z.object({
     symbol: z.string(),
-    quoteAmount: z.number().positive(),  // 花多少 USDT
+    quoteAmount: z.number().positive(),  // how much USDT to spend
     slippagePct: z.number().min(0).max(100).default(0.5),
   }),
 })
@@ -35,7 +35,7 @@ const sellSchema = z.object({
   action: z.literal('sell'),
   params: z.object({
     symbol: z.string(),
-    baseAmount: z.number().positive(),   // 卖多少个币
+    baseAmount: z.number().positive(),   // how many tokens to sell
     slippagePct: z.number().min(0).max(100).default(0.5),
   }),
 })
@@ -53,7 +53,7 @@ const tradeSchema = z.discriminatedUnion('action', [buySchema, sellSchema, cance
 
 type TradeInstruction = z.infer<typeof tradeSchema>
 
-// ── Executor 实现 ─────────────────────────────────────────────────────────────
+// ── Executor implementation ───────────────────────────────────────────────────
 
 export class TradeExecutor extends BaseExecutor<TradeInstruction> {
   get executorName() {
@@ -107,14 +107,14 @@ export class TradeExecutor extends BaseExecutor<TradeInstruction> {
   }
 
   protected override onError(instruction: TradeInstruction, error: unknown, attempt: number): void {
-    // 实际项目中接入告警系统
+    // hook into an alerting system in production
     console.error(`[TradeExecutor] attempt=${attempt} action=${instruction.action} error=${String(error)}`)
   }
 
-  // ── 模拟交易所 API ────────────────────────────────────────────────────────
+  // ── Simulated exchange API ────────────────────────────────────────────────
 
   private async placeBuyOrder(symbol: string, quoteAmount: number, _slippagePct: number): Promise<string> {
-    // 替换为真实 API 调用
+    // replace with real API call
     console.log(`[TradeExecutor] BUY ${symbol} with ${quoteAmount} USDT`)
     return `order_${Date.now()}`
   }

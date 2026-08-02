@@ -21,42 +21,65 @@ export type {
   MonitorDataReader,
   EmitHandler,
   MonitorOptions,
+  PlotPoint,
+  PlotSeries,
+  MonitorPlotDef,
+  SinglePlotDef,
+  MultiPlotDef,
+  PlotCandle,
+  PlotOption,
+  MonitorPlotInfo,
   StrategyContext,
   StrategyMetrics,
   StrategyOptions,
   LlmOptions,
+  LlmDeclaration,
+  LlmSlotBinding,
   BuiltinProviderId,
   ProviderConfig,
   BuiltinProviderConfig,
   CustomProviderConfig,
   IStrategy,
-  AccountTypeDeclaration,
+  StrategyRunTrace,
+  AccountSlotMeta,
+  ScriptDefinition,
+  ScriptContext,
+  ScriptResult,
+  ScriptInfo,
   StrategyInstance,
+  StrategyInstanceView,
   StrategyParams,
-  IAccount,
-  IBalance,
-  IPosition,
-  IOrder,
-  IPnL,
-  IHistoryRecord,
-  AccountFactory,
-  AdapterQueryOptions,
-  AdapterExecuteOptions,
-  IAdapter,
-  Ticker,
-  Kline,
-  OrderBook,
-  ExchangeBalance,
-  ExchangePosition,
-  ExchangeOrder,
-  ExchangeTrade,
-  FundingRateData,
-  SpotOrderParams,
-  PerpOrderParams,
-  SpotExchangeAdapter,
-  PerpExchangeAdapter,
+  AdapterKindMap,
+  NamespacedKind,
+  KnownKind,
+  SessionOf,
+  ReaderOf,
+  ReaderClass,
+  CredentialTypeDefinition,
+  CredentialTypeInfo,
+  AdapterRegistration,
+  AdapterResolver,
+  AccountEntity,
+  AccountImplementation,
+  AccountImplementationInfo,
+  AccountView,
+  AccountStore,
+  AccountSnapshotSample,
+  AccountSnapshotRecord,
+  AccountSnapshotStore,
+  MonitorImplementation,
+  MonitorContext,
+  MonitorInstanceEntity,
+  MonitorInstanceView,
+  MonitorInstanceStore,
+  PublicSessionRegistration,
+  PublicSessionAccessor,
+  ISession,
+  AccountSlot,
+  ExecutorCredentialSlot,
   RuntimeOptions,
   IRuntime,
+  LoadedPluginInfo,
   MonitorDefinition,
   ExecutorDefinition,
   StrategyDefinition,
@@ -64,8 +87,19 @@ export type {
   ParamFieldType,
   ParamFieldOption,
   ParamFieldMeta,
+  ParamIllustration,
+  ParamAvailability,
+  AvailabilityVerdict,
+  AvailabilityChecker,
+  ParamFieldCatalogue,
+  ParamFieldSlider,
+  ListColumnDef,
+  ListParamDef,
   IRegistry,
 } from './types/index.js'
+
+// Adapter error taxonomy (value exports)
+export { AdapterError, RetryableAdapterError, TerminalAdapterError, isTerminalError } from './types/adapter/errors.js'
 
 // Credentials
 export { DBCredentialStore } from './credentials/DBCredentialStore.js'
@@ -73,9 +107,14 @@ export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 // Monitor
 export { BaseMonitor, MonitorMode } from './monitor/BaseMonitor.js'
 export { MonitorDataReaderImpl } from './monitor/MonitorDataReader.js'
+export { MonitorInstanceManager, ContractMonitor } from './monitor/MonitorInstanceManager.js'
+export { DBMonitorInstanceStore, MemoryMonitorInstanceStore } from './monitor/MonitorInstanceStore.js'
+export { DBAccountStore, MemoryAccountStore } from './account/AccountStore.js'
+export { DBAccountSnapshotStore, MemoryAccountSnapshotStore } from './account/AccountSnapshotStore.js'
 
 // Executor
-export { BaseExecutor } from './executor/BaseExecutor.js'
+export { BaseExecutor, ExecutionTimeoutError } from './executor/BaseExecutor.js'
+export type { MaterializedSlot } from './executor/BaseExecutor.js'
 export { MemoryExecutionQueue } from './executor/MemoryExecutionQueue.js'
 export { RedisExecutionQueue } from './executor/RedisExecutionQueue.js'
 export type { RedisConfig } from './executor/RedisExecutionQueue.js'
@@ -86,8 +125,12 @@ export type { StrategyRunEvent } from './trigger/TriggerManager.js'
 
 // Strategy
 export { BaseStrategy } from './strategy/BaseStrategy.js'
+export type { DeclarationLabel, StrategyDeclarations } from './strategy/BaseStrategy.js'
+export { Strategy, Monitor, Executor, Account, Llm, Kind, VenueType } from './strategy/decorators.js'
+export type { DecoratedDeclarations } from './strategy/decorators.js'
 export { importLlmKeysFromEnv, BUILTIN_CREDENTIAL_NAMES } from './strategy/llm.js'
-export type { CoreMessage, LlmCallOptions } from './strategy/llm.js'
+export type { CoreMessage, LlmCallOptions, LlmToolCallOptions, LlmCallSettings } from './strategy/llm.js'
+export { LlmClient } from './strategy/llm.js'
 export type { IStrategyStore } from './strategy/StrategyStore.js'
 export { DBStrategyStore } from './strategy/StrategyStore.js'
 export { HttpClient, HttpError } from './strategy/HttpClient.js'
@@ -105,6 +148,10 @@ export type { SQLiteAdapterOptions } from './database/SQLiteAdapter.js'
 // Plugin
 export { PluginManager } from './plugin/PluginManager.js'
 export type { OpenWhalePlugin, PluginContext, PluginFactory, PluginManagerOptions } from './plugin/PluginManager.js'
+export { definePlugin } from './plugin/definePlugin.js'
+export type { PluginManifest } from './plugin/definePlugin.js'
+export { OwMonitor, OwAccount, OwExecutor, OwStrategy } from './plugin/componentDecorators.js'
+export type { OwMonitorMeta, OwAccountMeta, OwExecutorMeta, OwStrategyMeta, MonitorClass, AccountClass } from './plugin/componentDecorators.js'
 
 // Compiled
 export { CompiledLoader } from './compiled/CompiledLoader.js'
@@ -124,8 +171,8 @@ export { OpenWhaleRuntime } from './runtime/OpenWhaleRuntime.js'
 
 // Utils
 export { generateId } from './utils/id.js'
-export { getLogger, setLogger, createLogger } from './utils/logger.js'
-export type { Logger, LogLevel } from './utils/logger.js'
+export { getLogger, setLogger, createLogger, subscribeLogs, recentLogs } from './utils/logger.js'
+export type { Logger, LogLevel, LogRecord } from './utils/logger.js'
 export {
   getDataDir,
   getMonitorPath,

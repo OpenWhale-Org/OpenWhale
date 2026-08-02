@@ -1,15 +1,15 @@
 /**
  * Example: PriceMonitor
  *
- * Subscribe 模式 Monitor — 每隔 N 秒轮询一次价格接口，
- * 每个交易对（key）独立维护一个 setInterval。
+ * Subscribe-mode monitor — polls a price endpoint every N seconds,
+ * with each trading pair (key) maintaining its own setInterval.
  *
- * 关键点：
- * - mode = MonitorMode.Subscribe：由 TriggerManager 通过 subscribe(key) 驱动
- * - startSubscribe(key) 启动轮询，stopSubscribe(key) 清理定时器
- * - 调用 this.push(key, data) 提交数据，基类负责写 JSONL 和触发 emit
- * - 存储格式：{ ts: number, data: { price, volume24h, change24h } }（MonitorRecord 结构）
- * - 不需要手动管理引用计数，基类已处理
+ * Key points:
+ * - mode = MonitorMode.Subscribe: driven by TriggerManager via subscribe(key)
+ * - startSubscribe(key) starts polling; stopSubscribe(key) clears the timer
+ * - Call this.push(key, data) to submit data; base class handles JSONL writes and emit
+ * - Storage format: { ts: number, data: { price, volume24h, change24h } } (MonitorRecord structure)
+ * - No manual ref-count management needed; the base class handles it
  */
 
 import { BaseMonitor, MonitorMode } from '../src/monitor/BaseMonitor.js'
@@ -30,7 +30,7 @@ export class PriceMonitor extends BaseMonitor {
   }
 
   protected startSubscribe(key: string): void {
-    // 立即执行一次，然后按间隔重复
+    // run immediately once, then repeat on interval
     void this.fetchAndPush(key)
     const timer = setInterval(() => void this.fetchAndPush(key), this.intervalMs)
     this.timers.set(key, timer)
@@ -50,12 +50,12 @@ export class PriceMonitor extends BaseMonitor {
   }
 
   /**
-   * 实际项目中替换为真实 API 调用，例如：
+   * In a real project, replace with an actual API call, e.g.:
    *   const res = await fetch(`https://api.exchange.com/ticker/${key}`)
    *   return res.json()
    */
   private async fetchPrice(symbol: string): Promise<Record<string, unknown>> {
-    // 模拟价格数据
+    // simulated price data
     const base = symbol === 'BTC' ? 65000 : symbol === 'ETH' ? 3500 : 100
     return {
       price:     base * (1 + (Math.random() - 0.5) * 0.02),

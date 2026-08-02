@@ -1,22 +1,22 @@
 /**
  * Example: AiTradingStrategy
  *
- * LLM 辅助决策策略 — 将市场数据喂给 LLM，由 AI 给出结构化交易建议。
+ * LLM-assisted decision strategy — feeds market data to an LLM and receives structured trading recommendations.
  *
- * 触发方式：Cron 触发（每分钟运行一次）
+ * Trigger: Cron-driven (runs once per minute)
  *
- * 逻辑：
- * 1. 读取多个交易对的最新价格和近期历史
- * 2. 构造 prompt，调用 LLM 分析市场状态
- * 3. LLM 返回结构化决策（Zod schema 校验）
- * 4. 根据决策生成交易指令
+ * Logic:
+ * 1. Read the latest price and recent history for multiple trading pairs
+ * 2. Build a prompt and call the LLM to analyze market state
+ * 3. LLM returns a structured decision (validated by Zod schema)
+ * 4. Generate trade instructions based on the decision
  *
- * 关键点：
- * - baseParamsSchema 声明 watchlist（必填），triggers() 返回 cron 触发器
- * - monitors 声明依赖的 monitor，TriggerManager 在 start() 时注入 reader
- * - monitorData('price') 返回 reader，readLatest(key) / readLast(key, n) 读取数据
- * - llm({ schema }) 返回类型由 Zod schema 推断，完全类型安全
- * - step() 缓存 LLM 调用结果，避免同一次 evaluate 内重复调用
+ * Key points:
+ * - baseParamsSchema declares watchlist (required); triggers() returns a cron trigger
+ * - monitors declares monitor dependencies; TriggerManager injects readers at start()
+ * - monitorData('price') returns a reader; use readLatest(key) / readLast(key, n) to access data
+ * - llm({ schema }) return type is inferred from the Zod schema — fully type-safe
+ * - step() caches the LLM call result to avoid duplicate calls within a single evaluate
  */
 
 import { z } from 'zod'
@@ -26,7 +26,7 @@ import type { StrategyParams } from '../src/types/instance.js'
 import type { ExecutionInstruction } from '../src/types/executor.js'
 import type { Trigger } from '../src/types/trigger.js'
 
-// ── LLM 输出 Schema ───────────────────────────────────────────────────────────
+// ── LLM output schema ─────────────────────────────────────────────────────────
 
 const marketAnalysisSchema = z.object({
   sentiment:  z.enum(['bullish', 'bearish', 'neutral']),
@@ -42,7 +42,7 @@ const marketAnalysisSchema = z.object({
 
 type MarketAnalysis = z.infer<typeof marketAnalysisSchema>
 
-// ── Strategy 实现 ─────────────────────────────────────────────────────────────
+// ── Strategy implementation ───────────────────────────────────────────────────
 
 export class AiTradingStrategy extends BaseStrategy {
   readonly strategyId = 'ai-trading'
@@ -61,28 +61,28 @@ export class AiTradingStrategy extends BaseStrategy {
   triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
     return [{
       enabled: true,
-      conditions: [{ type: 'cron', expression: '* * * * *' }],  // 每分钟
+      conditions: [{ type: 'cron', expression: '* * * * *' }],  // every minute
     }]
   }
 
   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
     const { watchlist } = this.params.base as { watchlist: string[] }
 
-    // 收集所有交易对的市场数据
+    // collect market data for all trading pairs
     const marketData = await this.step('market-data', () => this.collectMarketData(watchlist))
     if (Object.keys(marketData).length === 0) return []
 
-    // 调用 LLM 分析，结果由 Zod schema 校验并推断类型
+    // call LLM for analysis; result is validated and typed by the Zod schema
     const analysis = await this.step('llm-analysis', () =>
       this.llm({
         messages: [
           {
             role: 'system',
             content: [
-              '你是一个专业的加密货币交易分析师。',
-              '根据提供的市场数据，给出每个交易对的操作建议。',
-              '只在高置信度（>0.7）时给出 buy/sell 建议，否则建议 hold。',
-              '回答必须严格遵循 JSON schema，不要添加额外字段。',
+              'You are a professional crypto trading analyst.',
+              'Based on the provided market data, give a trading recommendation for each pair.',
+              'Only suggest buy/sell when confidence is high (>0.7); otherwise suggest hold.',
+              'Your response must strictly follow the JSON schema with no extra fields.',
             ].join('\n'),
           },
           {
@@ -91,12 +91,12 @@ export class AiTradingStrategy extends BaseStrategy {
           },
         ],
         schema: marketAnalysisSchema,
-        // 可选：覆盖默认模型
+        // optional: override the default model
         // model: 'anthropic:claude-3-5-haiku-20241022',
       })
     )
 
-    // 只在高置信度时执行
+    // only execute when confidence is high enough
     if (analysis.confidence < 0.6) return []
 
     return this.parallel(
@@ -110,7 +110,7 @@ export class AiTradingStrategy extends BaseStrategy {
     signal: MarketAnalysis['signals'][number],
     analysis: MarketAnalysis,
   ): ExecutionInstruction[] {
-    const baseAmount = analysis.confidence > 0.85 ? 200 : 100  // 高置信度加仓
+    const baseAmount = analysis.confidence > 0.85 ? 200 : 100  // larger position at high confidence
 
     if (signal.action === 'buy')
       return [{ executorId: 'trade', messageId: '', action: 'buy', params: { symbol: signal.symbol, quoteAmount: baseAmount } }]

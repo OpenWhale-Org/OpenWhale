@@ -1,14 +1,30 @@
 {
-  "name": "@openwhale/core",
-  "version": "0.1.0",
+  "name": "@openwhaleorg/core",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenWhale-Org/OpenWhale",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/OpenWhale-Org/OpenWhale#readme",
+  "bugs": {
+    "url": "https://github.com/OpenWhale-Org/OpenWhale/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

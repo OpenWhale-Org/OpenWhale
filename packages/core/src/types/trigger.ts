@@ -9,6 +9,13 @@ export interface MonitorSource {
   monitorName: string
   /** Specific monitor key, or '*' to match all keys emitted by this monitor. */
   key: string | '*'
+  /**
+   * Structured alternative to `key`: field values validated against the
+   * monitor's keySchema and composed into the key at activation (e.g.
+   * { venue: 'binance', symbol: 'BTC/USDT:USDT' } → 'binance:BTC/USDT:USDT').
+   * When set, `key` may be omitted ('' placeholder) — the framework fills it.
+   */
+  keyParams?: Record<string, unknown>
   filter?: TriggerFilter
 }
 

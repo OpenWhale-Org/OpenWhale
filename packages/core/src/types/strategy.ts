@@ -4,11 +4,11 @@ import type { CredentialStore } from './credential.js'
 import type { RetryOptions } from './executor.js'
 import type { IStrategyStore } from '../strategy/StrategyStore.js'
 import type { HttpClient } from '../strategy/HttpClient.js'
-import type { Trigger } from './trigger.js'
+import type { Trigger, MonitorSource } from './trigger.js'
 import type { StrategyParams } from './instance.js'
-import type { IAccount } from './account.js'
+import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
-import type { ParamFieldDef } from './definition.js'
+import type { AvailabilityChecker, ParamFieldDef, ParamIllustration } from './definition.js'
 
 /**
  * Monitor dependency declaration.
@@ -86,8 +86,61 @@ export interface StrategyOptions {
   llm?: LlmOptions
 }
 
-/** Account type declaration: simple string or with a label for named access. */
-export type AccountTypeDeclaration = string | { type: string; label: string }
+/**
+ * The strategy speaks in LABELS only — its declarations' local names.
+ * Registry keys (namespace-prefixed ids) are the framework's currency; the
+ * runtime resolves labels to registry keys at activation using the strategy
+ * definition's pluginName. A strategy never learns which namespace it was
+ * registered under.
+ *
+ * Strategies are strictly read-only: account slots declare Reader classes
+ * and the framework injects Reader instances — a session (write-capable
+ * connection) is structurally unreachable from strategy code. Order flow
+ * must travel instruction → queue → executor.
+ */
+/**
+ * A named LLM slot declared by a strategy: label + default model, optionally a
+ * pinned credential and AI SDK settings. Instances may override per label.
+ */
+export interface LlmDeclaration {
+  label: string
+  /** Default model, `'provider:model'`. */
+  model: string
+  credentialName?: string
+  /** AI SDK settings passthrough (temperature, maxOutputTokens, …). */
+  settings?: Record<string, unknown>
+}
+
+/** Instance-level override for one LLM slot (all fields optional). */
+export interface LlmSlotBinding {
+  model?: string
+  credentialName?: string
+  settings?: Record<string, unknown>
+}
+
+/**
+ * Facts about one bound account slot, injected at activation. The venue is
+ * DERIVED from the bound Account (its credential's type) — strategies must
+ * never ask the user for a venue a binding already implies.
+ */
+export interface AccountSlotMeta {
+  label: string
+  /** The binding value: the Account entity's name (or, legacy, the credential name). */
+  accountName: string
+  /** The account's venue = its credential's type ('binance', 'hyperliquid', …). */
+  venue: string
+  kind: string
+}
+
+/** Trace of one finished run — what the strategy saw, decided, and emitted. */
+export interface StrategyRunTrace {
+  startedAt: number
+  triggerId: string
+  durationMs: number
+  instructions: number
+  error?: string
+  steps: Array<{ ts: number; step: string; data?: Record<string, unknown> }>
+}
 
 export interface IStrategy {
   readonly strategyId: string
@@ -95,35 +148,70 @@ export interface IStrategy {
   readonly monitors: readonly MonitorDeclaration[]
   /** Executor declarations this strategy depends on. */
   readonly executors: readonly ExecutorDeclaration[]
-  /**
-   * Resolved monitor registry keys — monitors with namespace prefix applied.
-   * TriggerManager uses this to look up monitors in the registry.
-   */
-  readonly resolvedMonitors: readonly string[]
-  /** Account type declarations. Framework validates and injects accounts at activate() time. */
-  readonly accountTypes: readonly AccountTypeDeclaration[]
+  /** Account slots: Reader class references. Framework materializes credentials into Readers at activate(). */
+  readonly accounts: readonly AccountSlot[]
+  /** Named LLM slots. Instance bindings may override model/credential/settings per label. */
+  readonly llms: readonly LlmDeclaration[]
   /** Base params schema (required fields, no defaults). */
   readonly baseParamsSchema: ZodObject<ZodRawShape>
   /** Tunable params schema (AI-optimizable, all fields must have .default()). */
   readonly tunableParamsSchema: ZodObject<ZodRawShape>
   /** Field descriptors for generic UI rendering. Optional. */
   readonly paramsFields?: ParamFieldDef[]
+  /** Interactive/illustrative HTML docs for the param form — see ParamIllustration. */
+  readonly paramsIllustrations?: ParamIllustration[]
+  /**
+   * Availability checkers this strategy provides, keyed by the name a field's
+   * `meta({ availability: { checker } })` refers to. Pure functions over the
+   * venue's market list — see AvailabilityChecker.
+   */
+  readonly availabilityCheckers?: Readonly<Record<string, AvailabilityChecker>>
   /** Returns the triggers this strategy needs, given its params. Framework fills id/strategyInstanceId. */
   triggers(params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[]
+  /**
+   * Monitors to keep RUNNING whose emits must not wake this strategy.
+   *
+   * Subscription and triggering are separate concerns that a MonitorCondition
+   * conflates: naming a monitor in a trigger is the only way to keep it
+   * collecting, so a strategy that merely needs a monitor's history on disk
+   * has to accept being run on every emit. That is not free — two triggers can
+   * reach run() concurrently, and a strategy whose real schedule is a cron
+   * then races itself through whatever de-duplication it keeps in its store.
+   *
+   * Declare those monitors here instead: they are subscribed and unsubscribed
+   * exactly like a trigger's sources, but no trigger condition references
+   * them, so their emits satisfy nothing and fire nothing. Read them with
+   * monitorData(label) when the strategy does run.
+   */
+  subscriptions?(params: StrategyParams): MonitorSource[]
   run(context: StrategyContext): Promise<ExecutionInstruction[]>
   getMetrics(): StrategyMetrics
-  setMonitorReader(key: string, reader: MonitorDataReader): void
+  setMonitorReader(label: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void
   setStore(store: IStrategyStore): void
   setHttpClient(client: HttpClient): void
   setParams(params: StrategyParams): void
-  setAccounts(accounts: IAccount[]): void
+  setLlmBindings(bindings: Record<string, LlmSlotBinding>): void
+  /**
+   * Inject materialized Readers, parallel to the accounts declaration order,
+   * with the bound credential names (used by instruction() for accountNames).
+   */
+  setReaders(readers: unknown[], credentialNames: string[]): void
+  /**
+   * Inject per-slot account facts (bound name, venue, kind) — set BEFORE
+   * triggers(), so venue-scoped subscriptions derive from the bound Account
+   * instead of duplicating a venue parameter.
+   */
+  setAccountMeta(metas: AccountSlotMeta[]): void
   setInstanceId(instanceId: string): void
-  /** Called by loadPlugin() to inject the plugin namespace (e.g. 'hyperliquid'). */
-  setPrefixedNames(namespace: string): void
-  /** Resolve a monitor declaration (label or index) to its registry key. Used in triggers(). */
+  /**
+   * Persistence hook for finished run traces, injected at activation. Optional
+   * so strategy bundles compiled against an older base keep loading.
+   */
+  setRunSink?(sink: ((run: StrategyRunTrace) => void) | null): void
+  /** Validate a monitor declaration (label or index) and return its label. Used in triggers(). */
   monitor(labelOrIndex: string | number): string
-  /** Resolve an executor declaration (label or index) to its registry key. Used in evaluate(). */
+  /** Validate an executor declaration (label or index) and return its label. Used in evaluate(). */
   executor(labelOrIndex: string | number): string
 }
 

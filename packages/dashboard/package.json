@@ -1,5 +1,5 @@
 {
-  "name": "@openwhale/dashboard",
+  "name": "@openwhaleorg/dashboard",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,11 +11,12 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@openwhale/core": "workspace:*",
-    "@openwhale/hyperliquid": "workspace:*",
+    "@openwhaleorg/core": "workspace:*",
     "next": "15.3.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "@openwhaleorg/compiler": "workspace:*",
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

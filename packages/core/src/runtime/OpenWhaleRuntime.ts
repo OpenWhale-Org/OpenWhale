@@ -1,25 +1,105 @@
-import type { StrategyInstance } from '../types/instance.js'
+import { pathToFileURL } from 'url'
+import type { StrategyInstance, StrategyInstanceView } from '../types/instance.js'
 import type { ExecutionQueue } from '../types/executor.js'
-import type { IRuntime, RuntimeOptions } from '../types/runtime.js'
+import type { IRuntime, RuntimeOptions, LoadedPluginInfo } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
 import type { Trigger } from '../types/trigger.js'
+import type { PlotOption } from '../types/monitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { IStrategy } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
-import type { AccountFactory, IAccount } from '../types/account.js'
+import type { AdapterResolver, CredentialTypeDefinition, CredentialTypeInfo, NamespacedKind, PublicSessionAccessor } from '../types/materialization.js'
+import type { AccountEntity, AccountImplementation, AccountImplementationInfo, AccountSnapshotRecord, AccountSnapshotSample, AccountSnapshotStore, AccountStore, AccountView } from '../types/account.js'
+import { AdapterRegistry } from './AdapterRegistry.js'
+import { DBAccountStore, MemoryAccountStore } from '../account/AccountStore.js'
+import { DBAccountSnapshotStore, MemoryAccountSnapshotStore } from '../account/AccountSnapshotStore.js'
+import { MonitorInstanceManager } from '../monitor/MonitorInstanceManager.js'
+import { DBMonitorInstanceStore, MemoryMonitorInstanceStore } from '../monitor/MonitorInstanceStore.js'
+import type { MonitorImplementation, MonitorInstanceEntity, MonitorInstanceView } from '../types/monitorInstance.js'
+import { z } from 'zod'
+import type { MaterializedSlot } from '../executor/BaseExecutor.js'
 import type { RawCredentialData } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
+import { appendRunTrace, readRunTraces } from '../strategy/runStore.js'
+import type { StrategyRunTrace } from '../types/strategy.js'
+import { BaseStrategy } from '../strategy/BaseStrategy.js'
+import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
 import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
 import { StrategyInstanceStore } from '../bundle/StrategyInstanceStore.js'
 import { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
 import type { PluginManager, PluginFactory } from '../plugin/PluginManager.js'
+import { lowerAccountEntry, lowerMonitorEntry } from '../plugin/definePlugin.js'
 import { CompiledLoader } from '../compiled/CompiledLoader.js'
+import { llmCredentialTypes } from '../credentials/llmCredentialTypes.js'
+import { BaseStrategy as BaseStrategyClass } from '../strategy/BaseStrategy.js'
 import { getDataDir } from '../utils/paths.js'
+import { generateId } from '../utils/id.js'
+import { createLogger } from '../utils/logger.js'
+import type { MonitorDeclaration } from '../types/strategy.js'
+
+const log = createLogger('OpenWhaleRuntime')
+
+/**
+ * Resolve a viewer's plot-option request against the options that exist in the
+ * current record window.
+ *
+ * Single-select: the requested value if still present, else the first option.
+ * Multi-select: the requested values that survive, else the options flagged
+ * `default`, else the first — extract never sees an empty or stale selection,
+ * so a panel can index into its data without defensive checks.
+ */
+function resolvePlotSelection(
+  options: PlotOption[] | undefined,
+  requested: string | string[] | undefined,
+  multi: boolean,
+): string | string[] | undefined {
+  if (!options?.length) return undefined
+  const valid = new Set(options.map(o => o.value))
+
+  if (!multi) {
+    const one = Array.isArray(requested) ? requested[0] : requested
+    return one !== undefined && valid.has(one) ? one : options[0]!.value
+  }
+
+  const asked = (Array.isArray(requested) ? requested : requested !== undefined ? [requested] : [])
+    .filter(v => valid.has(v))
+  if (asked.length > 0) return asked
+  const defaults = options.filter(o => o.default).map(o => o.value)
+  return defaults.length > 0 ? defaults : [options[0]!.value]
+}
+
+/** Names containing '/' are already fully qualified; others get the plugin namespace prefix. */
+function resolveComponentName(name: string, ns: string | undefined): string {
+  if (name.includes('/')) return name
+  return ns ? `${ns}/${name}` : name
+}
+
+function declarationName(decl: MonitorDeclaration): string {
+  return typeof decl === 'string' ? decl : decl.name
+}
+
+function declarationLabel(decl: MonitorDeclaration): string {
+  return typeof decl === 'string' ? decl : decl.label
+}
+
+function buildLabelToKeyMap(declarations: readonly MonitorDeclaration[], ns: string | undefined): Map<string, string> {
+  return new Map(declarations.map(d => [declarationLabel(d), resolveComponentName(declarationName(d), ns)]))
+}
+
+function sessionKey(credentialName: string, kind: string): string {
+  return `${credentialName}::${kind}`
+}
+
+function assertNamespacedKind(kind: string): void {
+  if (!/^[^/]+\/[^/]+$/.test(kind)) {
+    throw new Error(`Invalid kind "${kind}" — every kind must be namespaced as 'ns/name' (e.g. 'exchange/perp')`)
+  }
+}
 
 export class OpenWhaleRuntime implements IRuntime {
   private readonly instances = new Map<string, StrategyInstance>()
@@ -30,11 +110,50 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly queue: ExecutionQueue
   private readonly instanceStore: StrategyInstanceStore | DBStrategyInstanceStore
   private readonly pluginManager: PluginManager | undefined
-  private readonly compiledLoader: CompiledLoader | undefined
+  private readonly compiledLoader: CompiledLoader
   private readonly credentialStore: CredentialStore | undefined
   private readonly database: DatabaseAdapter | undefined
-  private readonly accountFactories = new Map<string, AccountFactory>()
-  private readonly accountRegistry = new Map<string, IAccount>()
+  private readonly credentialTypes = new Map<string, CredentialTypeDefinition>()
+  /** Registering plugin per credential type ('core' for built-ins) — picker grouping. */
+  private readonly credentialTypeOwners = new Map<string, string>()
+  /** Live sessions keyed by `${credentialName}::${kind}`, with referencing instances. */
+  private readonly sessions = new Map<string, { session: unknown; instances: Set<string> }>()
+  /** The adapter cell table + resolver — the single gateway to adapter instances. */
+  private readonly adapterRegistry: AdapterRegistry
+  /** Registered account implementations, keyed by qualified id '<plugin>/<id>'. */
+  private readonly accountImpls = new Map<string, { impl: AccountImplementation; owner: string }>()
+  /** Persisted account entities (DB when available, memory otherwise). */
+  private readonly accountStore: AccountStore
+  /** Equity snapshots feeding the Accounts page's curves. */
+  private readonly accountSnapshots: AccountSnapshotStore
+  /** Last snapshot failure per account — silent-failure killer for the Accounts page. */
+  private readonly accountSnapshotErrors = new Map<string, string>()
+  private accountSnapshotTimer: ReturnType<typeof setInterval> | undefined
+  private readonly accountSnapshotIntervalMs: number
+  private readonly accountSnapshotRetentionMs: number
+  /** Monitor contract/implementation/instance tables + key dispatch. */
+  private readonly monitorInstances: MonitorInstanceManager
+
+  /** The AdapterResolver — components declare (kind, type, credential need) and resolve here. */
+  get adapters(): AdapterResolver {
+    return this.adapterRegistry
+  }
+
+  /** Root data directory (monitor JSONL, executions…) — dashboard explorer / open-folder. */
+  get dataDirPath(): string {
+    return this.dataDir
+  }
+
+  /**
+   * Late-bound public session registry view (handed to plugin factories).
+   * @deprecated Thin shim over the AdapterResolver (venue = credential type,
+   * keyless form). Migrate consumers to `adapters`.
+   */
+  readonly publicSessions: PublicSessionAccessor = {
+    venues: (kind) => this.adapterRegistry.types(kind),
+    get: <T,>(venue: string, kind: NamespacedKind): Promise<T> => this.adapterRegistry.resolve<T>(kind, venue),
+  }
+  private readonly loadedPlugins = new Map<string, LoadedPluginInfo>()
   protected readonly dataDir: string
   private running = false
 
@@ -49,77 +168,774 @@ export class OpenWhaleRuntime implements IRuntime {
     this.instanceStore = options?.instanceStore
       ?? (this.database ? new DBStrategyInstanceStore(this.database) : new StrategyInstanceStore(this.dataDir))
     this.pluginManager = options?.pluginManager
-    this.compiledLoader = options?.compiledLoader
-      ?? new CompiledLoader({
-        monitorRegistry: this.monitorRegistry,
-        executorRegistry: this.executorRegistry,
-        strategyRegistry: this.strategyRegistry,
-        dataDir: this.dataDir,
-      })
+    this.compiledLoader = options?.compiledLoader ?? new CompiledLoader({
+      monitorRegistry: this.monitorRegistry,
+      executorRegistry: this.executorRegistry,
+      strategyRegistry: this.strategyRegistry,
+      ...(options?.dataDir !== undefined ? { dataDir: options.dataDir } : {}),
+      registerStrategy: (definition, factory) => this.registerStrategy(definition, factory),
+    })
+
+    // LLM keys are framework infrastructure (this.llm / the AI compiler), not
+    // domain vocabulary — the runtime registers their credential types itself.
+    for (const type of llmCredentialTypes) this.registerCredentialType(type)
+
     this.credentialStore = options?.credentialStore
+    this.adapterRegistry = new AdapterRegistry(options?.credentialStore)
+    this.accountStore = this.database ? new DBAccountStore(this.database) : new MemoryAccountStore()
+    this.accountSnapshots = this.database ? new DBAccountSnapshotStore(this.database) : new MemoryAccountSnapshotStore()
+    this.accountSnapshotIntervalMs = options?.accountSnapshots?.intervalMs ?? 5 * 60_000
+    this.accountSnapshotRetentionMs = options?.accountSnapshots?.retentionMs ?? 30 * 24 * 3_600_000
+    this.monitorInstances = new MonitorInstanceManager({
+      store: this.database ? new DBMonitorInstanceStore(this.database) : new MemoryMonitorInstanceStore(),
+      adapters: this.adapterRegistry,
+      ...(this.credentialStore ? { credentials: this.credentialStore } : {}),
+      dataDir: this.dataDir,
+      allowsRaw: (type) => this.credentialTypes.get(type)?.raw === true,
+    })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor<string, any>): void {
-    this.monitorRegistry.register(definition, instance)
+    const keySchema = instance.keySchema
+    this.monitorRegistry.register({
+      ...definition,
+      ...(definition.keyFields || !keySchema
+        ? {}
+        : { keyFields: BaseStrategyClass.deriveParamFields(keySchema, z.object({})) ?? [] }),
+    }, instance)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor<any>): void {
     this.executorRegistry.register(definition, instance)
+    // Hot install/replace while running: boot-time startInner won't run again,
+    // so the NEW executor object must take over the queue consumer here — and
+    // any consumer loop still owned by a replaced object must stop first
+    // (its materialized slots are stale; letting it claim instructions yields
+    // "No credentials materialized" on the next execution).
+    if (this.running) {
+      this.queue.cancelConsumers?.(definition.id)
+      void instance.run(this.queue, definition.id)
+    }
   }
 
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void {
-    // Extract paramsFields from a temporary strategy instance if not already in definition
-    if (!definition.paramsFields) {
-      const probe = factory()
-      const fields = probe.paramsFields
-      if (fields && fields.length > 0) {
-        this.strategyRegistry.register({ ...definition, paramsFields: fields }, factory)
-        return
+    // The strategy class's declarations are the single source of truth for its
+    // dependencies and params UI. Derive the definition's derived fields from a
+    // probe instance so hand-written definitions can't drift from the class.
+    const probe = factory()
+    if (!probe.strategyId) {
+      throw new Error(
+        `Strategy "${definition.id}" has no strategyId — set it with ` +
+        `\`readonly strategyId = '...'\` or the @Strategy('...') decorator`
+      )
+    }
+    for (const slot of probe.accounts) {
+      if (!slot.account.kind) {
+        throw new Error(
+          `Strategy "${definition.id}" account slot '${slot.label}': Reader class has no kind — ` +
+          `set it with \`static readonly kind = 'ns/name'\` or the @Kind('ns/name') decorator`
+        )
       }
     }
-    this.strategyRegistry.register(definition, factory)
+    const complete: StrategyDefinition = {
+      ...definition,
+      monitorIds: definition.monitorIds
+        ?? probe.monitors.map(d => resolveComponentName(declarationName(d), definition.pluginName)),
+      executorIds: definition.executorIds
+        ?? probe.executors.map(d => resolveComponentName(declarationName(d), definition.pluginName)),
+      accountRequirements: definition.accountRequirements
+        ?? probe.accounts.map(slot => ({
+          label: slot.label,
+          kind: slot.account.kind!,   // presence checked above
+          ...(slot.account.venueType !== undefined ? { type: slot.account.venueType } : {}),
+        })),
+      llmRequirements: definition.llmRequirements
+        ?? probe.llms.map(d => ({ ...d })),
+      ...(definition.paramsFields || !probe.paramsFields?.length ? {} : { paramsFields: probe.paramsFields }),
+      ...(definition.paramsIllustrations || !probe.paramsIllustrations?.length ? {} : { paramsIllustrations: probe.paramsIllustrations }),
+    }
+    this.strategyRegistry.register(complete, factory)
   }
 
-  registerAccountFactory(accountType: string, factory: AccountFactory): void {
-    this.accountFactories.set(accountType, factory)
+  /** Register a credential type — the recipe for one venue/service (schema, test, raw opt-in). */
+  registerCredentialType(definition: CredentialTypeDefinition, owner = 'core'): void {
+    for (const kind of Object.keys(definition.factories ?? {})) {
+      // Format check only: kinds have no registry to check against — the
+      // vocabulary is derived from the matrix, and a typo'd kind surfaces at
+      // the use site with a "no adapter for kind" error.
+      assertNamespacedKind(kind)
+    }
+    this.credentialTypes.set(definition.type, definition)
+    this.credentialTypeOwners.set(definition.type, owner)
   }
 
-  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void {
-    const plugin = factory({ credentials: this.credentialStore!, config })
+  listCredentialTypes(): CredentialTypeDefinition[] {
+    return Array.from(this.credentialTypes.values())
+  }
+
+  // ── Monitor implementations & instances (contract / implementation / instance) ──
+
+  /**
+   * Register a monitor implementation. Its contract's façade enters the
+   * monitor registry (that's what triggers and the dashboard address); user-
+   * created instances of the implementation do the actual listening.
+   */
+  registerMonitorImplementation(owner: string, impl: MonitorImplementation): void {
+    const facade = this.monitorInstances.registerImplementation(owner, impl)
+    const contractId = impl.contract.includes('/') ? impl.contract : `${owner}/${impl.contract}`
+    if (!this.monitorRegistry.get(contractId)) {
+      const now = new Date().toISOString()
+      this.registerMonitor({
+        id: contractId,
+        name: impl.displayName ?? contractId,
+        ...(impl.description !== undefined ? { description: impl.description } : {}),
+        source: 'plugin',
+        pluginName: owner,
+        createdAt: now,
+        updatedAt: now,
+      }, facade)
+    }
+    // Hot-installed plugins (runtime already up) get their default instances
+    // immediately — boot-time restore() won't run again until the next start.
+    // restore() is idempotent: existing instances/actives are skipped.
+    if (this.running) void this.monitorInstances.restore()
+  }
+
+  listMonitorImplementations(): Array<ReturnType<MonitorInstanceManager['listImplementations']>[number] & { paramsFields?: import('../types/definition.js').ParamFieldDef[] }> {
+    return this.monitorInstances.listImplementations().map((impl) => {
+      const schema = this.monitorInstances.paramsSchemaOf(impl.id)
+      const fields = schema ? BaseStrategyClass.deriveParamFields(schema, z.object({})) : undefined
+      return { ...impl, ...(fields?.length ? { paramsFields: fields } : {}) }
+    })
+  }
+
+  createMonitorInstance(input: { implementation: string; credential?: string; params?: Record<string, unknown> }): Promise<MonitorInstanceEntity> {
+    return this.monitorInstances.createInstance(input)
+  }
+
+  /** Update an inactive instance's tuning params (params freeze while active). */
+  updateMonitorInstanceParams(id: string, params: Record<string, unknown>): Promise<void> {
+    return this.monitorInstances.updateInstanceParams(id, params)
+  }
+
+  activateMonitorInstance(id: string): Promise<void> {
+    return this.monitorInstances.activate(id)
+  }
+
+  deactivateMonitorInstance(id: string): Promise<void> {
+    return this.monitorInstances.deactivate(id)
+  }
+
+  deleteMonitorInstance(id: string): Promise<void> {
+    return this.monitorInstances.deleteInstance(id)
+  }
+
+  async listMonitorInstances(): Promise<MonitorInstanceView[]> {
+    const views = await this.monitorInstances.listInstances()
+    return views.map((view) => {
+      const schema = this.monitorInstances.paramsSchemaOf(view.implementation)
+      const fields = schema ? BaseStrategyClass.deriveParamFields(schema, z.object({})) : undefined
+      return { ...view, ...(fields?.length ? { paramsFields: fields } : {}) }
+    })
+  }
+
+  /** Subscribed keys no active monitor instance serves — dashboard "missing instance" hints. */
+  monitorPendingKeys(): Record<string, string[]> {
+    return this.monitorInstances.pendingByContract()
+  }
+
+  /** A monitor's dashboard panels (metadata only — extract stays server-side). */
+  monitorPlots(monitorId: string): import('../types/monitor.js').MonitorPlotInfo[] {
+    const monitor = this.monitorRegistry.get(monitorId)
+    if (!monitor) return []
+    return monitor.plots().map(({ id, title, kind, unit, xKind, xUnit, description, multi, columns }) => ({
+      id, title, kind,
+      ...(columns !== undefined ? { columns } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      ...(xKind !== undefined ? { xKind } : {}),
+      ...(xUnit !== undefined ? { xUnit } : {}),
+      ...(description !== undefined ? { description } : {}),
+      // The dashboard picks its control from this before any series load
+      ...(multi ? { multi: true as const } : {}),
+    }))
+  }
+
+  /** Run one panel's server-side curation over the key's record tail. */
+  async monitorPlotSeries(monitorId: string, plotId: string, key: string, n = 500, option?: string | string[]): Promise<{
+    plot: import('../types/monitor.js').MonitorPlotInfo
+    series: import('../types/monitor.js').PlotSeries[]
+    options?: import('../types/monitor.js').PlotOption[]
+    option?: string | string[]
+  }> {
+    const monitor = this.monitorRegistry.get(monitorId)
+    if (!monitor) throw new Error(`Unknown monitor "${monitorId}"`)
+    const def = monitor.plots().find(p => p.id === plotId)
+    if (!def) throw new Error(`Monitor "${monitorId}" has no plot "${plotId}"`)
+    // n <= 0 is "the whole history" — panels that fit over months of data
+    // must not be silently windowed by a transport default. EXCEPT on stores
+    // too large to slurp: a display request must never scan 100MB+ per panel
+    // per filter click (the 2026-07-31 settlement-board freeze), so "all"
+    // degrades to the newest PLOT_CAP records there — served from the tail
+    // cache, so filter clicks are instant.
+    const reader = monitor.getReader()
+    const PLOT_CAP = 1_000
+    const effectiveN = n > 0 ? n : (await reader.isOversized?.(key)) ? PLOT_CAP : 0
+    const records = effectiveN > 0 ? await reader.readLast(key, effectiveN) : await reader.readAll(key)
+    const options = def.options?.(records)
+    // The option list is derived from the CURRENT window, so a stale pick
+    // (a session that scrolled out, a token no longer sampled) must not reach
+    // extract — resolve every request against what exists right now.
+    const selected = resolvePlotSelection(options, option, def.multi === true)
+    return {
+      plot: {
+        id: def.id, title: def.title, kind: def.kind,
+        ...(def.unit !== undefined ? { unit: def.unit } : {}),
+        ...(def.xKind !== undefined ? { xKind: def.xKind } : {}),
+        ...(def.xUnit !== undefined ? { xUnit: def.xUnit } : {}),
+        ...(def.description !== undefined ? { description: def.description } : {}),
+        ...(def.multi ? { multi: true } : {}),
+      },
+      // resolvePlotSelection returns the shape this def's `multi` flag
+      // declares — the union can't express that dependency at the call site.
+      series: (def.extract as (r: typeof records, o?: string | string[]) => import('../types/monitor.js').PlotSeries[])(records, selected),
+      ...(options !== undefined ? { options } : {}),
+      ...(selected !== undefined ? { option: selected } : {}),
+    }
+  }
+
+  // ── Accounts (first-class entities) ────────────────────────────────────────
+  //
+  // implementation × credential → a live venue account. Strategies read
+  // accounts (structurally read-only view), executors write them (full body);
+  // the credential is just the key that opens one.
+
+  /** Register an account implementation. Called by loadPlugin for the plugin's `accounts` entries. */
+  registerAccountImplementation(owner: string, impl: AccountImplementation): void {
+    assertNamespacedKind(impl.kind)
+    const id = impl.id.includes('/') ? impl.id : `${owner}/${impl.id}`
+    if (this.accountImpls.has(id)) {
+      throw new Error(`Account implementation "${id}" is already registered`)
+    }
+    this.accountImpls.set(id, { impl: { ...impl, id }, owner })
+  }
+
+  /** Implementations compatible with the given filters (dashboard implementation picker). */
+  listAccountImplementations(filter?: { kind?: NamespacedKind; type?: string }): AccountImplementationInfo[] {
+    return Array.from(this.accountImpls.values())
+      .filter(({ impl }) => {
+        if (filter?.kind !== undefined && impl.kind !== filter.kind) return false
+        // A kind-generic impl (no type) is compatible with every type; a
+        // specialized impl only with its own.
+        if (filter?.type !== undefined && impl.type !== undefined && impl.type !== filter.type) return false
+        return true
+      })
+      .map(({ impl, owner }) => ({
+        id: impl.id,
+        ...(impl.displayName !== undefined ? { displayName: impl.displayName } : {}),
+        kind: impl.kind,
+        ...(impl.type !== undefined ? { type: impl.type } : {}),
+        pluginName: owner,
+      }))
+  }
+
+  /** Create (or update the binding of) an account entity, validating impl/credential compatibility. */
+  async saveAccount(input: { name: string; implementation: string; credential?: string }): Promise<AccountEntity> {
+    const impl = this.accountImpls.get(input.implementation)?.impl
+    if (!impl) {
+      throw new Error(`Unknown account implementation "${input.implementation}" — is its plugin loaded?`)
+    }
+    if (input.credential !== undefined) {
+      const { type } = await this.readCredential(input.credential)
+      if (impl.type !== undefined && impl.type !== type) {
+        throw new Error(
+          `Account "${input.name}": implementation "${impl.id}" requires a "${impl.type}" credential, ` +
+          `but "${input.credential}" has type "${type}"`
+        )
+      }
+      // Kind-generic impls need the credential's venue to actually open this kind
+      const legacyFactories = this.credentialTypes.get(type)?.factories as Record<string, unknown> | undefined
+      if (impl.type === undefined && !this.adapterRegistry.has(impl.kind, type) && !legacyFactories?.[impl.kind]) {
+        throw new Error(
+          `Account "${input.name}": credential type "${type}" has no adapter for kind "${impl.kind}"`
+        )
+      }
+    }
+    const existing = await this.accountStore.get(input.name)
+    const now = new Date().toISOString()
+    const entity: AccountEntity = {
+      name: input.name,
+      implementation: impl.id,
+      ...(input.credential !== undefined ? { credential: input.credential } : {}),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    await this.accountStore.save(entity)
+    return entity
+  }
+
+  /** Accounts with derived kind/type/status (dashboard Accounts page). */
+  async listAccounts(): Promise<AccountView[]> {
+    const entities = await this.accountStore.list()
+    const views: AccountView[] = []
+    for (const entity of entities) {
+      const impl = this.accountImpls.get(entity.implementation)?.impl
+      if (!impl) {
+        views.push({ ...entity, status: 'broken', problem: `implementation "${entity.implementation}" is not registered` })
+        continue
+      }
+      if (!entity.credential) {
+        views.push({ ...entity, kind: impl.kind, ...(impl.type !== undefined ? { type: impl.type } : {}), status: 'inactive' })
+        continue
+      }
+      try {
+        const { type } = await this.readCredential(entity.credential)
+        const snapshotError = this.accountSnapshotErrors.get(entity.name)
+        views.push({ ...entity, kind: impl.kind, type, status: 'ready', ...(snapshotError !== undefined ? { snapshotError } : {}) })
+      } catch {
+        views.push({ ...entity, kind: impl.kind, status: 'broken', problem: `credential "${entity.credential}" not found` })
+      }
+    }
+    return views
+  }
+
+  async getAccount(name: string): Promise<AccountEntity | null> {
+    return this.accountStore.get(name)
+  }
+
+  /** Ascending equity series for one account (Accounts page curve). */
+  accountEquitySeries(name: string, sinceMs: number): Promise<AccountSnapshotRecord[]> {
+    return this.accountSnapshots.series(name, sinceMs)
+  }
+
+  /** Drop one account's snapshot history (e.g. samples taken under a wrong equity recipe). */
+  clearAccountSnapshots(name: string): Promise<void> {
+    return this.accountSnapshots.clear(name)
+  }
+
+  /**
+   * Live detail of one account through its READ VIEW — the curation follows
+   * the kind naturally: whatever read methods the view exposes (balance /
+   * positions / orders by convention) are called, each section failing
+   * independently. Core stays domain-clean: results are opaque JSON.
+   */
+  async accountDetail(name: string): Promise<{ sections: Record<string, unknown>; errors: Record<string, string> }> {
+    const entity = await this.accountStore.get(name)
+    if (!entity) throw new Error(`Unknown account "${name}"`)
+    if (!entity.credential) throw new Error(`Account "${name}" has no credential bound`)
+    const impl = this.accountImpls.get(entity.implementation)?.impl
+    if (!impl) throw new Error(`Account "${name}" uses unregistered implementation "${entity.implementation}"`)
+
+    const { type } = await this.readCredential(entity.credential)
+    const session = await this.adapterRegistry.resolve(impl.kind, type, entity.credential)
+    const reader = impl.createReader(session, entity.name) as Record<string, unknown>
+
+    const sections: Record<string, unknown> = {}
+    const errors: Record<string, string> = {}
+    await Promise.all(['balance', 'positions', 'orders'].map(async (section) => {
+      const fn = reader[section]
+      if (typeof fn !== 'function') return
+      try {
+        sections[section] = await (fn as () => Promise<unknown>).call(reader)
+      } catch (err) {
+        errors[section] = err instanceof Error ? err.message : String(err)
+      }
+    }))
+    return { sections, errors }
+  }
+
+  /** Most recent snapshot per account, keyed by account name. */
+  async latestAccountSnapshots(): Promise<Record<string, AccountSnapshotRecord>> {
+    const records = await this.accountSnapshots.latest()
+    return Object.fromEntries(records.map(r => [r.account, r]))
+  }
+
+  /**
+   * Sample every ready account whose read view implements `snapshot()` —
+   * equity is a READ, so the capability lives on the read view; views without
+   * it are skipped silently. Per-account failures log and continue.
+   */
+  async snapshotAccounts(): Promise<void> {
+    const now = Date.now()
+    for (const entity of await this.accountStore.list()) {
+      if (!entity.credential) continue
+      const impl = this.accountImpls.get(entity.implementation)?.impl
+      if (!impl) continue
+      try {
+        const { type } = await this.readCredential(entity.credential)
+        const session = await this.adapterRegistry.resolve(impl.kind, type, entity.credential)
+        const reader = impl.createReader(session, entity.name) as { snapshot?: () => Promise<AccountSnapshotSample> }
+        if (typeof reader.snapshot !== 'function') continue
+        const sample = await reader.snapshot()
+        await this.accountSnapshots.append({ account: entity.name, ts: now, ...sample })
+        this.accountSnapshotErrors.delete(entity.name)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        this.accountSnapshotErrors.set(entity.name, message)
+        log.warn({ account: entity.name, err }, 'Account snapshot failed — skipping this round')
+      }
+    }
+    await this.accountSnapshots.prune(now - this.accountSnapshotRetentionMs)
+  }
+
+  /** Delete an account. Refuses while any active instance binds it. */
+  async deleteAccount(name: string): Promise<void> {
+    for (const instance of this.instances.values()) {
+      const bound = [
+        ...Object.values(instance.credentials ?? {}),
+        ...(instance.accounts ?? []),
+      ]
+      if (bound.includes(name)) {
+        throw new Error(`Cannot delete account "${name}": active instance "${instance.id}" binds it — deactivate first`)
+      }
+    }
+    await this.accountStore.delete(name)
+  }
+
+  // ── Introspection (dashboard / AI compiler) ────────────────────────────────
+
+  /** Registered monitor instance by registry key — for schema/source introspection. */
+  /** The live strategy object behind an ACTIVE instance; undefined when deactivated. */
+  getStrategy(instanceId: string): unknown {
+    return this.triggerManager.getStrategy(instanceId)
+  }
+
+  /** Persisted run traces (newest first) — survive deactivation and restarts. */
+  readInstanceRuns(instanceId: string, limit = 100): Promise<StrategyRunTrace[]> {
+    return readRunTraces(this.dataDir, instanceId, limit)
+  }
+
+  // ── Scripts — on-demand plugin utilities ─────────────────────────────────────
+
+  private readonly scriptRegistry = new Map<string, { def: ScriptDefinition; owner: string }>()
+
+  async listScripts(): Promise<ScriptInfo[]> {
+    const out: ScriptInfo[] = []
+    for (const { def, owner } of this.scriptRegistry.values()) {
+      let fields = def.paramsSchema !== undefined
+        ? BaseStrategy.deriveParamFields(def.paramsSchema, z.object({})) ?? []
+        : []
+      // Live options (instance ids, account names) resolve per listing so the
+      // dropdown always reflects the current world. A resolver failure only
+      // costs the dropdown — the field degrades to a text input.
+      if (def.paramOptions !== undefined) {
+        try {
+          const resolved = await def.paramOptions(this)
+          fields = fields.map(f => resolved[f.name] !== undefined
+            ? { ...f, type: 'options' as const, options: resolved[f.name]!.map(o => ({ value: o.value, label: o.label })) }
+            : f)
+        } catch { /* advisory */ }
+      }
+      out.push({
+        id: def.id, name: def.name, pluginName: owner,
+        ...(def.description !== undefined ? { description: def.description } : {}),
+        ...(fields.length > 0 ? { paramsFields: fields } : {}),
+      })
+    }
+    return out
+  }
+
+  /** Validate params against the script's schema and run it against this runtime. */
+  async runScript(id: string, params: Record<string, unknown>): Promise<ScriptResult> {
+    const rec = this.scriptRegistry.get(id)
+    if (!rec) throw new Error(`Unknown script: "${id}"`)
+    const parsed = rec.def.paramsSchema !== undefined
+      ? rec.def.paramsSchema.parse(params) as Record<string, unknown>
+      : {}
+    return rec.def.run({ params: parsed, runtime: this })
+  }
+
+  /** The monitors an instance consumes and the executors it fires — its event scope. */
+  instanceScope(instanceId: string): { monitors: Array<{ monitor: string; key: string }>; executors: string[] } {
+    return {
+      monitors: this.triggerManager.getMonitorScope(instanceId),
+      executors: this.triggerManager.getExecutorKeys(instanceId),
+    }
+  }
+
+  getMonitorInstance(id: string): BaseMonitor | undefined {
+    return this.monitorRegistry.get(id)
+  }
+
+  /** Registered executor instance by registry key — for schema/source introspection. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getExecutorInstance(id: string): BaseExecutor<any> | undefined {
+    return this.executorRegistry.get(id)
+  }
+
+  /**
+   * The kind vocabulary — DERIVED, never declared: a kind exists iff some
+   * adapter cell or account implementation claims it.
+   */
+  listKinds(): NamespacedKind[] {
+    const kinds = new Set<NamespacedKind>(this.adapterRegistry.allKinds())
+    for (const { impl } of this.accountImpls.values()) kinds.add(impl.kind)
+    return Array.from(kinds)
+  }
+
+  /**
+   * Fresh mock adapter + the kind-generic account implementation's read view —
+   * the AI compiler's dry-run harness. Mocks are ordinary cells with
+   * type 'mock' (the domain package contributes them); fresh per call so
+   * dry-runs never share state. Undefined when either half is missing.
+   */
+  createDryRunReader(kind: NamespacedKind): unknown | undefined {
+    const mockFactory = this.adapterRegistry.factoryFor(kind, 'mock')
+    if (!mockFactory) return undefined
+    const readerFactory = this.readerFactoryForKind(kind)
+    if (!readerFactory) return undefined
+    return readerFactory(mockFactory(), 'dry-run')
+  }
+
+  /** The kind-generic account implementation's reader factory (venue-specialized wins when typed). */
+  private readerFactoryForKind(kind: NamespacedKind, credentialType?: string): ((session: unknown, name: string) => unknown) | undefined {
+    let generic: AccountImplementation | undefined
+    for (const { impl } of this.accountImpls.values()) {
+      if (impl.kind !== kind) continue
+      if (credentialType !== undefined && impl.type === credentialType) {
+        return (session, name) => impl.createReader(session, name)
+      }
+      if (impl.type === undefined) generic = generic ?? impl
+    }
+    return generic ? (session, name) => generic!.createReader(session, name) : undefined
+  }
+
+  /** The runtime's CompiledLoader — hot-compile registration path (dashboard, AI compiler). */
+  getCompiledLoader(): CompiledLoader {
+    return this.compiledLoader
+  }
+
+  /**
+   * The NON-SECRET fields of a stored credential, for display and editing.
+   * Secrecy comes from the credential type's schema: fields with
+   * `.meta({ password: true })` are withheld; types without a schema reveal
+   * nothing (fail closed). Storage stays fully encrypted either way — this
+   * governs what leaves the runtime, not how data rests.
+   */
+  async getCredentialPublicData(name: string): Promise<Record<string, unknown>> {
+    const { type, data } = await this.readCredential(name)
+    const schema = this.credentialTypes.get(type)?.schema
+    if (!schema) return {}
+    const out: Record<string, unknown> = {}
+    for (const [key, field] of Object.entries(schema.shape)) {
+      const meta = (field as { meta?: () => Record<string, unknown> | undefined }).meta?.()
+      if (meta?.['password'] === true) continue
+      if (key in data) out[key] = data[key]
+    }
+    return out
+  }
+
+  /**
+   * Manually fire ONE instruction at an executor (dashboard console) —
+   * bypasses the queue but keeps the executor's full validation/retry/
+   * recording path. Credential slots are materialized just for this call
+   * from the given slot-label → credential-name map and released after.
+   *
+   * ⚠️ This performs the executor's REAL side effects (orders, messages…).
+   */
+  async fireInstruction(
+    executorId: string,
+    action: string,
+    params: Record<string, unknown>,
+    credentials: Record<string, string> = {},
+  ): Promise<unknown> {
+    const executor = this.executorRegistry.get(executorId)
+    if (!executor) throw new Error(`Unknown executor "${executorId}"`)
+
+    const manualId = generateId('manual')
+    try {
+      if (executor.credentials.length > 0) {
+        const slots: MaterializedSlot[] = []
+        for (const decl of executor.credentials) {
+          const name = credentials[decl.label]
+          if (!name) throw new Error(`Credential slot '${decl.label}' requires a credential (pass credentials['${decl.label}'])`)
+          const { type, data } = await this.readCredential(name)
+          if ('raw' in decl) {
+            if (decl.type !== type) throw new Error(`Slot '${decl.label}' requires a "${decl.type}" credential, but "${name}" is "${type}"`)
+            if (!this.credentialTypes.get(type)?.raw) throw new Error(`Credential type "${type}" does not allow raw materialization`)
+            slots.push({ label: decl.label, credentialName: name, raw: data })
+          } else {
+            if (decl.type !== undefined && decl.type !== type) throw new Error(`Slot '${decl.label}' requires a "${decl.type}" credential, but "${name}" is "${type}"`)
+            const session = await this.ensureSession(manualId, name, type, decl.kind, data)
+            slots.push({ label: decl.label, credentialName: name, session })
+          }
+        }
+        executor.setMaterialized(manualId, slots)
+      }
+
+      const instruction = {
+        executorId,
+        messageId: manualId,
+        action,
+        params,
+        instanceId: manualId,
+      }
+      return await executor.fire(instruction)
+    } finally {
+      executor.removeMaterialized(manualId)
+      for (const [key, entry] of this.sessions) {
+        if (!entry.instances.delete(manualId)) continue
+        if (entry.instances.size > 0) continue
+        this.sessions.delete(key)
+        await this.closeSessionSafe(key, entry.session)
+      }
+    }
+  }
+
+  /** Serializable credential-type views — schemas exported as JSON Schema for remote form rendering. */
+  describeCredentialTypes(): CredentialTypeInfo[] {
+    return this.listCredentialTypes().map((def) => {
+      // A type's column set comes from its adapter cells (legacy factories merged until migration completes)
+      const kinds = Array.from(new Set([
+        ...this.adapterRegistry.kindsForType(def.type),
+        ...Object.keys(def.factories ?? {}) as NamespacedKind[],
+      ]))
+      return {
+      type: def.type,
+      ...(def.displayName !== undefined ? { displayName: def.displayName } : {}),
+      pluginName: this.credentialTypeOwners.get(def.type) ?? 'core',
+      ...(def.documentationUrl !== undefined ? { documentationUrl: def.documentationUrl } : {}),
+      kinds,
+      ...(def.raw !== undefined ? { raw: def.raw } : {}),
+      hasTest: typeof def.test === 'function',
+      // JSON round-trip: z.toJSONSchema emits null-prototype nodes, which are
+      // not "plain objects" to consumers like Next.js RSC serialization.
+      ...(def.schema ? { jsonSchema: JSON.parse(JSON.stringify(z.toJSONSchema(def.schema))) as Record<string, unknown> } : {}),
+      }
+    })
+  }
+
+  /**
+   * Run a credential type's connectivity probe against candidate data
+   * (dashboard "Test" button). Validates against the schema first when one is
+   * registered. Throws on failure; resolves on success.
+   */
+  async testCredential(type: string, data: RawCredentialData): Promise<void> {
+    const def = this.credentialTypes.get(type)
+    if (!def) throw new Error(`Unknown credential type "${type}"`)
+    const parsed = def.schema ? (def.schema.parse(data) as RawCredentialData) : data
+    if (!def.test) throw new Error(`Credential type "${type}" has no test`)
+    await def.test(parsed)
+  }
+
+  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): string {
+    if (!this.credentialStore) {
+      throw new Error('loadPlugin() requires a CredentialStore — pass one in RuntimeOptions')
+    }
+    const plugin = factory({ credentials: this.credentialStore, config, adapters: this.adapterRegistry, publicSessions: this.publicSessions })
     const ns = plugin.name  // e.g. 'hyperliquid'
+    if (this.loadedPlugins.has(ns)) {
+      throw new Error(`Plugin "${ns}" is already loaded — unload it first`)
+    }
     const p = (id: string) => `${ns}/${id}`
 
-    // Build a map from logical name → prefixed id for cross-reference rewriting
-    const monitorIds = new Map(plugin.monitors.map(({ instance }) => [instance.monitorName, p(instance.monitorName)]))
-    const executorIds = new Map(plugin.executors.map(({ instance }) => [instance.executorName, p(instance.executorName)]))
+    for (const cell of plugin.adapters ?? []) {
+      assertNamespacedKind(cell.kind)
+      this.adapterRegistry.register(ns, cell)
+    }
+    // Legacy publicSessions entries become keyless-only cells (venue = plugin name)
+    for (const reg of plugin.publicSessions ?? []) {
+      assertNamespacedKind(reg.kind)
+      this.adapterRegistry.register(ns, { kind: reg.kind, type: ns, create: () => reg.create() })
+    }
 
-    for (const { definition, instance } of plugin.monitors) {
-      this.registerMonitor({ ...definition, id: p(instance.monitorName) }, instance)
+    for (const { definition, instance } of plugin.monitors ?? []) {
+      this.registerMonitor({ ...definition, id: p(instance.monitorName), pluginName: ns }, instance)
     }
-    for (const { definition, instance } of plugin.executors) {
-      this.registerExecutor({ ...definition, id: p(instance.executorName) }, instance)
+    for (const { definition, instance } of plugin.executors ?? []) {
+      this.registerExecutor({ ...definition, id: p(instance.executorName), pluginName: ns }, instance)
     }
-    for (const { definition, factory: sf } of plugin.strategies) {
-      // Rewrite monitorIds/executorIds references to prefixed form
-      const rewritten: StrategyDefinition = {
-        ...definition,
-        id: p(definition.id),
-        monitorIds: definition.monitorIds.map(id => monitorIds.get(id) ?? id),
-        executorIds: definition.executorIds.map(id => executorIds.get(id) ?? id),
-      }
-      // Wrap factory to rewrite strategy's monitors/executorId references at runtime
-      const wrappedFactory = () => {
-        const strategy = sf()
-        strategy.setPrefixedNames(ns)
-        return strategy
-      }
-      this.registerStrategy(rewritten, wrappedFactory)
+    for (const { definition, factory: sf } of plugin.strategies ?? []) {
+      // pluginName carries the namespace; registerStrategy derives monitorIds/
+      // executorIds from the class declarations resolved against it. The
+      // strategy instance itself never learns the namespace.
+      const { monitorIds: _m, executorIds: _e, ...rest } = definition
+      this.registerStrategy({ ...rest, id: p(definition.id), pluginName: ns }, sf)
     }
-    for (const { accountType, factory: af } of plugin.accounts) {
-      this.registerAccountFactory(accountType, af)
+    for (const credentialType of plugin.credentialTypes ?? []) {
+      this.registerCredentialType(credentialType, ns)
     }
+    for (const script of plugin.scripts ?? []) {
+      const id = p(script.id)
+      if (this.scriptRegistry.has(id)) throw new Error(`Script "${id}" is already registered`)
+      this.scriptRegistry.set(id, { def: { ...script, id }, owner: ns })
+    }
+    // Class entries (@OwAccount/@OwMonitor) lower to plain registrations here,
+    // so plugin factories may reference classes directly, not just definePlugin.
+    const accountImpls = (plugin.accounts ?? []).map(entry => lowerAccountEntry(entry, ns))
+    const monitorImpls = (plugin.monitorImplementations ?? []).map(entry => lowerMonitorEntry(entry, ns))
+    for (const impl of accountImpls) {
+      this.registerAccountImplementation(ns, impl)
+    }
+    for (const impl of monitorImpls) {
+      this.registerMonitorImplementation(ns, impl)
+    }
+
+    this.loadedPlugins.set(ns, {
+      name: ns,
+      version: plugin.version,
+      monitors: (plugin.monitors ?? []).map(({ instance }) => p(instance.monitorName)),
+      executors: (plugin.executors ?? []).map(({ instance }) => p(instance.executorName)),
+      strategies: (plugin.strategies ?? []).map(({ definition }) => p(definition.id)),
+      kinds: Array.from(new Set([...(plugin.adapters ?? []).map(a => a.kind), ...accountImpls.map(a => a.kind)])),
+      credentialTypes: (plugin.credentialTypes ?? []).map(c => c.type),
+    })
+    return ns
+  }
+
+  /**
+   * Load a plugin from a built JS module on disk. The module must default-export
+   * a PluginFactory. Same namespacing and registration as loadPlugin().
+   */
+  async loadPluginFromPath(filePath: string, config: unknown): Promise<string> {
+    // webpackIgnore: true — keep bundlers from trying to resolve the dynamic path
+    const mod = await import(/* webpackIgnore: true */ pathToFileURL(filePath).href) as { default?: PluginFactory<unknown> }
+    const factory = mod.default
+    if (typeof factory !== 'function') {
+      throw new Error(`Plugin module at "${filePath}" must default-export a plugin factory function`)
+    }
+    return this.loadPlugin(factory, config)
+  }
+
+  /**
+   * Unregister a loaded plugin's components. Refuses when any active instance
+   * still uses one of the plugin's strategies — deactivate those first.
+   */
+  unloadPlugin(name: string): void {
+    const plugin = this.loadedPlugins.get(name)
+    if (!plugin) throw new Error(`Plugin not loaded: "${name}"`)
+
+    const inUse = Array.from(this.instances.values()).filter(i => plugin.strategies.includes(i.strategyId))
+    if (inUse.length > 0) {
+      throw new Error(
+        `Cannot unload plugin "${name}": ${inUse.length} active instance(s) use its strategies ` +
+        `(${inUse.map(i => i.id).join(', ')}). Deactivate them first.`
+      )
+    }
+
+    for (const id of plugin.monitors) this.monitorRegistry.unregister(id)
+    for (const id of plugin.executors) {
+      // The unregistered object's consume loop must not keep claiming the id
+      this.queue.cancelConsumers?.(id)
+      this.executorRegistry.unregister(id)
+    }
+    for (const id of plugin.strategies) this.strategyRegistry.unregister(id)
+    for (const type of plugin.credentialTypes) {
+      this.credentialTypes.delete(type)
+      this.credentialTypeOwners.delete(type)
+    }
+    for (const [id, entry] of this.accountImpls) {
+      if (entry.owner === name) this.accountImpls.delete(id)
+    }
+    void this.monitorInstances.unregisterOwner(name)
+    void this.adapterRegistry.unregisterOwner(name)
+    this.loadedPlugins.delete(name)
+    log.info({ plugin: name }, 'Plugin unloaded')
+  }
+
+  listLoadedPlugins(): LoadedPluginInfo[] {
+    return Array.from(this.loadedPlugins.values())
   }
 
   addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
@@ -137,18 +953,41 @@ export class OpenWhaleRuntime implements IRuntime {
   async start(): Promise<void> {
     if (this.running) return
     this.running = true
+    try {
+      await this.startInner()
+    } catch (err) {
+      // Reset the guard so a failed boot can be retried instead of leaving the
+      // runtime permanently half-started behind an early-return.
+      this.running = false
+      throw err
+    }
+  }
 
+  private async startInner(): Promise<void> {
     // Initialize database schema if a database adapter is provided
     if (this.database) await this.database.initialize()
 
     // Load compiled components
     if (this.compiledLoader) await this.compiledLoader.loadAll()
 
-    // Load and activate persisted instances
+    // Monitor instances first: strategy triggers subscribing during instance
+    // restore must find their serving monitors already active.
+    await this.monitorInstances.restore()
+
+    // Load and activate persisted instances. A single stale instance (e.g. its
+    // strategy's params schema changed since it was saved) must not brick the
+    // whole boot — skip it and keep going.
     const persistedInstances = await this.instanceStore.loadAll()
     for (const instance of persistedInstances) {
-      if (!this.instances.has(instance.id))
+      if (this.instances.has(instance.id)) continue
+      // Deactivated (enabled=false) instances stay stopped across restarts —
+      // they resume only through an explicit activateById
+      if (!instance.enabled) continue
+      try {
         await this.activateInstance(instance, { persist: false })
+      } catch (err) {
+        log.error({ instanceId: instance.id, strategyId: instance.strategyId, err }, 'Failed to restore persisted instance — skipping')
+      }
     }
 
     this.triggerManager.start(this.queue)
@@ -158,13 +997,34 @@ export class OpenWhaleRuntime implements IRuntime {
       const executor = this.executorRegistry.get(def.id)
       if (executor) void executor.run(this.queue, def.id)
     }
+
+    // Equity snapshotter: one immediate sample (fresh curves on first paint),
+    // then the interval. unref() so tests/embedders aren't kept alive by it.
+    void this.snapshotAccounts()
+    this.accountSnapshotTimer = setInterval(() => void this.snapshotAccounts(), this.accountSnapshotIntervalMs)
+    this.accountSnapshotTimer.unref?.()
   }
 
   async stop(): Promise<void> {
     if (!this.running) return
     this.running = false
+    if (this.accountSnapshotTimer) {
+      clearInterval(this.accountSnapshotTimer)
+      this.accountSnapshotTimer = undefined
+    }
     this.triggerManager.stop()
     await this.queue.stop()
+    // Release every instance so a later start() re-activates from persistence
+    // with fresh accounts, instead of reusing entries whose accounts are closed.
+    for (const instanceId of Array.from(this.instances.keys())) {
+      await this.releaseInstance(instanceId, { closeAccounts: false })
+    }
+    for (const [key, entry] of this.sessions) {
+      await this.closeSessionSafe(key, entry.session)
+    }
+    this.sessions.clear()
+    await this.monitorInstances.stopAll()
+    await this.adapterRegistry.closeAll()
     if (this.database) await this.database.close()
   }
 
@@ -172,14 +1032,229 @@ export class OpenWhaleRuntime implements IRuntime {
     await this.activateInstance(instance, { persist: true })
   }
 
+  /** Activate a persisted (stopped) instance by id. Idempotent when already active. */
+  async activateById(instanceId: string): Promise<void> {
+    if (this.instances.has(instanceId)) return
+    const persisted = await this.instanceStore.load(instanceId)
+    if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
+    persisted.enabled = true
+    persisted.updatedAt = new Date().toISOString()
+    await this.activateInstance(persisted, { persist: true })
+  }
+
+  /**
+   * Stop an instance but KEEP its persisted row (enabled=false so it does not
+   * auto-resume on boot). Edit with updateInstance, resume with activateById,
+   * remove for good with deleteInstance.
+   */
   async deactivate(instanceId: string): Promise<void> {
-    this.instances.delete(instanceId)
-    this.triggerManager.unregisterInstance(instanceId)
+    await this.releaseInstance(instanceId)
+    const persisted = await this.instanceStore.load(instanceId)
+    if (persisted) {
+      persisted.enabled = false
+      persisted.updatedAt = new Date().toISOString()
+      await this.instanceStore.save(persisted)
+    }
+  }
+
+  /** Stop (if active) and remove the persisted row. */
+  async deleteInstance(instanceId: string): Promise<void> {
+    await this.releaseInstance(instanceId)
     await this.instanceStore.delete(instanceId)
+  }
+
+  /** Edit a STOPPED instance — any field; validation happens at activation. */
+  async updateInstance(
+    instanceId: string,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'credentials' | 'accounts' | 'llm' | 'params'>>,
+  ): Promise<StrategyInstance> {
+    if (this.instances.has(instanceId)) {
+      throw new Error(`Instance "${instanceId}" is active — deactivate it before editing`)
+    }
+    const persisted = await this.instanceStore.load(instanceId)
+    if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
+    if (patch.name !== undefined) persisted.name = patch.name
+    if (patch.description !== undefined) {
+      if (patch.description) persisted.description = patch.description
+      else delete persisted.description
+    }
+    if (patch.credentials !== undefined) persisted.credentials = patch.credentials
+    if (patch.accounts !== undefined) persisted.accounts = patch.accounts
+    if (patch.llm !== undefined) persisted.llm = patch.llm
+    if (patch.params !== undefined) persisted.params = patch.params
+    persisted.updatedAt = new Date().toISOString()
+    await this.instanceStore.save(persisted)
+    return persisted
+  }
+
+  /**
+   * Edit COSMETIC metadata — icon, folder, ordering, name, description. These
+   * never affect a running strategy, so unlike updateInstance they are
+   * allowed while the instance is active; an active in-memory copy is patched
+   * in place so views agree without a restart.
+   */
+  async updateInstanceMeta(
+    instanceId: string,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder'>>,
+  ): Promise<StrategyInstance> {
+    const persisted = await this.instanceStore.load(instanceId)
+    if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
+    const apply = (target: StrategyInstance) => {
+      if (patch.name !== undefined) target.name = patch.name
+      if (patch.description !== undefined) {
+        if (patch.description) target.description = patch.description
+        else delete target.description
+      }
+      if (patch.icon !== undefined) {
+        if (patch.icon) target.icon = patch.icon
+        else delete target.icon
+      }
+      if (patch.folder !== undefined) {
+        if (patch.folder) target.folder = patch.folder
+        else delete target.folder
+      }
+      if (patch.sortOrder !== undefined) target.sortOrder = patch.sortOrder
+    }
+    apply(persisted)
+    persisted.updatedAt = new Date().toISOString()
+    await this.instanceStore.save(persisted)
+    const live = this.instances.get(instanceId)
+    if (live) apply(live)
+    return persisted
+  }
+
+  /** Copy an instance's full configuration into a new STOPPED instance. */
+  async duplicateInstance(instanceId: string, name?: string): Promise<StrategyInstance> {
+    const source = this.instances.get(instanceId) ?? await this.instanceStore.load(instanceId)
+    if (!source) throw new Error(`Unknown instance "${instanceId}"`)
+    const now = new Date().toISOString()
+    const copy: StrategyInstance = {
+      ...structuredClone(source),
+      id: generateId('inst'),
+      name: name?.trim() || `${source.name} (copy)`,
+      enabled: false,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await this.instanceStore.save(copy)
+    return copy
+  }
+
+  /**
+   * Release all runtime resources held by an instance: trigger registrations
+   * (cron tasks + monitor subscriptions), executor account injections, and —
+   * when closeAccounts is true and no other active instance shares them — the
+   * account instances themselves. Re-activation and stop() pass
+   * closeAccounts: false so shared/reusable accounts aren't bounced.
+   */
+  private async releaseInstance(
+    instanceId: string,
+    { closeAccounts = true }: { closeAccounts?: boolean } = {},
+  ): Promise<void> {
+    const instance = this.instances.get(instanceId)
+    const executorKeys = this.triggerManager.getExecutorKeys(instanceId)
+
+    this.triggerManager.unregisterInstance(instanceId)
+    this.instances.delete(instanceId)
+
+    for (const resolvedId of executorKeys) {
+      this.executorRegistry.get(resolvedId)?.removeMaterialized(instanceId)
+    }
+
+    void instance
+
+    // Drop this instance's session references; close sessions nobody uses
+    for (const [key, entry] of this.sessions) {
+      if (!entry.instances.delete(instanceId)) continue
+      if (entry.instances.size > 0 || !closeAccounts) continue
+      this.sessions.delete(key)
+      await this.closeSessionSafe(key, entry.session)
+    }
+  }
+
+  /**
+   * Close a session without letting a failed close (e.g. an already-broken
+   * WebSocket) abort teardown — an aborted deactivate() would leave the
+   * instance persisted and it would resume trading on the next boot.
+   */
+  private async closeSessionSafe(key: string, session: unknown): Promise<void> {
+    try {
+      await (session as { close?: () => Promise<void> }).close?.()
+    } catch (err) {
+      log.warn({ session: key, err }, 'Session close failed — continuing teardown')
+    }
   }
 
   listInstances(): StrategyInstance[] {
     return Array.from(this.instances.values())
+  }
+
+  /** All persisted instances merged with live activation state. */
+  async listInstanceViews(): Promise<StrategyInstanceView[]> {
+    const persisted = await this.instanceStore.loadAll()
+    const seen = new Set<string>()
+    const views: StrategyInstanceView[] = []
+    for (const row of persisted) {
+      const live = this.instances.get(row.id)
+      views.push({ ...(live ?? row), active: live !== undefined })
+      seen.add(row.id)
+    }
+    for (const [id, live] of this.instances) {
+      if (!seen.has(id)) views.push({ ...live, active: true })
+    }
+    return views
+  }
+
+  /**
+   * Check a strategy param's chosen values against a venue.
+   *
+   * The field's `availability` marker decides how: a named `checker` the
+   * strategy provides (arbitrary logic — liquidity floors, pair sanity), or
+   * the built-in market check (every value, split by `separator`, must be a
+   * listed symbol). Markets are read through the KEYLESS adapter cell, so the
+   * check works before any credential is bound.
+   *
+   * Advisory by construction: a venue that publishes no catalogue yields no
+   * verdicts rather than a wall of false negatives.
+   */
+  async checkParamAvailability(
+    strategyId: string,
+    fieldName: string,
+    values: string[],
+    venue: string,
+  ): Promise<import('../types/definition.js').AvailabilityVerdict[]> {
+    const definition = this.strategyRegistry.getDefinition(strategyId)
+    const field = definition?.paramsFields?.find(f => f.name === fieldName)
+    if (!field?.availability) throw new Error(`Field "${fieldName}" of "${strategyId}" declares no availability check`)
+    const spec = field.availability
+    if (values.length === 0) return []
+
+    const kind = (spec.kind ?? 'exchange/perp') as NamespacedKind
+    if (!this.adapterRegistry.has(kind, venue)) {
+      throw new Error(`No "${kind}" adapter for venue "${venue}"`)
+    }
+    const session = await this.adapterRegistry.resolve<Record<string, unknown>>(kind, venue)
+    const fetchMarkets = session['fetchMarkets']
+    const markets = typeof fetchMarkets === 'function'
+      ? await (fetchMarkets as () => Promise<Array<Record<string, unknown>>>).call(session)
+      : []
+
+    if (spec.checker) {
+      const checker = this.strategyRegistry.get(strategyId)?.().availabilityCheckers?.[spec.checker]
+      if (!checker) throw new Error(`Strategy "${strategyId}" provides no availability checker "${spec.checker}"`)
+      return checker(values, { venue, markets })
+    }
+
+    // Built-in: every symbol in the value must be listed.
+    if (markets.length === 0) return []
+    const listed = new Set(markets.map(m => String(m['symbol'])))
+    return values.map((value) => {
+      const symbols = spec.separator ? value.split(spec.separator).filter(Boolean) : [value]
+      const missing = symbols.filter(s => !listed.has(s))
+      return missing.length === 0
+        ? { value, available: true }
+        : { value, available: false, reason: `${venue} does not list ${missing.join(', ')}` }
+    })
   }
 
   listStrategies(): StrategyDefinition[] {
@@ -187,7 +1262,20 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   listMonitors(): MonitorDefinition[] {
-    return this.monitorRegistry.list()
+    // keyFields re-derive on every read: keySchemas contain LIVE option lists
+    // (the venue dropdown queries the adapter matrix), so a registration-time
+    // snapshot would freeze them at whatever plugins were loaded first.
+    return this.monitorRegistry.list().map((def) => {
+      const monitor = this.monitorRegistry.get(def.id)
+      if (!monitor) return def
+      // supportsBackfill is likewise live: a contract gains the capability as
+      // soon as a backfilling implementation registers against it.
+      const out = monitor.supportsBackfill ? { ...def, supportsBackfill: true } : def
+      const keySchema = monitor.keySchema
+      if (!keySchema) return out
+      const keyFields = BaseStrategyClass.deriveParamFields(keySchema, z.object({}))
+      return keyFields?.length ? { ...out, keyFields } : out
+    })
   }
 
   listExecutors(): ExecutorDefinition[] {
@@ -212,41 +1300,58 @@ export class OpenWhaleRuntime implements IRuntime {
       return
     }
 
+    // Re-activation: release the previous registration first so cron tasks,
+    // subscriptions, and executor accounts don't accumulate. Accounts are kept
+    // open — ensureAccounts() below reuses them from the registry.
+    if (this.instances.has(instance.id)) await this.releaseInstance(instance.id, { closeAccounts: false })
+
     const strategy = strategyFactory()
     const parsedParams = this.parseParams(strategy, instance)
-    const accounts = await this.ensureAccounts(instance, strategy)
+    const { readers, credentialNames, accountMetas } = await this.materializeStrategySlots(instance, strategy)
+    // BEFORE triggers(): venue-scoped subscriptions derive from the bound accounts
+    strategy.setAccountMeta(accountMetas)
 
-    // Build label → registry key map from strategy's monitor declarations
-    const monitorLabelToKey = new Map<string, string>()
-    strategy.monitors.forEach((decl, i) => {
-      const label = typeof decl === 'string' ? decl : decl.label
-      const registryKey = strategy.resolvedMonitors[i]!
-      monitorLabelToKey.set(label, registryKey)
-    })
+    // The strategy speaks in labels; resolve label → registry key here, once,
+    // using the namespace recorded on the strategy's definition.
+    const ns = this.strategyRegistry.getDefinition(instance.strategyId)?.pluginName
+    const monitorLabelToKey = buildLabelToKeyMap(strategy.monitors, ns)
+    const executorLabelToKey = buildLabelToKeyMap(strategy.executors, ns)
 
-    // triggers() uses this.monitor(label) which returns registry keys — no rewriting needed
-    const rawTriggers = strategy.triggers(parsedParams)
-    const triggers = rawTriggers.map((t, i) => ({
+    // triggers() conditions reference monitors by label — used as-is
+    const triggers = strategy.triggers(parsedParams).map((t, i) => ({
       ...t,
       id: `${instance.id}-trigger-${i}`,
       strategyInstanceId: instance.id,
-      // Rewrite trigger condition monitorNames from registry keys back to labels
-      // so TriggerState keys are label-based (matching context.getData() and monitorData keys)
-      conditions: t.conditions.map(c => {
-        if (c.type !== 'monitor') return c
-        const keyToLabel = new Map(Array.from(monitorLabelToKey, ([l, k]) => [k, l]))
-        return {
-          ...c,
-          sources: c.sources.map(s => ({
-            ...s,
-            monitorName: keyToLabel.get(s.monitorName) ?? s.monitorName,
-          })),
-        }
-      }) as Trigger['conditions'],
     }))
 
+    // Structured trigger sources: compose keyParams into keys via the
+    // monitor's keySchema so everything downstream still speaks plain keys
+    for (const trigger of triggers) {
+      for (const condition of trigger.conditions) {
+        if (condition.type !== 'monitor') continue
+        for (const source of condition.sources) {
+          if (!source.keyParams || (source.key && source.key !== '')) continue
+          const registryKey = monitorLabelToKey.get(source.monitorName) ?? source.monitorName
+          const monitor = this.monitorRegistry.get(registryKey)
+          if (!monitor) throw new Error(`Trigger source references unknown monitor "${source.monitorName}"`)
+          source.key = monitor.keyFor(source.keyParams)
+        }
+      }
+    }
+
+    // Per-instance LLM slot overrides (model/credential/settings by label)
+    strategy.setLlmBindings(instance.llm ?? {})
+
+    // Persist finished run traces — the audit trail must outlive deactivation
+    strategy.setRunSink?.(run => { void appendRunTrace(this.dataDir, instance.id, run).catch(() => {}) })
+
     this.instances.set(instance.id, instance)
-    this.triggerManager.registerInstance(instance.id, strategy, triggers, parsedParams, accounts, monitorLabelToKey)
+    this.triggerManager.registerInstance(
+      instance.id, strategy, triggers, parsedParams, readers, credentialNames, monitorLabelToKey, executorLabelToKey,
+    )
+
+    // Materialize each declared executor's credential slots (sessions / raw)
+    await this.materializeExecutorSlots(instance, strategy, executorLabelToKey)
 
     if (persist) await this.instanceStore.save(instance)
   }
@@ -254,47 +1359,282 @@ export class OpenWhaleRuntime implements IRuntime {
   private parseParams(strategy: IStrategy, instance: StrategyInstance) {
     const base = instance.params?.base ?? {}
     const tunable = instance.params?.tunable ?? {}
-    // Fill tunable defaults via Zod parse
+    // Validate base (required fields, fail at activate) and fill tunable defaults via Zod parse
+    const parsedBase = strategy.baseParamsSchema.parse(base) as RawCredentialData
     const parsedTunable = strategy.tunableParamsSchema.parse(tunable) as RawCredentialData
-    return { base, tunable: parsedTunable }
+    return { base: parsedBase, tunable: parsedTunable }
   }
 
-  private async ensureAccounts(instance: StrategyInstance, strategy: IStrategy): Promise<IAccount[]> {
-    const credentialNames = instance.accounts ?? []
+  // ── Credential materialization ────────────────────────────────────────────
+  //
+  // The Credential is the root entity; consumers receive materializations on a
+  // privilege ladder: Reader (strategies) < Session (executors) < Raw
+  // (executors, explicit opt-in). Sessions are cached per credential × kind
+  // and closed when no active instance references them.
 
-    if (credentialNames.length !== strategy.accountTypes.length) {
+  /** Resolve the credential name bound to a slot path, honoring both binding styles. */
+  private boundCredential(instance: StrategyInstance, slotPath: string, positional?: string): string | undefined {
+    return instance.credentials?.[slotPath] ?? positional
+  }
+
+  /**
+   * Resolve a slot binding value into credential facts. The binding is an
+   * ACCOUNT name first (the entity supplies implementation + credential);
+   * a plain credential name is accepted as the legacy fallback and gets the
+   * kind's canonical reader.
+   */
+  private async resolveAccountBinding(
+    bindingName: string,
+    opts: { kind: NamespacedKind; venueType?: string; context: string },
+  ): Promise<{ credentialName: string; type: string; data: RawCredentialData; impl?: AccountImplementation }> {
+    const entity = await this.accountStore.get(bindingName)
+    if (entity) {
+      const impl = this.accountImpls.get(entity.implementation)?.impl
+      if (!impl) {
+        throw new Error(`${opts.context}: account "${bindingName}" uses unregistered implementation "${entity.implementation}"`)
+      }
+      if (impl.kind !== opts.kind) {
+        throw new Error(
+          `${opts.context}: account "${bindingName}" has kind "${impl.kind}" but the slot requires "${opts.kind}"`
+        )
+      }
+      if (!entity.credential) {
+        throw new Error(
+          `${opts.context}: account "${bindingName}" has no credential bound — bind one on the Accounts page`
+        )
+      }
+      const { type, data } = await this.readCredential(entity.credential)
+      if (impl.type !== undefined && impl.type !== type) {
+        throw new Error(
+          `${opts.context}: account "${bindingName}" implementation requires a "${impl.type}" credential, ` +
+          `but "${entity.credential}" has type "${type}"`
+        )
+      }
+      if (opts.venueType !== undefined && opts.venueType !== type) {
+        throw new Error(
+          `${opts.context}: slot requires a "${opts.venueType}" venue, but account "${bindingName}" is "${type}"`
+        )
+      }
+      return { credentialName: entity.credential, type, data, impl }
+    }
+
+    // Legacy: the binding is a credential name
+    const { type, data } = await this.readCredential(bindingName)
+    if (opts.venueType !== undefined && opts.venueType !== type) {
       throw new Error(
-        `Strategy "${instance.strategyId}" requires ${strategy.accountTypes.length} account(s), ` +
-        `but instance "${instance.id}" has ${credentialNames.length}`
+        `${opts.context}: slot requires a "${opts.venueType}" credential, but "${bindingName}" has type "${type}"`
       )
     }
+    return { credentialName: bindingName, type, data }
+  }
 
-    const accounts: IAccount[] = []
-    for (let i = 0; i < credentialNames.length; i++) {
-      const name = credentialNames[i]!
-      const expectedType = strategy.accountTypes[i]!
-      const expectedTypeName = typeof expectedType === 'string' ? expectedType : expectedType.type
+  /** Materialize the strategy's account slots into Readers (+ per-slot account facts). */
+  private async materializeStrategySlots(
+    instance: StrategyInstance,
+    strategy: IStrategy,
+  ): Promise<{ readers: unknown[]; credentialNames: string[]; accountMetas: import('../types/strategy.js').AccountSlotMeta[] }> {
+    const readers: unknown[] = []
+    const credentialNames: string[] = []
+    const accountMetas: import('../types/strategy.js').AccountSlotMeta[] = []
 
-      if (!this.accountRegistry.has(name)) {
-        if (!this.credentialStore) {
-          throw new Error(`CredentialStore not configured — cannot create account for "${name}"`)
-        }
-        const { type, data } = await this.credentialStore.getByName(name)
-        if (type !== expectedTypeName) {
-          throw new Error(
-            `Account[${i}] type mismatch: strategy "${instance.strategyId}" expects "${expectedTypeName}", ` +
-            `but credential "${name}" has type "${type}"`
-          )
-        }
-        const factory = this.accountFactories.get(type)
-        if (!factory) {
-          throw new Error(`No AccountFactory registered for type: "${type}" (credential: "${name}")`)
-        }
-        this.accountRegistry.set(name, factory(data))
+    for (let i = 0; i < strategy.accounts.length; i++) {
+      const slot = strategy.accounts[i]!
+      const name = this.boundCredential(instance, slot.label, instance.accounts?.[i])
+      if (!name) {
+        throw new Error(
+          `Strategy "${instance.strategyId}" account slot '${slot.label}' has no credential bound ` +
+          `in instance "${instance.id}" (set credentials['${slot.label}'])`
+        )
       }
-      accounts.push(this.accountRegistry.get(name)!)
+      const kind = slot.account.kind
+      if (!kind) {
+        // registerStrategy validates this; kept for strategies reaching
+        // activation through a path that skipped registration
+        throw new Error(`Account slot '${slot.label}': Reader class has no kind`)
+      }
+      const resolved = await this.resolveAccountBinding(name, {
+        kind,
+        ...(slot.account.venueType !== undefined ? { venueType: slot.account.venueType } : {}),
+        context: `Account slot '${slot.label}' of instance "${instance.id}"`,
+      })
+
+      const session = await this.ensureSession(instance.id, resolved.credentialName, resolved.type, kind, resolved.data)
+      // Account entity → its implementation builds the read view; legacy bare-
+      // credential binding → venue reader override, then the kind-GENERIC
+      // account implementation (the canonical read view of the kind).
+      let reader: unknown
+      if (resolved.impl) {
+        reader = resolved.impl.createReader(session, name)
+      } else {
+        const readerOverrides = this.credentialTypes.get(resolved.type)?.readers as
+          Record<string, (session: unknown, credentialName: string) => unknown> | undefined
+        const readerFactory = readerOverrides?.[kind]
+          ?? this.readerFactoryForKind(kind, resolved.type)
+        if (!readerFactory) {
+          throw new Error(`Kind "${kind}" has no account implementation — is its domain plugin loaded?`)
+        }
+        reader = readerFactory(session, name)
+      }
+      readers.push(reader)
+      credentialNames.push(resolved.credentialName)
+      // The venue is the bound credential's type — strategies derive it from
+      // here instead of asking the user for a venue the binding already implies
+      accountMetas.push({ label: slot.label, accountName: name, venue: resolved.type, kind })
     }
 
-    return accounts
+    return { readers, credentialNames, accountMetas }
+  }
+
+  /** Materialize each declared executor's credential slots (sessions / raw data). */
+  private async materializeExecutorSlots(
+    instance: StrategyInstance,
+    strategy: IStrategy,
+    executorLabelToKey: Map<string, string>,
+  ): Promise<void> {
+    for (const [execLabel, resolvedId] of executorLabelToKey) {
+      const executor = this.executorRegistry.get(resolvedId)
+      // A silently-missing executor means instructions queue up with no consumer —
+      // fail at activation, symmetrically with missing monitors.
+      if (!executor) {
+        throw new Error(
+          `Instance "${instance.id}": strategy "${instance.strategyId}" declares executor "${resolvedId}" but it is not registered`
+        )
+      }
+      if (executor.credentials.length === 0) continue
+
+      const slots: MaterializedSlot[] = []
+      for (const decl of executor.credentials) {
+        const slotPath = `${execLabel}:${decl.label}`
+        // Executor slots default to the strategy binding that satisfies them —
+        // single-credential instances need no extra configuration.
+        const name = this.boundCredential(instance, slotPath)
+          ?? await this.defaultExecutorBinding(instance, strategy, decl)
+        if (!name) {
+          throw new Error(
+            `Executor slot '${slotPath}' of instance "${instance.id}" has no credential bound ` +
+            `and no strategy binding satisfies it (set credentials['${slotPath}'])`
+          )
+        }
+        if ('raw' in decl) {
+          // Raw slots bind CREDENTIALS (never accounts) — raw is the key itself.
+          const { type, data } = await this.readCredential(name)
+          if (decl.type !== type) {
+            throw new Error(`Executor slot '${slotPath}' requires a "${decl.type}" credential, but "${name}" is "${type}"`)
+          }
+          if (!this.credentialTypes.get(type)?.raw) {
+            throw new Error(`Credential type "${type}" does not allow raw materialization (slot '${slotPath}')`)
+          }
+          slots.push({ label: decl.label, credentialName: name, raw: data })
+        } else {
+          // Account slots: the binding is an account name (full body = the
+          // session behind the account), legacy credential names accepted.
+          const resolved = await this.resolveAccountBinding(name, {
+            kind: decl.kind,
+            ...(decl.type !== undefined ? { venueType: decl.type } : {}),
+            context: `Executor slot '${slotPath}' of instance "${instance.id}"`,
+          })
+          const session = await this.ensureSession(instance.id, resolved.credentialName, resolved.type, decl.kind, resolved.data)
+          slots.push({ label: decl.label, credentialName: resolved.credentialName, session })
+        }
+      }
+
+      // Sessions for every strategy-bound credential of matching kinds are also
+      // exposed by name, so instruction.accountNames can route among them.
+      const sessionKinds = new Set(
+        executor.credentials.flatMap(d => 'raw' in d ? [] : [d.kind])
+      )
+      const extraByName: MaterializedSlot[] = []
+      for (const bindingName of this.instanceSessionsByName(instance)) {
+        // Bindings may be account names — the session cache is keyed by the
+        // underlying credential, but instruction routing speaks binding names.
+        const credentialName = (await this.accountStore.get(bindingName))?.credential ?? bindingName
+        for (const kind of sessionKinds) {
+          const cached = this.sessions.get(sessionKey(credentialName, kind))
+          if (cached && !slots.some(s => s.credentialName === credentialName && s.session === cached.session)) {
+            extraByName.push({ label: `@${bindingName}`, credentialName, session: cached.session })
+          }
+        }
+      }
+
+      executor.setMaterialized(instance.id, [...slots, ...extraByName])
+    }
+  }
+
+  /** First strategy-bound credential whose type can materialize the executor slot. */
+  private async defaultExecutorBinding(
+    instance: StrategyInstance,
+    strategy: IStrategy,
+    decl: { kind?: NamespacedKind; type?: string },
+  ): Promise<string | undefined> {
+    const names = strategy.accounts
+      .map((slot, i) => this.boundCredential(instance, slot.label, instance.accounts?.[i]))
+      .filter((n): n is string => n !== undefined)
+    for (const name of names) {
+      // Bindings may be account names; fall through to the credential itself
+      const entity = await this.accountStore.get(name)
+      if (entity && decl.kind !== undefined) {
+        const implKind = this.accountImpls.get(entity.implementation)?.impl.kind
+        if (implKind !== decl.kind || !entity.credential) continue
+      }
+      const credentialName = entity?.credential ?? name
+      let type: string
+      try {
+        ({ type } = await this.readCredential(credentialName))
+      } catch {
+        continue
+      }
+      if (decl.type !== undefined && decl.type !== type) continue
+      const factories = this.credentialTypes.get(type)?.factories as Record<string, unknown> | undefined
+      if (decl.kind !== undefined && !this.adapterRegistry.has(decl.kind, type) && !factories?.[decl.kind]) continue
+      return name
+    }
+    return undefined
+  }
+
+  private async readCredential(name: string): Promise<{ type: string; data: RawCredentialData }> {
+    if (!this.credentialStore) {
+      throw new Error(`CredentialStore not configured — cannot materialize credential "${name}"`)
+    }
+    return this.credentialStore.getByName(name)
+  }
+
+  /** Get or create the session for credential × kind; tracked per instance for lifecycle. */
+  private async ensureSession(
+    instanceId: string,
+    name: string,
+    type: string,
+    kind: NamespacedKind,
+    data: RawCredentialData,
+  ): Promise<unknown> {
+    const key = sessionKey(name, kind)
+    let entry = this.sessions.get(key)
+    if (!entry) {
+      // Adapter cell first (the type × kind matrix), legacy per-credential-type
+      // factories as fallback until every venue plugin migrates to `adapters`.
+      const legacyFactories = this.credentialTypes.get(type)?.factories as
+        Record<string, (data: RawCredentialData) => unknown> | undefined
+      const factory = this.adapterRegistry.factoryFor(kind, type) ?? legacyFactories?.[kind]
+      if (!factory) {
+        const available = [
+          ...this.adapterRegistry.kindsForType(type),
+          ...Object.keys(legacyFactories ?? {}),
+        ]
+        throw new Error(
+          `Credential type "${type}" has no adapter for kind "${kind}" ` +
+          `(credential: "${name}") — available kinds: ${available.join(', ') || 'none'}`,
+        )
+      }
+      entry = { session: factory(data), instances: new Set() }
+      this.sessions.set(key, entry)
+    }
+    entry.instances.add(instanceId)
+    return entry.session
+  }
+
+  /** Credential names bound to any of the instance's strategy slots. */
+  private instanceSessionsByName(instance: StrategyInstance): string[] {
+    const fromMap = Object.values(instance.credentials ?? {})
+    const fromArray = instance.accounts ?? []
+    return Array.from(new Set([...fromMap, ...fromArray]))
   }
 }

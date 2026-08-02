@@ -1,41 +1,50 @@
 import fs from 'fs'
 import path from 'path'
-import type { EmitHandler, MonitorDataReader, MonitorOptions } from '../types/monitor.js'
+import type { EmitHandler, MonitorDataReader, MonitorOptions, MonitorPlotDef } from '../types/monitor.js'
+import type { ZodObject, ZodRawShape } from 'zod'
 import { getDataDir, getMonitorPath } from '../utils/paths.js'
 import { MonitorDataReaderImpl } from './MonitorDataReader.js'
 import { createLogger } from '../utils/logger.js'
 
 /**
- * Standalone — 只能独立运行，不支持 subscribe 驱动
- * Subscribe  — 只能被 subscribe 驱动，不支持独立运行
- * Any        — 两种方式均支持
+ * Standalone — can only run independently; does not support subscribe-driven mode
+ * Subscribe  — can only be driven by subscribe; does not support standalone mode
+ * Any        — supports both modes
+ *
+ * SEALED (2026-07 ruling): Standalone/Any are deprecated and will be removed
+ * with the legacy registration path. Scan-the-whole-venue monitors are
+ * Subscribe with key = venue — content inside a key is self-discovering, which
+ * covers Standalone's real use. Casualties recorded for the removal sweep:
+ * `key: '*'` trigger sources and subscribeAll() (only legal on Standalone/Any).
  */
 export enum MonitorMode {
+  /** @deprecated Sealed — migrate to Subscribe with key = venue. */
   Standalone = 'standalone',
   Subscribe = 'subscribe',
+  /** @deprecated Sealed — migrate to Subscribe. */
   Any = 'any',
 }
 
 /**
- * @ai-guide 如何编写一个 Monitor
+ * @ai-guide How to write a Monitor
  *
- * 1. 确定运行模式（mode）：
- *    - MonitorMode.Subscribe：数据由外部 key 驱动（如 REST 轮询），覆盖 startSubscribe/stopSubscribe
- *    - MonitorMode.Standalone：Monitor 自行管理连接（如 WebSocket），覆盖 startStandalone/stopStandalone
- *    - MonitorMode.Any：同时支持两种模式，覆盖全部四个方法
+ * 1. Choose a run mode:
+ *    - MonitorMode.Subscribe: data is driven by external keys (e.g. REST polling); override startSubscribe/stopSubscribe
+ *    - MonitorMode.Standalone: monitor manages its own connection (e.g. WebSocket); override startStandalone/stopStandalone
+ *    - MonitorMode.Any: supports both modes; override all four methods
  *
- * 2. 定义泛型参数：
- *    - TKey：监控的 key 类型，通常是交易对、地址等字符串标识
- *    - TData：每次采集到的数据结构，不需要包含时间戳（基类自动注入 ts 字段）
+ * 2. Define generic parameters:
+ *    - TKey: the key type being monitored, typically a trading pair, address, or string identifier
+ *    - TData: the data structure collected each time; no need to include a timestamp (base class injects ts automatically)
  *
- * 3. 实现 monitorName：返回唯一的字符串名称，用于确定 JSONL 文件存储路径
+ * 3. Implement monitorName: return a unique string name used to determine the JSONL file storage path
  *
- * 4. 在 startSubscribe(key) / startStandalone() 中启动采集，
- *    每次获取到数据后调用 this.push(key, data) 提交给基类
+ * 4. In startSubscribe(key) / startStandalone(), start collection.
+ *    Call this.push(key, data) each time new data is available to submit to the base class.
  *
- * 5. 在 stopSubscribe(key) / stopStandalone() 中清理资源（clearInterval、关闭连接等）
+ * 5. In stopSubscribe(key) / stopStandalone(), clean up resources (clearInterval, close connections, etc.)
  *
- * Subscribe 模式示例（REST 轮询）：
+ * Subscribe mode example (REST polling):
  * ```typescript
  * class PriceMonitor extends BaseMonitor<string, { price: number }> {
  *   readonly mode = MonitorMode.Subscribe
@@ -56,7 +65,7 @@ export enum MonitorMode {
  * }
  * ```
  *
- * Subscribe 模式示例（单一 WebSocket 连接，按 key 订阅/退订）：
+ * Subscribe mode example (single WebSocket connection, subscribe/unsubscribe per key):
  * ```typescript
  * class TradeMonitor extends BaseMonitor<string, TradeData> {
  *   readonly mode = MonitorMode.Subscribe
@@ -64,7 +73,7 @@ export enum MonitorMode {
  *   private ws?: WebSocket
  *   private subscribedKeys = new Set<string>()
  *
- *   // 确保 WS 连接存在，首次调用时建立
+ *   // Ensure WS connection exists; establish on first call
  *   private ensureConnected() {
  *     if (this.ws) return
  *     this.ws = new WebSocket('wss://exchange/stream')
@@ -73,7 +82,7 @@ export enum MonitorMode {
  *       if (this.subscribedKeys.has(key)) void this.push(key, data)
  *     })
  *     this.ws.on('open', () => {
- *       // 重连后重新订阅所有 key
+ *       // Re-subscribe all keys after reconnect
  *       for (const key of this.subscribedKeys) this.sendSubscribe(key)
  *     })
  *   }
@@ -95,7 +104,7 @@ export enum MonitorMode {
  *   protected stopSubscribe(key: string) {
  *     this.subscribedKeys.delete(key)
  *     this.sendUnsubscribe(key)
- *     // 所有 key 都退订后关闭连接
+ *     // Close connection when all keys are unsubscribed
  *     if (this.subscribedKeys.size === 0) {
  *       this.ws?.close()
  *       this.ws = undefined
@@ -104,7 +113,7 @@ export enum MonitorMode {
  * }
  * ```
  *
- * Standalone 模式示例（WebSocket）：
+ * Standalone mode example (WebSocket):
  * ```typescript
  * class OrderbookMonitor extends BaseMonitor<string, OrderbookData> {
  *   readonly mode = MonitorMode.Standalone
@@ -128,11 +137,12 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   private readonly refCounts = new Map<string, number>()
   private wildcardRefCount = 0
   private readonly emitHandlers: EmitHandler<TData>[] = []
+  private readonly backfills = new Map<string, AbortController>()
   protected readonly dataDir: string
   private get log() { return createLogger(this.monitorName) }
 
   /**
-   * 声明当前 Monitor 支持的运行模式，子类覆盖此属性。
+   * Declares the run mode supported by this monitor. Override in subclass.
    */
   readonly mode: MonitorMode = MonitorMode.Any
 
@@ -143,41 +153,106 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   abstract get monitorName(): string
 
   /**
-   * 独立运行模式的启动，子类按需覆盖。
-   * mode 为 Subscribe 的子类无需实现此方法。
+   * Machine-readable shape of the data this monitor emits — the monitor's
+   * self-description. Consumers: the AI compiler's prompt (what getData()
+   * returns), its dry-run mock-data synthesis, and dashboard display.
+   * Metadata only; emit() does not validate against it.
+   */
+  get emitSchema(): ZodObject<ZodRawShape> | undefined {
+    return undefined
+  }
+
+  /**
+   * Machine-readable structure of this monitor's KEYS — what each ':'-joined
+   * segment means. Drives the dashboard watch form, lets strategy triggers
+   * pass structured keyParams instead of hand-formatted strings, and gives
+   * the AI compiler a validated key contract.
+   */
+  get keySchema(): ZodObject<ZodRawShape> | undefined {
+    return undefined
+  }
+
+  /**
+   * Dashboard panels curating this monitor's data — the plotter convention.
+   * Override to declare them; each definition's extract() runs server-side
+   * over a window of persisted records and returns finished series for the
+   * dashboard's generic chart. One definition = one panel = one unit/axis.
+   */
+  plots(): MonitorPlotDef<TData>[] {
+    return []
+  }
+
+  /**
+   * OPTIONAL historical backfill — override when this monitor's data can be
+   * reconstructed from an archival source (klines, funding-rate history)
+   * rather than only observed live.
+   *
+   * Called on the FIRST subscribe of a key, BEFORE live collection starts,
+   * so consumers see a warm history instead of an empty file. `since` is the
+   * ts of the newest already-persisted record for this key (undefined when
+   * none) — the data file itself is the incremental watermark, so a restart
+   * or re-subscribe fetches only the gap. Return records ASCENDING by ts
+   * with each ts strictly greater than `since`; the base persists them
+   * WITHOUT dispatching triggers (historical data must never fire a
+   * strategy on stale signals). Throwing is non-fatal: the failure is
+   * logged and live collection starts anyway.
+   */
+  protected backfill?(key: TKey, since: number | undefined, signal: AbortSignal): Promise<Array<{ ts: number; data: TData }>>
+
+  /** True when this monitor (or class) implements the backfill hook. */
+  get supportsBackfill(): boolean {
+    return typeof this.backfill === 'function'
+  }
+
+  /**
+   * Compose a key from structured params. Default: validate against
+   * keySchema and join the field values with ':' in declaration order —
+   * matching the 'venue:symbol[:timeframe]' convention. Override for
+   * monitors with a different key format.
+   */
+  keyFor(params: Record<string, unknown>): TKey {
+    const schema = this.keySchema
+    if (!schema) throw new Error(`Monitor "${this.monitorName}" declares no keySchema — pass a raw key instead`)
+    const parsed = schema.parse(params)
+    return Object.keys(schema.shape).map(f => String(parsed[f])).join(':') as TKey
+  }
+
+  /**
+   * Start in standalone mode. Override in subclass as needed.
+   * Subclasses with mode=Subscribe do not need to implement this.
    */
   protected startStandalone(): void {
     throw new Error(`Monitor "${this.monitorName}" does not support standalone mode`)
   }
 
   /**
-   * 独立运行模式的停止，子类按需覆盖。
-   * mode 为 Subscribe 的子类无需实现此方法。
+   * Stop standalone mode. Override in subclass as needed.
+   * Subclasses with mode=Subscribe do not need to implement this.
    */
   protected stopStandalone(): void {
     throw new Error(`Monitor "${this.monitorName}" does not support standalone mode`)
   }
 
   /**
-   * subscribe 驱动模式的启动，针对指定 key 启动采集，子类按需覆盖。
-   * mode 为 Standalone 的子类无需实现此方法。
+   * Start subscribe-driven mode for the given key. Override in subclass as needed.
+   * Subclasses with mode=Standalone do not need to implement this.
    */
   protected startSubscribe(_key: TKey): void {
     throw new Error(`Monitor "${this.monitorName}" does not support subscribe mode`)
   }
 
   /**
-   * subscribe 驱动模式的停止，针对指定 key 停止采集，子类按需覆盖。
-   * mode 为 Standalone 的子类无需实现此方法。
+   * Stop subscribe-driven mode for the given key. Override in subclass as needed.
+   * Subclasses with mode=Standalone do not need to implement this.
    */
   protected stopSubscribe(_key: TKey): void {
     throw new Error(`Monitor "${this.monitorName}" does not support subscribe mode`)
   }
 
   /**
-   * 启动 Monitor。
-   * - 无参数：独立运行模式，mode 为 Subscribe 时抛出错误
-   * - 有参数：subscribe 驱动模式，mode 为 Standalone 时抛出错误
+   * Start the monitor.
+   * - No argument: standalone mode; throws if mode is Subscribe
+   * - With argument: subscribe-driven mode; throws if mode is Standalone
    */
   start(key?: TKey): void {
     if (key === undefined) {
@@ -194,9 +269,9 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   }
 
   /**
-   * 停止 Monitor。
-   * - 无参数：停止独立运行
-   * - 有参数：停止指定 key 的采集
+   * Stop the monitor.
+   * - No argument: stop standalone mode
+   * - With argument: stop collection for the given key
    */
   stop(key?: TKey): void {
     if (key === undefined) {
@@ -228,6 +303,7 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
     const count = this.refCounts.get(key) ?? 0
     if (count <= 1) {
       this.refCounts.delete(key)
+      this.backfills.get(key)?.abort()
       this.onUnsubscribe(key)
       this.onLastUnsubscribe(key)
     } else {
@@ -238,6 +314,16 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
 
   hasSubscribers(key: string): boolean {
     return (this.refCounts.get(key) ?? 0) > 0
+  }
+
+  /** Read-only runtime status — which keys are live and how referenced (dashboard introspection). */
+  status(): { mode: MonitorMode; activeKeys: Array<{ key: string; refCount: number }>; wildcardSubscribers: number; backfillingKeys?: string[] } {
+    return {
+      mode: this.mode,
+      activeKeys: Array.from(this.refCounts, ([key, refCount]) => ({ key, refCount })),
+      wildcardSubscribers: this.wildcardRefCount,
+      ...(this.backfills.size > 0 ? { backfillingKeys: [...this.backfills.keys()] } : {}),
+    }
   }
 
   /** Subscribe to all keys emitted by this monitor. Only valid for Standalone/Any mode monitors. */
@@ -258,7 +344,41 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   }
 
   protected onFirstSubscribe(key: TKey): void {
-    this.start(key)
+    if (this.backfill) void this.backfillThenStart(key)
+    else this.start(key)
+  }
+
+  /**
+   * Backfill orchestration: history lands before live collection starts, so
+   * records stay time-ordered in the file and consumers never interleave a
+   * fresh tick between two historical bars.
+   */
+  private async backfillThenStart(key: TKey): Promise<void> {
+    if (this.backfills.has(key)) return
+    const controller = new AbortController()
+    this.backfills.set(key, controller)
+    try {
+      const since = (await this.getReader().readLatest(key))?.ts
+      const records = await this.backfill!(key, since, controller.signal)
+      const fresh = records
+        .filter(r => since === undefined || r.ts > since)
+        .sort((a, b) => a.ts - b.ts)
+      if (fresh.length > 0 && !controller.signal.aborted) await this.appendHistorical(key, fresh)
+      this.log.info({ key, since, appended: fresh.length }, 'Backfill complete')
+    } catch (err) {
+      this.log.warn({ key, err }, 'Backfill failed — starting live collection without history')
+    } finally {
+      this.backfills.delete(key)
+    }
+    if (this.hasSubscribers(key) && !controller.signal.aborted) this.start(key)
+  }
+
+  /** Persist records with THEIR OWN timestamps and no trigger dispatch — the backfill write path. */
+  protected async appendHistorical(key: TKey, records: Array<{ ts: number; data: TData }>): Promise<void> {
+    const filePath = getMonitorPath(this.dataDir, this.monitorName, key)
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+    const lines = records.map(r => JSON.stringify({ ts: r.ts, data: r.data })).join('\n') + '\n'
+    await fs.promises.appendFile(filePath, lines, 'utf8')
   }
 
   protected onLastUnsubscribe(key: TKey): void {
@@ -272,8 +392,8 @@ export abstract class BaseMonitor<TKey extends string = string, TData = Record<s
   protected onAfterEmit(_key: TKey, _data: TData): void {}
 
   /**
-   * 子类采集到数据后调用此方法提交，基类负责持久化和事件分发。
-   * append 或 emit 失败时记录错误日志，不中断采集循环。
+   * Called by subclasses when new data is collected. Base class handles persistence and event dispatch.
+   * Errors in append or emit are logged but do not interrupt the collection loop.
    */
   protected async push(key: TKey, data: TData): Promise<void> {
     try {

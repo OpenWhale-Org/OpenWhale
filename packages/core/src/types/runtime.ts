@@ -10,7 +10,7 @@ import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { IStrategy } from './strategy.js'
 import type { CredentialStore } from './credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
-import type { AccountFactory } from './account.js'
+import type { CredentialTypeDefinition } from './materialization.js'
 import type { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
 import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 
@@ -26,6 +26,19 @@ export interface RuntimeOptions {
   credentialStore?: CredentialStore
   /** SQL database adapter. When provided, instances and credentials are persisted to DB. */
   database?: DatabaseAdapter
+  /** Equity snapshotter tuning (Accounts page curves). Defaults: 5min interval, 30d retention. */
+  accountSnapshots?: { intervalMs?: number; retentionMs?: number }
+}
+
+/** Summary of a loaded plugin: its namespace and the registry ids it contributed. */
+export interface LoadedPluginInfo {
+  name: string
+  version: string
+  monitors: string[]
+  executors: string[]
+  strategies: string[]
+  kinds: string[]
+  credentialTypes: string[]
 }
 
 export interface IRuntime {
@@ -41,8 +54,12 @@ export interface IRuntime {
   registerMonitor(definition: MonitorDefinition, instance: BaseMonitor): void
   registerExecutor(definition: ExecutorDefinition, instance: BaseExecutor): void
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void
-  registerAccountFactory(accountType: string, factory: AccountFactory): void
-  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): void
+  registerCredentialType(definition: CredentialTypeDefinition): void
+  listCredentialTypes(): CredentialTypeDefinition[]
+  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): string
+  loadPluginFromPath(filePath: string, config: unknown): Promise<string>
+  unloadPlugin(name: string): void
+  listLoadedPlugins(): LoadedPluginInfo[]
   addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
   removeStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
   /** @deprecated Use addStrategyRunHandler instead */

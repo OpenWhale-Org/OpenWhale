@@ -1,0 +1,180 @@
+# Writing a Strategy
+
+A strategy declares its dependencies (monitors, executors, account slots), its params (two Zod
+schemas), its triggers, and one decision function `evaluate()`. The runtime handles subscription
+lifecycle, param validation, account materialization, and instruction routing.
+
+## Complete template
+
+```ts
+import { z } from 'zod'
+import { BaseStrategy, OwStrategy, createLogger } from '@openwhaleorg/core'
+import type {
+  ExecutionInstruction, StrategyContext, StrategyParams, Trigger, StrategyDeclarations,
+} from '@openwhaleorg/core'
+import { PerpAccount } from '@openwhaleorg/exchange'
+import type { FundingSnapshot } from '@openwhaleorg/exchange'
+
+const log = createLogger('MyStrategy')
+
+// Declarations: `as const satisfies StrategyDeclarations` gives typed labels everywhere.
+const decls = {
+  monitors: [
+    { name: 'exchange/funding-rates', label: 'rates' },   // another plugin's contract → qualified id
+  ],
+  executors: [
+    { name: 'exchange/perp-trading', label: 'trade' },    // the shared perp executor
+  ],
+  accounts: [
+    { account: PerpAccount, label: 'main' },              // class reference = the read-view type you get
+  ],
+} as const satisfies StrategyDeclarations
+
+@OwStrategy({ name: 'My Strategy', description: 'One-line description shown in the Dashboard' })
+export class MyStrategy extends BaseStrategy<typeof decls> {
+  readonly strategyId = 'my-strategy'
+
+  override readonly monitors = decls.monitors
+  override readonly executors = decls.executors
+  override readonly accounts = decls.accounts
+
+  // Required params, no defaults. NEVER include a venue field — it derives from the account slot.
+  readonly baseParamsSchema = z.object({
+    capitalUsd: z.number().positive()
+      .meta({ displayName: 'Capital (USD)', placeholder: '1000' }),
+    dryRun: z.boolean().default(true)
+      .meta({ displayName: 'Dry Run', description: 'Simulate instead of placing orders' }),
+  })
+
+  // Tunables: EVERY field needs .default(). These are what the user (or an optimizer) tweaks.
+  readonly tunableParamsSchema = z.object({
+    minAbsRate: z.number().min(0).default(0.001)
+      .meta({ displayName: 'Min |Funding Rate|' }),
+    maxPositions: z.number().int().positive().default(3)
+      .meta({ displayName: 'Max Positions' }),
+  })
+
+  triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
+    // Injected BEFORE triggers(): the venue of the bound account.
+    const venue = this.accountVenue('main')
+    return [
+      {
+        enabled: true,
+        conditions: [{
+          type: 'monitor',
+          sources: [{ monitorName: this.monitor('rates'), key: venue }],
+        }],
+      },
+    ]
+  }
+
+  async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
+    const venue = this.accountVenue('main')
+    const snapshot = context.getData('rates', venue) as FundingSnapshot | undefined
+    if (!snapshot) return []
+
+    const { capitalUsd, dryRun } = this.baseParamsSchema.parse(this.params.base)
+    const t = this.tunableParamsSchema.parse(this.params.tunable)
+
+    // Read view of the bound account — typed as PerpAccount, structurally read-only.
+    const account = this.account('main')
+    const balance = await account.balance()
+
+    // Idempotency via the per-instance KV store (persisted in SQLite).
+    const actedKey = `acted:${venue}:${snapshot.timestamp}`
+    if (await this.store.has(actedKey)) return []
+    await this.store.set(actedKey, Date.now())
+
+    void capitalUsd; void t; void balance
+    log.info({ venue }, 'Emitting instruction')
+
+    // instruction(executorLabel, action, params, accountLabels)
+    // accountLabels routes the executor's slots to THIS strategy's bound accounts.
+    return [this.instruction('trade', dryRun ? 'simulate' : 'placeOrder', {
+      symbol: 'BTC/USDT:USDT', side: 'buy', notionalUsd: 100,
+    }, ['main'])]
+  }
+}
+```
+
+## The API you have inside a strategy
+
+| Member | What it gives you |
+|---|---|
+| `this.params` | `{ base, tunable }` raw objects — parse with your schemas for typing + defaults |
+| `this.account('label')` | The account slot's read view, typed as the declared class |
+| `this.accountVenue('label')` / `this.accountMeta('label')` | Bound account's venue (= credential type) / full `{label, accountName, venue, kind}` |
+| `this.monitor('label')` / `this.executor('label')` | Validated label, for triggers / rarely needed directly |
+| `this.monitorData('label')` | A `MonitorDataReader` for historical data: `keys() / readLast(key,n) / readLatest(key) / readRange(key,from,to) / count(key) / readAllLatest() / readAllLast(n)` — records are `{ ts, data }` |
+| `this.instruction(execLabel, action, params, accountLabels?)` | Build a serializable `ExecutionInstruction` |
+| `this.store` | Per-instance async KV: `get/set/has/delete/keys/clear` — survives restarts |
+| `this.credential(name)` | Read a credential by name (needs explicit user binding — avoid unless necessary) |
+| `this.llm(...)` / `llms` declaration | LLM slots — declare `{ label, model: 'provider:model' }` in `decls.llms`, call via `this.llm()` |
+| `context.getData(label, key)` | The emitted record that fired this trigger (undefined for other labels/keys) |
+
+## Trigger shapes
+
+```ts
+// PREFERRED — structured keyParams, validated against the contract's keySchema and composed
+// into the key at activation. This is also what lets keySchema dispatch pick a specialized
+// implementation; a plain string key cannot be routed when several implementations coexist.
+{ enabled: true, conditions: [{ type: 'monitor', sources: [{
+    monitorName: this.monitor('rates'), key: '', keyParams: { venue },
+}]}]}
+
+// Plain string key (single-field keySchema or a key you built with the same ':' join)
+{ enabled: true, conditions: [{ type: 'monitor', sources: [{ monitorName: this.monitor('rates'), key: venue }] }] }
+
+// Filtered: only when a field of the emitted record passes
+{ enabled: true, conditions: [{ type: 'monitor', sources: [{
+    monitorName: this.monitor('rates'), key: venue,
+    filter: { field: 'msToSettlement', op: 'lt', value: 3_600_000 },
+}]}]}
+
+// Cron: time-based (no monitor involved)
+{ enabled: true, conditions: [{ type: 'cron', expression: '*/5 * * * *' }] }
+```
+
+A trigger with multiple monitor declarations fires on ANY of them; `evaluate()` distinguishes which
+via `context.getData(label, key)` returning non-undefined. When one strategy has several data
+sources (e.g. a decision feed + a stats feed), give each its own trigger and branch in `evaluate()`.
+
+## Multi-slot / multi-account strategies
+
+Declare more slots — the instance form binds each:
+
+```ts
+accounts: [
+  { account: PerpAccount, label: 'long' },
+  { account: PerpAccount, label: 'short' },
+],
+```
+
+`this.instruction('trade', 'x', p, ['long'])` routes to the account bound to `long`. Different
+slots may be bound to different venues; `this.accountVenue('long')` tells you which.
+
+## Symbol params get a picker
+
+Any param holding a venue symbol should carry a `catalogue` marker so the instance form renders a
+searchable market picker instead of a text box. Strategy params have **no venue field** (rule 5),
+so omit `venueField` — the form sources the venue from the bound account:
+
+```ts
+symbolA: z.string().meta({
+  displayName: 'Symbol A',
+  placeholder: 'BZ/USDT:USDT',
+  catalogue: { source: 'market', kind: 'exchange/perp', marketType: 'swap' },
+}),
+```
+
+Free text still submits, so an unlisted symbol never blocks the form. See `references/monitor.md`
+§Symbol fields for the full contract.
+
+## Don'ts
+
+- Don't ask for a venue/exchange param — derive from the account (rule 5).
+- Don't loop/sleep/schedule in `evaluate()` — it must return promptly; timing belongs to the
+  executor (which may sleep) or a cron trigger.
+- Don't hold state in class fields for correctness — instances restart; use `this.store`.
+- Don't call `evaluate` logic on data you didn't verify came from your trigger — always check
+  `context.getData(...)` for undefined.

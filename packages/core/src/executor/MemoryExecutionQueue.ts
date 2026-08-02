@@ -7,11 +7,20 @@ function nextMessageId(): string {
   return `mem-${Date.now()}-${++messageCounter}`
 }
 
+const STOP: ExecutionInstruction = { messageId: '__stop__', executorId: '__stop__', action: '__stop__', params: {} }
+
 export class MemoryExecutionQueue implements ExecutionQueue {
   /** Per-executorId queues */
   private readonly queues = new Map<string, ExecutionInstruction[]>()
   /** Per-executorId waiters (consumers blocked on empty queue) */
   private readonly waiters = new Map<string, Waiter[]>()
+  /**
+   * Per-executorId consumer generation. cancelConsumers bumps it; consume
+   * loops entered under an older generation exit at their next iteration —
+   * the hot-plugin-replace path, where the NEW executor object must take over
+   * the id and the old object's loop must stop claiming instructions.
+   */
+  private readonly generations = new Map<string, number>()
   private stopped = false
 
   async push(instruction: ExecutionInstruction): Promise<void> {
@@ -34,10 +43,23 @@ export class MemoryExecutionQueue implements ExecutionQueue {
   }
 
   async consume(executorId: string, handler: (instruction: ExecutionInstruction) => Promise<void>): Promise<void> {
-    while (!this.stopped) {
-      const instruction = await this.dequeue(executorId)
+    const generation = this.generations.get(executorId) ?? 0
+    while (!this.stopped && (this.generations.get(executorId) ?? 0) === generation) {
+      const instruction = await this.dequeue(executorId, generation)
       if (instruction === null) break
       await handler(instruction)
+    }
+  }
+
+  /**
+   * Detach every current consumer of an executorId (queued instructions stay
+   * put for the next consumer). In-flight handlers finish; the loops exit
+   * before claiming another instruction.
+   */
+  cancelConsumers(executorId: string): void {
+    this.generations.set(executorId, (this.generations.get(executorId) ?? 0) + 1)
+    for (const waiter of (this.waiters.get(executorId) ?? []).splice(0)) {
+      waiter(STOP)
     }
   }
 
@@ -46,12 +68,12 @@ export class MemoryExecutionQueue implements ExecutionQueue {
     // Wake up all blocked consumers so they can exit their loops
     for (const waiters of this.waiters.values()) {
       for (const waiter of waiters.splice(0)) {
-        waiter({ messageId: '__stop__', executorId: '__stop__', action: '__stop__', params: {} })
+        waiter(STOP)
       }
     }
   }
 
-  private dequeue(executorId: string): Promise<ExecutionInstruction | null> {
+  private dequeue(executorId: string, generation: number): Promise<ExecutionInstruction | null> {
     const queue = this.queues.get(executorId)
     if (queue && queue.length > 0) {
       return Promise.resolve(queue.shift() ?? null)
@@ -60,7 +82,8 @@ export class MemoryExecutionQueue implements ExecutionQueue {
     return new Promise((resolve) => {
       if (!this.waiters.has(executorId)) this.waiters.set(executorId, [])
       this.waiters.get(executorId)!.push((instruction) => {
-        if (this.stopped && instruction.action === '__stop__') {
+        const cancelled = (this.generations.get(executorId) ?? 0) !== generation
+        if ((this.stopped || cancelled) && instruction.action === '__stop__') {
           resolve(null)
         } else {
           resolve(instruction)

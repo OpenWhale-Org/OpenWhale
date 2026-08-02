@@ -1,20 +1,25 @@
-import type { MonitorDefinition } from '@openwhale/core'
 import { MonitorClient } from './MonitorClient'
+import { MonitorInstancesSection } from './MonitorInstancesSection'
+import { fetchMonitorDefinitions, fetchMonitorInstancesData, fetchCredentials } from '@/lib/data'
 
-async function getMonitors(): Promise<{ monitors: MonitorDefinition[] }> {
-  const res = await fetch('http://localhost:3000/api/monitor', { cache: 'no-store' })
-  if (!res.ok) return { monitors: [] }
-  return res.json() as Promise<{ monitors: MonitorDefinition[] }>
-}
+export const dynamic = 'force-dynamic'
 
 export default async function MonitorPage() {
-  const { monitors } = await getMonitors()
+  const [monitors, { instances, implementations, pendingKeys }, credentials] = await Promise.all([
+    fetchMonitorDefinitions(), fetchMonitorInstancesData(), fetchCredentials(),
+  ])
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Monitor</h1>
       </div>
       <MonitorClient monitors={monitors} />
+      <MonitorInstancesSection
+        initialInstances={instances}
+        implementations={implementations}
+        pendingKeys={pendingKeys}
+        credentials={credentials}
+      />
     </div>
   )
 }

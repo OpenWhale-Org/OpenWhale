@@ -1,12 +1,12 @@
 import type { ExecutionInstruction, ExecutionQueue } from '../../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, AccountTypeDeclaration, MonitorDeclaration, ExecutorDeclaration } from '../../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding } from '../../types/strategy.js'
 import type { MonitorDataReader } from '../../types/monitor.js'
 import type { CredentialStore } from '../../types/credential.js'
 import type { IStrategyStore } from '../../strategy/StrategyStore.js'
 import type { HttpClient } from '../../strategy/HttpClient.js'
-import type { Trigger } from '../../types/trigger.js'
+import type { Trigger, MonitorSource } from '../../types/trigger.js'
 import type { StrategyParams } from '../../types/instance.js'
-import type { IAccount } from '../../types/account.js'
+import type { AccountSlot } from '../../types/materialization.js'
 import { z } from 'zod'
 import { BaseMonitor, MonitorMode } from '../../monitor/BaseMonitor.js'
 
@@ -34,32 +34,27 @@ export class MockStrategy implements IStrategy {
   readonly strategyId: string
   readonly monitors: readonly MonitorDeclaration[]
   readonly executors: readonly ExecutorDeclaration[] = []
-  readonly accountTypes: readonly AccountTypeDeclaration[] = []
+  readonly accounts: readonly AccountSlot[] = []
+  readonly llms: readonly LlmDeclaration[] = []
   readonly baseParamsSchema = z.object({})
   readonly tunableParamsSchema = z.object({})
   readonly contexts: StrategyContext[] = []
   private instructions: ExecutionInstruction[]
   private mockTriggers: Omit<Trigger, 'id' | 'strategyInstanceId'>[]
-  private namespace?: string
+  private mockSubscriptions: MonitorSource[]
 
   constructor(options: {
     id?: string
     monitors?: string[]
     instructions?: ExecutionInstruction[]
     triggers?: Omit<Trigger, 'id' | 'strategyInstanceId'>[]
+    subscriptions?: MonitorSource[]
   } = {}) {
     this.strategyId = options.id ?? 'mock-strategy'
     this.monitors = options.monitors ?? []
     this.instructions = options.instructions ?? []
     this.mockTriggers = options.triggers ?? []
-  }
-
-  get resolvedMonitors(): readonly string[] {
-    return this.monitors.map(m => {
-      const name = typeof m === 'string' ? m : m.name
-      if (name.includes('/')) return name
-      return this.namespace ? `${this.namespace}/${name}` : name
-    })
+    this.mockSubscriptions = options.subscriptions ?? []
   }
 
   monitor(labelOrIndex: string | number): string {
@@ -67,9 +62,7 @@ export class MockStrategy implements IStrategy {
       ? this.monitors[labelOrIndex]
       : this.monitors.find(m => (typeof m === 'string' ? m : m.label) === labelOrIndex)
     if (!decl) throw new Error(`monitor '${labelOrIndex}' not declared`)
-    const name = typeof decl === 'string' ? decl : decl.name
-    if (name.includes('/')) return name
-    return this.namespace ? `${this.namespace}/${name}` : name
+    return typeof decl === 'string' ? decl : decl.label
   }
 
   executor(labelOrIndex: string | number): string {
@@ -77,13 +70,15 @@ export class MockStrategy implements IStrategy {
       ? this.executors[labelOrIndex]
       : this.executors.find(e => (typeof e === 'string' ? e : e.label) === labelOrIndex)
     if (!decl) throw new Error(`executor '${labelOrIndex}' not declared`)
-    const name = typeof decl === 'string' ? decl : decl.name
-    if (name.includes('/')) return name
-    return this.namespace ? `${this.namespace}/${name}` : name
+    return typeof decl === 'string' ? decl : decl.label
   }
 
   triggers(_params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
     return this.mockTriggers
+  }
+
+  subscriptions(_params: StrategyParams): MonitorSource[] {
+    return this.mockSubscriptions
   }
 
   async run(context: StrategyContext): Promise<ExecutionInstruction[]> {
@@ -95,14 +90,15 @@ export class MockStrategy implements IStrategy {
     return { runsTotal: this.contexts.length, instructionsEmitted: 0, errors: 0 }
   }
 
-  setMonitorReader(_key: string, _reader: MonitorDataReader): void {}
+  setMonitorReader(_label: string, _reader: MonitorDataReader): void {}
   setCredentialStore(_store: CredentialStore): void {}
   setStore(_store: IStrategyStore): void {}
   setHttpClient(_client: HttpClient): void {}
   setParams(_params: StrategyParams): void {}
-  setAccounts(_accounts: IAccount[]): void {}
+  setReaders(_readers: unknown[], _credentialNames: string[]): void {}
+  setAccountMeta(_metas: import('../../types/strategy.js').AccountSlotMeta[]): void {}
+  setLlmBindings(_bindings: Record<string, LlmSlotBinding>): void {}
   setInstanceId(_instanceId: string): void {}
-  setPrefixedNames(namespace: string): void { this.namespace = namespace }
 }
 
 // ── MockMonitor ───────────────────────────────────────────────────────────────

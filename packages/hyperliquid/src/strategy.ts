@@ -1,5 +1,6 @@
-import { BaseStrategy, createLogger } from '@openwhale/core'
-import type { StrategyContext, StrategyParams, Trigger } from '@openwhale/core'
+import { BaseStrategy, OwStrategy, createLogger } from '@openwhaleorg/core'
+import { PerpAccount } from '@openwhaleorg/exchange'
+import type { StrategyContext, StrategyParams, Trigger, StrategyDeclarations } from '@openwhaleorg/core'
 import { z } from 'zod'
 
 const log = createLogger('CopyTradingStrategy')
@@ -17,17 +18,27 @@ const log = createLogger('CopyTradingStrategy')
  *
  * Requires:
  *   - monitor: 'user-trades' (UserTradesMonitor)
- *   - account: hyperliquid (HyperliquidAccount)
+ *   - account: hyperliquid
  *   - executor: 'perp-trading' (PerpTradingExecutor)
  */
-export class CopyTradingStrategy extends BaseStrategy {
+// Declared once, typed everywhere: labels in monitor()/executor()/account()/
+// instruction() autocomplete and reject typos at compile time.
+const decls = {
+  monitors: [{ name: 'user-trades', label: 'trades' }],
+  executors: [{ name: 'exchange/perp-trading', label: 'perp' }],   // shared executor from @openwhaleorg/exchange
+  accounts: [{ account: PerpAccount, label: 'main' }],             // any perp venue's Reader
+} as const satisfies StrategyDeclarations
+
+@OwStrategy({
+  name: 'Hyperliquid Copy Trading',
+  description: "Mirrors another trader's perpetual fills at a configurable ratio — executes on any bound perp venue",
+})
+export class CopyTradingStrategy extends BaseStrategy<typeof decls> {
   readonly strategyId = 'copy-trading'
 
-  readonly monitors = [{ name: 'user-trades', label: 'trades' }] as const
-
-  readonly executors = [{ name: 'perp-trading', label: 'perp' }] as const
-
-  readonly accountTypes = [{ type: 'hyperliquid', label: 'main' }] as const
+  override readonly monitors = decls.monitors
+  override readonly executors = decls.executors
+  override readonly accounts = decls.accounts
 
   readonly baseParamsSchema = z.object({
     targetAddress: z.string()
@@ -98,35 +109,58 @@ export class CopyTradingStrategy extends BaseStrategy {
       return []
     }
 
-    const cappedNotional = Math.min(copyNotional, maxPositionUsd)
-    const copyAmount = cappedNotional / trade.price
-
-    if (cappedNotional < copyNotional)
-      log.info({ copyNotional, cappedNotional, maxPositionUsd }, 'Notional capped by maxPositionUsd')
-
-    // Check existing position to avoid over-sizing
+    // Signed exposure: long positive, short negative. The cap applies to both directions.
+    // Note: REST position data lags recent fills slightly; maxPositionUsd is a soft
+    // cap under a rapid burst of trades from the target.
     const account = this.account('main')
     const positions = await account.positions()
     const existing = positions.find(p => p.id === trade.symbol)
-    const existingValue = existing?.value ?? 0
+    const signedExposure = existing ? (existing.side === 'short' ? -existing.value : existing.value) : 0
+    const tradeDelta = (trade.side === 'buy' ? 1 : -1) * copyNotional
+    const isReducing = signedExposure !== 0 && Math.sign(tradeDelta) !== Math.sign(signedExposure)
 
-    log.debug({ symbol: trade.symbol, existingValue, maxPositionUsd }, 'Current position check')
+    log.debug({ symbol: trade.symbol, signedExposure, tradeDelta, isReducing, maxPositionUsd }, 'Current position check')
 
-    if (trade.side === 'buy' && existingValue >= maxPositionUsd) {
-      log.info({ symbol: trade.symbol, existingValue, maxPositionUsd }, 'Position at cap — skipping buy')
+    let allowedNotional: number
+    let reduceOnly = false
+    if (isReducing) {
+      // Mirroring a close: never flip through zero into an opposite position.
+      allowedNotional = Math.min(copyNotional, Math.abs(signedExposure))
+      reduceOnly = true
+    } else {
+      // Increasing exposure (same direction or from flat): only the remaining headroom.
+      const headroom = maxPositionUsd - Math.abs(signedExposure)
+      allowedNotional = Math.min(copyNotional, Math.max(0, headroom))
+    }
+
+    if (allowedNotional < copyNotional)
+      log.info({ copyNotional, allowedNotional, maxPositionUsd, reduceOnly }, 'Notional capped')
+
+    // minTradeUsd filters noise on new exposure only. Reducing orders are capped
+    // at |signedExposure|, so applying the floor to them would make a residual
+    // position below minTradeUsd permanently unclosable.
+    if (!reduceOnly && allowedNotional < minTradeUsd) {
+      log.info({ symbol: trade.symbol, allowedNotional, minTradeUsd }, 'Allowed notional below minTradeUsd — skipping')
       return []
     }
+    if (allowedNotional <= 0) {
+      log.info({ symbol: trade.symbol }, 'No allowed notional — skipping')
+      return []
+    }
+
+    const copyAmount = allowedNotional / trade.price
 
     const instruction = this.instruction('perp', 'placeOrder', {
       symbol: trade.symbol,
       side: trade.side,
       type: 'market',
-      amount: parseFloat(copyAmount.toFixed(6)),
+      amount: copyAmount,
+      reduceOnly,
       slippage: slippageTolerance,
-    })
+    }, ['main'])
 
     log.info(
-      { symbol: trade.symbol, side: trade.side, amount: instruction.params.amount, cappedNotional, slippageTolerance },
+      { symbol: trade.symbol, side: trade.side, amount: copyAmount, allowedNotional, reduceOnly, slippageTolerance },
       'Emitting placeOrder instruction',
     )
 

@@ -1,13 +1,13 @@
 /**
- * Runnable example — MomentumStrategy 始终运行；
- * 若环境变量中存在 LLM API Key，则同时激活 AiTradingStrategy。
+ * Runnable example — MomentumStrategy always runs;
+ * if an LLM API key is present in the environment, AiTradingStrategy is also activated.
  *
- * 支持的环境变量（自动扫描，取第一个匹配的 provider）：
+ * Supported environment variables (scanned in order; first match wins):
  *   OPENAI_API_KEY      → openai:gpt-4o-mini
  *   ANTHROPIC_API_KEY   → anthropic:claude-haiku-4-5-20251001
  *   GOOGLE_API_KEY      → google:gemini-1.5-flash
  *
- * 运行方式：
+ * How to run:
  *   pnpm example
  *   OPENAI_API_KEY=sk-... pnpm example
  */
@@ -25,7 +25,7 @@ import { MomentumStrategy } from './MomentumStrategy.js'
 import { AiTradingStrategy } from './AiTradingStrategy.js'
 import type { BuiltinProviderId } from '../src/types/strategy.js'
 
-// 每个 provider 对应的默认 model
+// default model per provider
 const DEFAULT_MODELS: Partial<Record<BuiltinProviderId, string>> = {
   openai:    'openai:gpt-4o-mini',
   anthropic: 'anthropic:claude-haiku-4-5-20251001',
@@ -33,14 +33,14 @@ const DEFAULT_MODELS: Partial<Record<BuiltinProviderId, string>> = {
 }
 
 async function main() {
-  // ── 临时数据库（退出时自动清理）────────────────────────────────────────────
+  // ── Temporary database (auto-cleaned on exit) ─────────────────────────────
   const dbPath = path.join(os.tmpdir(), `openwhale-example-${Date.now()}.db`)
   const database = new SQLiteAdapter({ filePath: dbPath })
   await database.initialize()
 
   const credentials = new DBCredentialStore('example-key', database)
 
-  // ── 扫描环境变量，将 LLM API Key 导入 CredentialStore ─────────────────────
+  // ── Scan env vars and import LLM API keys into CredentialStore ───────────
   const importedProviders = await importLlmKeysFromEnv(credentials)
   const activeProvider = importedProviders[0]
   const defaultModel = activeProvider ? DEFAULT_MODELS[activeProvider] : undefined
@@ -49,13 +49,13 @@ async function main() {
   const runtime = new OpenWhaleRuntime({ database, credentialStore: credentials })
   const now = new Date().toISOString()
 
-  // ── 注册 Monitor ──────────────────────────────────────────────────────────
+  // ── Register Monitor ──────────────────────────────────────────────────────
   runtime.registerMonitor(
     { id: 'price', name: 'Price Monitor', source: 'builtin', createdAt: now, updatedAt: now },
     new PriceMonitor(2000),
   )
 
-  // ── 注册 Executor ─────────────────────────────────────────────────────────
+  // ── Register Executor ─────────────────────────────────────────────────────
   runtime.registerExecutor(
     {
       id: 'trade',
@@ -68,7 +68,7 @@ async function main() {
     new TradeExecutor(),
   )
 
-  // ── 注册 Strategy ─────────────────────────────────────────────────────────
+  // ── Register Strategy ─────────────────────────────────────────────────────
   runtime.registerStrategy(
     {
       id: 'momentum',
@@ -97,7 +97,7 @@ async function main() {
     )
   }
 
-  // ── 激活实例 ──────────────────────────────────────────────────────────────
+  // ── Activate instances ────────────────────────────────────────────────────
   await runtime.activate({
     id: 'instance-btc',
     name: 'BTC Momentum',
@@ -140,23 +140,23 @@ async function main() {
       createdAt: now,
       updatedAt: now,
     })
-    console.log(`LLM 已检测到 (${defaultModel}) — AiTradingStrategy 已激活。\n`)
+    console.log(`LLM detected (${defaultModel}) — AiTradingStrategy activated.\n`)
   } else {
-    console.log('未检测到 LLM API Key，仅运行 MomentumStrategy。')
-    console.log('设置 OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY 可同时激活 AiTradingStrategy。\n')
+    console.log('No LLM API key found; running MomentumStrategy only.')
+    console.log('Set OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY to also activate AiTradingStrategy.\n')
   }
 
-  // ── 启动 ──────────────────────────────────────────────────────────────────
+  // ── Start ─────────────────────────────────────────────────────────────────
   await runtime.start()
-  console.log('Runtime 已启动，运行 30 秒后自动退出...\n')
+  console.log('Runtime started; will auto-exit after 30 seconds...\n')
 
   await new Promise<void>(resolve => setTimeout(resolve, 30_000))
 
-  console.log('\n正在关闭...')
+  console.log('\nShutting down...')
   await runtime.stop()
   await database.close()
   fs.rmSync(dbPath, { force: true })
-  console.log('完成。')
+  console.log('Done.')
 }
 
 main().catch(err => {

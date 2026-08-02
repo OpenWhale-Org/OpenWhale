@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '@openwhale/core'
+import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '@openwhaleorg/core'
 
 type CompiledType = 'monitors' | 'executors' | 'strategies'
 
@@ -348,11 +348,11 @@ function StrategyRow({ def }: { def: StrategyDefinition }) {
   return (
     <DefinitionCard id={def.id} name={def.name} description={def.description} source={def.source}>
       <div className="flex flex-wrap gap-2 mt-1">
-        {def.monitorIds.length > 0 && (
-          <InlineTag label="monitors" values={def.monitorIds} color="var(--success)" />
+        {(def.monitorIds?.length ?? 0) > 0 && (
+          <InlineTag label="monitors" values={def.monitorIds ?? []} color="var(--success)" />
         )}
-        {def.executorIds.length > 0 && (
-          <InlineTag label="executors" values={def.executorIds} color="var(--warning)" />
+        {(def.executorIds?.length ?? 0) > 0 && (
+          <InlineTag label="executors" values={def.executorIds ?? []} color="var(--warning)" />
         )}
       </div>
     </DefinitionCard>

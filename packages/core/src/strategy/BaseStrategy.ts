@@ -1,30 +1,89 @@
 import type { ExecutionInstruction } from '../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, AccountTypeDeclaration, MonitorDeclaration, ExecutorDeclaration } from '../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
 import type { ZodType, ZodRawShape } from 'zod'
-import type { Trigger } from '../types/trigger.js'
+import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
-import type { IAccount } from '../types/account.js'
-import type { ParamFieldDef, ParamFieldMeta, ParamFieldType } from '../types/definition.js'
+import type { AccountSlot, ReaderClass } from '../types/materialization.js'
+import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType } from '../types/definition.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
 import { getDataDir } from '../utils/paths.js'
-import { createLogger } from '../utils/logger.js'
+import { createLogger , subscribeLogs } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
-import type { CoreMessage, LlmCallOptions } from './llm.js'
+import type { CoreMessage, LlmCallOptions, LlmCallSettings } from './llm.js'
+import type { LanguageModel } from 'ai'
 import { HttpClient } from './HttpClient.js'
+import { decoratedDeclarations } from './decorators.js'
 
 export type { CoreMessage }
 
 /**
- * @ai-guide 如何编写一个 Strategy
+ * A strategy's dependency declarations, grouped for typed label inference.
  *
- * Strategy 负责：接收触发上下文 → 决策 → 返回一批 ExecutionInstruction。
- * 子类只需实现 `evaluate(context)`，基类提供决策辅助、数据访问和 LLM 推理能力。
+ * Declare once `as const satisfies StrategyDeclarations`, pass its typeof as
+ * BaseStrategy's type argument, and monitor()/executor()/account()/instruction()
+ * autocomplete their labels and reject typos at compile time:
  *
- * 基本示例：
+ *   const decls = {
+ *     monitors: [{ name: 'user-trades', label: 'trades' }],
+ *     executors: [{ name: 'perp-trading', label: 'perp' }],
+ *     accounts: [{ account: PerpAccount, label: 'main' }],
+ *   } as const satisfies StrategyDeclarations
+ *
+ *   class MyStrategy extends BaseStrategy<typeof decls> {
+ *     override readonly monitors = decls.monitors
+ *     override readonly executors = decls.executors
+ *     override readonly accounts = decls.accounts
+ *     ...
+ *   }
+ *
+ * The type argument is optional — `extends BaseStrategy` alone keeps every
+ * label parameter as plain string.
+ *
+ * Alternatively, declare with the @monitor/@executor/@account class decorators
+ * (see decorators.ts) — same runtime behaviour, no label typing.
+ */
+export interface StrategyDeclarations {
+  monitors?: readonly MonitorDeclaration[]
+  executors?: readonly ExecutorDeclaration[]
+  accounts?: readonly AccountSlot[]
+  llms?: readonly LlmDeclaration[]
+}
+
+/** Union of the labels in a declarations tuple type; plain string for wide types. */
+export type DeclarationLabel<T> = [T] extends [readonly (infer D)[]]
+  ? D extends string ? D
+  : D extends { readonly label: infer L extends string } ? L
+  : never
+  : string
+
+type MonitorLabel<TDecl extends StrategyDeclarations> = DeclarationLabel<Exclude<TDecl['monitors'], undefined>>
+type ExecutorLabel<TDecl extends StrategyDeclarations> = DeclarationLabel<Exclude<TDecl['executors'], undefined>>
+type AccountLabel<TDecl extends StrategyDeclarations> = DeclarationLabel<Exclude<TDecl['accounts'], undefined>>
+type LlmLabel<TDecl extends StrategyDeclarations> = DeclarationLabel<Exclude<TDecl['llms'], undefined>>
+
+/**
+ * The Reader type of an account slot, looked up by its label — the
+ * InstanceType of the Reader class the declaration references. Declaring a
+ * venue subclass (e.g. HyperliquidAccount) surfaces its extra typed methods.
+ */
+type ReaderOfLabel<TDecl extends StrategyDeclarations, L> =
+  [Extract<NonNullable<TDecl['accounts']>[number], { readonly label: L }>] extends
+    [{ readonly account: infer C extends ReaderClass }]
+    ? C['prototype']
+    : unknown
+
+/**
+ * @ai-guide How to write a Strategy
+ *
+ * A Strategy receives a trigger context, makes decisions, and returns a batch of ExecutionInstructions.
+ * Subclasses only need to implement `evaluate(context)`; the base class provides decision helpers,
+ * data access, and LLM inference capabilities.
+ *
+ * Basic example:
  * ```typescript
  * class MyStrategy extends BaseStrategy {
  *   readonly strategyId = 'my-strategy'
@@ -38,14 +97,14 @@ export type { CoreMessage }
  * }
  * ```
  *
- * 使用 LLM 推理（结构化输出）：
+ * Using LLM inference (structured output):
  * ```typescript
  * class AiStrategy extends BaseStrategy {
  *   readonly strategyId = 'ai-strategy'
  *
  *   constructor() {
  *     super({ llm: { defaultModel: 'openai:gpt-4o' } })
- *     // 需要在 CredentialStore 中存储 'openai-api-key'
+ *     // requires 'openai-api-key' stored in CredentialStore
  *   }
  *
  *   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
@@ -53,7 +112,7 @@ export type { CoreMessage }
  *
  *     const decision = await this.llm({
  *       messages: [
- *         { role: 'system', content: '你是一个交易分析师，根据市场数据给出操作建议。' },
+ *         { role: 'system', content: 'You are a trading analyst. Recommend an action based on market data.' },
  *         { role: 'user', content: JSON.stringify(data) },
  *       ],
  *       schema: z.object({
@@ -70,7 +129,7 @@ export type { CoreMessage }
  * }
  * ```
  *
- * 使用自定义 Provider：
+ * Using a custom provider:
  * ```typescript
  * class CustomAiStrategy extends BaseStrategy {
  *   constructor() {
@@ -89,19 +148,33 @@ export type { CoreMessage }
  * }
  * ```
  */
-export abstract class BaseStrategy implements IStrategy {
-  abstract readonly strategyId: string
+export abstract class BaseStrategy<TDecl extends StrategyDeclarations = StrategyDeclarations> implements IStrategy {
+  /**
+   * Unique strategy id. Set via `readonly strategyId = '...'` or `@strategy('...')`.
+   * Not abstract so the decorator form can satisfy it — a strategy that sets
+   * it neither way is rejected at registration.
+   */
+  readonly strategyId: string = ''
   /** Declare monitor dependencies. Use `{ name, label }` for named access, or plain string for name=label. */
   readonly monitors: readonly MonitorDeclaration[] = []
   /** Declare executor dependencies. Use `{ name, label }` for named access, or plain string for name=label. */
   readonly executors: readonly ExecutorDeclaration[] = []
-  /** Declare account type requirements. Framework validates and injects accounts at activate() time. */
-  readonly accountTypes: readonly AccountTypeDeclaration[] = []
+  /** Account slots: Reader class references — the ONLY venue view a strategy can hold. */
+  readonly accounts: readonly AccountSlot[] = []
+  /** Named LLM slots: label + default model/credential/settings. Instances override per label. */
+  readonly llms: readonly LlmDeclaration[] = []
 
   /** Base params schema (required, no defaults). Override in subclass. */
   readonly baseParamsSchema: z.ZodObject<z.ZodRawShape> = z.object({})
   /** Tunable params schema (AI-optimizable, all fields must have .default()). Override in subclass. */
   readonly tunableParamsSchema: z.ZodObject<z.ZodRawShape> = z.object({})
+
+  /**
+   * Availability checkers for params whose `meta({ availability: { checker } })`
+   * names one. Pure functions over the venue's market list — the runtime
+   * fetches those and calls in.
+   */
+  readonly availabilityCheckers: Readonly<Record<string, AvailabilityChecker>> = {}
 
   /**
    * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.
@@ -126,36 +199,79 @@ export abstract class BaseStrategy implements IStrategy {
 
     const fields: ParamFieldDef[] = []
 
+    /** Peel .default()/.optional() wrappers: inner type + default + the first non-empty meta. */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function unwrap(rawField: unknown): { field: any; meta: ParamFieldMeta; defaultValue: unknown; wrapped: boolean } {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let field: any = rawField
+      let defaultValue: unknown = undefined
+      let wrapped = false
+
+      // Read meta from the outermost wrapper first (covers .default().meta() pattern)
+      let meta: ParamFieldMeta = field.meta?.() ?? {}
+
+      if (field.type === 'default') {
+        defaultValue = typeof field.def.defaultValue === 'function'
+          ? field.def.defaultValue()
+          : field.def.defaultValue
+        field = field.def.innerType
+        wrapped = true
+        // If meta was empty on the wrapper, try the inner type (.meta().default() pattern)
+        if (Object.keys(meta).length === 0) meta = field.meta?.() ?? {}
+      }
+
+      if (field.type === 'optional') {
+        field = field.def.innerType
+        wrapped = true
+        if (Object.keys(meta).length === 0) meta = field.meta?.() ?? {}
+      }
+
+      return { field, meta, defaultValue, wrapped }
+    }
+
+    /**
+     * An array-of-objects param renders as an editable row list: the element
+     * shape becomes the columns, each column's .meta() its display info.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function deriveListDef(arrayField: any, meta: ParamFieldMeta): ListParamDef | undefined {
+      const element = arrayField.def?.element
+      const shape: ZodRawShape | undefined = element?.type === 'object'
+        ? (element.def?.shape ?? element.shape)
+        : undefined
+      if (!shape) return undefined
+
+      const columns: ListColumnDef[] = Object.entries(shape).map(([name, raw]) => {
+        const col = unwrap(raw)
+        const zt: string = col.field.type ?? ''
+        const type = col.meta.options?.length ? 'options' as const
+          : zt === 'number' ? 'number' as const
+          : zt === 'boolean' ? 'boolean' as const
+          : 'string' as const
+        return {
+          name,
+          displayName: col.meta.displayName ?? name,
+          type,
+          ...(col.meta.options ? { options: col.meta.options } : {}),
+          ...(col.meta.slider ? { slider: col.meta.slider } : {}),
+          ...(col.meta.catalogue ? { catalogue: col.meta.catalogue } : {}),
+          ...(col.meta.unit ? { unit: col.meta.unit } : {}),
+          ...(col.meta.placeholder ? { placeholder: col.meta.placeholder } : {}),
+          ...(col.meta.description ? { description: col.meta.description } : {}),
+          ...(col.defaultValue !== undefined ? { default: col.defaultValue } : {}),
+        }
+      })
+      return { columns, ...(meta.list ?? {}) }
+    }
+
     function processShape(shape: ZodRawShape, group: 'base' | 'tunable') {
       for (const [name, rawField] of Object.entries(shape)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let field: any = rawField
-        let defaultValue: unknown = undefined
-        let required = group === 'base'
-
-        // Read meta from the outermost wrapper first (covers .default().meta() pattern)
-        let meta: ParamFieldMeta = field.meta?.() ?? {}
-
-        // Unwrap ZodDefault to get the inner type and default value
-        if (field.type === 'default') {
-          defaultValue = typeof field.def.defaultValue === 'function'
-            ? field.def.defaultValue()
-            : field.def.defaultValue
-          field = field.def.innerType
-          required = false
-          // If meta was empty on the wrapper, try the inner type (.meta().default() pattern)
-          if (Object.keys(meta).length === 0) meta = field.meta?.() ?? {}
-        }
-
-        // Unwrap ZodOptional
-        if (field.type === 'optional') {
-          field = field.def.innerType
-          required = false
-          if (Object.keys(meta).length === 0) meta = field.meta?.() ?? {}
-        }
+        const { field, meta, defaultValue, wrapped } = unwrap(rawField)
+        const required = group === 'base' && !wrapped
 
         const zodType: string = field.type ?? ''
         const fieldType = BaseStrategy.zodTypeToParamFieldType(zodType, meta)
+        const list = fieldType === 'list' ? deriveListDef(field, meta) : undefined
 
         fields.push({
           name,
@@ -166,9 +282,16 @@ export abstract class BaseStrategy implements IStrategy {
           ...(required ? { required: true } : {}),
           ...(meta.description ? { description: meta.description } : {}),
           ...(meta.hint ? { hint: meta.hint } : {}),
+          ...(meta.section ? { section: meta.section } : {}),
           ...(meta.placeholder ? { placeholder: meta.placeholder } : {}),
           ...(meta.options ? { options: meta.options } : {}),
           ...(meta.displayOptions ? { displayOptions: meta.displayOptions } : {}),
+          ...(meta.catalogue ? { catalogue: meta.catalogue } : {}),
+          ...(meta.availability ? { availability: meta.availability } : {}),
+          ...(meta.multiple ? { multiple: true } : {}),
+          ...(meta.slider ? { slider: meta.slider } : {}),
+          ...(meta.unit ? { unit: meta.unit } : {}),
+          ...(list ? { list } : {}),
         })
       }
     }
@@ -184,6 +307,7 @@ export abstract class BaseStrategy implements IStrategy {
     switch (zodType) {
       case 'number': return 'number'
       case 'boolean': return 'boolean'
+      case 'array': return 'list'
       default: return 'string'
     }
   }
@@ -200,61 +324,61 @@ export abstract class BaseStrategy implements IStrategy {
   private credentialStore?: CredentialStore
   private storeInstance?: IStrategyStore
   private httpClient?: HttpClient
-  private readonly llmClient?: LlmClient
+  private readonly llmClient: LlmClient
+  private llmBindings: Record<string, LlmSlotBinding> = {}
   private injectedParams?: StrategyParams
-  private injectedAccounts: IAccount[] = []
-  private namespace?: string
+  private injectedReaders: unknown[] = []
+  private injectedCredentialNames: string[] = []
   private instanceId?: string
-  private get log() { return createLogger(this.strategyId) }
+  private get log() {
+    return createLogger(this.strategyId, this.instanceId !== undefined ? { instanceId: this.instanceId } : undefined)
+  }
 
   constructor(options?: StrategyOptions) {
     this.dataDir = getDataDir(options?.dataDir)
-    if (options?.llm) {
-      this.llmClient = new LlmClient(options.llm)
+    // Always constructed: llm slots need no class-level opt-in. options.llm
+    // remains for code-registered custom providers and a legacy defaultModel.
+    this.llmClient = new LlmClient(options?.llm)
+    // Decorator-declared dependencies (@monitor/@executor/@account). Subclass
+    // field initializers run after this constructor, so explicit declarations
+    // override decorator metadata.
+    const decorated = decoratedDeclarations(new.target)
+    if (decorated) {
+      if (decorated.id !== undefined) this.strategyId = decorated.id
+      if (decorated.monitors.length > 0) this.monitors = decorated.monitors
+      if (decorated.executors.length > 0) this.executors = decorated.executors
+      if (decorated.accounts.length > 0) this.accounts = decorated.accounts
+      if (decorated.llms.length > 0) this.llms = decorated.llms
     }
   }
 
-  get resolvedMonitors(): readonly string[] {
-    return this.monitors.map(m => this._resolveDeclarationName(typeof m === 'string' ? m : m.name))
-  }
-
   /**
-   * Called by loadPlugin() to inject the plugin namespace (e.g. 'hyperliquid').
-   * After this, monitor/executor names without '/' are resolved as '{namespace}/{name}'.
-   */
-  setPrefixedNames(namespace: string): void {
-    this.namespace = namespace
-  }
-
-  /**
-   * Resolve a monitor declaration by label or index to its registry key.
-   * Use this in triggers() to reference monitors without hardcoding registry keys.
+   * Validate a monitor declaration by label or index and return its label.
+   * Strategies speak in labels only — the runtime maps labels to registry keys
+   * at activation, so no namespace knowledge is needed here.
+   * Labels autocomplete when the declarations are `as const`.
    *
    * @example
    * sources: [{ monitorName: this.monitor('trades'), key: targetAddress }]
    */
-  monitor(labelOrIndex: string | number): string {
-    return this._resolveDeclaration(this.monitors, labelOrIndex, 'monitor')
+  monitor(labelOrIndex: MonitorLabel<TDecl> | number): string {
+    return this._resolveLabel(this.monitors, labelOrIndex as string | number, 'monitor')
   }
 
   /**
-   * Resolve an executor declaration by label or index to its registry key.
-   * Use this in evaluate() to build ExecutionInstructions without hardcoding executor ids.
+   * Validate an executor declaration by label or index and return its label.
+   * TriggerManager rewrites the label to the executor's registry key when the
+   * instruction is queued. Labels autocomplete when the declarations are `as const`.
    *
    * @example
    * { executorId: this.executor('perp'), action: 'placeOrder', ... }
    */
-  executor(labelOrIndex: string | number): string {
-    return this._resolveDeclaration(this.executors, labelOrIndex, 'executor')
+  executor(labelOrIndex: ExecutorLabel<TDecl> | number): string {
+    return this._resolveLabel(this.executors, labelOrIndex as string | number, 'executor')
   }
 
-  /** Resolve a declaration name: if it contains '/', use as-is; otherwise prepend namespace. */
-  private _resolveDeclarationName(name: string): string {
-    if (name.includes('/')) return name
-    return this.namespace ? `${this.namespace}/${name}` : name
-  }
-
-  private _resolveDeclaration(
+  /** Resolve a declaration by label or index to its label, throwing on unknown declarations. */
+  private _resolveLabel(
     declarations: readonly MonitorDeclaration[],
     labelOrIndex: string | number,
     kind: string,
@@ -262,34 +386,17 @@ export abstract class BaseStrategy implements IStrategy {
     if (typeof labelOrIndex === 'number') {
       const decl = declarations[labelOrIndex]
       if (!decl) throw new Error(`${kind}[${labelOrIndex}] not declared in strategy "${this.strategyId}"`)
-      const name = typeof decl === 'string' ? decl : decl.name
-      return this._resolveDeclarationName(name)
-    }
-    const decl = declarations.find(d =>
-      typeof d === 'string' ? d === labelOrIndex : d.label === labelOrIndex
-    )
-    if (!decl) throw new Error(`${kind} with label '${labelOrIndex}' not declared in strategy "${this.strategyId}"`)
-    const name = typeof decl === 'string' ? decl : decl.name
-    return this._resolveDeclarationName(name)
-  }
-
-  /** Resolve a monitor label/index to the key used in monitorReaders and context.monitorData. */
-  private _resolveMonitorLabel(labelOrIndex: string | number): string {
-    const declarations = this.monitors
-    if (typeof labelOrIndex === 'number') {
-      const decl = declarations[labelOrIndex]
-      if (!decl) throw new Error(`monitor[${labelOrIndex}] not declared in strategy "${this.strategyId}"`)
       return typeof decl === 'string' ? decl : decl.label
     }
     const decl = declarations.find(d =>
       typeof d === 'string' ? d === labelOrIndex : d.label === labelOrIndex
     )
-    if (!decl) throw new Error(`monitor with label '${labelOrIndex}' not declared in strategy "${this.strategyId}"`)
+    if (!decl) throw new Error(`${kind} with label '${labelOrIndex}' not declared in strategy "${this.strategyId}"`)
     return typeof decl === 'string' ? decl : decl.label
   }
 
-  setMonitorReader(key: string, reader: MonitorDataReader): void {
-    this.monitorReaders.set(key, reader)
+  setMonitorReader(label: string, reader: MonitorDataReader): void {
+    this.monitorReaders.set(label, reader)
   }
 
   setCredentialStore(store: CredentialStore): void {
@@ -308,12 +415,44 @@ export abstract class BaseStrategy implements IStrategy {
     this.injectedParams = params
   }
 
+  setLlmBindings(bindings: Record<string, LlmSlotBinding>): void {
+    this.llmBindings = bindings
+  }
+
   setInstanceId(instanceId: string): void {
     this.instanceId = instanceId
   }
 
-  setAccounts(accounts: IAccount[]): void {
-    this.injectedAccounts = accounts
+  setReaders(readers: unknown[], credentialNames: string[]): void {
+    this.injectedReaders = readers
+    this.injectedCredentialNames = credentialNames
+  }
+
+  private injectedAccountMeta: AccountSlotMeta[] = []
+
+  setAccountMeta(metas: AccountSlotMeta[]): void {
+    this.injectedAccountMeta = metas
+  }
+
+  /**
+   * Facts about a bound account slot (name/venue/kind) — available from
+   * triggers() onward. Use accountVenue() for the common case: venue-scoped
+   * monitor keys derive from the binding instead of a duplicated parameter.
+   */
+  protected accountMeta(label: string): AccountSlotMeta {
+    const meta = this.injectedAccountMeta.find(m => m.label === label)
+    if (!meta) {
+      throw new Error(
+        `No account meta for slot '${label}' — it is injected at activation; ` +
+        'triggers()/evaluate() may use it, constructors may not'
+      )
+    }
+    return meta
+  }
+
+  /** The venue of the account bound to a slot ('binance', 'hyperliquid', …). */
+  protected accountVenue(label: string): string {
+    return this.accountMeta(label).venue
   }
 
   /** Returns the triggers this strategy needs. Override in subclass. Default: no triggers. */
@@ -321,19 +460,82 @@ export abstract class BaseStrategy implements IStrategy {
     return []
   }
 
+  /**
+   * Monitors to keep running without being woken by them. Override when the
+   * strategy needs a monitor's data but decides on its own schedule — see
+   * IStrategy.subscriptions. Default: none.
+   */
+  subscriptions(_params: StrategyParams): MonitorSource[] {
+    return []
+  }
+
+  // ── Run tracing ─────────────────────────────────────────────────────────
+  // Every run() assembles a step-by-step trace: what the strategy saw, what
+  // each gate decided, what was finally emitted. Strategies add their own
+  // steps via this.trace(); outside a run (previews, tests) trace() is a
+  // no-op, so instrumentation costs nothing there.
+  private runTraces: StrategyRunTrace[] = []
+
+  private activeTraceSteps: Array<{ ts: number; step: string; data?: Record<string, unknown> }> | null = null
+
+  private runSink: ((run: StrategyRunTrace) => void) | null = null
+
+  /** Runtime-injected persistence for finished runs; must never throw into the run path. */
+  setRunSink(sink: ((run: StrategyRunTrace) => void) | null): void {
+    this.runSink = sink
+  }
+
+  /** Record one decision step of the current run. No-op outside run(). */
+  protected trace(step: string, data?: Record<string, unknown>): void {
+    if (!this.activeTraceSteps) return
+    this.activeTraceSteps.push({ ts: Date.now(), step, ...(data !== undefined ? { data } : {}) })
+  }
+
+  /** The last runs' traces, newest first — the dashboard's audit view. */
+  getRecentRuns(): typeof this.runTraces {
+    return this.runTraces
+  }
+
   async run(context: StrategyContext): Promise<ExecutionInstruction[]> {
     this.metrics.runsTotal++
     this.metrics.lastRunAt = Date.now()
     this.stepCache.clear()
     this.log.debug({ triggerId: context.triggerId }, 'Strategy run started')
+    const startedAt = Date.now()
+    this.activeTraceSteps = []
+    // Everything the process logs to the console during this run lands in the
+    // trace too — over-inclusive by design (concurrent runs of OTHER instances
+    // will interleave, each line carries its module), because a silent trace
+    // is worse than a noisy one.
+    const unsubLogs = subscribeLogs((rec) => {
+      this.activeTraceSteps?.push({
+        ts: rec.ts, step: `log:${rec.level}`,
+        data: { ...(rec.module !== undefined ? { module: rec.module } : {}), msg: rec.msg, ...rec.extra },
+      })
+    })
+    this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
+    const finish = (instructions: number, error?: string) => {
+      const rec: StrategyRunTrace = {
+        startedAt, triggerId: context.triggerId, durationMs: Date.now() - startedAt,
+        instructions, ...(error !== undefined ? { error } : {}),
+        steps: this.activeTraceSteps ?? [],
+      }
+      this.runTraces.unshift(rec)
+      if (this.runTraces.length > 50) this.runTraces.length = 50
+      this.activeTraceSteps = null
+      unsubLogs()
+      try { this.runSink?.(rec) } catch { /* persistence must not fail the run */ }
+    }
     try {
       const instructions = await this.evaluate(context)
       this.metrics.instructionsEmitted += instructions.length
       this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
+      finish(instructions.length)
       return instructions
     } catch (err) {
       this.metrics.errors++
       this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
+      finish(0, err instanceof Error ? err.message : String(err))
       throw err
     }
   }
@@ -386,28 +588,35 @@ export abstract class BaseStrategy implements IStrategy {
    * const reader = this.monitorData('trades')
    * const latest = await reader?.readLatest('BTC')
    */
-  protected monitorData(labelOrIndex: string | number): MonitorDataReader | undefined {
-    const registryKey = this._resolveDeclaration(this.monitors, labelOrIndex, 'monitor')
-    return this.monitorReaders.get(registryKey)
+  protected monitorData(labelOrIndex: MonitorLabel<TDecl> | number): MonitorDataReader | undefined {
+    const label = this._resolveLabel(this.monitors, labelOrIndex as string | number, 'monitor')
+    return this.monitorReaders.get(label)
   }
 
   /**
    * Build an ExecutionInstruction for a declared executor.
    *
+   * @param accountLabels - Labels (or indices) of this strategy's account slots
+   *   whose bound credentials the executor should use, in the order of the
+   *   executor's session slots. Omit to use the executor's instance-level bindings.
+   *
    * @example
-   * return [this.instruction('perp', 'placeOrder', { symbol: 'BTC', side: 'buy', ... })]
+   * return [this.instruction('perp', 'placeOrder', { symbol: 'BTC', side: 'buy', ... }, ['main'])]
    */
   protected instruction(
-    executorLabelOrIndex: string | number,
+    executorLabelOrIndex: ExecutorLabel<TDecl> | number,
     action: string,
     params: Record<string, unknown>,
+    accountLabels?: (AccountLabel<TDecl> | number)[],
   ): ExecutionInstruction {
+    const accountNames = accountLabels?.map((labelOrIdx) => this._accountSlot(labelOrIdx as string | number).credentialName)
     return {
       executorId: this.executor(executorLabelOrIndex),
       messageId: nanoid(),
       action,
       params,
       ...(this.instanceId ? { instanceId: this.instanceId } : {}),
+      ...(accountNames && accountNames.length > 0 ? { accountNames } : {}),
     }
   }
 
@@ -425,25 +634,34 @@ export abstract class BaseStrategy implements IStrategy {
   }
 
   /**
-   * Access an injected account by index or label.
-   * Cast to a platform-specific interface for extended fields.
+   * Access the Reader of an account slot, by label or index.
+   *
+   * The Reader type follows the declaration's class reference — declaring a
+   * venue subclass surfaces its extra typed methods. Strategies only ever hold
+   * Readers: the underlying session (write-capable venue connection) is
+   * structurally unreachable from strategy code.
    *
    * @example
-   * const hl = this.account<IPerpAccount>(0)
-   * const hl = this.account<IPerpAccount>('main')  // requires label in accountTypes
+   * const reader = this.account('main')        // e.g. PerpAccount
+   * const positions = await reader.positions()
    */
-  protected account<T extends IAccount = IAccount>(indexOrLabel: number | string): T {
-    if (typeof indexOrLabel === 'number') {
-      const acc = this.injectedAccounts[indexOrLabel]
-      if (!acc) throw new Error(`Account at index ${indexOrLabel} not found`)
-      return acc as T
+  protected account<L extends AccountLabel<TDecl> | number>(
+    indexOrLabel: L,
+  ): L extends number ? unknown : ReaderOfLabel<TDecl, L> {
+    return this._accountSlot(indexOrLabel as string | number).reader as never
+  }
+
+  /** Resolve an account slot (by label or index) to its injected reader and credential name. */
+  private _accountSlot(indexOrLabel: string | number): { reader: unknown; credentialName: string } {
+    const index = typeof indexOrLabel === 'number'
+      ? indexOrLabel
+      : this.accounts.findIndex(d => d.label === indexOrLabel)
+    const reader = this.injectedReaders[index]
+    const credentialName = this.injectedCredentialNames[index]
+    if (index < 0 || reader === undefined || credentialName === undefined) {
+      throw new Error(`Account slot '${indexOrLabel}' not found in strategy "${this.strategyId}"`)
     }
-    const acc = this.injectedAccounts.find((a) => {
-      const decl = this.accountTypes[this.injectedAccounts.indexOf(a)]
-      return typeof decl === 'object' && decl.label === indexOrLabel
-    })
-    if (!acc) throw new Error(`Account with label '${indexOrLabel}' not found`)
-    return acc as T
+    return { reader, credentialName }
   }
 
   /**
@@ -497,18 +715,81 @@ export abstract class BaseStrategy implements IStrategy {
    */
   protected async llm(options: LlmCallOptions<undefined>): Promise<string>
 
-  protected async llm<TSchema extends ZodType | undefined>(
+  /**
+   * Call a declared LLM slot by label. Config merges declaration defaults ←
+   * instance bindings ← this call's options.
+   *
+   * @example
+   * const decision = await this.llm('decision', { messages, schema })
+   */
+  protected async llm<TSchema extends ZodType>(
+    label: LlmLabel<TDecl>,
     options: LlmCallOptions<TSchema>
+  ): Promise<import('zod').infer<TSchema>>
+  protected async llm(label: LlmLabel<TDecl>, options: LlmCallOptions<undefined>): Promise<string>
+
+  protected async llm<TSchema extends ZodType | undefined>(
+    labelOrOptions: LlmLabel<TDecl> | LlmCallOptions<TSchema>,
+    maybeOptions?: LlmCallOptions<TSchema>,
   ): Promise<TSchema extends ZodType ? import('zod').infer<TSchema> : string> {
-    if (!this.llmClient) {
-      throw new Error(
-        `llm() called but no LLM is configured. Pass 'llm: { defaultModel: "provider:model" }' in StrategyOptions.`
-      )
-    }
     if (!this.credentialStore) {
       throw new Error('llm() requires a CredentialStore — make sure the runtime has injected one.')
     }
-    return this.llmClient.call(options, this.credentialStore)
+    const label = typeof labelOrOptions === 'string' ? labelOrOptions : undefined
+    const options = (typeof labelOrOptions === 'string' ? maybeOptions : labelOrOptions)!
+    const slot = this._llmSlotConfig(label, options)
+    return this.llmClient.call({
+      ...options,
+      ...(slot.model !== undefined ? { model: slot.model } : {}),
+      ...(slot.credentialName !== undefined ? { credentialName: slot.credentialName } : {}),
+      ...(Object.keys(slot.settings).length > 0 ? { settings: slot.settings } : {}),
+    }, this.credentialStore)
+  }
+
+  /**
+   * ESCAPE HATCH: resolve a declared LLM slot to a raw AI SDK LanguageModel
+   * (key injected). Use it with any AI SDK function directly — streamText,
+   * embed, agent loops — the framework only handles credentials and slot
+   * config; the capability surface is the AI SDK itself.
+   *
+   * @example
+   * const model = await this.llmModel('decision')
+   * const stream = streamText({ model, messages })
+   */
+  protected async llmModel(label?: LlmLabel<TDecl>): Promise<LanguageModel> {
+    if (!this.credentialStore) {
+      throw new Error('llmModel() requires a CredentialStore — make sure the runtime has injected one.')
+    }
+    const slot = this._llmSlotConfig(label)
+    if (!slot.model) {
+      throw new Error(label
+        ? `LLM slot '${String(label)}' has no model configured`
+        : 'llmModel() without a label needs a declared llm slot or a defaultModel')
+    }
+    return this.llmClient.resolveModel(slot.model, this.credentialStore, slot.credentialName)
+  }
+
+  /** Merge one slot's config: declaration defaults ← instance binding ← call overrides. */
+  private _llmSlotConfig(
+    label: string | undefined,
+    call?: { model?: string; credentialName?: string; settings?: LlmCallSettings },
+  ): { model?: string; credentialName?: string; settings: LlmCallSettings } {
+    let declaration: LlmDeclaration | undefined
+    if (label !== undefined) {
+      declaration = this.llms.find(d => d.label === label)
+      if (!declaration) throw new Error(`llm slot '${label}' not declared in strategy "${this.strategyId}"`)
+    } else if (this.llms.length === 1) {
+      // A single declared slot is unambiguous — label may be omitted
+      declaration = this.llms[0]
+    }
+    const binding = declaration ? this.llmBindings[declaration.label] : undefined
+    const model = call?.model ?? binding?.model ?? declaration?.model
+    const credentialName = call?.credentialName ?? binding?.credentialName ?? declaration?.credentialName
+    return {
+      ...(model !== undefined ? { model } : {}),
+      ...(credentialName !== undefined ? { credentialName } : {}),
+      settings: { ...declaration?.settings, ...binding?.settings, ...call?.settings },
+    }
   }
 }
 
