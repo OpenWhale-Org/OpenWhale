@@ -111,6 +111,7 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 | `this.credential(name)` | Read a credential by name (needs explicit user binding — avoid unless necessary) |
 | `this.llm(...)` / `llms` declaration | LLM slots — declare `{ label, model: 'provider:model' }` in `decls.llms`, call via `this.llm()` |
 | `context.getData(label, key)` | The emitted record that fired this trigger (undefined for other labels/keys) |
+| `this.addMonitorSource(label, key, { trigger? })` | Start collecting a monitor key discovered at RUNTIME (e.g. an auto-detected pair's feed); `trigger: true` also wakes `evaluate` on its pushes. Returns false on runtimes without dynamic-source support; idempotence is your job |
 
 ## Trigger shapes
 

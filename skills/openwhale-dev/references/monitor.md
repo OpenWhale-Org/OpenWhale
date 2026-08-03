@@ -203,8 +203,10 @@ override plots(): MonitorPlotDef[] {
 }
 ```
 
-`kind: 'line' | 'bar' | 'candles'`; `xKind: 'value'` + `xUnit` for non-time x-axes (e.g. a depth
-curve over basis points).
+`kind: 'line' | 'bar' | 'candles' | 'table'`; `xKind: 'value'` + `xUnit` for non-time x-axes
+(e.g. a depth curve over basis points). A `table` panel declares `columns: [{ key, label }]` and
+its `extract` returns row objects keyed by column — headers are click-to-sort in the dashboard
+(rows missing a value sink to the bottom).
 
 ### Panel pickers
 

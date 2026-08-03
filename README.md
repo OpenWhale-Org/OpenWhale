@@ -30,10 +30,10 @@ OpenWhale is a TypeScript framework for building automated economic strategies. 
 |---|---|
 | **Monitor** | Collects data and emits keyed records (`venue:symbol`, …). Declared as a *contract* with one or more *implementations*; users create per-key *instances*, optionally credential-bound. Emits persist as JSONL and drive triggers. |
 | **Strategy** | Pure decision logic. Declares monitor/executor/account dependencies by label, receives triggers, returns `ExecutionInstruction[]`. Params split into `base` (required) and `tunable` (defaulted, AI-optimizable) zod schemas. |
-| **Executor** | Turns instructions into venue actions through adapter sessions: retry discipline, idempotent client order ids, per-order latency and slippage capture. Strategies stay pure. |
+| **Executor** | Turns instructions into venue actions through adapter sessions: retry discipline, idempotent client order ids, per-order latency and slippage capture. Credential slots resolve to sessions (by kind) or raw credential data (`raw: true` — e.g. a bot token); `optional: true` slots let instances activate unbound and the executor degrade gracefully. Strategies stay pure. |
 | **Instance** | A strategy + params + account bindings, activated as a unit. Everything observable hangs off the instance: live events, executions, run traces, logs. |
 | **Account** | A named entity binding a credential to an account implementation (generic or venue-specialized). Strategies read balances and positions only through their bound account's Reader. |
-| **Trigger** | Cron schedules and monitor conditions (multi-source AND within a time window). Subscriptions keep monitors collecting without waking the strategy. |
+| **Trigger** | Cron schedules and monitor conditions (multi-source AND within a time window). Subscriptions keep monitors collecting without waking the strategy; a live strategy can add sources it discovers at runtime (`addMonitorSource`). |
 
 ```
 Monitor (data collection)

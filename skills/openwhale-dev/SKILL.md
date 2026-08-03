@@ -5,6 +5,9 @@ description: Write runnable OpenWhale components — strategies, monitors, execu
 
 # OpenWhale Plugin Development
 
+> **Calibrated against `@openwhaleorg/core` v0.1.1 (2026-08-03).** If the installed core is newer,
+> verify signatures against the framework source before trusting a template verbatim.
+
 OpenWhale is an AI-native trading framework: **Monitor → Trigger → Strategy → Queue → Executor**.
 You are writing a **plugin package** — an npm package whose default export is a `definePlugin({...})`
 manifest. The user installs it from the Dashboard (Plugins page → local path or npm spec) into a
@@ -37,7 +40,27 @@ row. Generic implementations claim a column, specializations claim a cell, speci
 - **A new domain (new kind)** → `references/plugin.md` §New kind (AdapterKindMap merge + mock cell +
   generic Account).
 - **Packaging / install / project scaffold** → `references/plugin.md` §Packaging.
+- **An operator utility for the Scripts page** → a `ScriptDefinition` in the plugin's `scripts: []`
+  array: `{ id, name, description, paramsSchema, paramOptions?(runtime), run({params, runtime}) }`.
+  `run` returns `{ text }` (monospace report) and may return `{ json }` alongside;
+  `paramOptions` resolves live dropdown choices (e.g. instance ids) at render time.
 - **Tests** → `references/testing.md`. Always write them; every template there runs offline.
+
+## Since v0.1.0 (quick delta index)
+
+- **Optional executor credential slots** — `{ label, type, raw: true, optional: true }`: activation
+  proceeds with the slot unbound; read with `this.rawIfBound(label)` (undefined = unbound) and
+  return a clear failed result instead of throwing. For side-channel executors (notifiers) gated
+  by a strategy toggle. (`references/executor.md`)
+- **Automatic PnL attribution** — record `{ orderId, symbol }` on the same object anywhere in the
+  execution result's `data` (depth ≤ 6) and the framework claims the order for the instance; venue
+  fills and funding then attribute automatically. Follow the convention for EVERY placed order,
+  including resting/protective orders. (`references/executor.md`)
+- **Dynamic monitor sources** — a live strategy may call
+  `this.addMonitorSource(label, key, { trigger? })` to start collecting a key discovered at
+  runtime. No-op (returns false) where unsupported. (`references/strategy.md`)
+- **`table` plot kind** — monitors may declare sortable table panels via
+  `{ kind: 'table', columns: [...] }`. (`references/monitor.md`)
 
 Read the reference file for each component you touch BEFORE writing code. The templates there are
 verified against the framework source — copy their shape exactly.

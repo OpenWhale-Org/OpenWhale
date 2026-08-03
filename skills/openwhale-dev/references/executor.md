@@ -47,6 +47,9 @@ export class SimpleTradeExecutor extends BaseExecutor<MyInstruction> {
   override get credentials(): readonly ExecutorCredentialSlot[] {
     return [{ label: 'trading', kind: 'exchange/perp' }]
     // Raw-credential slot (e.g. a bot token): { label: 'notify', type: 'telegram', raw: true }
+    // Add optional: true and the instance may activate WITHOUT binding it — read with
+    // this.rawIfBound('notify') (undefined = unbound) and return a clear failed result
+    // instead of throwing. Use for side-channel executors gated by a strategy toggle.
   }
 
   // Per-action param schemas → Dashboard "manual fire" forms + validation.
@@ -83,7 +86,12 @@ export class SimpleTradeExecutor extends BaseExecutor<MyInstruction> {
 ## Essentials
 
 - `this.session<T>('label')` — the slot's session for the CURRENT instruction (resolved from the
-  calling instance's bindings). `this.raw('label')` for `raw: true` slots.
+  calling instance's bindings). `this.raw('label')` for `raw: true` slots;
+  `this.rawIfBound('label')` for `optional: true` raw slots (undefined when unbound).
+- **PnL attribution is convention-based**: put `{ orderId, symbol }` on the same object anywhere
+  in the result's `data` (nested is fine, depth ≤ 6) for EVERY order you place — including
+  resting/protective orders — and the framework claims them for the calling instance. Venue fills
+  and funding then attribute automatically; an order you forget shows up as unattributed.
 - **Return an `ExecutionResult` — always.** The framework writes it to
   `dataDir/executions/{executorName}/{date}.jsonl`, which feeds the Dashboard's execution history.
   An `execute()` that never returns (infinite retry loop) means NO record — bound the work, and
