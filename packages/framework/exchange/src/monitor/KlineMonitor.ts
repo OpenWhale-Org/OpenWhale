@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { OwMonitor } from '@openwhaleorg/core'
-import type { MonitorContext } from '@openwhaleorg/core'
+import type { MonitorContext, MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
 import { PublicMarketMonitor, parseMarketKey, sleep, type ParsedMarketKey } from './PublicMarketMonitor.js'
 import type { PerpExchangeAdapter } from '../types/perp.js'
 import type { Kline } from '../types/exchange.js'
@@ -124,6 +124,48 @@ export class KlineMonitor extends PublicMarketMonitor<KlineUpdate> {
       ts: c.timestamp + timeframeMs,
       data: { ...c, venue, symbol, timeframe, closeTime: c.timestamp + timeframeMs },
     }))
+  }
+
+  override plots(): MonitorPlotDef<KlineUpdate>[] {
+    return [
+      {
+        id: 'candles',
+        title: 'Candles',
+        kind: 'candles',
+        unit: '$',
+        description: 'OHLC per stored candle. The x of each bar is its OPEN time, so a bar sits on the interval it describes.',
+        extract: (records: MonitorRecord<KlineUpdate>[]) => [{
+          label: 'ohlc',
+          candles: records.map(r => ({
+            x: r.data.timestamp, o: r.data.open, h: r.data.high, l: r.data.low, c: r.data.close,
+          })),
+        }],
+      },
+      {
+        id: 'volume',
+        title: 'Volume',
+        kind: 'bar',
+        description: 'Base-asset volume per candle',
+        extract: (records: MonitorRecord<KlineUpdate>[]) => [
+          { label: 'volume', points: records.map(r => ({ x: r.data.timestamp, y: r.data.volume })) },
+        ],
+      },
+      {
+        id: 'range',
+        title: 'Bar Range',
+        kind: 'line',
+        unit: '%',
+        description: 'Per-candle high−low as a percentage of the open — a cheap realized-volatility read.',
+        extract: (records: MonitorRecord<KlineUpdate>[]) => [
+          {
+            label: 'range',
+            points: records
+              .filter(r => r.data.open > 0)
+              .map(r => ({ x: r.data.timestamp, y: (r.data.high - r.data.low) / r.data.open * 100 })),
+          },
+        ],
+      },
+    ]
   }
 
   override get emitSchema() {

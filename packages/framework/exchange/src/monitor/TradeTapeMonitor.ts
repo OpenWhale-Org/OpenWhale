@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { OwMonitor } from '@openwhaleorg/core'
-import type { MonitorContext } from '@openwhaleorg/core'
+import type { MonitorContext, MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
 import { PublicMarketMonitor, type ParsedMarketKey } from './PublicMarketMonitor.js'
 import type { PerpExchangeAdapter } from '../types/perp.js'
 
@@ -66,6 +66,58 @@ export class TradeTapeMonitor extends PublicMarketMonitor<TradeTapeUpdate> {
     options = { ...(ctx.params as TradeTapeMonitorOptions | undefined), ...options }
     this.windowMs = options.windowMs ?? 5_000
     this.largeTradeUsd = options.largeTradeUsd ?? 0
+  }
+
+  override plots(): MonitorPlotDef<TradeTapeUpdate>[] {
+    return [
+      {
+        id: 'flow',
+        title: 'Taker Flow',
+        kind: 'bar',
+        description: 'Aggressive volume per window, split by side — who is crossing the spread',
+        extract: (records: MonitorRecord<TradeTapeUpdate>[]) => [
+          { label: 'buy', points: records.map(r => ({ x: r.data.windowEnd, y: r.data.buyVolume })) },
+          { label: 'sell', points: records.map(r => ({ x: r.data.windowEnd, y: r.data.sellVolume })) },
+        ],
+      },
+      {
+        id: 'buy-ratio',
+        title: 'Buy Ratio',
+        kind: 'line',
+        unit: '%',
+        description: 'buyVolume / volume per window. 50% is balanced; sustained departures are the imbalance a taker-flow signal reads.',
+        extract: (records: MonitorRecord<TradeTapeUpdate>[]) => [
+          { label: 'buy ratio', points: records.map(r => ({ x: r.data.windowEnd, y: r.data.buyRatio * 100 })) },
+        ],
+      },
+      {
+        id: 'vwap',
+        title: 'VWAP vs Last',
+        kind: 'line',
+        unit: '$',
+        description: 'Window VWAP against the window\'s closing print — last above VWAP means the window ended being bought up',
+        extract: (records: MonitorRecord<TradeTapeUpdate>[]) => [
+          { label: 'vwap', points: records.map(r => ({ x: r.data.windowEnd, y: r.data.vwap })) },
+          { label: 'last', points: records.map(r => ({ x: r.data.windowEnd, y: r.data.lastPrice })) },
+        ],
+      },
+      {
+        id: 'largest-trade',
+        title: 'Largest Trade',
+        kind: 'bar',
+        unit: '$',
+        description: 'Biggest single fill per window, signed by side (positive = buy). The spikes are the prints worth explaining.',
+        extract: (records: MonitorRecord<TradeTapeUpdate>[]) => [
+          {
+            label: 'largest',
+            points: records.map(r => ({
+              x: r.data.windowEnd,
+              y: r.data.largestTradeSide === 'sell' ? -r.data.largestTradeUsd : r.data.largestTradeUsd,
+            })),
+          },
+        ],
+      },
+    ]
   }
 
   override get emitSchema() {

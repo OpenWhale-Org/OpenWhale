@@ -1,5 +1,5 @@
 import { BaseMonitor, MonitorMode, OwMonitor, createLogger } from '@openwhaleorg/core'
-import type { MonitorContext } from '@openwhaleorg/core'
+import type { MonitorContext, MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
 import { z } from 'zod'
 import type { ExchangeTrade } from '@openwhaleorg/exchange'
 import { exchangeTradeSchema } from '@openwhaleorg/exchange'
@@ -57,6 +57,43 @@ export class UserTradesMonitor extends BaseMonitor<string, ExchangeTrade> {
 
   get monitorName(): string {
     return 'user-trades'
+  }
+
+  override plots(): MonitorPlotDef<ExchangeTrade>[] {
+    return [
+      {
+        id: 'fills',
+        title: 'Fill Notional',
+        kind: 'bar',
+        unit: '$',
+        description: "The target's fills, signed by side (positive = buy). Bar height is the trade's notional — the shape of someone else's activity.",
+        extract: (records: MonitorRecord<ExchangeTrade>[]) => [
+          {
+            label: 'fills',
+            points: records.map(r => ({
+              x: r.data.timestamp,
+              y: (r.data.side === 'sell' ? -1 : 1) * (r.data.cost > 0 ? r.data.cost : r.data.price * r.data.amount),
+            })),
+          },
+        ],
+      },
+      {
+        id: 'fill-price',
+        title: 'Fill Price',
+        kind: 'line',
+        unit: '$',
+        // One symbol per option: a shared axis across BTC and a $0.02 alt is unreadable.
+        options: (records: MonitorRecord<ExchangeTrade>[]) => {
+          const symbols = [...new Set(records.map(r => r.data.symbol))]
+          return symbols.map((symbol, i) => ({ value: symbol, label: symbol, ...(i === 0 ? { default: true } : {}) }))
+        },
+        description: 'Price of each fill for one symbol, in trade order',
+        extract: (records: MonitorRecord<ExchangeTrade>[], option?: string) => {
+          const rows = option ? records.filter(r => r.data.symbol === option) : records
+          return [{ label: option ?? 'all', points: rows.map(r => ({ x: r.data.timestamp, y: r.data.price })) }]
+        },
+      },
+    ]
   }
 
   override get emitSchema() {

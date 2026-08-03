@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { OwMonitor } from '@openwhaleorg/core'
-import type { MonitorContext } from '@openwhaleorg/core'
+import type { MonitorContext, MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
 import { PublicMarketMonitor, sleep, type ParsedMarketKey } from './PublicMarketMonitor.js'
 import type { PerpExchangeAdapter } from '../types/perp.js'
 
@@ -50,6 +50,39 @@ export class OpenInterestMonitor extends PublicMarketMonitor<OpenInterestUpdate>
     // Instance params (dashboard-tuned, frozen while active); direct options win in tests
     options = { ...(ctx.params as OpenInterestMonitorOptions | undefined), ...options }
     this.pollIntervalMs = options.pollIntervalMs ?? 60_000
+  }
+
+  override plots(): MonitorPlotDef<OpenInterestUpdate>[] {
+    return [
+      {
+        id: 'open-interest',
+        title: 'Open Interest',
+        kind: 'line',
+        description: 'Open contracts in base units, and their USD value where the venue reports one',
+        extract: (records: MonitorRecord<OpenInterestUpdate>[]) => {
+          const series = [{ label: 'contracts', points: records.map(r => ({ x: r.ts, y: r.data.amount })) }]
+          // Only venues that price the book report `value` — an all-undefined
+          // series would render as an empty legend entry.
+          if (records.some(r => r.data.value !== undefined)) {
+            series.push({
+              label: 'value ($)',
+              points: records.filter(r => r.data.value !== undefined).map(r => ({ x: r.ts, y: r.data.value! })),
+            })
+          }
+          return series
+        },
+      },
+      {
+        id: 'oi-change',
+        title: 'OI Change',
+        kind: 'bar',
+        unit: '%',
+        description: 'Percentage change since the previous emit — positioning building (positive) or unwinding (negative)',
+        extract: (records: MonitorRecord<OpenInterestUpdate>[]) => [
+          { label: 'change', points: records.map(r => ({ x: r.ts, y: r.data.changePct * 100 })) },
+        ],
+      },
+    ]
   }
 
   override get emitSchema() {
