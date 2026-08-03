@@ -90,7 +90,7 @@ export class PerpAccount {
    */
   async snapshot(): Promise<{ equity: number; available?: number; unrealizedPnl?: number }> {
     // Portfolio-margin equity already INCLUDES unrealized PnL — adding it
-    // again double-counts (and the wallet-sum path read a healthy 统一账户
+    // again double-counts (and the wallet-sum path read a healthy unified account
     // as −$2.2k equity live).
     const pm = await this.session.fetchPortfolioEquity?.().catch(() => null)
     if (pm) {

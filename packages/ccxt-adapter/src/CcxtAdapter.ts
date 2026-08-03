@@ -292,7 +292,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   }
 
   /**
-   * Binance portfolio-margin (统一账户) equity via GET /papi/v1/account.
+   * Binance portfolio-margin (unified-account) equity via GET /papi/v1/account.
    * accountEquity is the collateral-haircut-adjusted equity in USD with
    * unrealized PnL included — the number the venue's own risk engine (uniMMR)
    * runs on; the USDT wallet meanwhile can sit deeply negative as a loan.
