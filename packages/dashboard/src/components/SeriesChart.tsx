@@ -182,6 +182,22 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
     ? formatTime(x, geom ? geom.x1 - geom.x0 : 0)
     : xUnit ? `${x.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${xUnit}` : x.toLocaleString(undefined, { maximumFractionDigits: 2 })
 
+  /**
+   * The point a series contributes AT the hovered instant — or null when the
+   * series simply has no data there. Nearest-match alone listed every series
+   * at every crosshair position (38 tokens in one tooltip when only a handful
+   * settled that hour); a point qualifies only within half the series' own
+   * median sampling gap, and a single-point series only on exact hit.
+   */
+  const pointAt = (pts: Array<{ x: number; y: number }> | undefined, x: number): { x: number; y: number } | null => {
+    if (!pts || pts.length === 0) return null
+    const nearest = pts.reduce((acc, pt) => (Math.abs(pt.x - x) < Math.abs(acc.x - x) ? pt : acc), pts[0]!)
+    if (pts.length === 1) return nearest.x === x ? nearest : null
+    const gaps = pts.slice(1).map((pt, i) => pt.x - pts[i]!.x).filter(g => g > 0).sort((a, b) => a - b)
+    const medianGap = gaps[Math.floor(gaps.length / 2)] ?? 0
+    return Math.abs(nearest.x - x) <= medianGap / 2 + 1e-9 ? nearest : null
+  }
+
   // Hover: nearest x across every visible series, within the window
   const refXs = useMemo(() => {
     const set = new Set<number>()
@@ -355,9 +371,8 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
               <g>
                 <line x1={geom.px(hoveredX)} x2={geom.px(hoveredX)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--muted)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
                 {visible.map((s) => {
-                  const p = (s.points ?? []).find(pt => pt.x === hoveredX)
-                    ?? (s.points ?? []).reduce<{ x: number; y: number } | null>((acc, pt) => (!acc || Math.abs(pt.x - hoveredX!) < Math.abs(acc.x - hoveredX!) ? pt : acc), null)
-                  if (!p || (s.points?.length ?? 0) === 0) return null
+                  const p = pointAt(s.points, hoveredX)
+                  if (!p) return null
                   return (
                     <circle
                       key={s.label}
@@ -407,7 +422,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
                     </div>
                   )
                 }
-                const p = (s.points ?? []).reduce<{ x: number; y: number } | null>((acc, pt) => (!acc || Math.abs(pt.x - hoveredX!) < Math.abs(acc.x - hoveredX!) ? pt : acc), null)
+                const p = pointAt(s.points, hoveredX)
                 return p ? (
                   <div key={s.label} className="flex items-center gap-2 py-0.5">
                     <span style={{ width: 10, height: 3, borderRadius: 2, background: SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length], display: 'inline-block' }} />
