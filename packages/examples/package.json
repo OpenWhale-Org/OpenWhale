@@ -30,7 +30,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "run:copy-trading": "npx tsx runnable/copy-trading.ts"
   },
   "dependencies": {
     "zod": "^4.4.1",
@@ -41,6 +42,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "tsx": "^4.19.2",
+    "@openwhaleorg/hyperliquid": "workspace:*"
   }
 }

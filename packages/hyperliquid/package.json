@@ -29,8 +29,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "example:copy-trading": "npx tsx --env-file=examples/.env examples/copy-trading.ts"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "ccxt": "^4.4.87",

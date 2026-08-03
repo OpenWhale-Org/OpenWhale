@@ -1,12 +1,12 @@
 /**
- * Example: Hyperliquid CopyTrading
+ * Runnable end-to-end example: copy trading, assembled in code
  *
- * Shows how to build a copy-trading bot using @openwhaleorg/hyperliquid:
+ * Shows how to assemble a runtime WITHOUT the dashboard — plugins, credentials,
  *   1. Initialize HyperliquidAdapter (read-only, for the monitor)
  *   2. Register UserTradesMonitor (watch target address fills)
  *   3. Register PerpTradingExecutor (executes orders using the account's adapter)
  *   4. Register AccountFactory (framework creates the account from stored credentials)
- *   5. Activate a CopyTradingStrategy instance
+ *   5. Activate an examples/copy-trading instance
  *
  * The executor's private key comes from the credential stored in CredentialStore,
  * not from an environment variable. Only the monitor needs a read-only wallet address.
@@ -36,7 +36,7 @@
  *   Put the variables in packages/hyperliquid/examples/.env (gitignored), then:
  *
  *     pnpm engine                # from the repo root, or:
- *     pnpm --filter @openwhaleorg/hyperliquid example:copy-trading
+ *     pnpm --filter @openwhaleorg/examples run:copy-trading
  *
  *   Or export them manually and run directly:
  *
@@ -44,13 +44,14 @@
  *     export HL_WALLET_ADDRESS="0xYourWalletAddress"
  *     export HL_PRIVATE_KEY="0xYourPrivateKey"
  *     export HL_TARGET_ADDRESS="0xTargetAddress"
- *     npx tsx packages/hyperliquid/examples/copy-trading.ts
+ *     npx tsx packages/examples/runnable/copy-trading.ts
  */
 
 import { OpenWhaleRuntime, DBCredentialStore, SQLiteAdapter, BaseExecutor, createLogger } from '@openwhaleorg/core'
 import type { ExecutionInstruction, ExecutionResult, ExecutorCredentialSlot } from '@openwhaleorg/core'
 import { exchangePlugin } from '@openwhaleorg/exchange'
-import { hyperliquidPlugin } from '../src/plugin.js'
+import { hyperliquidPlugin } from '@openwhaleorg/hyperliquid'
+import { examplesPlugin } from '../src/plugin.js'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -108,7 +109,8 @@ async function main() {
   // ── 3. Assemble Runtime via plugins ───────────────────────────────────────
   const runtime = new OpenWhaleRuntime({ database, credentialStore, dataDir })
   runtime.loadPlugin(exchangePlugin, {})            // kind 'exchange/perp' + shared executor
-  runtime.loadPlugin(hyperliquidPlugin, {})          // credential type + monitor + strategy (testnet rides on the credential)
+  runtime.loadPlugin(hyperliquidPlugin, {})          // credential type + the fills monitor (testnet rides on the credential)
+  runtime.loadPlugin(examplesPlugin, {})             // the reference strategies, copy-trading among them
 
   const now = new Date().toISOString()
 
@@ -129,7 +131,7 @@ async function main() {
   await runtime.activate({
     id: 'copy-trading-instance-1',
     name: `Copy ${TARGET_ADDRESS.slice(0, 8)}...`,
-    strategyId: 'hyperliquid/copy-trading',
+    strategyId: 'examples/copy-trading',
     accounts: ['HL Main'],   // credential name — framework resolves it to an account at activate()
     params: {
       base: {
@@ -139,7 +141,7 @@ async function main() {
       },
       tunable: {
         minTradeUsd: 10,
-        slippageTolerance: 0.005,
+        slippage: 0.005,
       },
     },
     enabled: true,

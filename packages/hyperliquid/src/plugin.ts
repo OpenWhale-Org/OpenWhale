@@ -3,7 +3,6 @@ import { definePlugin } from '@openwhaleorg/core'
 import type { RawCredentialData } from '@openwhaleorg/core'
 import { HyperliquidAdapter } from './adapter.js'
 import { UserTradesMonitor } from './monitor.js'
-import { CopyTradingStrategy } from './strategy.js'
 
 const build = (data: RawCredentialData) => new HyperliquidAdapter({
   walletAddress: data['walletAddress'] as string,
@@ -19,8 +18,10 @@ const build = (data: RawCredentialData) => new HyperliquidAdapter({
  *     kinds; the keyless perp form is a public ccxt adapter — always mainnet)
  *   - monitor 'hyperliquid/user-trades' — watches ANY address's fills
  *     (credential-less, so a default instance auto-activates)
- *   - strategy 'hyperliquid/copy-trading' — executes through the shared
- *     'exchange/perp-trading' executor on any bound perp account
+ *
+ * Strategies live elsewhere: this package is venue capability only. The
+ * copy-trading strategy that consumes the fills feed ships in
+ * @openwhaleorg/examples.
  *
  * Requires the exchange domain plugin (kind 'exchange/perp' vocabulary).
  */
@@ -62,8 +63,6 @@ export const hyperliquidPlugin = definePlugin({
   ],
 
   monitors: [UserTradesMonitor],
-
-  strategies: [CopyTradingStrategy],
 })
 
 export default hyperliquidPlugin

@@ -243,6 +243,7 @@ Before exposing the gateway to a network:
 | [`@openwhaleorg/hyperliquid`](./packages/hyperliquid) / [`binance`](./packages/binance) / [`aster`](./packages/aster) | Venue plugins: credential types + adapter cells (+ venue-specialized accounts, Portfolio Margin support on Binance) |
 | [`@openwhaleorg/gateway`](./packages/gateway) | Resident backend: runtime singleton, auth, REST + SSE API, compiler service, plugin install — all secrets live here |
 | [`@openwhaleorg/dashboard`](./packages/dashboard) | Next.js frontend: instances (folders/boards), accounts (equity curves), monitor boards, executors, credentials, plugins, scripts, AI compiler |
+| [`@openwhaleorg/examples`](./packages/examples) | Reference strategies, venue-agnostic by construction: momentum breakout, z-score mean reversion, scheduled accumulation (DCA), an LLM analyst whose risk lives in code, and copy trading. Read them, copy them |
 | [`@openwhaleorg/compiler`](./packages/compiler) | AI strategy compiler: NL → analyze → codegen → L1–L4 validation ladder → human review → hot load |
 | `@openwhaleorg/assistant` | Personal assistant layer *(planned)* |
 | `@openwhaleorg/mcp-server` | Expose the strategy engine as an MCP server *(planned)* |

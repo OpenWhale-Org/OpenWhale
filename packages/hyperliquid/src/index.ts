@@ -1,6 +1,5 @@
 export { HyperliquidAdapter } from './adapter.js'
 export { UserTradesMonitor } from './monitor.js'
-export { CopyTradingStrategy } from './strategy.js'
 export { hyperliquidPlugin } from './plugin.js'
 
 // Plugin-package convention: the entry default-exports the plugin factory

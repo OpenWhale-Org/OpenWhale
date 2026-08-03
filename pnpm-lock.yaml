@@ -211,6 +211,31 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/examples:
+    dependencies:
+      '@openwhaleorg/core':
+        specifier: workspace:*
+        version: link:../core
+      '@openwhaleorg/exchange':
+        specifier: workspace:*
+        version: link:../exchange
+      zod:
+        specifier: ^4.4.1
+        version: 4.4.1
+    devDependencies:
+      '@openwhaleorg/hyperliquid':
+        specifier: workspace:*
+        version: link:../hyperliquid
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
+
   packages/exchange:
     dependencies:
       zod:
@@ -244,6 +269,9 @@ importers:
       '@openwhaleorg/core':
         specifier: workspace:*
         version: link:../core
+      '@openwhaleorg/examples':
+        specifier: workspace:*
+        version: link:../examples
       '@openwhaleorg/exchange':
         specifier: workspace:*
         version: link:../exchange

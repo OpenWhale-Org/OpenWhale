@@ -4,6 +4,7 @@
 import { OpenWhaleRuntime, SQLiteAdapter, DBCredentialStore, getLogger, importLlmKeysFromEnv } from '@openwhaleorg/core'
 import { exchangePlugin } from '@openwhaleorg/exchange'
 import { hyperliquidPlugin } from '@openwhaleorg/hyperliquid'
+import { examplesPlugin } from '@openwhaleorg/examples'
 import { binancePlugin } from '@openwhaleorg/binance'
 import { asterPlugin } from '@openwhaleorg/aster'
 import { allVenuePlugins } from '@openwhaleorg/venues'
@@ -54,6 +55,9 @@ function createRuntime(): OpenWhaleRuntime {
   // Plain ccxt venues (Bybit, OKX, Bitget, Gate, Kraken, Upbit, Lighter, …):
   // key + adapter cells only, so the roster loads as data — see @openwhaleorg/venues
   for (const venue of allVenuePlugins) runtime.loadPlugin(venue, {})
+  // Reference strategies — venue-agnostic, bind any perp account at activation.
+  // Loaded last: they reference monitors/executors the plugins above register.
+  runtime.loadPlugin(examplesPlugin, {})
 
   return runtime
 }
