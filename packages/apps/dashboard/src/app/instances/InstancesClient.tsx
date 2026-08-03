@@ -340,6 +340,33 @@ export function ParamFieldsForm({
    */
   venueContext?: string
 }) {
+  // Which parameter groups are folded away, remembered per strategy: tuning
+  // one knob in a forty-parameter form should not mean scrolling past the
+  // thirty-nine others every time.
+  const collapseKey = `ow:params-collapsed:${strategyId ?? 'default'}`
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(collapseKey)
+      setCollapsed(new Set(raw ? (JSON.parse(raw) as string[]) : []))
+    } catch { /* a broken entry just means everything shows */ }
+  }, [collapseKey])
+  const persistCollapsed = (next: Set<string>) => {
+    setCollapsed(next)
+    try { window.localStorage.setItem(collapseKey, JSON.stringify([...next])) } catch { /* private mode */ }
+  }
+  const toggleSection = (key: string) => {
+    const next = new Set(collapsed)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    persistCollapsed(next)
+  }
+  const setAllCollapsed = (collapse: boolean) => {
+    persistCollapsed(collapse
+      ? new Set([...new Set(fields.filter(f => f.group === 'tunable').map(f => (f.section ?? '') || 'general'))])
+      : new Set())
+  }
+
   const [availability, setAvailability] = useState<FieldAvailability>({})
 
   // Verify chosen values against the venue whenever either changes. Advisory:
@@ -505,8 +532,7 @@ export function ParamFieldsForm({
             value={value}
             onChange={(e) => set(field.name, e.target.value)}
             required={field.required}
-            className="rounded-md px-3 py-2 text-sm"
-            style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            className="input"
           >
             {field.options.map((opt) => (
               <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
@@ -535,8 +561,7 @@ export function ParamFieldsForm({
             title={field.description}
             required={field.required}
             multiple={field.multiple}
-            className="rounded-md px-3 py-2 text-sm font-mono w-full"
-            style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            className="input mono"
           />
           {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
         </div>
@@ -560,8 +585,7 @@ export function ParamFieldsForm({
             placeholder={field.placeholder ?? (field.default !== undefined ? String(field.default) : undefined)}
             required={field.required}
             step={field.type === 'number' ? 'any' : undefined}
-            className="rounded-md px-3 py-2 text-sm flex-1"
-            style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            className="input flex-1"
           />
           {/* The unit is half the meaning of a number — 6 what? */}
           {field.unit && <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>{field.unit}</span>}
@@ -572,6 +596,17 @@ export function ParamFieldsForm({
   }
 
   const illsFor = (sec: string) => (illustrations ?? []).filter(i => (i.section ?? '') === sec)
+
+  const sections = [...new Set(tunableFields.map(f => f.section ?? ''))]
+  const fieldsIn = (sec: string) => tunableFields.filter(f => (f.section ?? '') === sec)
+  /** Fields the operator has moved off the strategy's default — what a collapsed group is hiding. */
+  const editedIn = (sec: string) => fieldsIn(sec).filter((f) => {
+    const v = values[f.name]
+    if (v === undefined || v === '') return false
+    return f.default === undefined ? true : v !== String(f.default)
+  }).length
+
+  const allCollapsed = sections.length > 0 && sections.every(sec => collapsed.has(sec || 'general'))
 
   return (
     <div className="flex flex-col gap-3">
@@ -586,21 +621,64 @@ export function ParamFieldsForm({
       )}
       {tunableFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Tunable Parameters</label>
-          <div className="rounded-md p-3 flex flex-col gap-4" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Tunable Parameters</label>
+            {sections.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setAllCollapsed(!allCollapsed)}
+                className="text-[11px] px-2 py-0.5 rounded-md"
+                style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+              >
+                {allCollapsed ? 'Expand all' : 'Collapse all'}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
             {/* Sections in first-appearance order; unsectioned fields group under General. */}
-            {[...new Set(tunableFields.map((f) => f.section ?? ''))].map((sec) => (
-              <div key={sec || 'general'} className="flex flex-col gap-3">
-                {sec !== '' && (
-                  <div className="text-[11px] font-semibold uppercase tracking-wider pb-1"
-                       style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-                    {sec}
-                  </div>
-                )}
-                {tunableFields.filter((f) => (f.section ?? '') === sec).map(renderField)}
-                {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} />)}
-              </div>
-            ))}
+            {sections.map((sec) => {
+              const key = sec || 'general'
+              const isCollapsed = collapsed.has(key)
+              const edited = editedIn(sec)
+              return (
+                <div key={key} className="rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(key)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
+                    style={{ background: 'var(--surface)' }}
+                    title={isCollapsed ? 'Expand' : 'Collapse'}
+                  >
+                    <svg
+                      width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                      strokeLinecap="round" strokeLinejoin="round"
+                      style={{ color: 'var(--muted)', transform: isCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 120ms' }}
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--foreground)' }}>
+                      {sec || 'General'}
+                    </span>
+                    <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{fieldsIn(sec).length}</span>
+                    {/* A collapsed group must still say whether anything inside it was touched. */}
+                    {edited > 0 && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full"
+                        style={{ background: 'var(--accent-soft, rgba(124,58,237,0.14))', color: '#a78bfa' }}
+                      >
+                        {edited} set
+                      </span>
+                    )}
+                  </button>
+                  {!isCollapsed && (
+                    <div className="flex flex-col gap-3 p-3" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
+                      {fieldsIn(sec).map(renderField)}
+                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} />)}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
