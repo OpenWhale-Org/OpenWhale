@@ -235,18 +235,20 @@ Before exposing the gateway to a network:
 
 ## Packages
 
+Grouped by role — `framework/` (engine, domain, compiler), `venues/` (exchange
+integrations), `apps/` (gateway, dashboard), `strategies/` (reference and
+private strategy plugins).
+
 | Package | Description |
 |---------|-------------|
-| [`@openwhaleorg/core`](./packages/core) | Domain-agnostic engine: credential materialization, adapter matrix, first-class Accounts, monitor contract/implementation/instance model, Strategy/Executor/Trigger, run-trace persistence, PnL attribution (order claims + fill/funding collector), Scripts, `definePlugin` + `@Ow*` decorators, CompiledLoader |
-| [`@openwhaleorg/exchange`](./packages/exchange) | Exchange domain package: kinds `exchange/perp` + `exchange/spot`, Perp/SpotAccount read views, shared trading executors, public market monitors (ticker/orderbook/volume/kline/funding-rates) with dashboard plots |
-| [`@openwhaleorg/ccxt-adapter`](./packages/ccxt-adapter) | Generic ccxt implementation of the exchange adapter interfaces + the data-driven venue roster |
-| [`@openwhaleorg/hyperliquid`](./packages/hyperliquid) / [`binance`](./packages/binance) / [`aster`](./packages/aster) | Venue plugins: credential types + adapter cells (+ venue-specialized accounts, Portfolio Margin support on Binance) |
-| [`@openwhaleorg/gateway`](./packages/gateway) | Resident backend: runtime singleton, auth, REST + SSE API, compiler service, plugin install — all secrets live here |
-| [`@openwhaleorg/dashboard`](./packages/dashboard) | Next.js frontend: instances (folders/boards), accounts (equity curves), monitor boards, executors, credentials, plugins, scripts, AI compiler |
-| [`@openwhaleorg/examples`](./packages/examples) | Reference strategies, venue-agnostic by construction: momentum breakout, z-score mean reversion, scheduled accumulation (DCA), an LLM analyst whose risk lives in code, and copy trading. Read them, copy them |
-| [`@openwhaleorg/compiler`](./packages/compiler) | AI strategy compiler: NL → analyze → codegen → L1–L4 validation ladder → human review → hot load |
-| `@openwhaleorg/assistant` | Personal assistant layer *(planned)* |
-| `@openwhaleorg/mcp-server` | Expose the strategy engine as an MCP server *(planned)* |
+| [`@openwhaleorg/core`](./packages/framework/core) | Domain-agnostic engine: credential materialization, adapter matrix, first-class Accounts, monitor contract/implementation/instance model, Strategy/Executor/Trigger, run-trace persistence, PnL attribution (order claims + fill/funding collector), Scripts, `definePlugin` + `@Ow*` decorators, CompiledLoader |
+| [`@openwhaleorg/exchange`](./packages/framework/exchange) | Exchange domain package: kinds `exchange/perp` + `exchange/spot`, Perp/SpotAccount read views, shared trading executors, public market monitors (ticker/orderbook/volume/kline/funding-rates) with dashboard plots |
+| [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | Generic ccxt implementation of the exchange adapter interfaces + the data-driven venue roster |
+| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | Venue plugins: credential types + adapter cells (+ venue-specialized accounts, Portfolio Margin support on Binance) |
+| [`@openwhaleorg/gateway`](./packages/apps/gateway) | Resident backend: runtime singleton, auth, REST + SSE API, compiler service, plugin install — all secrets live here |
+| [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js frontend: instances (folders/boards), accounts (equity curves), monitor boards, executors, credentials, plugins, scripts, AI compiler |
+| [`@openwhaleorg/examples`](./packages/strategies/examples) | Reference strategies, venue-agnostic by construction: momentum breakout, z-score mean reversion, scheduled accumulation (DCA), an LLM analyst whose risk lives in code, and copy trading. Read them, copy them |
+| [`@openwhaleorg/compiler`](./packages/framework/compiler) | AI strategy compiler: NL → analyze → codegen → L1–L4 validation ladder → human review → hot load |
 
 ---
 

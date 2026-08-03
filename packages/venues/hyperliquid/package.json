@@ -1,0 +1,49 @@
+{
+  "name": "@openwhaleorg/hyperliquid",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenWhale-Org/OpenWhale",
+    "directory": "packages/venues/hyperliquid"
+  },
+  "homepage": "https://github.com/OpenWhale-Org/OpenWhale#readme",
+  "bugs": {
+    "url": "https://github.com/OpenWhale-Org/OpenWhale/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "ccxt": "^4.4.87",
+    "nanoid": "^5.0.7",
+    "zod": "^4.4.1",
+    "@openwhaleorg/ccxt-adapter": "workspace:*",
+    "@openwhaleorg/exchange": "workspace:*"
+  },
+  "peerDependencies": {
+    "@openwhaleorg/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.2",
+    "vitest": "^1.6.0"
+  }
+}

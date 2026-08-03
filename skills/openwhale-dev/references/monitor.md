@@ -85,7 +85,7 @@ declare function fetchPriceSomehow(venue: string, symbol: string): Promise<numbe
 - `startSubscribe(key)` / `stopSubscribe(key)` — called by the runtime as strategy instances
   subscribe/unsubscribe. Manage your own connections per key; ALWAYS clean up in stop.
 - Long-lived streams: keep an `AbortController` per key, reconnect-with-backoff in a loop, and
-  dedupe replayed events (see `packages/hyperliquid/src/monitor.ts` for the canonical pattern).
+  dedupe replayed events (see `packages/venues/hyperliquid/src/monitor.ts` for the canonical pattern).
 - Keys are plain strings. When keySchema has multiple fields they are joined in field order with
   `:`. Keep keys clean — no credential/instance identifiers (hard rule 6).
 - Credential-less monitors get a **default instance auto-created and activated** on install.

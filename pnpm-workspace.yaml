@@ -1,5 +1,8 @@
 packages:
-  - 'packages/*'
-  # Local-only private packages follow the packages/private-* convention and
-  # never enter the workspace or the lockfile.
-  - '!packages/private-*'
+  # Packages are grouped by role: framework/ (engine + domain + compiler),
+  # venues/ (exchange integrations), apps/ (gateway + dashboard),
+  # strategies/ (reference and private strategy plugins).
+  - 'packages/*/*'
+  # Local-only private packages follow the private-* convention and never
+  # enter the workspace or the lockfile.
+  - '!packages/*/private-*'

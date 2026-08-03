@@ -15,74 +15,108 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
-  packages/assistant:
+  packages/apps/dashboard:
     dependencies:
+      '@openwhaleorg/compiler':
+        specifier: workspace:*
+        version: link:../../framework/compiler
       '@openwhaleorg/core':
         specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-
-  packages/aster:
-    dependencies:
-      '@openwhaleorg/ccxt-adapter':
-        specifier: workspace:*
-        version: link:../ccxt-adapter
-      '@openwhaleorg/exchange':
-        specifier: workspace:*
-        version: link:../exchange
+        version: link:../../framework/core
+      next:
+        specifier: 15.3.2
+        version: 15.3.2(@opentelemetry/api@1.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.6
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.6(react@19.2.6)
       zod:
         specifier: ^4.4.1
         version: 4.4.1
     devDependencies:
-      '@openwhaleorg/core':
-        specifier: workspace:*
-        version: link:../core
+      '@tailwindcss/postcss':
+        specifier: ^4.1.7
+        version: 4.3.0
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      prettier:
+        specifier: ^3.5.3
+        version: 3.8.3
+      prettier-plugin-tailwindcss:
+        specifier: ^0.6.12
+        version: 0.6.14(prettier@3.8.3)
+      tailwindcss:
+        specifier: ^4.1.7
+        version: 4.3.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
-  packages/binance:
+  packages/apps/gateway:
     dependencies:
+      '@openwhaleorg/aster':
+        specifier: workspace:*
+        version: link:../../venues/aster
+      '@openwhaleorg/binance':
+        specifier: workspace:*
+        version: link:../../venues/binance
       '@openwhaleorg/ccxt-adapter':
         specifier: workspace:*
-        version: link:../ccxt-adapter
+        version: link:../../venues/ccxt-adapter
+      '@openwhaleorg/compiler':
+        specifier: workspace:*
+        version: link:../../framework/compiler
+      '@openwhaleorg/core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@openwhaleorg/examples':
+        specifier: workspace:*
+        version: link:../../strategies/examples
       '@openwhaleorg/exchange':
         specifier: workspace:*
-        version: link:../exchange
+        version: link:../../framework/exchange
+      '@openwhaleorg/hyperliquid':
+        specifier: workspace:*
+        version: link:../../venues/hyperliquid
+      '@openwhaleorg/venues':
+        specifier: workspace:*
+        version: link:../../venues/roster
+      express:
+        specifier: ^4.21.0
+        version: 4.22.2
+      multer:
+        specifier: ^1.4.5-lts.1
+        version: 1.4.5-lts.2
       zod:
         specifier: ^4.4.1
         version: 4.4.1
     devDependencies:
-      '@openwhaleorg/core':
-        specifier: workspace:*
-        version: link:../core
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/multer':
+        specifier: ^1.4.12
+        version: 1.4.13
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
-      vitest:
-        specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
-  packages/ccxt-adapter:
-    dependencies:
-      ccxt:
-        specifier: ^4.4.87
-        version: 4.5.52
-    devDependencies:
-      '@openwhaleorg/core':
-        specifier: workspace:*
-        version: link:../core
-      '@openwhaleorg/exchange':
-        specifier: workspace:*
-        version: link:../exchange
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-
-  packages/compiler:
+  packages/framework/compiler:
     dependencies:
       ai:
         specifier: ^6.0.174
@@ -107,7 +141,7 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
-  packages/core:
+  packages/framework/core:
     dependencies:
       '@ai-sdk/anthropic':
         specifier: ^3.0.74
@@ -165,67 +199,37 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
-  packages/dashboard:
+  packages/framework/exchange:
     dependencies:
-      '@openwhaleorg/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      '@openwhaleorg/core':
-        specifier: workspace:*
-        version: link:../core
-      next:
-        specifier: 15.3.2
-        version: 15.3.2(@opentelemetry/api@1.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.6
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.6(react@19.2.6)
       zod:
         specifier: ^4.4.1
         version: 4.4.1
     devDependencies:
-      '@tailwindcss/postcss':
-        specifier: ^4.1.7
-        version: 4.3.0
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.14)
-      prettier:
-        specifier: ^3.5.3
-        version: 3.8.3
-      prettier-plugin-tailwindcss:
-        specifier: ^0.6.12
-        version: 0.6.14(prettier@3.8.3)
-      tailwindcss:
-        specifier: ^4.1.7
-        version: 4.3.0
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  packages/examples:
-    dependencies:
       '@openwhaleorg/core':
         specifier: workspace:*
         version: link:../core
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
+
+  packages/strategies/examples:
+    dependencies:
+      '@openwhaleorg/core':
+        specifier: workspace:*
+        version: link:../../framework/core
       '@openwhaleorg/exchange':
         specifier: workspace:*
-        version: link:../exchange
+        version: link:../../framework/exchange
       zod:
         specifier: ^4.4.1
         version: 4.4.1
     devDependencies:
       '@openwhaleorg/hyperliquid':
         specifier: workspace:*
-        version: link:../hyperliquid
+        version: link:../../venues/hyperliquid
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
@@ -236,15 +240,40 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
-  packages/exchange:
+  packages/venues/aster:
     dependencies:
+      '@openwhaleorg/ccxt-adapter':
+        specifier: workspace:*
+        version: link:../ccxt-adapter
+      '@openwhaleorg/exchange':
+        specifier: workspace:*
+        version: link:../../framework/exchange
       zod:
         specifier: ^4.4.1
         version: 4.4.1
     devDependencies:
       '@openwhaleorg/core':
         specifier: workspace:*
-        version: link:../core
+        version: link:../../framework/core
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+
+  packages/venues/binance:
+    dependencies:
+      '@openwhaleorg/ccxt-adapter':
+        specifier: workspace:*
+        version: link:../ccxt-adapter
+      '@openwhaleorg/exchange':
+        specifier: workspace:*
+        version: link:../../framework/exchange
+      zod:
+        specifier: ^4.4.1
+        version: 4.4.1
+    devDependencies:
+      '@openwhaleorg/core':
+        specifier: workspace:*
+        version: link:../../framework/core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
@@ -252,72 +281,33 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
-  packages/gateway:
+  packages/venues/ccxt-adapter:
     dependencies:
-      '@openwhaleorg/aster':
-        specifier: workspace:*
-        version: link:../aster
-      '@openwhaleorg/binance':
-        specifier: workspace:*
-        version: link:../binance
-      '@openwhaleorg/ccxt-adapter':
-        specifier: workspace:*
-        version: link:../ccxt-adapter
-      '@openwhaleorg/compiler':
-        specifier: workspace:*
-        version: link:../compiler
+      ccxt:
+        specifier: ^4.4.87
+        version: 4.5.52
+    devDependencies:
       '@openwhaleorg/core':
         specifier: workspace:*
-        version: link:../core
-      '@openwhaleorg/examples':
-        specifier: workspace:*
-        version: link:../examples
+        version: link:../../framework/core
       '@openwhaleorg/exchange':
         specifier: workspace:*
-        version: link:../exchange
-      '@openwhaleorg/hyperliquid':
-        specifier: workspace:*
-        version: link:../hyperliquid
-      '@openwhaleorg/venues':
-        specifier: workspace:*
-        version: link:../venues
-      express:
-        specifier: ^4.21.0
-        version: 4.22.2
-      multer:
-        specifier: ^1.4.5-lts.1
-        version: 1.4.5-lts.2
-      zod:
-        specifier: ^4.4.1
-        version: 4.4.1
-    devDependencies:
-      '@types/express':
-        specifier: ^4.17.21
-        version: 4.17.25
-      '@types/multer':
-        specifier: ^1.4.12
-        version: 1.4.13
+        version: link:../../framework/exchange
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
-      tsx:
-        specifier: ^4.19.0
-        version: 4.21.0
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
 
-  packages/hyperliquid:
+  packages/venues/hyperliquid:
     dependencies:
       '@openwhaleorg/ccxt-adapter':
         specifier: workspace:*
         version: link:../ccxt-adapter
       '@openwhaleorg/core':
         specifier: workspace:*
-        version: link:../core
+        version: link:../../framework/core
       '@openwhaleorg/exchange':
         specifier: workspace:*
-        version: link:../exchange
+        version: link:../../framework/exchange
       ccxt:
         specifier: ^4.4.87
         version: 4.5.52
@@ -338,27 +328,14 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
-  packages/mcp-server:
-    dependencies:
-      '@openwhaleorg/assistant':
-        specifier: workspace:*
-        version: link:../assistant
-      '@openwhaleorg/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-
-  packages/venues:
+  packages/venues/roster:
     dependencies:
       '@openwhaleorg/ccxt-adapter':
         specifier: workspace:*
         version: link:../ccxt-adapter
       '@openwhaleorg/exchange':
         specifier: workspace:*
-        version: link:../exchange
+        version: link:../../framework/exchange
       ccxt:
         specifier: ^4.4.87
         version: 4.5.52
@@ -368,7 +345,7 @@ importers:
     devDependencies:
       '@openwhaleorg/core':
         specifier: workspace:*
-        version: link:../core
+        version: link:../../framework/core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39

@@ -52,7 +52,7 @@ the credential schema — never in plugin config.
 ## Adding a plain ccxt exchange — use the roster, not a new package
 
 If the venue is on ccxt and needs no custom behaviour, do NOT write a plugin: add one entry to
-`packages/venues/src/venues.ts`. `defineCcxtVenue` lowers the description into exactly the manifest
+`packages/venues/roster/src/venues.ts`. `defineCcxtVenue` lowers the description into exactly the manifest
 below, and the gateway already loads the whole roster.
 
 ```ts
