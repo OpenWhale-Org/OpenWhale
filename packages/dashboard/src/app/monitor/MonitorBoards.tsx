@@ -472,6 +472,7 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
                 <SeriesChart
                   series={series[p.id] ?? []}
                   height={isExpanded ? 380 : 230}
+                  {...(p.kind === 'scatter' ? { mode: 'scatter' as const } : {})}
                   {...(p.unit !== undefined ? { unit: p.unit } : {})}
                   {...(p.xKind !== undefined ? { xKind: p.xKind } : {})}
                   {...(p.xUnit !== undefined ? { xUnit: p.xUnit } : {})}

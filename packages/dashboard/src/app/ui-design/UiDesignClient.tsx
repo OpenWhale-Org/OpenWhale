@@ -344,6 +344,29 @@ export function UiDesignClient() {
             The viewBox width must follow the container (ResizeObserver) so text renders 1:1.
           </p>
         </div>
+
+        <div className="card p-4 mt-3">
+          <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+            Scatter — a relationship, not a sequence
+          </span>
+          <svg viewBox="0 0 560 120" className="w-full mt-2" style={{ display: 'block', height: 120 }}>
+            <rect x="0" y="0" width="500" height="104" fill="var(--surface-inset)" rx="4" />
+            {[26, 52, 78].map(y => <line key={y} x1="8" x2="492" y1={y} y2={y} stroke="var(--border)" strokeWidth="1" />)}
+            <path d="M20,62 L250,50 L480,28 L480,48 L250,58 L20,82 Z" fill="var(--accent)" opacity="0.13" />
+            <path d="M20,72 L480,38" fill="none" stroke="var(--accent)" strokeWidth="2" strokeDasharray="6 4" opacity="0.9" />
+            {[[40, 80], [78, 66], [112, 88], [150, 60], [186, 74], [222, 52], [258, 66], [292, 44], [330, 58], [366, 36], [400, 50], [438, 30], [468, 44]].map(([cx, cy]) => (
+              <circle key={`${cx}`} cx={cx} cy={cy} r="4" fill="var(--accent)" fillOpacity="0.62" stroke="var(--surface)" strokeWidth="1.5" />
+            ))}
+            <text x="506" y="55" fontSize="10" fill="var(--muted)">ms</text>
+          </svg>
+          <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+            When x is a measured quantity rather than time, points are never connected — a line through a cloud invents an order the data does not have.
+            The form is <Code>kind: &apos;scatter&apos;</Code>: 8px dots at 62% fill with a surface ring so overlaps stay countable,
+            a dashed 2px least-squares trend, and its <b style={{ color: 'var(--foreground-soft)' }}>95% confidence band</b> as a 13% fill —
+            the band is the honesty layer, since a bare trend line always looks certain. The legend carries <Code>R²</Code>, the slope and <Code>n</Code>;
+            hover targets the nearest point within 24px rather than a shared x.
+          </p>
+        </div>
       </Section>
 
       {/* ── Overlays ── */}

@@ -59,6 +59,12 @@ function formatTime(ts: number, spanMs: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** Two-sided 95% t critical values by degrees of freedom; ≥30 df → the normal 1.96. */
+const T95 = [12.71, 4.30, 3.18, 2.78, 2.57, 2.45, 2.36, 2.31, 2.26, 2.23,
+  2.20, 2.18, 2.16, 2.14, 2.13, 2.12, 2.11, 2.10, 2.09, 2.09,
+  2.08, 2.07, 2.07, 2.06, 2.06, 2.06, 2.05, 2.05, 2.05, 2.04]
+const tCrit = (df: number): number => (df < 1 ? T95[0]! : df <= 30 ? T95[df - 1]! : 1.96)
+
 let clipCounter = 0
 
 /**
@@ -70,14 +76,17 @@ let clipCounter = 0
  * rescales to what the zoomed window shows. Renders at the container's
  * native pixel width so SVG text keeps its true point size.
  */
-export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 }: {
+export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220, mode = 'line' }: {
   series: ChartSeries[]
   unit?: string
   xKind?: 'time' | 'value'
   xUnit?: string
   height?: number
+  /** 'scatter' = point cloud + OLS trend with its 95% confidence band; connecting a cloud would invent order. */
+  mode?: 'line' | 'scatter'
 }) {
   const [hoverX, setHoverX] = useState<number | null>(null)
+  const [hoverY, setHoverY] = useState<number | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [width, setWidth] = useState(640)
   const [view, setView] = useState<[number, number] | null>(null)   // zoomed x-domain
@@ -209,8 +218,60 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, hidden])
 
+  /**
+   * Least-squares trend per series over the VISIBLE points, with the 95%
+   * confidence band of the mean response — the band answers "how firmly does
+   * this cloud pin the line down", which a bare trend line silently overstates.
+   * Fewer than 3 points, or no spread in x, means no defensible fit at all.
+   */
+  const fits = useMemo(() => {
+    if (mode !== 'scatter' || !geom) return []
+    return visible.map((s) => {
+      const pts = (s.points ?? []).filter(p => geom.inWindow(p.x) && isFinite(p.x) && isFinite(p.y))
+      const n = pts.length
+      if (n < 3) return null
+      const mx = pts.reduce((a, p) => a + p.x, 0) / n
+      const my = pts.reduce((a, p) => a + p.y, 0) / n
+      let sxx = 0, sxy = 0, syy = 0
+      for (const p of pts) { const dx = p.x - mx, dy = p.y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy }
+      if (sxx <= 0) return null
+      const slope = sxy / sxx
+      const intercept = my - slope * mx
+      const ssRes = pts.reduce((a, p) => { const r = p.y - (intercept + slope * p.x); return a + r * r }, 0)
+      const r2 = syy > 0 ? Math.max(0, 1 - ssRes / syy) : 0
+      const se = Math.sqrt(ssRes / Math.max(1, n - 2))
+      const t = tCrit(n - 2)
+      const fit = (x: number) => intercept + slope * x
+      const half = (x: number) => t * se * Math.sqrt(1 / n + ((x - mx) ** 2) / sxx)
+      const STEPS = 48
+      const xs = Array.from({ length: STEPS + 1 }, (_, i) => geom.x0 + (i / STEPS) * (geom.x1 - geom.x0))
+      const linePath = xs.map((x, i) => `${i === 0 ? 'M' : 'L'}${geom.px(x).toFixed(1)},${geom.py(fit(x)).toFixed(1)}`).join(' ')
+      const upper = xs.map((x, i) => `${i === 0 ? 'M' : 'L'}${geom.px(x).toFixed(1)},${geom.py(fit(x) + half(x)).toFixed(1)}`).join(' ')
+      const lower = [...xs].reverse().map(x => `L${geom.px(x).toFixed(1)},${geom.py(fit(x) - half(x)).toFixed(1)}`).join(' ')
+      return { slope, r2, n, linePath, bandPath: `${upper} ${lower} Z` }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, hidden, geom, mode])
+
+  /** Scatter hover is per-POINT (no shared x to cross): nearest mark within 24px. */
+  const hoverPt = useMemo(() => {
+    if (mode !== 'scatter' || !geom || hoverX === null || hoverY === null || drag) return null
+    let best: { label: string; x: number; y: number; color: string; dist: number } | null = null
+    for (const s of visible) {
+      for (const p of s.points ?? []) {
+        if (!geom.inWindow(p.x)) continue
+        const d = Math.hypot(geom.px(p.x) - hoverX, geom.py(p.y) - hoverY)
+        if (d <= 24 && (!best || d < best.dist)) {
+          best = { label: s.label, x: p.x, y: p.y, color: SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]!, dist: d }
+        }
+      }
+    }
+    return best
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, hidden, geom, mode, hoverX, hoverY, drag])
+
   let hoveredX: number | null = null
-  if (geom && hoverX !== null && drag === null && refXs.length > 0) {
+  if (mode === 'line' && geom && hoverX !== null && drag === null && refXs.length > 0) {
     const inWin = refXs.filter(geom.inWindow)
     const pool = inWin.length > 0 ? inWin : refXs
     hoveredX = pool.reduce((best, x) => Math.abs(geom.px(x) - hoverX) < Math.abs(geom.px(best) - hoverX) ? x : best, pool[0]!)
@@ -225,6 +286,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
     const x = localX(e)
     if (x === null) return
     setHoverX(x)
+    if (svgRef.current) setHoverY(e.clientY - svgRef.current.getBoundingClientRect().top)
     if (drag) setDrag({ from: drag.from, to: x })
   }
 
@@ -258,6 +320,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
         {lineSeries.length >= 2 && lineSeries.map((s) => {
           const i = series.indexOf(s)
           const off = hidden.has(s.label)
+          const f = mode === 'scatter' ? fits[visible.indexOf(s)] : null
           return (
             <button
               key={s.label}
@@ -268,6 +331,11 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
             >
               <span style={{ width: 14, height: 3, borderRadius: 2, background: off ? 'var(--border)' : SERIES_COLORS[i % SERIES_COLORS.length], display: 'inline-block' }} />
               {s.label}
+              {f && !off && (
+                <span style={{ color: 'var(--border)' }}>
+                  · R² {f.r2.toFixed(2)} · {f.slope >= 0 ? '+' : ''}{f.slope.toFixed(f.slope !== 0 && Math.abs(f.slope) < 1 ? 2 : 0)}{unit ? ` ${unit}` : ''}{xUnit ? `/${xUnit}` : ''} · n {f.n}
+                </span>
+              )}
             </button>
           )
         })}
@@ -296,7 +364,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
             onMouseMove={onMove}
             onMouseDown={onDown}
             onMouseUp={onUp}
-            onMouseLeave={() => { setHoverX(null); setDrag(null) }}
+            onMouseLeave={() => { setHoverX(null); setHoverY(null); setDrag(null) }}
             onDoubleClick={() => setView(null)}
           >
             <defs>
@@ -346,10 +414,40 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
                 )
               }))}
 
-              {/* Lines */}
-              {visible.map((s, vi) => (s.points?.length ?? 0) > 0 && (
-                <path key={s.label} d={geom.paths[vi]!} fill="none" stroke={SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-              ))}
+              {/* Series: a connected line, or a scatter cloud under its fitted trend */}
+              {mode === 'scatter' ? (
+                <>
+                  {visible.map((s, vi) => {
+                    const f = fits[vi]
+                    if (!f) return null
+                    const color = SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]
+                    return (
+                      <g key={`fit-${s.label}`}>
+                        <path d={f.bandPath} fill={color} opacity="0.13" />
+                        <path d={f.linePath} fill="none" stroke={color} strokeWidth="2" strokeDasharray="6 4" opacity="0.9" />
+                      </g>
+                    )
+                  })}
+                  {visible.map((s) => {
+                    const color = SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]
+                    return (s.points ?? []).filter(p => geom.inWindow(p.x)).map((p, i) => (
+                      <circle
+                        key={`${s.label}-${i}`}
+                        cx={geom.px(p.x)} cy={geom.py(p.y)} r="4"
+                        fill={color} fillOpacity="0.62"
+                        stroke="var(--surface)" strokeWidth="1.5"
+                      />
+                    ))
+                  })}
+                  {hoverPt && (
+                    <circle cx={geom.px(hoverPt.x)} cy={geom.py(hoverPt.y)} r="5.5" fill={hoverPt.color} stroke="var(--foreground)" strokeWidth="1.5" />
+                  )}
+                </>
+              ) : (
+                visible.map((s, vi) => (s.points?.length ?? 0) > 0 && (
+                  <path key={s.label} d={geom.paths[vi]!} fill="none" stroke={SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                ))
+              )}
             </g>
 
             {/* Drag selection */}
@@ -385,6 +483,28 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220 
               </g>
             )}
           </svg>
+
+          {hoverPt && geom && (
+            <div
+              className="absolute pointer-events-none px-3 py-2 rounded-md text-xs whitespace-nowrap shadow-lg"
+              style={{
+                left: `${Math.min(Math.max((geom.px(hoverPt.x) / W) * 100, 2), 98)}%`,
+                top: Math.max(4, geom.py(hoverPt.y) - 56),
+                transform: geom.px(hoverPt.x) > W * 0.65 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                zIndex: 10,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span style={{ width: 10, height: 10, borderRadius: 9999, background: hoverPt.color, display: 'inline-block' }} />
+                <span style={{ color: 'var(--muted)' }}>{hoverPt.label}</span>
+              </div>
+              <div className="font-mono mt-0.5">{formatValue(hoverPt.y, unit, geom.tickDecimals)}</div>
+              <div style={{ color: 'var(--muted)' }}>{formatX(hoverPt.x)}</div>
+            </div>
+          )}
 
           {hoveredX !== null && (
             <div

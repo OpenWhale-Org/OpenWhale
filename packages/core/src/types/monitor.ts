@@ -98,7 +98,7 @@ interface PlotDefBase<TData> {
    * 'table' renders each series as a ROW (label = row name, points[i].y =
    * the i-th cell) under the headers declared in `columns`.
    */
-  kind: 'line' | 'bar' | 'candles' | 'table'
+  kind: 'line' | 'bar' | 'candles' | 'table' | 'scatter'
   /** Column headers for kind 'table' — cell i of a row is points[i].y. */
   columns?: string[]
   /** y-axis unit hint shown on labels ('$', 'bps', '%', …). */
@@ -156,7 +156,7 @@ export type MonitorPlotDef<TData = Record<string, unknown>> = SinglePlotDef<TDat
 export interface MonitorPlotInfo {
   id: string
   title: string
-  kind: 'line' | 'bar' | 'candles' | 'table'
+  kind: 'line' | 'bar' | 'candles' | 'table' | 'scatter'
   columns?: string[]
   unit?: string
   xKind?: 'time' | 'value'
