@@ -19,6 +19,7 @@ import { ensureCompiler, getCompilerService } from './compiler.js'
 import { installFromNpm, installFromFile, uninstallPlugin, listInstalledPlugins } from './plugins.js'
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
 import { sseHandler } from './events.js'
+import { activityMeter } from './activity.js'
 import { getAuth } from './authService.js'
 import { SESSION_COOKIE, readCookie, setSessionCookie, clearSessionCookie } from './auth.js'
 import type { AuthedRequest } from './auth.js'
@@ -276,6 +277,44 @@ export function buildRouter(): Router {
   router.get('/api/instances', h(async (_req, res) => {
     const runtime = await ensureStarted()
     res.json(await runtime.listInstanceViews())
+  }))
+
+  /**
+   * Headline numbers for the instances page. One request instead of the
+   * N+1 the dashboard would otherwise make (every instance's runs, then its
+   * PnL) — and the only place that knows how long the event meter has
+   * actually been watching.
+   */
+  router.get('/api/stats', h(async (_req, res) => {
+    const runtime = await ensureStarted()
+    activityMeter.sync(runtime)
+    const since = Date.now() - 24 * 3_600_000
+
+    const [views, runs, pnl] = await Promise.all([
+      runtime.listInstanceViews(),
+      runtime.countRuns(since),
+      runtime.allInstancePnl().catch(() => ({} as Record<string, { net: number; realized: number; fees: number; funding: number; unrealized: number | null }>)),
+    ])
+
+    const totals = Object.values(pnl).reduce(
+      (acc, p) => ({
+        net: acc.net + p.net,
+        realized: acc.realized + p.realized,
+        fees: acc.fees + p.fees,
+        funding: acc.funding + p.funding,
+        // null anywhere means "the venue could not be reached" — do not add it
+        // to a number the user would read as complete
+        unrealized: p.unrealized === null || acc.unrealized === null ? null : acc.unrealized + p.unrealized,
+      }),
+      { net: 0, realized: 0, fees: 0, funding: 0, unrealized: 0 as number | null },
+    )
+
+    res.json({
+      instances: { total: views.length, running: views.filter(v => v.active).length },
+      runs: { ...runs, windowHours: 24 },
+      events: activityMeter.read(24),
+      pnl: totals,
+    })
   }))
 
   router.get('/api/instances/:id/runs', h(async (req, res) => {

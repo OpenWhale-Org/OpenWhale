@@ -23,7 +23,7 @@ import type { MaterializedSlot } from '../executor/BaseExecutor.js'
 import type { RawCredentialData } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
-import { appendRunTrace, readRunTraces } from '../strategy/runStore.js'
+import { appendRunTrace, readRunTraces, countRunsSince } from '../strategy/runStore.js'
 import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
 import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
@@ -610,6 +610,15 @@ export class OpenWhaleRuntime implements IRuntime {
   /** Persisted run traces (newest first) — survive deactivation and restarts. */
   readInstanceRuns(instanceId: string, limit = 100): Promise<StrategyRunTrace[]> {
     return readRunTraces(this.dataDir, instanceId, limit)
+  }
+
+  /** Runs and instructions since `since`, summed across every instance. */
+  async countRuns(since: number): Promise<{ runs: number; instructions: number }> {
+    const per = await Promise.all(
+      (await this.listInstanceViews()).map(v => countRunsSince(this.dataDir, v.id, since)),
+    )
+    return per.reduce((acc, r) => ({ runs: acc.runs + r.runs, instructions: acc.instructions + r.instructions }),
+      { runs: 0, instructions: 0 })
   }
 
   // ── PnL attribution ─────────────────────────────────────────────────────────

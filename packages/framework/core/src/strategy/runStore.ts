@@ -55,3 +55,40 @@ export async function readRunTraces(dataDir: string, instanceId: string, limit =
   }
   return out
 }
+
+/**
+ * Runs and emitted instructions since `since`, for one instance.
+ *
+ * Counting only — the traces themselves are never materialised, because a
+ * single run carries its whole step list and a stats bar has no use for them.
+ * Only the day files that can contain `since` are opened.
+ */
+export async function countRunsSince(
+  dataDir: string,
+  instanceId: string,
+  since: number,
+): Promise<{ runs: number; instructions: number }> {
+  const dir = runsDir(dataDir, instanceId)
+  let files: string[]
+  try {
+    files = (await fs.promises.readdir(dir)).filter(f => f.endsWith('.jsonl'))
+  } catch {
+    return { runs: 0, instructions: 0 }
+  }
+  // File names are UTC dates; anything before `since`'s date cannot qualify.
+  const fromDay = new Date(since).toISOString().slice(0, 10)
+  const out = { runs: 0, instructions: 0 }
+  for (const f of files.filter(f => f.slice(0, 10) >= fromDay)) {
+    let text: string
+    try { text = await fs.promises.readFile(path.join(dir, f), 'utf8') } catch { continue }
+    for (const line of text.split('\n')) {
+      if (!line) continue
+      let run: StrategyRunTrace
+      try { run = JSON.parse(line) as StrategyRunTrace } catch { continue }
+      if (run.startedAt < since) continue
+      out.runs++
+      out.instructions += run.instructions ?? 0
+    }
+  }
+  return out
+}

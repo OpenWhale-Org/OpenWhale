@@ -6,6 +6,9 @@ import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
 import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ExecutionResult } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
+import { Modal, ModalMaximizeButton } from '@/components/Modal'
+import { StatsBar } from './StatsBar'
+import { StrategyBrowser } from './StrategyPicker'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -734,6 +737,7 @@ export function InstancesClient({ initialInstances }: Props) {
   const [actionError, setActionError] = useState('')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [pnl, setPnl] = useState<Record<string, PnlTotals>>({})
+  const [statsKey, setStatsKey] = useState(0)
 
   const loadPnl = useCallback(async () => {
     const res = await fetch('/api/pnl/summary')
@@ -751,6 +755,7 @@ export function InstancesClient({ initialInstances }: Props) {
     const res = await fetch('/api/instances')
     if (res.ok) setInstances(await res.json())
     void loadPnl()
+    setStatsKey(k => k + 1)
     setLoading(false)
   }, [loadPnl])
 
@@ -769,23 +774,28 @@ export function InstancesClient({ initialInstances }: Props) {
 
   return (
     <div>
-      <div className="flex justify-end gap-2 mb-4">
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="px-4 py-2 rounded-md text-sm transition-colors"
-          style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        >
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
-        <button
-          onClick={() => { setShowForm((v) => !v); setEditing(null) }}
-          className="px-4 py-2 rounded-md text-sm transition-colors"
-          style={{ background: showForm ? 'var(--surface)' : 'var(--accent)', color: '#fff', border: showForm ? '1px solid var(--border)' : 'none' }}
-        >
-          {showForm ? 'Cancel' : '+ New Instance'}
-        </button>
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Strategy Instances</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+            Activate and manage running strategy instances
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={refresh} disabled={loading} className="btn btn-secondary">
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          {/* The dialog covers the page, so this never needs to read "Cancel" —
+              cancelling belongs to the dialog that has focus. */}
+          <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn btn-primary">
+            + New Instance
+          </button>
+        </div>
       </div>
+
+      {/* Re-reads whenever an action changes the world, so the numbers agree
+          with the cards below instead of lagging a poll behind. */}
+      <StatsBar refreshKey={statsKey} />
 
       {actionError && (
         <p className="text-sm px-3 py-2 rounded-md mb-3" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
@@ -807,7 +817,7 @@ export function InstancesClient({ initialInstances }: Props) {
         />
       )}
 
-      {instances.length === 0 && !showForm ? (
+      {instances.length === 0 ? (
         <EmptyState onNew={() => setShowForm(true)} />
       ) : (
         <div className="flex flex-col gap-3 mt-4">
@@ -990,6 +1000,8 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
   const [tunableError, setTunableError] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // A new instance starts at the choice that determines everything else.
+  const [pickerOpen, setPickerOpen] = useState(!initial)
 
   useEffect(() => {
     void Promise.all([
@@ -1006,17 +1018,18 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
         // Edit mode: the strategy is fixed; prefill fields from the saved params
         const strat = s.find((x) => x.id === initial.strategyId)
         if (strat?.paramsFields) setFieldValues(fieldValuesFromParams(strat.paramsFields, initial.params))
-      } else if (s.length > 0) {
-        const first = s[0]!
-        setSelectedStrategy(first.id)
-        if (first.paramsFields) setFieldValues(defaultFieldValues(first.paramsFields))
       }
+      // No auto-select for a new instance: the picker opens on top and the
+      // choice is explicit. Silently pre-selecting whichever strategy sorted
+      // first is how you create an instance of something you never read.
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?.id])
 
-  // Reset field values when strategy changes
+  // Reset field values when strategy changes. Re-confirming the SAME strategy
+  // from the browser is not a change — it must not discard what you typed.
   function handleStrategyChange(id: string) {
+    if (id === selectedStrategy) return
     setSelectedStrategy(id)
     setSlotBindings({})
     const strat = strategies.find((s) => s.id === id)
@@ -1135,235 +1148,259 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
     return undefined
   })()
 
+  // Backing out of the browser returns to the form once a strategy is chosen;
+  // with nothing chosen there is no form to return to, so it closes.
+  const dismiss = () => {
+    if (pickerOpen && selectedStrategy) setPickerOpen(false)
+    else onCancel()
+  }
+
+  // One Modal across both steps: remounting the shell would restart the
+  // scroll lock and flash the panel between choosing and configuring.
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="rounded-lg p-5 mb-2 flex flex-col gap-4"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+    <Modal
+      onClose={dismiss}
+      maxWidth="58rem"
+      height="min(90vh, calc(100vh - 2rem))"
+      maximizable
+      persistKey="ow:instance-dialog-maximized"
     >
-      <h2 className="font-semibold text-base">{initial ? `Edit "${initial.name}"` : 'New Strategy Instance'}</h2>
-
-      {/* Strategy selector — fixed in edit mode */}
-      <FormField label="Strategy" required>
-        {initial ? (
-          <p className="text-sm font-mono px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
-            {initial.strategyId}
-          </p>
-        ) : strategies.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>No strategies registered.</p>
-        ) : (
-          <select
-            value={selectedStrategy}
-            onChange={(e) => handleStrategyChange(e.target.value)}
-            required
-            className="rounded-md px-3 py-2 text-sm w-full"
-            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-          >
-            {strategies.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name || s.id}{s.description ? ` — ${s.description}` : ''}
-              </option>
-            ))}
-          </select>
-        )}
-        {strategy && (
-          <div className="flex flex-wrap gap-2 mt-1">
-            {(strategy.monitorIds?.length ?? 0) > 0 && <Tag label="Monitors" values={strategy.monitorIds ?? []} color="var(--accent)" />}
-            {(strategy.executorIds?.length ?? 0) > 0 && <Tag label="Executors" values={strategy.executorIds ?? []} color="var(--warning)" />}
-          </div>
-        )}
-      </FormField>
-
-      {/* Name */}
-      <FormField label="Name" required>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          placeholder="e.g. Copy Trade BTC Leader"
-          className="rounded-md px-3 py-2 text-sm w-full"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        />
-      </FormField>
-
-      {/* Description */}
-      <FormField label="Description">
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Optional description"
-          className="rounded-md px-3 py-2 text-sm w-full"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        />
-      </FormField>
-
-      {/* Account slots — one labeled binding per strategy declaration, eligible ACCOUNTS only */}
-      {(strategy?.accountRequirements?.length ?? 0) > 0 && (
-        <FormField label="Accounts" hint="Each slot lists the accounts whose kind (and venue, when pinned) matches — create accounts on the Accounts page">
-          <div className="flex flex-col gap-2">
-            {strategy!.accountRequirements!.map((slot) => {
-              const eligible = accounts.filter(a =>
-                a.status === 'ready' &&
-                (slot.kind === undefined || a.kind === slot.kind) &&
-                (slot.type === undefined || a.type === slot.type),
-              )
-              // Credentials also bind: kind slots as the legacy fallback; kindless
-              // type-pinned slots (raw executor slots) bind credentials DIRECTLY —
-              // that is their only form, so match on the pinned type alone.
-              const typesForKind = new Set(
-                credentialTypes.filter(t => slot.kind && t.kinds.includes(slot.kind!)).map(t => t.type),
-              )
-              const legacyEligible = credentials.filter(c =>
-                (slot.kind ? typesForKind.has(c.type) : slot.type !== undefined) &&
-                (slot.type === undefined || c.type === slot.type),
-              )
-              return (
-                <div key={slot.label} className="flex items-center gap-3 px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
-                  <div className="flex flex-col min-w-32">
-                    <span className="text-sm font-mono">{slot.label}</span>
-                    <span className="text-xs" style={{ color: 'var(--muted)' }}>{slot.type ?? slot.kind}</span>
-                  </div>
-                  <select
-                    value={slotBindings[slot.label] ?? ''}
-                    onChange={(e) => setSlotBindings((prev) => ({ ...prev, [slot.label]: e.target.value }))}
-                    required={!slot.optional}
-                    className="flex-1 rounded-md px-3 py-2 text-sm"
-                    style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-                  >
-                    <option value="">
-                      {slot.optional
-                        ? 'not bound (optional)'
-                        : eligible.length === 0 && legacyEligible.length === 0
-                          ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
-                          : 'choose account…'}
-                    </option>
-                    {eligible.length > 0 && (
-                      <optgroup label="Accounts">
-                        {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.type ?? a.kind})</option>)}
-                      </optgroup>
-                    )}
-                    {legacyEligible.length > 0 && (
-                      <optgroup label={slot.kind ? 'Credentials (legacy direct binding)' : 'Credentials'}>
-                        {legacyEligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
-                      </optgroup>
-                    )}
-                  </select>
-                </div>
-              )
-            })}
-          </div>
-        </FormField>
-      )}
-
-      {/* LLM slots — model/credential overrides per declared label */}
-      {(strategy?.llmRequirements?.length ?? 0) > 0 && (
-        <FormField label="LLM Slots" hint="Override each slot's model or pin a credential; empty fields use the strategy's declared defaults">
-          <div className="flex flex-col gap-2">
-            {strategy!.llmRequirements!.map((slot) => {
-              const binding = llmBindings[slot.label] ?? {}
-              const provider = (binding.model?.trim() || slot.model).split(':')[0] ?? ''
-              const matching = credentials.filter((c) => c.type === provider)
-              return (
-                <div key={slot.label} className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
-                  <span className="text-xs font-mono w-24">{slot.label}</span>
-                  <input
-                    value={binding.model ?? ''}
-                    onChange={(e) => setLlmBindings((prev) => ({ ...prev, [slot.label]: { ...prev[slot.label], model: e.target.value } }))}
-                    placeholder={slot.model}
-                    className="rounded-md px-2 py-1.5 text-xs font-mono flex-1 min-w-48"
-                    style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-                  />
-                  <select
-                    value={binding.credentialName ?? ''}
-                    onChange={(e) => setLlmBindings((prev) => ({ ...prev, [slot.label]: { ...prev[slot.label], credentialName: e.target.value } }))}
-                    className="rounded-md px-2 py-1.5 text-xs"
-                    style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-                  >
-                    <option value="">{matching.length > 0 ? 'auto credential' : `no "${provider}" credential`}</option>
-                    {matching.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                  </select>
-                </div>
-              )
-            })}
-          </div>
-        </FormField>
-      )}
-
-      {/* Params — generic field renderer if paramsFields present, JSON editor otherwise */}
-      {strategy?.paramsFields ? (
-        <ParamFieldsForm
-          fields={strategy.paramsFields}
-          values={fieldValues}
-          onChange={setFieldValues}
-          strategyId={strategy.id}
-          venueContext={boundVenue}
-          illustrations={strategy.paramsIllustrations}
+      {pickerOpen ? (
+        <StrategyBrowser
+          strategies={strategies}
+          selectedId={selectedStrategy}
+          onPick={(id) => { handleStrategyChange(id); setPickerOpen(false) }}
+          onCancel={dismiss}
+          cancelLabel={selectedStrategy ? '← Back' : 'Cancel'}
         />
       ) : (
-        <>
-          <FormField label="Base Params (JSON)" hint="Required params defined in baseParamsSchema" error={baseError}>
-            <JsonEditor
-              value={baseParams}
-              onChange={(v) => { setBaseParams(v); validateJson(v, setBaseError) }}
-              placeholder='{ "symbol": "BTC" }'
-              hasError={!!baseError}
-            />
-          </FormField>
-          <FormField label="Tunable Params (JSON)" hint="Optional — Zod defaults apply for missing fields" error={tunableError}>
-            <JsonEditor
-              value={tunableParams}
-              onChange={(v) => { setTunableParams(v); validateJson(v, setTunableError) }}
-              placeholder='{ "threshold": 100000 }'
-              hasError={!!tunableError}
-            />
-          </FormField>
-        </>
-      )}
-
-      {/* Enabled toggle — create only; edit saves a stopped instance, resume via Activate */}
-      {!initial && (
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setEnabled((v) => !v)}
-            className="relative w-10 h-5 rounded-full transition-colors"
-            style={{ background: enabled ? 'var(--accent)' : 'var(--border)' }}
-            aria-label="Toggle enabled"
-          >
-            <span
-              className="absolute top-0.5 left-0 w-4 h-4 rounded-full bg-white transition-transform"
-              style={{ transform: enabled ? 'translateX(1.25rem)' : 'translateX(0.125rem)' }}
-            />
-          </button>
-          <span className="text-sm">{enabled ? 'Enabled' : 'Disabled'}</span>
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+        {/* Which strategy this configures stays pinned above the scroll — in a
+            forty-parameter form it is the one fact you must not lose track of. */}
+        <div className="flex items-start gap-3 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">
+              {initial ? `Edit "${initial.name}"` : 'Configure the instance'}
+            </div>
+            <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>
+              {!initial && 'Step 2 of 2 · '}
+              {strategy
+                ? <>{strategy.name || strategy.id} <span className="mono">{strategy.id}</span></>
+                : initial
+                  ? <span className="mono">{initial.strategyId}</span>
+                  : 'No strategy chosen'}
+            </div>
+          </div>
+          <ModalMaximizeButton />
         </div>
-      )}
 
-      {submitError && (
-        <p className="text-sm px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
-          {submitError}
-        </p>
-      )}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+          {!initial && strategies.length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>No strategies registered.</p>
+          )}
+          {strategy && ((strategy.monitorIds?.length ?? 0) > 0 || (strategy.executorIds?.length ?? 0) > 0) && (
+            <div className="flex flex-wrap gap-2">
+              {(strategy.monitorIds?.length ?? 0) > 0 && <Tag label="Monitors" values={strategy.monitorIds ?? []} color="var(--accent)" />}
+              {(strategy.executorIds?.length ?? 0) > 0 && <Tag label="Executors" values={strategy.executorIds ?? []} color="var(--warning)" />}
+            </div>
+          )}
 
-      <div className="flex justify-end gap-2 pt-1">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-2 rounded-md text-sm"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={submitting || (!initial && strategies.length === 0)}
-          className="px-4 py-2 rounded-md text-sm"
-          style={{ background: 'var(--accent)', color: '#fff', opacity: submitting ? 0.6 : 1 }}
-        >
-          {initial ? (submitting ? 'Saving…' : 'Save Changes') : (submitting ? 'Activating…' : 'Activate')}
-        </button>
-      </div>
-    </form>
+          {/* Name */}
+          <FormField label="Name" required>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              placeholder="e.g. Copy Trade BTC Leader"
+              className="rounded-md px-3 py-2 text-sm w-full"
+              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            />
+          </FormField>
+
+          {/* Description */}
+          <FormField label="Description">
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional description"
+              className="rounded-md px-3 py-2 text-sm w-full"
+              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            />
+          </FormField>
+
+          {/* Account slots — one labeled binding per strategy declaration, eligible ACCOUNTS only */}
+          {(strategy?.accountRequirements?.length ?? 0) > 0 && (
+            <FormField label="Accounts" hint="Each slot lists the accounts whose kind (and venue, when pinned) matches — create accounts on the Accounts page">
+              <div className="flex flex-col gap-2">
+                {strategy!.accountRequirements!.map((slot) => {
+                  const eligible = accounts.filter(a =>
+                    a.status === 'ready' &&
+                    (slot.kind === undefined || a.kind === slot.kind) &&
+                    (slot.type === undefined || a.type === slot.type),
+                  )
+                  // Credentials also bind: kind slots as the legacy fallback; kindless
+                  // type-pinned slots (raw executor slots) bind credentials DIRECTLY —
+                  // that is their only form, so match on the pinned type alone.
+                  const typesForKind = new Set(
+                    credentialTypes.filter(t => slot.kind && t.kinds.includes(slot.kind!)).map(t => t.type),
+                  )
+                  const legacyEligible = credentials.filter(c =>
+                    (slot.kind ? typesForKind.has(c.type) : slot.type !== undefined) &&
+                    (slot.type === undefined || c.type === slot.type),
+                  )
+                  return (
+                    <div key={slot.label} className="flex items-center gap-3 px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                      <div className="flex flex-col min-w-32">
+                        <span className="text-sm font-mono">{slot.label}</span>
+                        <span className="text-xs" style={{ color: 'var(--muted)' }}>{slot.type ?? slot.kind}</span>
+                      </div>
+                      <select
+                        value={slotBindings[slot.label] ?? ''}
+                        onChange={(e) => setSlotBindings((prev) => ({ ...prev, [slot.label]: e.target.value }))}
+                        required={!slot.optional}
+                        className="flex-1 rounded-md px-3 py-2 text-sm"
+                        style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+                      >
+                        <option value="">
+                          {slot.optional
+                            ? 'not bound (optional)'
+                            : eligible.length === 0 && legacyEligible.length === 0
+                              ? `no eligible account — create a ${slot.type ?? slot.kind} account first`
+                              : 'choose account…'}
+                        </option>
+                        {eligible.length > 0 && (
+                          <optgroup label="Accounts">
+                            {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.type ?? a.kind})</option>)}
+                          </optgroup>
+                        )}
+                        {legacyEligible.length > 0 && (
+                          <optgroup label={slot.kind ? 'Credentials (legacy direct binding)' : 'Credentials'}>
+                            {legacyEligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
+                          </optgroup>
+                        )}
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
+            </FormField>
+          )}
+
+          {/* LLM slots — model/credential overrides per declared label */}
+          {(strategy?.llmRequirements?.length ?? 0) > 0 && (
+            <FormField label="LLM Slots" hint="Override each slot's model or pin a credential; empty fields use the strategy's declared defaults">
+              <div className="flex flex-col gap-2">
+                {strategy!.llmRequirements!.map((slot) => {
+                  const binding = llmBindings[slot.label] ?? {}
+                  const provider = (binding.model?.trim() || slot.model).split(':')[0] ?? ''
+                  const matching = credentials.filter((c) => c.type === provider)
+                  return (
+                    <div key={slot.label} className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                      <span className="text-xs font-mono w-24">{slot.label}</span>
+                      <input
+                        value={binding.model ?? ''}
+                        onChange={(e) => setLlmBindings((prev) => ({ ...prev, [slot.label]: { ...prev[slot.label], model: e.target.value } }))}
+                        placeholder={slot.model}
+                        className="rounded-md px-2 py-1.5 text-xs font-mono flex-1 min-w-48"
+                        style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+                      />
+                      <select
+                        value={binding.credentialName ?? ''}
+                        onChange={(e) => setLlmBindings((prev) => ({ ...prev, [slot.label]: { ...prev[slot.label], credentialName: e.target.value } }))}
+                        className="rounded-md px-2 py-1.5 text-xs"
+                        style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+                      >
+                        <option value="">{matching.length > 0 ? 'auto credential' : `no "${provider}" credential`}</option>
+                        {matching.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
+            </FormField>
+          )}
+
+          {/* Params — generic field renderer if paramsFields present, JSON editor otherwise */}
+          {strategy?.paramsFields ? (
+            <ParamFieldsForm
+              fields={strategy.paramsFields}
+              values={fieldValues}
+              onChange={setFieldValues}
+              strategyId={strategy.id}
+              venueContext={boundVenue}
+              illustrations={strategy.paramsIllustrations}
+            />
+          ) : (
+            <>
+              <FormField label="Base Params (JSON)" hint="Required params defined in baseParamsSchema" error={baseError}>
+                <JsonEditor
+                  value={baseParams}
+                  onChange={(v) => { setBaseParams(v); validateJson(v, setBaseError) }}
+                  placeholder='{ "symbol": "BTC" }'
+                  hasError={!!baseError}
+                />
+              </FormField>
+              <FormField label="Tunable Params (JSON)" hint="Optional — Zod defaults apply for missing fields" error={tunableError}>
+                <JsonEditor
+                  value={tunableParams}
+                  onChange={(v) => { setTunableParams(v); validateJson(v, setTunableError) }}
+                  placeholder='{ "threshold": 100000 }'
+                  hasError={!!tunableError}
+                />
+              </FormField>
+            </>
+          )}
+
+          {/* Enabled toggle — create only; edit saves a stopped instance, resume via Activate */}
+          {!initial && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setEnabled((v) => !v)}
+                className="relative w-10 h-5 rounded-full transition-colors"
+                style={{ background: enabled ? 'var(--accent)' : 'var(--border)' }}
+                aria-label="Toggle enabled"
+              >
+                <span
+                  className="absolute top-0.5 left-0 w-4 h-4 rounded-full bg-white transition-transform"
+                  style={{ transform: enabled ? 'translateX(1.25rem)' : 'translateX(0.125rem)' }}
+                />
+              </button>
+              <span className="text-sm">{enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Outside the scroll area: a rejection you have to scroll to find is
+            a rejection you will retry blind. */}
+        {submitError && (
+          <p className="text-sm px-5 py-2 shrink-0" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
+            {submitError}
+          </p>
+        )}
+
+        <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+          {/* Wizard navigation sits where a wizard puts it: back on the left,
+              commit on the right. Going back keeps everything already filled in. */}
+          {!initial && strategies.length > 0 && (
+            <button type="button" onClick={() => setPickerOpen(true)} className="btn btn-secondary">
+              ← Back
+            </button>
+          )}
+          <div className="flex-1" />
+          <button type="button" onClick={onCancel} className="btn btn-secondary">Cancel</button>
+          <button
+            type="submit"
+            disabled={submitting || (!initial && (strategies.length === 0 || !selectedStrategy))}
+            className="btn btn-primary"
+            style={{ opacity: submitting ? 0.6 : 1 }}
+          >
+            {initial ? (submitting ? 'Saving…' : 'Save Changes') : (submitting ? 'Activating…' : 'Activate')}
+          </button>
+        </div>
+      </form>
+      )}
+    </Modal>
   )
 }
 
