@@ -23,6 +23,9 @@ export default definePlugin({
 })
 ```
 
+`definePlugin` covers everything above. Two things live only on the raw factory form (below):
+`scripts` and the deprecated `publicSessions` — passing either to `definePlugin` is a type error.
+
 Plugin archetypes:
 - **Venue plugin** (binance, hyperliquid): credentialTypes + adapters (+ specialized Account).
 - **Domain package** (exchange): mock adapter cells + generic Account/Monitor/Executor classes.
@@ -147,6 +150,47 @@ export class LendingPoolAccount { ... }
 
 Kind names are namespaced `'domain/subkind'` — validated at load. After this, any plugin can add
 `(kind='lending/pool', type='aave')` cells and any strategy can declare slots of that kind.
+
+## Scripts (operator utilities) — and the raw factory form
+
+A script is trusted plugin code run on click from the Dashboard's Scripts page: plan previews, fit
+inspectors, post-mortem reports. Deliberately NOT an instance — no lifecycle, no persistence, no
+triggers. Anything that must run on a schedule is a monitor or a strategy instead.
+
+```ts
+export const planPreviewScript: ScriptDefinition = {
+  id: 'plan-preview',                                   // qualified to '{plugin}/plan-preview'
+  name: 'Plan Preview',
+  description: 'Dry-run the next settlement plan without placing anything',
+  paramsSchema: z.object({ instanceId: z.string().meta({ displayName: 'Instance' }) }),
+  // Live dropdown choices, re-resolved on every listing — the param stays a plain string.
+  paramOptions: async (runtime) => ({
+    instanceId: (await (runtime as Rt).listInstanceViews()).map(v => ({ value: v.id, label: v.name })),
+  }),
+  run: async ({ params, runtime }) => ({ text: report, json: rows }),   // text = monospace report
+}
+```
+
+`scripts` is not a `definePlugin` field. A plugin that ships them exports a `PluginFactory` — a
+function of the plugin context returning the manifest shape directly:
+
+```ts
+export const myPlugin: PluginFactory<MyConfig> = (context): OpenWhalePlugin => ({
+  name: 'my-plugin',
+  version: '1.0.0',
+  credentialTypes: [ ... ],
+  scripts: [planPreviewScript],
+  // Raw form takes LOWERED entries, not classes: strategies are
+  // `{ definition, factory }`, executors `{ definition, instance }`,
+  // monitors go under `monitorImplementations` (the plain `monitors` field is legacy).
+  strategies: [{ definition: { id: 'my-strategy', /* … */ }, factory: () => new MyStrategy() }],
+})
+export default myPlugin
+```
+
+That is the whole trade-off: the raw form costs you the decorator-derived definitions (you hand-write
+each `definition`, including `accountRequirements`), and buys `scripts` plus access to `context`.
+Prefer `definePlugin` until you actually need one of those.
 
 ## Packaging
 

@@ -5,7 +5,7 @@ description: Write runnable OpenWhale components — strategies, monitors, execu
 
 # OpenWhale Plugin Development
 
-> **Calibrated against `@openwhaleorg/core` v0.1.1 (2026-08-03).** If the installed core is newer,
+> **Calibrated against `@openwhaleorg/core` v0.1.1 (re-verified 2026-08-06).** If the installed core is newer,
 > verify signatures against the framework source before trusting a template verbatim.
 
 OpenWhale is an AI-native trading framework: **Monitor → Trigger → Strategy → Queue → Executor**.
@@ -41,10 +41,15 @@ row. Generic implementations claim a column, specializations claim a cell, speci
   generic Account).
 - **Packaging / install / project scaffold** → `references/plugin.md` §Packaging.
 - **An operator utility for the Scripts page** → a `ScriptDefinition` in the plugin's `scripts: []`
-  array: `{ id, name, description, paramsSchema, paramOptions?(runtime), run({params, runtime}) }`.
-  `run` returns `{ text }` (monospace report) and may return `{ json }` alongside;
-  `paramOptions` resolves live dropdown choices (e.g. instance ids) at render time.
+  array — see `references/plugin.md` §Scripts. `definePlugin` does NOT accept `scripts`; a plugin
+  that ships them must use the raw `PluginFactory` form.
 - **Tests** → `references/testing.md`. Always write them; every template there runs offline.
+
+Working code to copy from: `packages/strategies/examples` (`@openwhaleorg/examples`) — five
+venue-agnostic strategies (momentum breakout, mean reversion, scheduled accumulation, an
+LLM-driven analyst, copy-trading) over a tested `indicators.ts`. Read the one closest to the ask
+before writing: they show the account-slot / `accountVenue` idiom, `store`-based idempotency, and
+the discipline that risk limits live in code even when a model produces the signal.
 
 ## Since v0.1.0 (quick delta index)
 
@@ -59,8 +64,9 @@ row. Generic implementations claim a column, specializations claim a cell, speci
 - **Dynamic monitor sources** — a live strategy may call
   `this.addMonitorSource(label, key, { trigger? })` to start collecting a key discovered at
   runtime. No-op (returns false) where unsupported. (`references/strategy.md`)
-- **`table` plot kind** — monitors may declare sortable table panels via
-  `{ kind: 'table', columns: [...] }`. (`references/monitor.md`)
+- **`table` and `scatter` plot kinds** — monitors may declare sortable table panels via
+  `{ kind: 'table', columns: [...] }`, and correlation panels (points + fitted trend line with a
+  confidence band) via `{ kind: 'scatter' }`. (`references/monitor.md`)
 
 Read the reference file for each component you touch BEFORE writing code. The templates there are
 verified against the framework source — copy their shape exactly.
