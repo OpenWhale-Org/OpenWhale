@@ -72,7 +72,13 @@ describe('venue roster', () => {
 
   it('a credentialed adapter carries key, passphrase and venue options through', () => {
     const okx = VENUE_SPECS.find(s => s.name === 'okx')!
-    expect(() => buildVenueAdapter(okx, 'exchange/perp', { apiKey: 'k', secret: 's', password: 'p', testnet: true })).not.toThrow()
+    const okxPerp = buildVenueAdapter(okx, 'exchange/perp', { apiKey: 'k', secret: 's', password: 'p', testnet: true })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const okxExchange = (okxPerp as any).exchange
+    expect(okxExchange.timeout).toBe(30_000)
+    expect(okxExchange.options.fetchMarkets.types).toEqual(['swap'])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((buildVenueAdapter(okx, 'exchange/spot') as any).exchange.options.fetchMarkets.types).toEqual(['spot'])
 
     const lighter = VENUE_SPECS.find(s => s.name === 'lighter')!
     expect(() => buildVenueAdapter(lighter, 'exchange/perp', { privateKey: '0xabc', accountIndex: 3, apiKeyIndex: 0 })).not.toThrow()
