@@ -62,6 +62,21 @@ export interface CcxtAdapterOptions {
 
 const MARKET_TYPES: MarketInfo['type'][] = ['spot', 'swap', 'future', 'option']
 
+/** CCXT does not normalize positionSide casing across venues. */
+export function positionSideForVenue(exchangeId: string, positionSide: 'long' | 'short'): string {
+  // OKX forwards this value directly to `posSide`, whose enum is lowercase.
+  // Binance's corresponding `positionSide` enum is uppercase.
+  return exchangeId === 'okx' ? positionSide : positionSide.toUpperCase()
+}
+
+/**
+ * OKX implements fetchPositionMode even though ccxt 4.5.x omits the matching
+ * `has.fetchPositionMode` capability flag. Trust the concrete OKX method.
+ */
+export function canFetchPositionMode(exchangeId: string, advertised: unknown): boolean {
+  return advertised === true || exchangeId === 'okx'
+}
+
 export class CcxtAdapter implements PerpExchangeAdapter {
   protected readonly exchange: ccxt.Exchange
 
@@ -313,9 +328,10 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   }
 
   async fetchPositionMode(symbol?: string): Promise<{ hedged: boolean }> {
-    if (!this.exchange.has['fetchPositionMode']) return { hedged: false }
+    if (!canFetchPositionMode(this.exchange.id, this.exchange.has['fetchPositionMode'])) return { hedged: false }
     const mode = await this.guard(() => this.exchange.fetchPositionMode(symbol))
-    return { hedged: (mode as { hedged?: boolean }).hedged === true }
+    const raw = mode as { hedged?: boolean; info?: { posMode?: string } }
+    return { hedged: raw.hedged === true || raw.info?.posMode === 'long_short_mode' }
   }
 
   async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
@@ -324,7 +340,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     if (params.timeInForce !== undefined) extra.timeInForce = params.timeInForce
     if (params.clientOrderId !== undefined) extra.clientOrderId = params.clientOrderId
     if (params.positionSide !== undefined && this.supportsPositionSide) {
-      extra.positionSide = params.positionSide.toUpperCase()
+      extra.positionSide = positionSideForVenue(this.exchange.id, params.positionSide)
       // In hedge mode the side already encodes open/close intent; Binance
       // rejects an explicit reduceOnly alongside positionSide.
       delete extra.reduceOnly
@@ -413,6 +429,19 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   async amountToPrecision(symbol: string, amount: number): Promise<number> {
     await this.guard(() => this.exchange.loadMarkets())
     return Number(this.exchange.amountToPrecision(symbol, amount))
+  }
+
+  async baseAmountToContracts(symbol: string, baseAmount: number): Promise<number> {
+    await this.guard(() => this.exchange.loadMarkets())
+    const market = this.exchange.market(symbol)
+    if (market?.inverse === true) {
+      throw new TerminalAdapterError(`${symbol}: base-unit sizing is unsupported for inverse contracts`)
+    }
+    const contractSize = Number(market?.contractSize)
+    if (!Number.isFinite(contractSize) || contractSize <= 0) {
+      throw new TerminalAdapterError(`${symbol}: invalid contract size ${contractSize}`)
+    }
+    return baseAmount / contractSize
   }
 
   async priceToPrecision(symbol: string, price: number): Promise<number> {

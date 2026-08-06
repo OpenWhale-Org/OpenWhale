@@ -27,6 +27,15 @@ export interface PerpExchangeAdapter extends SpotExchangeAdapter {
    */
   readonly supportsPositionSide?: boolean
 
+  /**
+   * Convert a strategy amount expressed in underlying/base units into the
+   * venue order amount. Derivative venues such as OKX accept contract counts
+   * (`baseAmount / contractSize`), while linear 1-unit venues return it
+   * unchanged. Every perpetual adapter must define this conversion so the
+   * executor never guesses a venue's amount semantics.
+   */
+  baseAmountToContracts(symbol: string, baseAmount: number): Promise<number>
+
   // ── Market data (perp-specific) ───────────────────────────────────────────
 
   /**

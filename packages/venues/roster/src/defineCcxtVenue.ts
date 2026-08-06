@@ -40,8 +40,8 @@ export interface CcxtVenueSpec {
   testnet?: boolean
   /** Extra credential fields (venue-specific identifiers). */
   extraFields?: z.ZodRawShape
-  /** Map credential data onto raw ccxt constructor options. */
-  ccxtOptions?: (data: RawCredentialData) => Record<string, unknown>
+  /** Map credential data and adapter kind onto raw ccxt constructor options. */
+  ccxtOptions?: (data: RawCredentialData, kind: 'exchange/perp' | 'exchange/spot') => Record<string, unknown>
 }
 
 const field = {
@@ -65,8 +65,13 @@ function credentialShape(spec: CcxtVenueSpec): z.ZodRawShape {
 }
 
 /** Credential data → adapter options for one of the venue's ccxt ids. */
-function toOptions(spec: CcxtVenueSpec, exchangeId: string, data: RawCredentialData): CcxtAdapterOptions {
-  const extra = spec.ccxtOptions?.(data)
+function toOptions(
+  spec: CcxtVenueSpec,
+  exchangeId: string,
+  kind: 'exchange/perp' | 'exchange/spot',
+  data: RawCredentialData,
+): CcxtAdapterOptions {
+  const extra = spec.ccxtOptions?.(data, kind)
   return {
     exchangeId,
     ...(data['apiKey'] ? { apiKey: String(data['apiKey']) } : {}),
@@ -96,7 +101,8 @@ export function buildVenueAdapter(
   const exchangeId = spec.markets[kind]
   if (!exchangeId) throw new Error(`${spec.displayName} does not serve kind "${kind}"`)
   // Keyless form = the public adapter: market data with no credential bound.
-  return new CcxtAdapter(data ? toOptions(spec, exchangeId, data) : { exchangeId })
+  const publicData: RawCredentialData = {}
+  return new CcxtAdapter(toOptions(spec, exchangeId, kind, data ?? publicData))
 }
 
 export function defineCcxtVenue(spec: CcxtVenueSpec) {

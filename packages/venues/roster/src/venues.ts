@@ -29,6 +29,13 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
     // OKX issues a passphrase alongside the key pair — all three are required
     credentialStyle: 'key-secret-passphrase',
     testnet: true,
+    // OKX's default ccxt catalogue loads spot, futures, swaps and options in
+    // parallel. Each OpenWhale adapter serves one kind, so loading unrelated
+    // catalogues only increases cold-start latency and timeout exposure.
+    ccxtOptions: (_data, kind) => ({
+      timeout: 30_000,
+      options: { fetchMarkets: { types: [kind === 'exchange/perp' ? 'swap' : 'spot'] } },
+    }),
   },
   {
     name: 'bitget',
