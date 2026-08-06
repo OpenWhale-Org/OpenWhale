@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import ccxt from 'ccxt'
 import type { OpenWhalePlugin, PluginContext } from '@openwhaleorg/core'
 import type { ZodObject, ZodRawShape } from 'zod'
+import { canFetchPositionMode, positionSideForVenue } from '@openwhaleorg/ccxt-adapter'
 import { VENUE_SPECS, venuePlugins, allVenuePlugins, buildVenueAdapter, venueKinds } from '../index.js'
 
 /** definePlugin returns a factory — lower it exactly the way the runtime does. */
@@ -24,6 +25,20 @@ function credentialSchema(name: string): ZodObject<ZodRawShape> {
  */
 
 describe('venue roster', () => {
+  it('formats hedge-mode positionSide using each venue API casing', () => {
+    expect(positionSideForVenue('okx', 'long')).toBe('long')
+    expect(positionSideForVenue('okx', 'short')).toBe('short')
+    expect(positionSideForVenue('binanceusdm', 'long')).toBe('LONG')
+    expect(positionSideForVenue('binanceusdm', 'short')).toBe('SHORT')
+  })
+
+  it('uses OKX position-mode support despite ccxt 4.5.x missing the capability flag', () => {
+    expect(canFetchPositionMode('okx', undefined)).toBe(true)
+    expect(canFetchPositionMode('okx', false)).toBe(true)
+    expect(canFetchPositionMode('binanceusdm', true)).toBe(true)
+    expect(canFetchPositionMode('unsupported', undefined)).toBe(false)
+  })
+
   it('declares a plugin per venue, all named and namespaced by the venue', () => {
     expect(allVenuePlugins.length).toBe(VENUE_SPECS.length)
     for (const spec of VENUE_SPECS) {
