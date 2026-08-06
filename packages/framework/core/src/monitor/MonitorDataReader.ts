@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { MonitorDataReader, MonitorRecord } from '../types/monitor.js'
 import { streamJsonlLines } from '../utils/jsonl.js'
+import { encodeMonitorKey, decodeMonitorKey } from '../utils/paths.js'
 
 /**
  * Parsed records, shared across readers of the same file.
@@ -76,7 +77,7 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
       const entries = await fs.promises.readdir(this.monitorDir)
       return entries
         .filter(f => f.endsWith('.jsonl'))
-        .map(f => f.slice(0, -6))  // strip '.jsonl'
+        .map(f => decodeMonitorKey(f.slice(0, -6)))  // strip '.jsonl', undo the path-safe encoding
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
       throw err
@@ -202,7 +203,7 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
   }
 
   private filePath(key: string): string {
-    return path.join(this.monitorDir, `${key}.jsonl`)
+    return path.join(this.monitorDir, `${encodeMonitorKey(key)}.jsonl`)
   }
 
   private async oversized(key: string): Promise<boolean> {

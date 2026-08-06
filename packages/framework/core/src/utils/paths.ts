@@ -26,8 +26,29 @@ export function getDataDir(custom?: string): string {
   return custom ?? path.join(homedir(), '.openwhale')
 }
 
+/**
+ * Monitor keys carry venue prefixes and ccxt symbols that are illegal in file
+ * names — `:` (Windows forbids it; macOS tolerates it) and `/` (every OS treats
+ * it as a directory separator, so `BTC/USDC` silently becomes a nested path).
+ * Encode both into filesystem-safe, reversible tokens before they hit disk.
+ *
+ *   `:`  ->  `__`     (double underscore; a single `_` appears in real keys
+ *                       like `kucoin-futures`, so the doubled form is unambiguous)
+ *   `/`  ->  `--`     (double dash; same reasoning against single `-`)
+ *
+ * Reversible and applied identically by writers and readers, so a key round-
+ * trips through the filesystem losslessly on every platform.
+ */
+export function encodeMonitorKey(key: string): string {
+  return key.replaceAll(':', '__').replaceAll('/', '--')
+}
+
+export function decodeMonitorKey(encoded: string): string {
+  return encoded.replaceAll('--', '/').replaceAll('__', ':')
+}
+
 export function getMonitorPath(dataDir: string, monitorName: string, key: string): string {
-  return path.join(dataDir, 'monitors', monitorName, `${key}.jsonl`)
+  return path.join(dataDir, 'monitors', monitorName, `${encodeMonitorKey(key)}.jsonl`)
 }
 
 export function getExecutionPath(dataDir: string, executorName: string): string {
