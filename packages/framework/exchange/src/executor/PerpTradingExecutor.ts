@@ -104,7 +104,8 @@ export class PerpTradingExecutor extends BaseExecutor<PerpInstruction> {
         this.logger.debug({ symbol, side, type, amount, price, reduceOnly, positionSide, timeInForce, slippage }, 'Placing order')
 
         const trading = this.trading
-        const preciseAmount = await trading.amountToPrecision(symbol, amount)
+        const venueAmount = await trading.baseAmountToContracts(symbol, amount)
+        const preciseAmount = await trading.amountToPrecision(symbol, venueAmount)
         if (preciseAmount <= 0) {
           this.logger.info({ symbol, amount, preciseAmount }, 'Amount rounds to zero at market precision — skipping')
           return { instruction, status: 'skipped', executedAt: new Date() }

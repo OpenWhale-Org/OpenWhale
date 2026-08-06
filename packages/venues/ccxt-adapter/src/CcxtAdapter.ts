@@ -431,6 +431,19 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     return Number(this.exchange.amountToPrecision(symbol, amount))
   }
 
+  async baseAmountToContracts(symbol: string, baseAmount: number): Promise<number> {
+    await this.guard(() => this.exchange.loadMarkets())
+    const market = this.exchange.market(symbol)
+    if (market?.inverse === true) {
+      throw new TerminalAdapterError(`${symbol}: base-unit sizing is unsupported for inverse contracts`)
+    }
+    const contractSize = Number(market?.contractSize)
+    if (!Number.isFinite(contractSize) || contractSize <= 0) {
+      throw new TerminalAdapterError(`${symbol}: invalid contract size ${contractSize}`)
+    }
+    return baseAmount / contractSize
+  }
+
   async priceToPrecision(symbol: string, price: number): Promise<number> {
     await this.guard(() => this.exchange.loadMarkets())
     return Number(this.exchange.priceToPrecision(symbol, price))

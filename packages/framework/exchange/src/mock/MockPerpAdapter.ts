@@ -118,6 +118,7 @@ export class MockPerpAdapter implements PerpExchangeAdapter {
   async setLeverage(_symbol: string, _leverage: number): Promise<void> {}
   async setMarginMode(_symbol: string, _marginMode: 'cross' | 'isolated'): Promise<void> {}
   async amountToPrecision(_symbol: string, amount: number): Promise<number> { return amount }
+  async baseAmountToContracts(_symbol: string, baseAmount: number): Promise<number> { return baseAmount }
 
   // ── Streams: resolve immediately (nothing to stream) ────────────────────────
 
