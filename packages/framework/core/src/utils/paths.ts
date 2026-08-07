@@ -73,7 +73,17 @@ export function encodeMonitorKey(key: string): string {
 
 export function decodeMonitorKey(encoded: string): string {
   if (!NEEDS_KEY_ENCODING) return encoded
-  return decodeURIComponent(encoded)
+  // decodeURIComponent is the wider transform — it accepts any percent-escape
+  // and throws URIError on a malformed one. Framework-written names are safe
+  // (encode always escapes % first), but keys() and the gateway walkJsonl feed
+  // raw filesystem names straight in, so a stray/half-written file (e.g.
+  // `100%off`) must not take out the whole listing. Fail soft: return the name
+  // verbatim when it cannot be decoded.
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    return encoded
+  }
 }
 
 export function getMonitorPath(dataDir: string, monitorName: string, key: string): string {

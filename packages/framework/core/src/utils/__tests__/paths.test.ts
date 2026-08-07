@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import path from 'path'
 
 /**
  * Monitor key encoding is platform-gated: Windows percent-encodes the reserved
@@ -74,10 +75,23 @@ describe('encodeMonitorKey / decodeMonitorKey', () => {
     expect(encodeMonitorKey('100%')).toBe('100%25')
   })
 
+  it('win32 decode fails soft on a malformed percent-escape (foreign file name)', async () => {
+    const { decodeMonitorKey } = await loadPaths('win32')
+    // keys() / walkJsonl feed raw filesystem names in; a stray/half-written file
+    // must not throw and take out the whole listing — it returns verbatim.
+    expect(decodeMonitorKey('100%')).toBe('100%')
+    expect(decodeMonitorKey('50%off')).toBe('50%off')
+    // A well-formed escape still decodes.
+    expect(decodeMonitorKey('a%3Ab')).toBe('a:b')
+  })
+
   it('getMonitorPath encodes only the key segment on win32', async () => {
     const { getMonitorPath } = await loadPaths('win32')
     const p = getMonitorPath('/data', 'klines', 'hyperliquid:BTC/USDC:USDC:1m')
-    // The monitorName is NOT encoded; only the key (now the filename stem) is.
-    expect(p).toBe('\\data\\monitors\\klines\\hyperliquid%3ABTC%2FUSDC%3AUSDC%3A1m.jsonl')
+    // Assert on the basename only: path.join binds to the HOST platform at module
+    // load, so redefining process.platform does not flip '/' to '\' on POSIX.
+    // The thing under test is the encoded filename stem, not the separator.
+    expect(path.basename(p)).toBe('hyperliquid%3ABTC%2FUSDC%3AUSDC%3A1m.jsonl')
+    expect(p).toContain('klines')   // monitorName is NOT encoded
   })
 })
