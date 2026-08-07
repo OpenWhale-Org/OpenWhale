@@ -28,23 +28,52 @@ export function getDataDir(custom?: string): string {
 
 /**
  * Monitor keys carry venue prefixes and ccxt symbols that are illegal in file
- * names — `:` (Windows forbids it; macOS tolerates it) and `/` (every OS treats
- * it as a directory separator, so `BTC/USDC` silently becomes a nested path).
- * Encode both into filesystem-safe, reversible tokens before they hit disk.
+ * names on Windows — `:` is forbidden in directory names there (POSIX tolerates
+ * it), and a store containing `:` in its filenames cannot have been created on
+ * Windows in the first place. So the encoding is gated on `win32`: Windows
+ * percent-encodes the reserved set, POSIX passes the key through verbatim.
  *
- *   `:`  ->  `__`     (double underscore; a single `_` appears in real keys
- *                       like `kucoin-futures`, so the doubled form is unambiguous)
- *   `/`  ->  `--`     (double dash; same reasoning against single `-`)
+ * Gating matters because POSIX stores already exist with `/` in keys, where the
+ * OS silently turned `BTC/USDC` into a nested directory tree (up to gigabytes
+ * across many files). Encoding on POSIX too would make every one of those series
+ * invisible at once — readers return empty, no throw — and strategies that fit a
+ * baseline over history silently restart from nothing. POSIX stays byte-identical
+ * to today and needs no migration; Windows gets a store that works from scratch.
  *
- * Reversible and applied identically by writers and readers, so a key round-
- * trips through the filesystem losslessly on every platform.
+ * The reserved set is percent-encoded (percent itself first, then the rest) so
+ * the transform is a total bijection: `decode(encode(k)) === k` for every key,
+ * including adversarial ones containing the encoded tokens literally. The set is
+ * the full Windows-illegal group, because a venue-supplied symbol is not under
+ * our control.
+ *
+ * CAVEAT: `process.platform` is a proxy for "this filesystem rejects `:`". The
+ * two come apart under WSL, or a Windows-hosted volume mounted into a Linux
+ * container, where the platform reads `linux` but the filesystem is still NTFS
+ * (and still rejects `:`). Not solved here — but named so the next person hitting
+ * a phantom ENOENT on such a mount knows where to look.
  */
+const NEEDS_KEY_ENCODING = process.platform === 'win32'
+
+// Percent-sign first so encoding the rest never collides with an encoded `%`.
+// The remaining chars are the Windows-illegal set plus `/` (a path separator on
+// every OS) — all of which appear in real monitor keys (`venue:symbol:tf`).
+const KEY_ENCODE_CHARS: Record<string, string> = {
+  '%': '%25', '/': '%2F', ':': '%3A', '\\': '%5C', '*': '%2A',
+  '?': '%3F', '"': '%22', '<': '%3C', '>': '%3E', '|': '%7C',
+}
+
 export function encodeMonitorKey(key: string): string {
-  return key.replaceAll(':', '__').replaceAll('/', '--')
+  if (!NEEDS_KEY_ENCODING) return key
+  let out = key
+  for (const [char, token] of Object.entries(KEY_ENCODE_CHARS)) {
+    out = out.split(char).join(token)
+  }
+  return out
 }
 
 export function decodeMonitorKey(encoded: string): string {
-  return encoded.replaceAll('--', '/').replaceAll('__', ':')
+  if (!NEEDS_KEY_ENCODING) return encoded
+  return decodeURIComponent(encoded)
 }
 
 export function getMonitorPath(dataDir: string, monitorName: string, key: string): string {
