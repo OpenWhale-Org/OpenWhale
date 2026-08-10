@@ -11,7 +11,7 @@ import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
 import { z } from 'zod'
-import { BaseStrategy, getDataDir, recentLogs } from '@openwhaleorg/core'
+import { BaseStrategy, getDataDir, decodeMonitorKey, recentLogs } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
@@ -1098,7 +1098,7 @@ function walkJsonl(dir: string, prefix = ''): Array<{ key: string; bytes: number
     if (stat.isDirectory()) {
       out.push(...walkJsonl(full, `${prefix}${entry}/`))
     } else if (entry.endsWith('.jsonl')) {
-      out.push({ key: `${prefix}${entry.slice(0, -6)}`, bytes: stat.size, mtimeMs: stat.mtimeMs })
+      out.push({ key: decodeMonitorKey(`${prefix}${entry.slice(0, -6)}`), bytes: stat.size, mtimeMs: stat.mtimeMs })
     }
   }
   return out

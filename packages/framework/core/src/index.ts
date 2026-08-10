@@ -178,6 +178,8 @@ export type { Logger, LogLevel, LogRecord } from './utils/logger.js'
 export {
   getDataDir,
   getMonitorPath,
+  encodeMonitorKey,
+  decodeMonitorKey,
   getExecutionPath,
   getCredentialPath,
   getRegistryPath,
