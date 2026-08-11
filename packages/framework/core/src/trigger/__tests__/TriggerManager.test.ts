@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import cron from 'node-cron'
+import { z } from 'zod'
 import { TriggerManager } from '../TriggerManager.js'
 import { MockQueue, MockStrategy, MockMonitor } from './mocks.js'
+import { BaseMonitor, MonitorMode } from '../../monitor/BaseMonitor.js'
 import type { Trigger } from '../../types/trigger.js'
 import { createMonitorRegistry } from '../../registry/Registry.js'
 import type { MonitorRegistry } from '../../registry/Registry.js'
@@ -33,6 +36,21 @@ function makeLabelMap(strategy: MockStrategy): Map<string, string> {
   }))
 }
 
+class StructuredKeyMonitor extends BaseMonitor<string, Record<string, unknown>> {
+  override readonly mode = MonitorMode.Subscribe
+  override readonly monitorName = 'structured'
+  override get keySchema() {
+    return z.object({
+      scope: z.string(),
+      feed: z.string(),
+    })
+  }
+
+  protected override startSubscribe(): void {}
+  protected override stopSubscribe(): void {}
+  protected override async append(): Promise<void> {}
+}
+
 
 describe('TriggerManager', () => {
   let manager: TriggerManager
@@ -52,11 +70,33 @@ describe('TriggerManager', () => {
 
   afterEach(() => {
     manager.stop()
+    vi.restoreAllMocks()
   })
 
   // ── Subscribe without being triggered ───────────────────────────────────────
 
   describe('subscriptions (collect without waking)', () => {
+    it('composes structured subscription keys before registering the instance', () => {
+      const structuredMonitor = new StructuredKeyMonitor()
+      monitorRegistry.register(makeMonitorDef('structured'), structuredMonitor)
+      const collector = new MockStrategy({
+        id: 'collector', monitors: ['structured'],
+        subscriptions: [{
+          monitorName: 'structured',
+          key: '',
+          keyParams: { scope: 'global', feed: 'macro' },
+        }],
+      })
+
+      manager.registerInstance(
+        'instance-1', collector, [], { base: {}, tunable: {} }, [], [], makeLabelMap(collector), new Map(),
+      )
+
+      expect(manager.getMonitorScope('instance-1')).toEqual([
+        { monitor: 'structured', key: 'global:macro' },
+      ])
+    })
+
     it('subscribes a declared monitor that no condition references', () => {
       const spy = vi.spyOn(monitor, 'subscribeAll')
       const collector = new MockStrategy({
@@ -264,6 +304,19 @@ describe('TriggerManager', () => {
   // ── Cron condition ──────────────────────────────────────────────────────────
 
   describe('cron condition', () => {
+    it('schedules the expression in the configured IANA time zone', () => {
+      const schedule = vi.spyOn(cron, 'schedule').mockReturnValue({ stop: vi.fn() } as never)
+      strategy = new MockStrategy({ id: 'test', monitors: [], instructions: [makeInstruction()] })
+      const trigger = makeTrigger({
+        conditions: [{ type: 'cron', expression: '0 8 * * *', timezone: 'Asia/Shanghai' }],
+      })
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
+
+      manager.start(queue)
+
+      expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), { timezone: 'Asia/Shanghai' })
+    })
+
     it('fires when cron ticks', async () => {
       vi.useFakeTimers()
       strategy = new MockStrategy({ id: 'test', monitors: [], instructions: [makeInstruction()] })
