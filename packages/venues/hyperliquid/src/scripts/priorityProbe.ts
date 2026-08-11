@@ -306,8 +306,15 @@ export const priorityProbeScript: ScriptDefinition = {
           try {
             const res = await ex.privatePostExchange(req) as Record<string, unknown>
             const st = (((res['response'] as Record<string, unknown>)?.['data'] as Record<string, unknown>)?.['statuses'] as Array<Record<string, unknown>>)?.[0]
-            const filled = st?.['filled'] as { oid?: number; totalSz?: string } | undefined
-            if (filled?.oid !== undefined) return { oid: filled.oid, sentAt, sz: Number(filled.totalSz ?? 0) }
+            const filled = st?.['filled'] as { oid?: number | string; totalSz?: string } | undefined
+            // Coerce at the boundary. The venue's info endpoints reject a
+            // STRING oid with a 422 that reads like a malformed request, and a
+            // Map keyed by one will never match a fill keyed by the other — so
+            // a stringly-typed oid silently blanks the entire result table
+            // while every order traded fine. Number() is identity on a number
+            // and correct on a numeric string, so this holds either way.
+            const oid = filled?.oid !== undefined ? Number(filled.oid) : undefined
+            if (oid !== undefined && Number.isFinite(oid)) return { oid, sentAt, sz: Number(filled?.totalSz ?? 0) }
             return { sentAt, error: st?.['error'] !== undefined ? String(st['error']) : JSON.stringify(st ?? res).slice(0, 160) }
           } catch (err) {
             return { sentAt, error: (err instanceof Error ? err.message : String(err)).slice(0, 160) }
@@ -405,7 +412,9 @@ export const priorityProbeScript: ScriptDefinition = {
           const r = await info({ type: 'orderStatus', user: wallet, oid }) as { order?: { status?: string; statusTimestamp?: number } }
           if (r.order?.status === 'filled' && typeof r.order.statusTimestamp === 'number') fillAt.set(oid, r.order.statusTimestamp)
         } catch (err) {
-          lookupErrors.push(`orderStatus ${oid}: ${err instanceof Error ? err.message : String(err)}`)
+          // typeof is in here deliberately: a 422 from this endpoint means the
+          // body did not deserialize, and the only field we build is the oid.
+          lookupErrors.push(`orderStatus ${oid} (${typeof oid}): ${err instanceof Error ? err.message : String(err)}`)
         }
       }
 
