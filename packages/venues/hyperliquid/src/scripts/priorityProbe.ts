@@ -95,6 +95,7 @@ interface Ccxt {
   privatePostExchange(request: unknown): Promise<Record<string, unknown>>
   milliseconds(): number
   walletAddress?: string
+  enableRateLimit: boolean
 }
 
 /** Spot mark price of HYPE — the fee is charged in HYPE, the notional is USD. */
@@ -321,10 +322,25 @@ export const priorityProbeScript: ScriptDefinition = {
           }
         }
 
+        // ccxt throttles this exchange to one request per 50ms, so Promise.all
+        // only made the two calls START together — the throttler then held the
+        // second one back by ~50ms. Blocks are ~70ms apart, so that self-
+        // inflicted delay pushed the later order into the NEXT block most of
+        // the time, and the benchmark was measuring our own rate limiter at a
+        // magnitude (50ms) larger than the effect under test (1bp ≈ 45ms).
+        // Two requests cannot trip the venue's limit; the throttle goes back on
+        // immediately after.
+        const ratelimited = ex.enableRateLimit
+        ex.enableRateLimit = false
+        let a: Awaited<ReturnType<typeof fire>>, b: Awaited<ReturnType<typeof fire>>
         const prioFirst = round % 2 === 1
-        const [a, b] = await Promise.all(
-          prioFirst ? [fire(reqPrio), fire(reqPlain)] : [fire(reqPlain), fire(reqPrio)],
-        )
+        try {
+          ;[a, b] = await Promise.all(
+            prioFirst ? [fire(reqPrio), fire(reqPlain)] : [fire(reqPlain), fire(reqPrio)],
+          )
+        } finally {
+          ex.enableRateLimit = ratelimited
+        }
         const prio = prioFirst ? a : b
         const plain = prioFirst ? b : a
         rounds.push({
@@ -375,12 +391,27 @@ export const priorityProbeScript: ScriptDefinition = {
       }
       const firstSent = Math.min(...[...wanted.values()].map(v => v.sentAt))
       const fillAt = new Map<number, number>()
+      const fillHash = new Map<number, string>()
       const lookupErrors: string[] = []
 
       // A single rate-limited read used to blank the entire table, and the
       // report then said "no round produced both fills" — which was a lie
       // about the trading, not just a gap in the data. Retry, then fall back
       // to a per-order read, and if it still fails SAY so.
+      const info2 = async (url: string, body: unknown, tries = 3): Promise<unknown> => {
+        for (let i = 0; ; i++) {
+          try {
+            const res = await fetch(url, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            })
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            return await res.json()
+          } catch (err) {
+            if (i >= tries) throw err
+            await new Promise(r => setTimeout(r, 500 * (i + 1)))
+          }
+        }
+      }
       const info = async (body: unknown, tries = 4): Promise<unknown> => {
         for (let i = 0; ; i++) {
           try {
@@ -397,8 +428,12 @@ export const priorityProbeScript: ScriptDefinition = {
       }
 
       try {
-        const rows = await info({ type: 'userFillsByTime', user: wallet, startTime: firstSent - 5_000, endTime: Date.now() }) as Array<{ oid: number; time: number }>
-        for (const f of rows) if (wanted.has(f.oid)) fillAt.set(f.oid, Math.min(fillAt.get(f.oid) ?? Infinity, f.time))
+        const rows = await info({ type: 'userFillsByTime', user: wallet, startTime: firstSent - 5_000, endTime: Date.now() }) as Array<{ oid: number; time: number; hash?: string }>
+        for (const f of rows) {
+          if (!wanted.has(f.oid)) continue
+          fillAt.set(f.oid, Math.min(fillAt.get(f.oid) ?? Infinity, f.time))
+          if (f.hash !== undefined) fillHash.set(f.oid, f.hash)
+        }
       } catch (err) {
         lookupErrors.push(`userFillsByTime: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -418,17 +453,36 @@ export const priorityProbeScript: ScriptDefinition = {
         }
       }
 
+      // A fill is stamped with its BLOCK's time, not its own, so two orders in
+      // one block are identical to the millisecond — a delta of exactly 0 means
+      // "did not gain a block", not "tied". Blocks run ~70ms apart (measured
+      // 2026-08-11), which is also the resolution of this whole measurement, so
+      // the honest unit is blocks and the report says so.
+      const blockOf = new Map<number, number>()
+      for (const [oid] of wanted) {
+        const t = fillHash.get(oid)
+        if (t === undefined) continue
+        try {
+          const r = await info2('https://rpc.hyperliquid.xyz/explorer', { type: 'txDetails', hash: t }) as { tx?: { block?: number } }
+          if (typeof r.tx?.block === 'number') blockOf.set(oid, r.tx.block)
+        } catch { /* block is a nicety; the ms delta still stands without it */ }
+      }
+
       hr()
       say('Result — venue fill time minus local send time, per round')
-      say(`  ${'round'.padEnd(7)}${'priority'.padEnd(12)}${'plain'.padEnd(12)}${'delta'.padEnd(12)}sent first`)
+      say(`  ${'round'.padEnd(7)}${'priority'.padEnd(12)}${'plain'.padEnd(12)}${'delta'.padEnd(12)}${'Δblocks'.padEnd(9)}sent first`)
       const deltas: number[] = []
       for (const r of rounds) {
         const lp = r.prio && fillAt.has(r.prio.oid) ? fillAt.get(r.prio.oid)! - r.prio.sentAt : undefined
         const ln = r.plain && fillAt.has(r.plain.oid) ? fillAt.get(r.plain.oid)! - r.plain.sentAt : undefined
         const d = lp !== undefined && ln !== undefined ? lp - ln : undefined
         if (d !== undefined) deltas.push(d)
+        const bp = r.prio ? blockOf.get(r.prio.oid) : undefined
+        const bn = r.plain ? blockOf.get(r.plain.oid) : undefined
+        const db = bp !== undefined && bn !== undefined ? bp - bn : undefined
         say(`  ${String(r.round).padEnd(7)}${(lp !== undefined ? `${lp}ms` : '—').padEnd(12)}${(ln !== undefined ? `${ln}ms` : '—').padEnd(12)}` +
-          `${(d !== undefined ? `${d >= 0 ? '+' : ''}${d}ms` : '—').padEnd(12)}${r.prioFirst ? 'priority' : 'plain'}`)
+          `${(d !== undefined ? `${d >= 0 ? '+' : ''}${d}ms` : '—').padEnd(12)}` +
+          `${(db !== undefined ? `${db >= 0 ? '+' : ''}${db}` : '—').padEnd(9)}${r.prioFirst ? 'priority' : 'plain'}`)
       }
       if (deltas.length > 0) {
         const mean = deltas.reduce((x, y) => x + y, 0) / deltas.length
