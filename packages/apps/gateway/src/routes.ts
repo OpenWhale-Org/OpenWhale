@@ -453,11 +453,17 @@ export function buildRouter(): Router {
     }
   }))
 
-  // Edit a STOPPED instance (any field) — 409 while active
+  // Edit an instance (any field) — 409 while active unless ?restart=1, which
+  // rebuilds it from the new settings instead of refusing. A restart that the
+  // new settings fail rolls back to the old ones and still reports 400, so a
+  // rejected edit never leaves a running strategy stopped.
   router.patch('/api/instances/:id', h(async (req, res) => {
     const runtime = await ensureStarted()
+    const restart = req.query['restart'] === '1' || req.query['restart'] === 'true'
     try {
-      res.json(await runtime.updateInstance(req.params['id']!, req.body as Parameters<typeof runtime.updateInstance>[1]))
+      res.json(await runtime.updateInstance(
+        req.params['id']!, req.body as Parameters<typeof runtime.updateInstance>[1], { restart },
+      ))
     } catch (err) {
       const message = errText(err)
       res.status(message.includes('is active') ? 409 : 400).send(message)

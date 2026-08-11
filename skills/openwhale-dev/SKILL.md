@@ -87,8 +87,12 @@ verified against the framework source — copy their shape exactly.
    `AccountSlotMeta` before `triggers()`; derive the venue with `this.accountVenue('slotLabel')`.
 6. **Monitor keys are clean**: no credential or instance identifiers inside a key. Data lives in
    `dataDir/monitors/{contractName}/{key}.jsonl`, shared by all implementations of a contract.
-7. **Instance params freeze on activation** (both monitor and strategy instances). Tuning params
-   go in Zod schemas with `.meta()` so the Dashboard renders forms; never in plugin config.
+7. **Params are read once, at activation** — triggers, subscriptions and executor slots all derive
+   from them there. So editing a RUNNING strategy instance restarts it: `updateInstance(id, patch,
+   { restart: true })` (gateway: `PATCH /api/instances/:id?restart=1`) rebuilds it from the new
+   params, and rolls back to the previous ones if they fail to activate. Without `restart` the edit
+   is refused while active. Monitor instance params still freeze. Tuning params go in Zod schemas
+   with `.meta()` so the Dashboard renders forms; never in plugin config.
 8. **Instructions are serializable JSON** referencing executor slot labels — never object refs.
 9. **All fields of `tunableParamsSchema` must have `.default()`**; `baseParamsSchema` holds the
    required fields. `.meta({ displayName, description, placeholder })` drives the form UI.

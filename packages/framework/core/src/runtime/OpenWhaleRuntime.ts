@@ -1129,16 +1129,32 @@ export class OpenWhaleRuntime implements IRuntime {
     await this.instanceStore.delete(instanceId)
   }
 
-  /** Edit a STOPPED instance — any field; validation happens at activation. */
+  /**
+   * Edit an instance — any field; validation happens at activation.
+   *
+   * A running instance refuses the edit unless `restart` is passed. The rule
+   * behind that refusal is that a strategy's triggers, subscriptions and
+   * executor slots are all derived from its params ONCE, at activation: an
+   * instance whose stored params no longer describe the machinery actually
+   * running is lying to whoever reads it next. `restart` satisfies the rule
+   * instead of waiving it — the instance is rebuilt from the new params, so
+   * what runs and what is stored still agree.
+   */
   async updateInstance(
     instanceId: string,
     patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'credentials' | 'accounts' | 'llm' | 'params'>>,
+    { restart = false }: { restart?: boolean } = {},
   ): Promise<StrategyInstance> {
-    if (this.instances.has(instanceId)) {
+    const wasActive = this.instances.has(instanceId)
+    if (wasActive && !restart) {
       throw new Error(`Instance "${instanceId}" is active — deactivate it before editing`)
     }
     const persisted = await this.instanceStore.load(instanceId)
     if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
+    // Snapshot BEFORE mutating: rollback needs the configuration that was
+    // actually running, and `persisted` is about to become the new one.
+    const previous = wasActive ? (JSON.parse(JSON.stringify(persisted)) as StrategyInstance) : undefined
+
     if (patch.name !== undefined) persisted.name = patch.name
     if (patch.description !== undefined) {
       if (patch.description) persisted.description = patch.description
@@ -1149,8 +1165,41 @@ export class OpenWhaleRuntime implements IRuntime {
     if (patch.llm !== undefined) persisted.llm = patch.llm
     if (patch.params !== undefined) persisted.params = patch.params
     persisted.updatedAt = new Date().toISOString()
-    await this.instanceStore.save(persisted)
-    return persisted
+
+    if (!wasActive) {
+      await this.instanceStore.save(persisted)
+      return persisted
+    }
+
+    // activateInstance releases the previous registration itself and keeps the
+    // accounts open, so there is no window where the instance is torn down
+    // waiting on fresh venue connections — and it persists only on success.
+    try {
+      await this.activateInstance(persisted, { persist: true })
+      return persisted
+    } catch (err) {
+      // The edit is rejected at activation — bad params, an unbound slot, a
+      // credential that no longer resolves. Leaving it here would mean a
+      // rejected edit silently STOPPED a strategy that was running fine, which
+      // is a far worse outcome than the edit not applying. Put the old
+      // configuration back and bring it up again.
+      let restored = false
+      if (previous) {
+        try {
+          await this.activateInstance(previous, { persist: true })
+          restored = true
+        } catch (rollbackErr) {
+          log.error({ instanceId, err: rollbackErr }, 'Rollback failed — instance is STOPPED')
+        }
+      }
+      const detail = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        restored
+          ? `Instance "${instanceId}" rejected the edit and was rolled back — it is still running on its previous settings. Cause: ${detail}`
+          : `Instance "${instanceId}" rejected the edit AND could not be rolled back — it is now STOPPED. Cause: ${detail}`,
+        { cause: err },
+      )
+    }
   }
 
   /**
