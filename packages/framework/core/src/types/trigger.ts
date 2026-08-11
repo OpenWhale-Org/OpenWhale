@@ -28,6 +28,8 @@ export interface MonitorSource {
 export interface CronCondition {
   type: 'cron'
   expression: string
+  /** IANA time zone used to evaluate the expression. Defaults to the process time zone. */
+  timezone?: string
 }
 
 /**

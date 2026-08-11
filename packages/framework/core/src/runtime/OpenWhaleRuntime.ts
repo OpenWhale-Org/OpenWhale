@@ -1439,21 +1439,6 @@ export class OpenWhaleRuntime implements IRuntime {
       strategyInstanceId: instance.id,
     }))
 
-    // Structured trigger sources: compose keyParams into keys via the
-    // monitor's keySchema so everything downstream still speaks plain keys
-    for (const trigger of triggers) {
-      for (const condition of trigger.conditions) {
-        if (condition.type !== 'monitor') continue
-        for (const source of condition.sources) {
-          if (!source.keyParams || (source.key && source.key !== '')) continue
-          const registryKey = monitorLabelToKey.get(source.monitorName) ?? source.monitorName
-          const monitor = this.monitorRegistry.get(registryKey)
-          if (!monitor) throw new Error(`Trigger source references unknown monitor "${source.monitorName}"`)
-          source.key = monitor.keyFor(source.keyParams)
-        }
-      }
-    }
-
     // Per-instance LLM slot overrides (model/credential/settings by label)
     strategy.setLlmBindings(instance.llm ?? {})
 

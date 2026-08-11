@@ -106,9 +106,11 @@ export class TriggerManager {
       addTrigger: trigger => this.addTrigger(instanceId, trigger),
     })
     const monitorKeyToLabel = new Map(Array.from(monitorLabelToKey, ([label, key]) => [key, label]))
+    for (const trigger of triggers) this.resolveTriggerSourceKeys(trigger, monitorLabelToKey)
     const entry: InstanceEntry = {
       instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel, executorLabelToKey,
-      subscriptions: strategy.subscriptions?.(params) ?? [],
+      subscriptions: (strategy.subscriptions?.(params) ?? [])
+        .map(source => this.resolveSourceKey(source, monitorLabelToKey)),
     }
 
     // Re-registration (e.g. re-activate with new params) must first release the
@@ -136,8 +138,9 @@ export class TriggerManager {
   addSubscription(instanceId: string, source: MonitorSource): void {
     const entry = this.instances.get(instanceId)
     if (!entry) return
-    entry.subscriptions.push(source)
-    if (this.running) this.subscribeSource(source, entry.monitorLabelToKey)
+    const resolved = this.resolveSourceKey(source, entry.monitorLabelToKey)
+    entry.subscriptions.push(resolved)
+    if (this.running) this.subscribeSource(resolved, entry.monitorLabelToKey)
   }
 
   /**
@@ -157,6 +160,7 @@ export class TriggerManager {
       id: `${instanceId}-trigger-dyn-${entry.triggers.length}`,
       strategyInstanceId: instanceId,
     }
+    this.resolveTriggerSourceKeys(full, entry.monitorLabelToKey)
     entry.triggers.push(full)
     if (full.enabled) this.triggerStates.set(full.id, new TriggerState(full.conditions.length))
     if (this.running) {
@@ -361,6 +365,22 @@ export class TriggerManager {
     ]
   }
 
+  private resolveTriggerSourceKeys(trigger: Trigger, labelToKey: Map<string, string>): void {
+    for (const condition of trigger.conditions) {
+      if (condition.type !== 'monitor') continue
+      for (const source of condition.sources) this.resolveSourceKey(source, labelToKey)
+    }
+  }
+
+  private resolveSourceKey(source: MonitorSource, labelToKey: Map<string, string>): MonitorSource {
+    if (!source.keyParams || (source.key && source.key !== '')) return source
+    const registryKey = labelToKey.get(source.monitorName) ?? source.monitorName
+    const monitor = this.monitorRegistry.get(registryKey)
+    if (!monitor) throw new Error(`Monitor source references unknown monitor "${source.monitorName}"`)
+    source.key = monitor.keyFor(source.keyParams)
+    return source
+  }
+
   private subscribeSource(source: MonitorSource, labelToKey: Map<string, string>): void {
     const registryKey = labelToKey.get(source.monitorName) ?? source.monitorName
     const monitor = this.monitorRegistry.get(registryKey)
@@ -411,7 +431,7 @@ export class TriggerManager {
       if (!triggerState) return
       triggerState.satisfyCron(conditionIndex, now)
       await this.checkAndFire(entry, trigger, triggerState, queue, now)
-    })
+    }, condition.timezone ? { timezone: condition.timezone } : undefined)
     if (!this.cronTasks.has(entry.instanceId)) this.cronTasks.set(entry.instanceId, [])
     this.cronTasks.get(entry.instanceId)!.push(task)
   }
