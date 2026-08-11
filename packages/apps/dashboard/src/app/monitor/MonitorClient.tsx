@@ -59,7 +59,13 @@ export function MonitorClient({ monitors }: Props) {
   const refresh = useCallback(async () => {
     const res = await fetch('/api/monitor/status')
     if (res.ok) {
-      const next = await res.json() as MonitorStatus[]
+      const raw = await res.json() as MonitorStatus[]
+      const next = raw.map(status => ({
+        ...status,
+        activeKeys: status.activeKeys.filter(({ key }) => key.trim().length > 0),
+        manualKeys: status.manualKeys.filter(key => key.trim().length > 0),
+        dataKeys: status.dataKeys.filter(key => key.trim().length > 0),
+      }))
       setStatuses(next)
       setSelectedId((prev) => prev ?? next[0]?.id ?? null)
     }
