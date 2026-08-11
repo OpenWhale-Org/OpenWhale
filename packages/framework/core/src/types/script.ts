@@ -23,6 +23,18 @@ export interface ScriptContext {
   /** Validated against paramsSchema (defaults applied). */
   params: Record<string, unknown>
   /**
+   * Push a line to the caller WHILE the script runs, for scripts whose work
+   * outlives a request's patience.
+   *
+   * The reason this exists is not comfort: the dashboard proxies /api through
+   * Next, which cuts the connection at 30s, so a script that only spoke at the
+   * end lost everything it had done. A run that emits keeps the connection fed
+   * and shows progress; the returned ScriptResult is still the record of
+   * record. Absent when the caller does not stream, so scripts must treat it
+   * as optional and still return a complete result.
+   */
+  emit?: (line: string) => void
+  /**
    * The live OpenWhaleRuntime. Typed loosely so plugin packages don't need
    * the runtime's full type surface — cast to what the script actually uses
    * (listInstanceViews, getStrategy, …).

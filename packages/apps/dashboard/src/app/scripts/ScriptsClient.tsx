@@ -89,15 +89,54 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         params[f.name] = f.type === 'number' ? Number(raw) : f.type === 'boolean' ? raw === 'true' : raw
       }
       const [owner, ...rest] = script.id.split('/')
-      const res = await fetch(`/api/scripts/${encodeURIComponent(owner!)}/${encodeURIComponent(rest.join('/'))}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ params }),
+      const base = `/api/scripts/${encodeURIComponent(owner!)}/${encodeURIComponent(rest.join('/'))}`
+      const post = (path: string) => fetch(base + path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),
       })
-      const body = await res.json() as { text?: string; json?: unknown; error?: string }
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
-      setResult({ text: body.text ?? '', ...(body.json !== undefined ? { json: body.json } : {}) })
-      setRanAt(new Date())
+
+      // Stream by default. /api is proxied through Next, which severs an idle
+      // connection at 30s, so a script that only spoke at the end returned a
+      // bare "Internal Server Error" however well it had run. Streaming keeps
+      // bytes moving and shows the run as it happens.
+      const res = await post('/stream')
+      if (res.ok && res.body) {
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        const lines: string[] = []
+        let done: { text: string; json?: unknown } | undefined
+        let failed: string | undefined
+        for (;;) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          buffer += decoder.decode(chunk.value, { stream: true })
+          // Frames are newline-delimited; a chunk can split one in half, so the
+          // trailing partial stays in the buffer until its newline arrives.
+          const parts = buffer.split('\n')
+          buffer = parts.pop() ?? ''
+          for (const part of parts) {
+            if (!part.trim()) continue
+            let frame: { type?: string; text?: string; json?: unknown; error?: string }
+            try { frame = JSON.parse(part) } catch { continue }
+            if (frame.type === 'line') { lines.push(frame.text ?? ''); setResult({ text: lines.join('\n') }) }
+            else if (frame.type === 'result') done = { text: frame.text ?? '', ...(frame.json !== undefined ? { json: frame.json } : {}) }
+            else if (frame.type === 'error') failed = frame.error ?? 'script failed'
+          }
+        }
+        if (failed !== undefined) throw new Error(failed)
+        // No terminal frame means the connection died mid-run. Keep whatever
+        // was streamed — it is the only record of what actually happened.
+        if (done === undefined) throw new Error('connection closed before the script finished')
+        setResult(done)
+        setRanAt(new Date())
+      } else {
+        // Older gateway without the streaming route.
+        const legacy = await post('/run')
+        const body = await legacy.json() as { text?: string; json?: unknown; error?: string }
+        if (!legacy.ok) throw new Error(body.error ?? `HTTP ${legacy.status}`)
+        setResult({ text: body.text ?? '', ...(body.json !== undefined ? { json: body.json } : {}) })
+        setRanAt(new Date())
+      }
     } catch (err) {
       setRunError(err instanceof Error ? err.message : String(err))
     } finally {

@@ -272,6 +272,48 @@ export function buildRouter(): Router {
     }
   }))
 
+  /**
+   * Streaming run — NDJSON, one JSON object per line.
+   *
+   * The unary route above is capped by whatever sits in front of it: the
+   * dashboard proxies /api through Next, which severs the connection at 30s,
+   * so a script that worked for longer returned nothing at all and the browser
+   * saw a bare "Internal Server Error". Streaming keeps bytes moving, so the
+   * proxy's idle timer never fires, and the operator sees the run progress
+   * instead of a blank wait.
+   *
+   * Frames: {type:'line',text} while running, then exactly one terminal frame,
+   * either {type:'result',text,json} or {type:'error',error}.
+   */
+  router.post('/api/scripts/:owner/:sid/stream', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    res.status(200)
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    // Without this nginx buffers the whole response and streaming silently
+    // degrades back into one late blob — the exact failure being fixed.
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders?.()
+
+    const write = (frame: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(frame) + '\n') }
+    // A script can be busy for a long stretch without a word (one slow venue
+    // round trip). The heartbeat is what actually holds the proxy open then.
+    const beat = setInterval(() => write({ type: 'ping' }), 10_000)
+    try {
+      const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
+      const result = await runtime.runScript(
+        `${req.params['owner']}/${req.params['sid']}`, params,
+        (line) => write({ type: 'line', text: line }),
+      )
+      write({ type: 'result', ...result })
+    } catch (err) {
+      write({ type: 'error', error: errText(err) })
+    } finally {
+      clearInterval(beat)
+      if (!res.writableEnded) res.end()
+    }
+  }))
+
   // ── instances ───────────────────────────────────────────────────────────────
 
   router.get('/api/instances', h(async (_req, res) => {

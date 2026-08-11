@@ -683,13 +683,17 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   /** Validate params against the script's schema and run it against this runtime. */
-  async runScript(id: string, params: Record<string, unknown>): Promise<ScriptResult> {
+  async runScript(
+    id: string,
+    params: Record<string, unknown>,
+    emit?: (line: string) => void,
+  ): Promise<ScriptResult> {
     const rec = this.scriptRegistry.get(id)
     if (!rec) throw new Error(`Unknown script: "${id}"`)
     const parsed = rec.def.paramsSchema !== undefined
       ? rec.def.paramsSchema.parse(params) as Record<string, unknown>
       : {}
-    return rec.def.run({ params: parsed, runtime: this })
+    return rec.def.run({ params: parsed, runtime: this, ...(emit ? { emit } : {}) })
   }
 
   /** The monitors an instance consumes and the executors it fires — its event scope. */

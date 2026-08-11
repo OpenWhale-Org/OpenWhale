@@ -171,7 +171,7 @@ export const priorityProbeScript: ScriptDefinition = {
     }
   },
 
-  run: async ({ params, runtime }) => {
+  run: async ({ params, runtime, emit }) => {
     const p = paramsSchema.parse(params)
     const rt = runtime as {
       listAccounts(): Promise<AccountView[]>
@@ -179,7 +179,11 @@ export const priorityProbeScript: ScriptDefinition = {
     }
 
     const out: string[] = []
-    const say = (s = '') => out.push(s)
+    // Every line goes to the caller as it happens as well as into the final
+    // result. The benchmark spends minutes placing real orders; a run that
+    // only spoke at the end left the operator unable to tell a slow round from
+    // a wedged one — and, past the proxy's 30s cut, told them nothing at all.
+    const say = (s = '') => { out.push(s); emit?.(s) }
     const hr = () => say('─'.repeat(66))
 
     const ready = (await rt.listAccounts()).filter(a => a.type === 'hyperliquid' && a.status === 'ready')
@@ -268,8 +272,14 @@ export const priorityProbeScript: ScriptDefinition = {
       const rounds: Array<{ round: number; prioFirst: boolean; prio?: { oid: number; sentAt: number }; plain?: { oid: number; sentAt: number } }> = []
 
       for (let round = 1; round <= p.benchmarkRounds; round++) {
-        const tick = await ex.fetchTicker(p.symbol)
-        const now = tick.last ?? tick.close ?? mid
+       try {
+        // Reuse the mid read once before the loop. Re-reading it per round cost
+        // a /info call each time, and the gateway's monitors already keep that
+        // budget near its ceiling — measured 2026-08-11, the per-round ticker
+        // was both the source of the 429s that killed the run and most of its
+        // wall time (11s queued behind other traffic for a single quote). A
+        // 0.5% crossing margin does not need a fresh quote every few seconds.
+        const now = mid
         // Priced through the book so both are certain to cross. An IOC fills at
         // the book's price, not this limit — the limit only guarantees a match.
         const px = Number(ex.priceToPrecision(p.symbol, now * 1.005))
@@ -334,6 +344,11 @@ export const priorityProbeScript: ScriptDefinition = {
         } else if (filledSz > 0) {
           say(`    ⏸ left ${filledSz} open (close-after is off)`)
         }
+       } catch (err) {
+        // One bad round must not discard the rounds that already worked — a
+        // rate-limited quote used to throw out the whole benchmark.
+        say(`  round ${round}: ✖ ${(err instanceof Error ? err.message : String(err)).slice(0, 180)}`)
+       }
       }
 
       // The venue stamps the fill, we do not — local send time only bounds it.
