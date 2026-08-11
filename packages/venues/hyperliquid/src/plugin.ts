@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { definePlugin } from '@openwhaleorg/core'
+import { priorityProbeScript } from './scripts/priorityProbe.js'
 import type { RawCredentialData } from '@openwhaleorg/core'
 import { HyperliquidAdapter } from './adapter.js'
 import { UserTradesMonitor } from './monitor.js'
@@ -28,6 +29,8 @@ const build = (data: RawCredentialData) => new HyperliquidAdapter({
 export const hyperliquidPlugin = definePlugin({
   name: 'hyperliquid',
   version: '1.0.0',
+
+  scripts: [priorityProbeScript],
 
   adapters: [
     {

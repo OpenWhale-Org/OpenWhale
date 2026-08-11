@@ -5,7 +5,7 @@ import type {
   ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade, ExchangeFill, FundingEvent,
   FundingRateData, OpenInterestData, PerpOrderParams,
 } from '@openwhaleorg/exchange'
-import { RetryableAdapterError, TerminalAdapterError } from '@openwhaleorg/core'
+import { RetryableAdapterError, TerminalAdapterError, createLogger } from '@openwhaleorg/core'
 
 /**
  * Generic PerpExchangeAdapter over any ccxt.pro exchange.
@@ -257,6 +257,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
           ...(t.fee?.cost !== undefined ? { fee: t.fee.cost } : {}),
           ...(t.fee?.currency !== undefined ? { feeAsset: t.fee.currency } : {}),
           timestamp: t.timestamp ?? 0,
+          info,
         }
       })
       .sort((a, b) => a.timestamp - b.timestamp)
@@ -281,6 +282,16 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   }
 
   // ── Trading ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Order-priority fees are one venue's mechanism, so the generic adapter has
+   * none. A venue subclass that implements the path overrides this to true;
+   * everything else strips `priorityBps` in createOrder rather than forwarding
+   * a knob ccxt would put into an order request the venue does not understand.
+   */
+  get supportsPriorityFee(): boolean {
+    return false
+  }
 
   /** Dual-side (hedge-mode) venues accept positionSide on orders. ccxt models this as setPositionMode support. */
   get supportsPositionSide(): boolean {
@@ -336,6 +347,22 @@ export class CcxtAdapter implements PerpExchangeAdapter {
 
   async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
     const extra: Record<string, unknown> = { ...(params.params ?? {}) }
+    // Order priority is one venue's feature carried in the generic passthrough.
+    // Forwarding it to a venue that has no such concept would put an unknown
+    // key in that venue's order request — rejected outright on some, silently
+    // ignored on others. Strip it, and say so: a caller who thinks they are
+    // paying for sequencing and is not deserves to hear about it.
+    if (extra['priorityBps'] !== undefined) {
+      if (this.supportsPriorityFee !== true) {
+        createLogger('CcxtAdapter').warn(
+          { venue: this.exchange.id, priorityBps: extra['priorityBps'] },
+          'priorityBps ignored — this venue has no order-priority mechanism',
+        )
+      }
+      delete extra['priorityBps']
+      delete extra['priorityBudgetUsd']
+      delete extra['priorityFallback']
+    }
     if (params.reduceOnly !== undefined) extra.reduceOnly = params.reduceOnly
     if (params.timeInForce !== undefined) extra.timeInForce = params.timeInForce
     if (params.clientOrderId !== undefined) extra.clientOrderId = params.clientOrderId
