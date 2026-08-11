@@ -320,10 +320,13 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
 
 /**
  * The instance's params, rendered with the REAL form — sections, ladders,
- * sliders — instead of raw key:value chips. Read-only while the instance is
- * active (the runtime froze them at activation); once deactivated the same
- * panel saves edits directly. Collapsible because a ladder strategy carries
- * forty-odd fields.
+ * sliders — instead of raw key:value chips. Collapsible because a ladder
+ * strategy carries forty-odd fields.
+ *
+ * Editable whether or not the instance is running. A running instance derives
+ * its triggers and subscriptions from its params once, at activation, so
+ * saving new ones restarts it — the runtime rebuilds it from what was saved,
+ * and rolls back to the previous settings if the new ones fail to activate.
  */
 function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [open, setOpen] = useState(true)
@@ -369,13 +372,15 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   async function save() {
     setSaving(true)
     setNotice('')
-    const res = await fetch(`/api/instances/${instance.id}`, {
+    // restart=1 tells the runtime to rebuild a RUNNING instance from the new
+    // params rather than refusing the edit. On a stopped one it changes nothing.
+    const res = await fetch(`/api/instances/${instance.id}?restart=1`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ params: buildParamsFromFields(fields!, values) }),
     })
     setSaving(false)
-    if (res.ok) { setDirty(false); setNotice('Saved ✓') }
+    if (res.ok) { setDirty(false); setNotice(instance.active ? 'Saved & restarted ✓' : 'Saved ✓') }
     else setNotice(`Save failed: ${await res.text()}`)
   }
 
@@ -387,47 +392,44 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
           <span>{open ? '▾' : '▸'}</span>
           <span>Parameters</span>
           <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
-            {instance.active ? '(active: read-only — deactivate to edit here)' : '(stopped: edit and save directly)'}
+            {instance.active ? '(active: saving restarts the instance)' : '(stopped: edit and save directly)'}
           </span>
-          {dirty && !instance.active && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
+          {dirty && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
         </button>
         {notice && <span className="text-xs" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
-        {!instance.active && (
-          <button
-            onClick={() => void save()}
-            disabled={saving || !dirty}
-            className="px-3 py-1.5 rounded-md text-xs shrink-0"
-            style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        )}
+        <button
+          onClick={() => void save()}
+          disabled={saving || !dirty}
+          className="px-3 py-1.5 rounded-md text-xs shrink-0"
+          style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+        >
+          {saving ? 'Saving…' : instance.active ? 'Save & restart' : 'Save'}
+        </button>
       </div>
       {open && (
         <div className="px-4 pb-4">
-          {/* One fieldset flips the whole tree read-only — inputs, toggles,
-              list editors and sliders alike — with zero prop drilling. */}
-          <fieldset disabled={instance.active} style={{ opacity: instance.active ? 0.75 : 1 }}>
-            <ParamFieldsForm
-              fields={fields}
-              values={values}
-              onChange={(v) => { setValues(v); setDirty(true) }}
-              strategyId={instance.strategyId}
-              venueContext={boundVenue}
-            />
-          </fieldset>
-          {!instance.active && (
-            <div className="flex justify-end mt-3">
-              <button
-                onClick={() => void save()}
-                disabled={saving || !dirty}
-                className="px-4 py-2 rounded-md text-sm"
-                style={{ background: dirty ? 'var(--accent)' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
-              >
-                {saving ? 'Saving…' : 'Save parameters'}
-              </button>
-            </div>
-          )}
+          <ParamFieldsForm
+            fields={fields}
+            values={values}
+            onChange={(v) => { setValues(v); setDirty(true) }}
+            strategyId={instance.strategyId}
+            venueContext={boundVenue}
+          />
+          <div className="flex justify-end items-center gap-3 mt-3">
+            {instance.active && dirty && (
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                Saving rebuilds the running instance from these values.
+              </span>
+            )}
+            <button
+              onClick={() => void save()}
+              disabled={saving || !dirty}
+              className="px-4 py-2 rounded-md text-sm"
+              style={{ background: dirty ? 'var(--accent)' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+            >
+              {saving ? 'Saving…' : instance.active ? 'Save & restart' : 'Save parameters'}
+            </button>
+          </div>
         </div>
       )}
     </div>

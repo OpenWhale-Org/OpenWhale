@@ -11,7 +11,7 @@ import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
 import { z } from 'zod'
-import { BaseStrategy, getDataDir, recentLogs } from '@openwhaleorg/core'
+import { BaseStrategy, getDataDir, decodeMonitorKey, recentLogs } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
@@ -453,11 +453,17 @@ export function buildRouter(): Router {
     }
   }))
 
-  // Edit a STOPPED instance (any field) — 409 while active
+  // Edit an instance (any field) — 409 while active unless ?restart=1, which
+  // rebuilds it from the new settings instead of refusing. A restart that the
+  // new settings fail rolls back to the old ones and still reports 400, so a
+  // rejected edit never leaves a running strategy stopped.
   router.patch('/api/instances/:id', h(async (req, res) => {
     const runtime = await ensureStarted()
+    const restart = req.query['restart'] === '1' || req.query['restart'] === 'true'
     try {
-      res.json(await runtime.updateInstance(req.params['id']!, req.body as Parameters<typeof runtime.updateInstance>[1]))
+      res.json(await runtime.updateInstance(
+        req.params['id']!, req.body as Parameters<typeof runtime.updateInstance>[1], { restart },
+      ))
     } catch (err) {
       const message = errText(err)
       res.status(message.includes('is active') ? 409 : 400).send(message)
@@ -1098,7 +1104,7 @@ function walkJsonl(dir: string, prefix = ''): Array<{ key: string; bytes: number
     if (stat.isDirectory()) {
       out.push(...walkJsonl(full, `${prefix}${entry}/`))
     } else if (entry.endsWith('.jsonl')) {
-      out.push({ key: `${prefix}${entry.slice(0, -6)}`, bytes: stat.size, mtimeMs: stat.mtimeMs })
+      out.push({ key: decodeMonitorKey(`${prefix}${entry.slice(0, -6)}`), bytes: stat.size, mtimeMs: stat.mtimeMs })
     }
   }
   return out

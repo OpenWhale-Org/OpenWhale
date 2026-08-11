@@ -203,10 +203,12 @@ override plots(): MonitorPlotDef[] {
 }
 ```
 
-`kind: 'line' | 'bar' | 'candles' | 'table'`; `xKind: 'value'` + `xUnit` for non-time x-axes
+`kind: 'line' | 'bar' | 'candles' | 'table' | 'scatter'`; `xKind: 'value'` + `xUnit` for non-time x-axes
 (e.g. a depth curve over basis points). A `table` panel declares `columns: [{ key, label }]` and
 its `extract` returns row objects keyed by column — headers are click-to-sort in the dashboard
-(rows missing a value sink to the bottom).
+(rows missing a value sink to the bottom). A `scatter` panel plots points with no implied ordering
+and the dashboard fits a least-squares trend line with a 95% confidence band over them — use it to
+ask whether two quantities are related at all, not to show a series over time.
 
 ### Panel pickers
 

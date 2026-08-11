@@ -28,6 +28,18 @@ export interface PerpExchangeAdapter extends SpotExchangeAdapter {
   readonly supportsPositionSide?: boolean
 
   /**
+   * The venue prices order sequencing and this adapter can pay for it.
+   *
+   * The rate itself travels in `PerpOrderParams.params.priorityBps` rather than
+   * a field here: exactly one venue offers it today, and a semantic field added
+   * for one venue is dead weight in the generic interface if no second venue
+   * follows. This flag is what lets a caller ask before sending, and what lets
+   * the generic adapter strip the parameter loudly instead of forwarding a knob
+   * the venue will reject.
+   */
+  readonly supportsPriorityFee?: boolean
+
+  /**
    * Convert a strategy amount expressed in underlying/base units into the
    * venue order amount. Derivative venues such as OKX accept contract counts
    * (`baseAmount / contractSize`), while linear 1-unit venues return it

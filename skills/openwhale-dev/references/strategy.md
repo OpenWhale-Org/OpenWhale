@@ -105,11 +105,11 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 | `this.account('label')` | The account slot's read view, typed as the declared class |
 | `this.accountVenue('label')` / `this.accountMeta('label')` | Bound account's venue (= credential type) / full `{label, accountName, venue, kind}` |
 | `this.monitor('label')` / `this.executor('label')` | Validated label, for triggers / rarely needed directly |
-| `this.monitorData('label')` | A `MonitorDataReader` for historical data: `keys() / readLast(key,n) / readLatest(key) / readRange(key,from,to) / count(key) / readAllLatest() / readAllLast(n)` — records are `{ ts, data }` |
+| `this.monitorData('label')` | A `MonitorDataReader` for historical data: `keys() / readLast(key,n) / readAll(key) / readLatest(key) / readRange(key,from,to) / count(key) / stream(key) / readAllLatest() / readAllLast(n)` — records are `{ ts, data }`. `readAll` returns the whole stored history with no cap: prefer it over a large `readLast` when a fit needs every sample, since a windowed read silently truncates the evidence |
 | `this.instruction(execLabel, action, params, accountLabels?)` | Build a serializable `ExecutionInstruction` |
 | `this.store` | Per-instance async KV: `get/set/has/delete/keys/clear` — survives restarts |
 | `this.credential(name)` | Read a credential by name (needs explicit user binding — avoid unless necessary) |
-| `this.llm(...)` / `llms` declaration | LLM slots — declare `{ label, model: 'provider:model' }` in `decls.llms`, call via `this.llm()` |
+| `this.llm(...)` / `llms` declaration | LLM slots — declare `{ label, model: 'provider:model', credentialName?, settings? }` in `decls.llms`; call `this.llm('label', { messages, schema? })` (a `schema` returns the parsed object, no schema returns text; the label is omissible with exactly one slot). Config merges declaration ← instance binding ← call options. `this.llmModel('label')` hands you the raw AI-SDK model for anything the wrapper doesn't cover |
 | `context.getData(label, key)` | The emitted record that fired this trigger (undefined for other labels/keys) |
 | `this.addMonitorSource(label, key, { trigger? })` | Start collecting a monitor key discovered at RUNTIME (e.g. an auto-detected pair's feed); `trigger: true` also wakes `evaluate` on its pushes. Returns false on runtimes without dynamic-source support; idempotence is your job |
 

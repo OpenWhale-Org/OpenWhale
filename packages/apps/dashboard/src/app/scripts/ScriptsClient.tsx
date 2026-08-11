@@ -32,16 +32,51 @@ export function ScriptsClient() {
   )
 }
 
+/**
+ * Seed the form from what the field ALREADY shows.
+ *
+ * A `<select>` with no value renders its first option, so the form looked
+ * filled in while the state behind it was empty and the run submitted
+ * `undefined` — the field displayed one thing and sent another. Defaults do
+ * the same for text fields: a script author who set `.default()` expects that
+ * value to be sent without the user retyping it.
+ */
+function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const f of fields ?? []) {
+    if (f.default !== undefined) out[f.name] = String(f.default)
+    else if (f.type === 'options' && f.options?.[0] !== undefined) out[f.name] = String(f.options[0].value)
+    else if (f.type === 'boolean') out[f.name] = 'false'
+  }
+  return out
+}
+
 function ScriptCard({ script }: { script: ScriptInfo }) {
-  const [values, setValues] = useState<Record<string, string>>({})
+  const [values, setValues] = useState<Record<string, string>>(() => seedValues(script.paramsFields))
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{ text: string; json?: unknown } | null>(null)
   const [runError, setRunError] = useState('')
   const [showJson, setShowJson] = useState(false)
   const [ranAt, setRanAt] = useState<Date | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const fields = script.paramsFields ?? []
+
+  // paramOptions resolves server-side on every listing, so the option list can
+  // arrive after the first render. Re-seed the fields that are still empty —
+  // never overwrite something the user has already touched.
+  useEffect(() => {
+    setValues(prev => {
+      const seeded = seedValues(script.paramsFields)
+      const next = { ...prev }
+      let changed = false
+      for (const [k, v] of Object.entries(seeded)) {
+        if (next[k] === undefined || next[k] === '') { next[k] = v; changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [script.paramsFields])
 
   async function run() {
     setRunning(true)
@@ -109,6 +144,35 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                 {showJson ? 'Report' : 'JSON'}
               </button>
             )}
+            <button
+              onClick={async () => {
+                // Copy what is on screen, not always the report: with the JSON
+                // toggle on, the JSON is what the reader means by "this".
+                const shown = showJson && result.json !== undefined
+                  ? JSON.stringify(result.json, null, 2)
+                  : result.text
+                try {
+                  await navigator.clipboard.writeText(shown)
+                } catch {
+                  // Clipboard needs a secure context; fall back so the button
+                  // is never a dead end on plain http.
+                  const ta = document.createElement('textarea')
+                  ta.value = shown
+                  ta.style.position = 'fixed'
+                  ta.style.opacity = '0'
+                  document.body.appendChild(ta)
+                  ta.select()
+                  document.execCommand('copy')
+                  document.body.removeChild(ta)
+                }
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              }}
+              className="text-xs px-2 py-0.5 rounded"
+              style={{ border: '1px solid var(--border)', color: copied ? 'var(--foreground)' : 'var(--muted)' }}
+            >
+              {copied ? '✓ Copied' : '⧉ Copy'}
+            </button>
             <button onClick={() => setExpanded(v => !v)} className="text-xs px-2 py-0.5 rounded" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
               {expanded ? '⤡ Collapse' : '⤢ Expand all'}
             </button>

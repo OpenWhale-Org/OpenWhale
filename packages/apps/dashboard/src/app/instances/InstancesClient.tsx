@@ -1595,6 +1595,15 @@ function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDupl
             </>
           ) : instance.active ? (
             <>
+              {/* Editing a running instance is allowed — the params panel there
+                  restarts it on save rather than refusing the edit. */}
+              <Link
+                href={`/instances/${instance.id}`}
+                className="px-3 py-1.5 rounded-md text-xs"
+                style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+              >
+                Edit
+              </Link>
               {smallButton('Duplicate', onDuplicate,
                 { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' })}
               {smallButton('Deactivate', () => setConfirming('deactivate'),

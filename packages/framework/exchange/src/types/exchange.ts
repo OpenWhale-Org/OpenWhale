@@ -134,6 +134,8 @@ export interface ExchangeFill {
   fee?: number
   feeAsset?: string
   timestamp: number
+  /** Raw venue payload — venue adapters correct their own quirks from it. */
+  info?: Record<string, unknown>
 }
 
 /** One funding payment (positive = received) charged on a held position. */

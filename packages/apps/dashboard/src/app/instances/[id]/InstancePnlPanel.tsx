@@ -42,9 +42,58 @@ function pnlColor(v: number): string {
   return 'var(--muted)'
 }
 
+type SortState = { key: string; desc: boolean } | null
+
+/**
+ * Click-to-sort table headers. Numbers open descending (the biggest loser or
+ * the busiest symbol is what a PnL table is opened to find); text opens
+ * ascending. Blanks sink either way, so an unpriced row never displaces a real
+ * one at the top.
+ */
+function sortRows<T>(rows: T[], sort: SortState): T[] {
+  if (!sort) return rows
+  const { key, desc } = sort
+  const pick = (r: T) => (r as Record<string, unknown>)[key]
+  return [...rows].sort((a, b) => {
+    const va = pick(a), vb = pick(b)
+    const blank = (v: unknown) => v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v))
+    if (blank(va) && blank(vb)) return 0
+    if (blank(va)) return 1
+    if (blank(vb)) return -1
+    if (typeof va === 'number' && typeof vb === 'number') return desc ? vb - va : va - vb
+    const cmp = String(va).localeCompare(String(vb))
+    return desc ? -cmp : cmp
+  })
+}
+
+function SortableTh({ label, sortKey, numeric, sort, onSort }: {
+  label: string
+  sortKey: string
+  numeric?: boolean
+  sort: SortState
+  onSort: (s: SortState) => void
+}) {
+  const active = sort?.key === sortKey
+  return (
+    <th
+      className={`px-2 py-1 cursor-pointer select-none whitespace-nowrap ${numeric ? 'text-right' : 'text-left'}`}
+      style={{ color: active ? 'var(--foreground)' : 'var(--muted)' }}
+      onClick={() => onSort(active ? { key: sortKey, desc: !sort!.desc } : { key: sortKey, desc: Boolean(numeric) })}
+      title="Click to sort"
+    >
+      {label}<span style={{ opacity: active ? 1 : 0.25 }}>{active ? (sort!.desc ? ' ▾' : ' ▴') : ' ⇅'}</span>
+    </th>
+  )
+}
+
 export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<'summary' | 'fills' | 'positions'>('summary')
+  // One state per table: switching tabs must not carry a key the next table
+  // does not have.
+  const [symSort, setSymSort] = useState<SortState>(null)
+  const [fillSort, setFillSort] = useState<SortState>(null)
+  const [posSort, setPosSort] = useState<SortState>(null)
   const [summary, setSummary] = useState<PnlSummary | null>(null)
   const [fills, setFills] = useState<FillRow[]>([])
   const [positions, setPositions] = useState<PositionRow[]>([])
@@ -150,17 +199,17 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                 {tab === 'summary' && (
                   <table className="w-full">
                     <thead>
-                      <tr style={{ color: 'var(--muted)' }}>
-                        <th className="text-left px-2 py-1">symbol</th>
-                        <th className="text-right px-2 py-1">realized</th>
-                        <th className="text-right px-2 py-1">fees</th>
-                        <th className="text-right px-2 py-1">funding</th>
-                        <th className="text-right px-2 py-1">net</th>
-                        <th className="text-right px-2 py-1">fills</th>
+                      <tr>
+                        <SortableTh label="symbol" sortKey="symbol" sort={symSort} onSort={setSymSort} />
+                        <SortableTh label="realized" sortKey="realized" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label="fees" sortKey="fees" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label="funding" sortKey="funding" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label="net" sortKey="net" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label="fills" sortKey="fills" numeric sort={symSort} onSort={setSymSort} />
                       </tr>
                     </thead>
                     <tbody>
-                      {summary.bySymbol.map(r => (
+                      {sortRows(summary.bySymbol, symSort).map(r => (
                         <tr key={r.symbol} style={{ borderTop: '1px solid var(--border)' }}>
                           <td className="px-2 py-1">{r.symbol}</td>
                           <td className="text-right px-2 py-1" style={{ color: pnlColor(r.realized) }}>{fmt(r.realized)}</td>
@@ -182,18 +231,18 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                 {tab === 'fills' && (
                   <table className="w-full">
                     <thead>
-                      <tr style={{ color: 'var(--muted)' }}>
-                        <th className="text-left px-2 py-1">time</th>
-                        <th className="text-left px-2 py-1">symbol</th>
-                        <th className="text-left px-2 py-1">side</th>
-                        <th className="text-right px-2 py-1">qty</th>
-                        <th className="text-right px-2 py-1">price</th>
-                        <th className="text-right px-2 py-1">pnl</th>
-                        <th className="text-right px-2 py-1">fee</th>
+                      <tr>
+                        <SortableTh label="time" sortKey="ts" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label="symbol" sortKey="symbol" sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label="side" sortKey="side" sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label="qty" sortKey="qty" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label="price" sortKey="price" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label="pnl" sortKey="realizedPnl" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label="fee" sortKey="fee" numeric sort={fillSort} onSort={setFillSort} />
                       </tr>
                     </thead>
                     <tbody>
-                      {fills.map((f, i) => (
+                      {sortRows(fills, fillSort).map((f, i) => (
                         <tr key={`${f.orderId}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
                           <td className="px-2 py-1" style={{ color: 'var(--muted)' }}>{new Date(f.ts).toLocaleString()}</td>
                           <td className="px-2 py-1">{f.symbol}</td>
@@ -214,17 +263,17 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                 {tab === 'positions' && (
                   <table className="w-full">
                     <thead>
-                      <tr style={{ color: 'var(--muted)' }}>
-                        <th className="text-left px-2 py-1">symbol</th>
-                        <th className="text-right px-2 py-1">net qty</th>
-                        <th className="text-right px-2 py-1">avg entry</th>
-                        <th className="text-right px-2 py-1">mark</th>
-                        <th className="text-right px-2 py-1">unrealized</th>
-                        <th className="text-left px-2 py-1">account</th>
+                      <tr>
+                        <SortableTh label="symbol" sortKey="symbol" sort={posSort} onSort={setPosSort} />
+                        <SortableTh label="net qty" sortKey="qty" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label="avg entry" sortKey="avgEntry" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label="mark" sortKey="markPrice" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label="unrealized" sortKey="unrealizedPnl" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label="account" sortKey="account" sort={posSort} onSort={setPosSort} />
                       </tr>
                     </thead>
                     <tbody>
-                      {positions.map(p => (
+                      {sortRows(positions, posSort).map(p => (
                         <tr key={`${p.account}:${p.symbol}`} style={{ borderTop: '1px solid var(--border)' }}>
                           <td className="px-2 py-1">{p.symbol}</td>
                           <td className="text-right px-2 py-1" style={{ color: p.qty > 0 ? 'var(--success)' : 'var(--danger)' }}>{p.qty}</td>
