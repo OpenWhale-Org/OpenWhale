@@ -59,6 +59,14 @@ const paramsSchema = z.object({
     displayName: 'Real fill (spends money)',
     description: '**Removes the probe safety net**: sends a buy priced to cross and reads the priority fee off the change in staking balance. Incurs real trading fees, slippage and priority fee. Notional is capped at 500.',
   }),
+  benchmark: z.boolean().default(false).meta({
+    displayName: 'A/B benchmark (spends money)',
+    description: 'Race a priority order against an identical plain one and compare when each actually filled. Both are real crossing IOCs, so both fill and both cost fees — this is the only way to measure what the rate buys, since the venue reports no latency of its own.',
+  }),
+  benchmarkRounds: z.number().int().min(1).max(20).default(3).meta({
+    displayName: 'Benchmark rounds',
+    description: 'One round = one priority order + one plain order + one close. A single round proves nothing; the per-round spread is wide enough that a handful is the minimum worth reading.',
+  }),
   closeAfter: z.boolean().default(true).meta({
     displayName: 'Close immediately after filling',
     description: 'Only meaningful with a real fill. On by default — this script exists to observe a fee, not to take a position. Turning it off **leaves the position open** for you to handle.',
@@ -217,6 +225,184 @@ export const priorityProbeScript: ScriptDefinition = {
     say(`Limit ${price} (~50% of mid, crosses nothing)   size ${amount}   notional ≈ $${(price * amount).toFixed(2)}`)
     say(`Priority ${p.priorityBps} bps → p = ${priorityP(p.priorityBps)} (charged on fills only)`)
     say()
+
+
+    // Both money-spending modes sit behind dryRun, which defaults ON. Say so
+    // rather than silently running the free probe instead — a benchmark that
+    // reports nothing looks like a broken benchmark, not a guarded one.
+    if ((p.benchmark || p.liveFill) && p.dryRun) {
+      say(`⚠️ "${p.benchmark ? 'A/B benchmark' : 'Real fill'}" is on but so is "Print payload only" — nothing will be sent.`)
+      say('   Turn print-only OFF to actually run it. Falling through to the free probe below.')
+      say('')
+    }
+
+    // ── A/B benchmark ────────────────────────────────────────────────────────
+    //
+    // The venue reports no latency and no priority fee, so the only way to see
+    // what the rate buys is to race two orders that differ in nothing else and
+    // read the fill times back off the chain.
+    //
+    // Two things decide whether the number means anything:
+    //
+    //  - SIGN BOTH FIRST, then fire both. Signing is CPU work in the hundreds of
+    //    microseconds to milliseconds; doing it between the two sends would put
+    //    that entirely into the second order's latency and manufacture exactly
+    //    the difference we are trying to measure.
+    //  - ALTERNATE which one goes first each round. Promise.all still starts the
+    //    array in order, and whatever edge that confers has to fall on both sides
+    //    equally or it shows up as a priority effect.
+    //
+    // Both orders are the same side, so the first to land moves the book for the
+    // second — sizes are kept small for that reason, and the comparison is on
+    // TIME, never on price.
+    if (p.benchmark && !p.dryRun) {
+      const notional = Math.min(p.notionalUsd, LIVE_MAX_NOTIONAL)
+      const wallet = ex.walletAddress
+      const before = wallet ? await delegatable(wallet) : undefined
+
+      hr()
+      say(`▶ A/B benchmark — ${p.benchmarkRounds} round(s), $${notional.toFixed(2)} per order`)
+      say(`  Each round: one IOC at ${p.priorityBps} bps priority, one identical IOC with none, fired together.`)
+      say(`  Undelegated stake (before): ${before ?? 'query failed'} HYPE`)
+
+      const rounds: Array<{ round: number; prioFirst: boolean; prio?: { oid: number; sentAt: number }; plain?: { oid: number; sentAt: number } }> = []
+
+      for (let round = 1; round <= p.benchmarkRounds; round++) {
+        const tick = await ex.fetchTicker(p.symbol)
+        const now = tick.last ?? tick.close ?? mid
+        // Priced through the book so both are certain to cross. An IOC fills at
+        // the book's price, not this limit — the limit only guarantees a match.
+        const px = Number(ex.priceToPrecision(p.symbol, now * 1.005))
+        const qty = Number(ex.amountToPrecision(p.symbol, notional / now))
+        if (!(qty > 0)) { say(`  round ${round}: size rounds to zero at $${notional} — raise the notional`); break }
+
+        const build = (grouping: unknown, nonce: number) => {
+          const orderObj = ex.createOrderRequest(p.symbol, 'limit', 'buy', qty, px, { timeInForce: 'Ioc' })
+          const action = { type: 'order', orders: [orderObj], grouping }
+          return { action, nonce, signature: ex.signL1Action(action, nonce) }
+        }
+        // Distinct nonces: the venue rejects a repeat, and two calls inside the
+        // same millisecond would collide.
+        const base = ex.milliseconds()
+        const reqPrio = build({ p: priorityP(p.priorityBps) }, base)
+        const reqPlain = build('na', base + 1)
+
+        const fire = async (req: unknown) => {
+          const sentAt = Date.now()
+          try {
+            const res = await ex.privatePostExchange(req) as Record<string, unknown>
+            const st = (((res['response'] as Record<string, unknown>)?.['data'] as Record<string, unknown>)?.['statuses'] as Array<Record<string, unknown>>)?.[0]
+            const filled = st?.['filled'] as { oid?: number; totalSz?: string } | undefined
+            if (filled?.oid !== undefined) return { oid: filled.oid, sentAt, sz: Number(filled.totalSz ?? 0) }
+            return { sentAt, error: st?.['error'] !== undefined ? String(st['error']) : JSON.stringify(st ?? res).slice(0, 160) }
+          } catch (err) {
+            return { sentAt, error: (err instanceof Error ? err.message : String(err)).slice(0, 160) }
+          }
+        }
+
+        const prioFirst = round % 2 === 1
+        const [a, b] = await Promise.all(
+          prioFirst ? [fire(reqPrio), fire(reqPlain)] : [fire(reqPlain), fire(reqPrio)],
+        )
+        const prio = prioFirst ? a : b
+        const plain = prioFirst ? b : a
+        rounds.push({
+          round, prioFirst,
+          ...(prio.oid !== undefined ? { prio: { oid: prio.oid, sentAt: prio.sentAt } } : {}),
+          ...(plain.oid !== undefined ? { plain: { oid: plain.oid, sentAt: plain.sentAt } } : {}),
+        })
+        say(`  round ${round} (${prioFirst ? 'priority sent first' : 'plain sent first'}): ` +
+          `priority ${prio.oid !== undefined ? `oid ${prio.oid}` : `❌ ${prio.error}`}, ` +
+          `plain ${plain.oid !== undefined ? `oid ${plain.oid}` : `❌ ${plain.error}`}`)
+
+        // Flatten before the next round so the book state does not accumulate.
+        const filledSz = (prio.sz ?? 0) + (plain.sz ?? 0)
+        if (filledSz > 0 && p.closeAfter) {
+          const sellPx = Number(ex.priceToPrecision(p.symbol, now * 0.995))
+          const sellAction = {
+            type: 'order',
+            orders: [ex.createOrderRequest(p.symbol, 'limit', 'sell', filledSz, sellPx, { timeInForce: 'Ioc' })],
+            grouping: 'na',
+          }
+          try {
+            const nonce = ex.milliseconds()
+            await ex.privatePostExchange({ action: sellAction, nonce, signature: ex.signL1Action(sellAction, nonce) })
+          } catch (err) {
+            say(`    🚨 close FAILED: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`)
+            say(`    🚨 you are holding ${filledSz} long — flatten it manually on Hyperliquid.`)
+          }
+        } else if (filledSz > 0) {
+          say(`    ⏸ left ${filledSz} open (close-after is off)`)
+        }
+      }
+
+      // The venue stamps the fill, we do not — local send time only bounds it.
+      await new Promise(r => setTimeout(r, 3000))
+      const wanted = new Map<number, { round: number; kind: 'priority' | 'plain'; sentAt: number }>()
+      for (const r of rounds) {
+        if (r.prio) wanted.set(r.prio.oid, { round: r.round, kind: 'priority', sentAt: r.prio.sentAt })
+        if (r.plain) wanted.set(r.plain.oid, { round: r.round, kind: 'plain', sentAt: r.plain.sentAt })
+      }
+      const firstSent = Math.min(...[...wanted.values()].map(v => v.sentAt))
+      const fillAt = new Map<number, number>()
+      try {
+        const res = await fetch('https://api.hyperliquid.xyz/info', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFillsByTime', user: wallet, startTime: firstSent - 5_000, endTime: Date.now() }),
+        })
+        for (const f of (await res.json() as Array<{ oid: number; time: number }>)) {
+          if (wanted.has(f.oid)) fillAt.set(f.oid, Math.min(fillAt.get(f.oid) ?? Infinity, f.time))
+        }
+      } catch { /* fall through to a report without venue times */ }
+
+      hr()
+      say('Result — venue fill time minus local send time, per round')
+      say(`  ${'round'.padEnd(7)}${'priority'.padEnd(12)}${'plain'.padEnd(12)}${'delta'.padEnd(12)}sent first`)
+      const deltas: number[] = []
+      for (const r of rounds) {
+        const lp = r.prio && fillAt.has(r.prio.oid) ? fillAt.get(r.prio.oid)! - r.prio.sentAt : undefined
+        const ln = r.plain && fillAt.has(r.plain.oid) ? fillAt.get(r.plain.oid)! - r.plain.sentAt : undefined
+        const d = lp !== undefined && ln !== undefined ? lp - ln : undefined
+        if (d !== undefined) deltas.push(d)
+        say(`  ${String(r.round).padEnd(7)}${(lp !== undefined ? `${lp}ms` : '—').padEnd(12)}${(ln !== undefined ? `${ln}ms` : '—').padEnd(12)}` +
+          `${(d !== undefined ? `${d >= 0 ? '+' : ''}${d}ms` : '—').padEnd(12)}${r.prioFirst ? 'priority' : 'plain'}`)
+      }
+      if (deltas.length > 0) {
+        const mean = deltas.reduce((x, y) => x + y, 0) / deltas.length
+        const sorted = [...deltas].sort((x, y) => x - y)
+        const med = sorted[Math.floor(sorted.length / 2)]!
+        say('')
+        say(`  mean ${mean >= 0 ? '+' : ''}${mean.toFixed(1)}ms   median ${med >= 0 ? '+' : ''}${med}ms   n=${deltas.length}`)
+        say(`  Negative = the priority order filled EARLIER. Official guidance is ~45ms per bp`)
+        say(`  up to 8bps, so ${p.priorityBps} bps predicts about ${(p.priorityBps * 45).toFixed(0)}ms.`)
+        if (deltas.length < 5) say(`  ⚠️ n=${deltas.length} is too few to separate the effect from round-trip noise.`)
+      } else {
+        say('  No round produced both fills — nothing to compare.')
+      }
+
+      const after = wallet ? await delegatable(wallet) : undefined
+      say('')
+      say(`  Undelegated stake (after): ${after ?? 'query failed'} HYPE`)
+      if (before !== undefined && after !== undefined) {
+        const burned = before - after
+        const hypeUsd = await hypePrice()
+        say(`  Priority fee burned across the run: ${burned.toFixed(8)} HYPE` +
+          (hypeUsd !== undefined ? ` ≈ $${(burned * hypeUsd).toFixed(6)}` : ''))
+      }
+
+      return {
+        text: out.join('\n'),
+        json: {
+          mode: 'benchmark', symbol: p.symbol, priorityBps: p.priorityBps, rounds: p.benchmarkRounds,
+          perRound: rounds.map(r => ({
+            round: r.round, prioFirst: r.prioFirst,
+            priorityLatencyMs: r.prio && fillAt.has(r.prio.oid) ? fillAt.get(r.prio.oid)! - r.prio.sentAt : null,
+            plainLatencyMs: r.plain && fillAt.has(r.plain.oid) ? fillAt.get(r.plain.oid)! - r.plain.sentAt : null,
+          })),
+          deltasMs: deltas, before, after,
+        },
+      }
+    }
 
     // ── Live fill ────────────────────────────────────────────────────────────
     // Everything above this point is provably free. From here it is not: the
