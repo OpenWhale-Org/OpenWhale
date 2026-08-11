@@ -67,6 +67,10 @@ const paramsSchema = z.object({
     displayName: 'Benchmark rounds',
     description: 'One round = one priority order + one plain order + one close. A single round proves nothing; the per-round spread is wide enough that a handful is the minimum worth reading.',
   }),
+  roundGapSec: z.number().int().min(0).max(600).default(30).meta({
+    displayName: 'Gap between rounds (s)',
+    description: 'Back-to-back rounds are not independent samples — fired seconds apart they fill at the same price, in the same book, against the same queue, so three of them carry barely more information than one. Spacing them also keeps the venue from rate-limiting the run. 0 fires them as fast as possible.',
+  }),
   closeAfter: z.boolean().default(true).meta({
     displayName: 'Close immediately after filling',
     description: 'Only meaningful with a real fill. On by default — this script exists to observe a fee, not to take a position. Turning it off **leaves the position open** for you to handle.',
@@ -349,6 +353,10 @@ export const priorityProbeScript: ScriptDefinition = {
         // rate-limited quote used to throw out the whole benchmark.
         say(`  round ${round}: ✖ ${(err instanceof Error ? err.message : String(err)).slice(0, 180)}`)
        }
+       if (round < p.benchmarkRounds && p.roundGapSec > 0) {
+         say(`    … waiting ${p.roundGapSec}s before the next round`)
+         await new Promise(r => setTimeout(r, p.roundGapSec * 1000))
+       }
       }
 
       // The venue stamps the fill, we do not — local send time only bounds it.
@@ -360,15 +368,46 @@ export const priorityProbeScript: ScriptDefinition = {
       }
       const firstSent = Math.min(...[...wanted.values()].map(v => v.sentAt))
       const fillAt = new Map<number, number>()
-      try {
-        const res = await fetch('https://api.hyperliquid.xyz/info', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'userFillsByTime', user: wallet, startTime: firstSent - 5_000, endTime: Date.now() }),
-        })
-        for (const f of (await res.json() as Array<{ oid: number; time: number }>)) {
-          if (wanted.has(f.oid)) fillAt.set(f.oid, Math.min(fillAt.get(f.oid) ?? Infinity, f.time))
+      const lookupErrors: string[] = []
+
+      // A single rate-limited read used to blank the entire table, and the
+      // report then said "no round produced both fills" — which was a lie
+      // about the trading, not just a gap in the data. Retry, then fall back
+      // to a per-order read, and if it still fails SAY so.
+      const info = async (body: unknown, tries = 4): Promise<unknown> => {
+        for (let i = 0; ; i++) {
+          try {
+            const res = await fetch('https://api.hyperliquid.xyz/info', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            })
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            return await res.json()
+          } catch (err) {
+            if (i >= tries) throw err
+            await new Promise(r => setTimeout(r, 700 * (i + 1)))
+          }
         }
-      } catch { /* fall through to a report without venue times */ }
+      }
+
+      try {
+        const rows = await info({ type: 'userFillsByTime', user: wallet, startTime: firstSent - 5_000, endTime: Date.now() }) as Array<{ oid: number; time: number }>
+        for (const f of rows) if (wanted.has(f.oid)) fillAt.set(f.oid, Math.min(fillAt.get(f.oid) ?? Infinity, f.time))
+      } catch (err) {
+        lookupErrors.push(`userFillsByTime: ${err instanceof Error ? err.message : String(err)}`)
+      }
+
+      // Per-order fallback. orderStatus stamps a filled order with the same
+      // instant the fill carries, and one order missing from a windowed read
+      // does not stop the others from being read individually.
+      for (const oid of wanted.keys()) {
+        if (fillAt.has(oid)) continue
+        try {
+          const r = await info({ type: 'orderStatus', user: wallet, oid }) as { order?: { status?: string; statusTimestamp?: number } }
+          if (r.order?.status === 'filled' && typeof r.order.statusTimestamp === 'number') fillAt.set(oid, r.order.statusTimestamp)
+        } catch (err) {
+          lookupErrors.push(`orderStatus ${oid}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
 
       hr()
       say('Result — venue fill time minus local send time, per round')
@@ -392,7 +431,16 @@ export const priorityProbeScript: ScriptDefinition = {
         say(`  up to 8bps, so ${p.priorityBps} bps predicts about ${(p.priorityBps * 45).toFixed(0)}ms.`)
         if (deltas.length < 5) say(`  ⚠️ n=${deltas.length} is too few to separate the effect from round-trip noise.`)
       } else {
-        say('  No round produced both fills — nothing to compare.')
+        const placed = [...wanted.keys()].length
+        say(placed > 0
+          ? `  ${placed} order(s) went out but no round has BOTH fill times — see the per-round lines above for why.`
+          : '  No order was accepted — nothing to compare.')
+      }
+      if (lookupErrors.length > 0) {
+        say('')
+        say(`  ⚠️ Could not read ${lookupErrors.length} fill time(s) from the venue. A blank cell above means`)
+        say('     UNREAD, not unfilled — check the order on Hyperliquid before concluding anything.')
+        for (const e of lookupErrors.slice(0, 4)) say(`       ${e}`)
       }
 
       const after = wallet ? await delegatable(wallet) : undefined
