@@ -3,6 +3,7 @@ import type { CredentialTypeDefinition, AdapterRegistration } from '../types/mat
 import type { AccountImplementation } from '../types/account.js'
 import type { MonitorImplementation } from '../types/monitorInstance.js'
 import type { IStrategy } from '../types/strategy.js'
+import type { ScriptDefinition } from '../types/script.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import {
   owMonitorMeta, owAccountMeta, owExecutorMeta, owStrategyMeta,
@@ -36,6 +37,12 @@ export interface PluginManifest {
   executors?: Array<new () => BaseExecutor<any>>
   /** Strategy classes (zero-arg constructor; id from the class or @Strategy). */
   strategies?: Array<new () => IStrategy>
+  /**
+   * Operator utilities for the dashboard's Scripts page — run on click, no
+   * lifecycle. Passed through verbatim: a script is already a plain object,
+   * so there is nothing to lower.
+   */
+  scripts?: ScriptDefinition[]
 }
 
 function kebab(name: string): string {
@@ -134,6 +141,7 @@ export function definePlugin(manifest: PluginManifest): PluginFactory<Record<str
       name: manifest.name,
       version: manifest.version,
       ...(manifest.credentialTypes ? { credentialTypes: manifest.credentialTypes } : {}),
+      ...(manifest.scripts ? { scripts: manifest.scripts } : {}),
       ...(manifest.adapters ? { adapters: manifest.adapters } : {}),
       ...(accounts.length ? { accounts } : {}),
       ...(monitorImplementations.length ? { monitorImplementations } : {}),
