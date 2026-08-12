@@ -9,6 +9,7 @@ import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { MonitorRegistry } from '../registry/Registry.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
+import { PortfolioJournal } from '../strategy/PortfolioJournal.js'
 import { HttpClient } from '../strategy/HttpClient.js'
 import { TriggerState } from './TriggerState.js'
 import { createLogger } from '../utils/logger.js'
@@ -99,7 +100,10 @@ export class TriggerManager {
     strategy.setReaders(readers, credentialNames)
     strategy.setInstanceId(instanceId)
     if (this.credentialStore) strategy.setCredentialStore(this.credentialStore)
-    if (this.database) strategy.setStore(new DBStrategyStore(instanceId, this.database))
+    if (this.database) {
+      strategy.setStore(new DBStrategyStore(instanceId, this.database))
+      strategy.setPortfolioJournal?.(new PortfolioJournal(instanceId, this.database))
+    }
     strategy.setHttpClient(new HttpClient(strategy.strategyId))
     strategy.setDynamicSources?.({
       addSubscription: source => this.addSubscription(instanceId, source),

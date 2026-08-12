@@ -8,6 +8,7 @@ import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { AccountSlot, ReaderClass } from '../types/materialization.js'
 import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType } from '../types/definition.js'
+import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
 import { getDataDir } from '../utils/paths.js'
@@ -323,6 +324,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   private monitorReaders = new Map<string, MonitorDataReader>()
   private credentialStore?: CredentialStore
   private storeInstance?: IStrategyStore
+  private portfolioJournalInstance?: IPortfolioJournal
   private httpClient?: HttpClient
   private readonly llmClient: LlmClient
   private llmBindings: Record<string, LlmSlotBinding> = {}
@@ -405,6 +407,10 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
 
   setStore(store: IStrategyStore): void {
     this.storeInstance = store
+  }
+
+  setPortfolioJournal(journal: IPortfolioJournal): void {
+    this.portfolioJournalInstance = journal
   }
 
   setHttpClient(client: HttpClient): void {
@@ -702,6 +708,11 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     return this.storeInstance
   }
 
+  /** Instance-scoped append-only portfolio history, when the runtime has a database. */
+  protected get portfolioJournal(): IPortfolioJournal | undefined {
+    return this.portfolioJournalInstance
+  }
+
   /**
    * Controlled HTTP client. All requests are logged for observability.
    * Use this instead of calling fetch directly.
@@ -817,4 +828,3 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     }
   }
 }
-
