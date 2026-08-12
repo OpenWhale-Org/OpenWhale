@@ -31,5 +31,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  // Public assets are needed before authentication (notably the particle-whale
+  // source image on /login), so exclude file requests as well as Next assets.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.[^/]+$).*)'],
 }

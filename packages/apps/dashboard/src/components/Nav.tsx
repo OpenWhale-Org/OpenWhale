@@ -2,158 +2,95 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { AuroraLogo } from './AuroraLogo'
+import { useUiMode } from './UiModeProvider'
 
-const links = [
-  {
-    href: '/instances',
-    label: 'Instances',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <path d="M8 21h8M12 17v4" />
-      </svg>
-    ),
-  },
-  {
-    href: '/accounts',
-    label: 'Accounts',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-    ),
-  },
-  {
-    href: '/credentials',
-    label: 'Credentials',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="8" cy="15" r="4" />
-        <path d="M11.7 11.7 20 4" />
-        <path d="M18 6l2 2" />
-        <path d="M15 9l2 2" />
-      </svg>
-    ),
-  },
-  {
-    href: '/registry',
-    label: 'Registry',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-      </svg>
-    ),
-  },
-  {
-    href: '/monitor',
-    label: 'Monitor',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-      </svg>
-    ),
-  },
-  {
-    href: '/monitor-data',
-    label: 'Explorer',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <ellipse cx="12" cy="5" rx="9" ry="3" />
-        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-      </svg>
-    ),
-  },
-  {
-    href: '/executors',
-    label: 'Executors',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-      </svg>
-    ),
-  },
-  {
-    href: '/plugins',
-    label: 'Plugins',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2v6M9 5h6" />
-        <path d="M5 8h14a1 1 0 0 1 1 1v3a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7V9a1 1 0 0 1 1-1z" />
-        <path d="M12 19v3" />
-      </svg>
-    ),
-  },
-  {
-    href: '/compiler',
-    label: 'Compiler',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="16 18 22 12 16 6" />
-        <polyline points="8 6 2 12 8 18" />
-      </svg>
-    ),
-  },
-  {
-    href: '/scripts',
-    label: 'Scripts',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="4 17 10 11 4 5" />
-        <line x1="12" y1="19" x2="20" y2="19" />
-      </svg>
-    ),
-  },
-  {
-    href: '/assistant',
-    label: 'Assistant',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      </svg>
-    ),
-  },
-  {
-    href: '/users',
-    label: 'Users',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
-  },
+type IconName = 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users'
+
+const links: Array<{ href: string; label: string; auroraLabel?: string; group?: string; icon: IconName }> = [
+  { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
+  { href: '/accounts', label: 'Accounts', group: 'TRADE', icon: 'accounts' },
+  { href: '/credentials', label: 'Credentials', group: 'SETTINGS', icon: 'credentials' },
+  { href: '/registry', label: 'Registry', group: 'DEVELOP', icon: 'registry' },
+  { href: '/monitor', label: 'Monitor', group: 'OBSERVE', icon: 'monitor' },
+  { href: '/monitor-data', label: 'Explorer', group: 'OBSERVE', icon: 'explorer' },
+  { href: '/executors', label: 'Executors', group: 'AUTOMATE', icon: 'executors' },
+  { href: '/plugins', label: 'Plugins', group: 'DEVELOP', icon: 'plugins' },
+  { href: '/compiler', label: 'Compiler', group: 'DEVELOP', icon: 'compiler' },
+  { href: '/scripts', label: 'Scripts', group: 'AUTOMATE', icon: 'scripts' },
+  { href: '/assistant', label: 'Assistant', icon: 'assistant' },
+  { href: '/users', label: 'Users', group: 'SETTINGS', icon: 'users' },
 ]
+
+const auroraGroups = ['TRADE', 'OBSERVE', 'AUTOMATE', 'DEVELOP', 'SETTINGS']
+
+function Icon({ name }: { name: IconName }) {
+  const common = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  switch (name) {
+    case 'overview': return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></svg>
+    case 'strategies': return <svg {...common}><path d="M4 18 9 12l4 3 7-9" /><path d="M15 6h5v5" /></svg>
+    case 'accounts': return <svg {...common}><path d="M3 7h18v12H3z" /><path d="M16 12h5v3h-5a1.5 1.5 0 0 1 0-3Z" /><path d="M6 7V5h12v2" /></svg>
+    case 'credentials': return <svg {...common}><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l2 2M14 9l2 2" /></svg>
+    case 'registry': return <svg {...common}><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" /></svg>
+    case 'monitor': return <svg {...common}><path d="M3 12h4l2.5-7 5 14 2.5-7h4" /></svg>
+    case 'explorer': return <svg {...common}><circle cx="11" cy="11" r="7" /><path d="m16 16 5 5M11 8v6M8 11h6" /></svg>
+    case 'executors': return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="m10 8 6 4-6 4Z" /></svg>
+    case 'plugins': return <svg {...common}><path d="M8 3h8v5h5v8h-5v5H8v-5H3V8h5Z" /><path d="M12 3v5M21 12h-5M12 21v-5M3 12h5" /></svg>
+    case 'compiler': return <svg {...common}><path d="m8 5-6 7 6 7M16 5l6 7-6 7M14 3l-4 18" /></svg>
+    case 'scripts': return <svg {...common}><path d="m4 7 5 5-5 5M12 18h8" /></svg>
+    case 'assistant': return <svg {...common}><path d="M12 3 13.5 8.5 19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5Z" /><path d="M19 17l.7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7Z" /></svg>
+    case 'users': return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.2a4 4 0 0 1 0 7.6" /></svg>
+  }
+}
+
+function NavLink({ href, label, icon, active, aurora = false }: { href: string; label: string; icon: IconName; active: boolean; aurora?: boolean }) {
+  return (
+    <Link href={href} className={aurora ? `aurora-nav-link${active ? ' is-active' : ''}` : 'classic-nav-link'} style={aurora ? undefined : { background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--muted)' }}>
+      <Icon name={icon} />
+      <span>{label}</span>
+    </Link>
+  )
+}
 
 export function Nav() {
   const pathname = usePathname()
+  const { mode, setMode } = useUiMode()
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
+
+  if (mode === 'classic') {
+    return (
+      <nav className="classic-nav w-52 shrink-0 flex flex-col gap-1 p-4 border-r" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+        {links.map(link => <NavLink key={link.href} href={link.href} label={link.label} icon={link.icon} active={isActive(link.href)} />)}
+      </nav>
+    )
+  }
 
   return (
-    <nav
-      className="w-52 shrink-0 flex flex-col gap-1 p-4 border-r"
-      style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-    >
-      {links.map(({ href, label, icon }) => {
-        // Boundary-aware prefix: '/monitor' must match '/monitor/x' but not
-        // '/monitor-data' — bare startsWith lit up Monitor alongside Explorer.
-        const active = pathname === href || pathname.startsWith(href + '/')
-        return (
-          <Link
-            key={href}
-            href={href}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors"
-            style={{
-              background: active ? 'var(--accent)' : 'transparent',
-              color: active ? '#fff' : 'var(--muted)',
-            }}
-          >
-            {icon}
-            {label}
-          </Link>
-        )
-      })}
-    </nav>
+    <aside className="aurora-sidebar">
+      <div className="aurora-sidebar-brand">
+        <AuroraLogo size="sm" />
+        <span className="aurora-beta"><span>AURORA</span><b>BETA</b></span>
+      </div>
+      <nav className="aurora-nav">
+        <NavLink href="/overview" label="Overview" icon="overview" active={isActive('/overview')} aurora />
+        {auroraGroups.map(group => {
+          const grouped = links.filter(link => link.group === group)
+          if (grouped.length === 0) return null
+          return (
+            <div className="aurora-nav-group" key={group}>
+              <div className="aurora-nav-heading">{group}</div>
+              {grouped.map(link => <NavLink key={link.href} href={link.href} label={link.auroraLabel ?? link.label} icon={link.icon} active={isActive(link.href)} aurora />)}
+            </div>
+          )
+        })}
+      </nav>
+      <div className="aurora-sidebar-footer">
+        <NavLink href="/assistant" label="Assistant" icon="assistant" active={isActive('/assistant')} aurora />
+        <button className="aurora-nav-link aurora-switch-back" onClick={() => setMode('classic')}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 7H4v12h12v-5M15 3h5v5M20 3l-9 9" /></svg>
+          <span>Switch to Classic UI</span>
+        </button>
+      </div>
+    </aside>
   )
 }
