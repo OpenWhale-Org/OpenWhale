@@ -383,11 +383,18 @@ export function AuroraBackground() {
       const rect = canvas.getBoundingClientRect()
       const pointerX = event.clientX - rect.left
       const pointerY = event.clientY - rect.top
-      const whaleLeft = offsetX + WHALE_BOUNDS.x * scale
-      const whaleTop = offsetY + WHALE_BOUNDS.y * scale
-      const whaleRight = whaleLeft + WHALE_BOUNDS.width * scale
-      const whaleBottom = whaleTop + WHALE_BOUNDS.height * scale
-      if (pointerX < whaleLeft || pointerX > whaleRight || pointerY < whaleTop || pointerY > whaleBottom) return
+      const activationRadiusSquared = 48 ** 2
+      let nearbyParticles = 0
+      for (const particle of particles) {
+        const particleX = offsetX + particle.x * scale
+        const particleY = offsetY + particle.y * scale
+        const deltaX = particleX - pointerX
+        const deltaY = particleY - pointerY
+        if (deltaX * deltaX + deltaY * deltaY > activationRadiusSquared) continue
+        nearbyParticles += 1
+        if (nearbyParticles >= 12) break
+      }
+      if (nearbyParticles < 12) return
       emitParticleWave(
         waveEmitter,
         pointerX,
