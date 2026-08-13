@@ -1,12 +1,6 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import {
-  createParticleWaveEmitter,
-  displaceByParticleWaves,
-  emitParticleWave,
-  type ParticleWave,
-} from '@/lib/particle-waves'
 
 const MASTER_SRC = '/market-whale-master.png'
 const FALLBACK_MASTER_WIDTH = 1672
@@ -19,7 +13,6 @@ const EXCLUDED_DETAILS = [
 ]
 const WHALE_WAVE_OPTIONS = {
   maxRadius: 180,
-  duration: 780,
   strength: 42,
 }
 
@@ -68,6 +61,30 @@ type Sample = {
   active: boolean
 }
 
+type WhaleField = {
+  x: number
+  y: number
+  targetX: number
+  targetY: number
+  radius: number
+  active: boolean
+}
+
+function displaceByWhaleField(x: number, y: number, field: WhaleField, strengthScale = 1) {
+  if (!field.active || field.radius < 1) return { x, y }
+  const deltaX = x - field.x
+  const deltaY = y - field.y
+  const distance = Math.hypot(deltaX, deltaY) || 1
+  if (distance >= field.radius) return { x, y }
+
+  const influence = 1 - distance / field.radius
+  const force = influence ** 1.55 * WHALE_WAVE_OPTIONS.strength * strengthScale
+  return {
+    x: x + deltaX / distance * force,
+    y: y + deltaY / distance * force,
+  }
+}
+
 function hash(x: number, y: number, salt = 0) {
   const value = Math.sin(x * 12.9898 + y * 78.233 + salt * 37.719) * 43758.5453
   return value - Math.floor(value)
@@ -87,8 +104,7 @@ function drawDotText(
   unit: number,
   color: string,
   alpha: number,
-  waves: ParticleWave[],
-  now: number,
+  field: WhaleField,
   reducedMotion: boolean,
 ) {
   let cursor = x
@@ -107,7 +123,7 @@ function drawDotText(
         const baseY = y + rowIndex * unit
         const point = reducedMotion
           ? { x: baseX, y: baseY }
-          : displaceByParticleWaves(baseX, baseY, waves, now, WHALE_WAVE_OPTIONS, 0.68)
+          : displaceByWhaleField(baseX, baseY, field, 0.68)
         context.moveTo(point.x + unit * 0.25, point.y)
         context.arc(point.x, point.y, Math.max(0.62, unit * 0.29), 0, Math.PI * 2)
       }
@@ -125,8 +141,7 @@ function drawDataCallouts(
   offsetX: number,
   offsetY: number,
   time: number,
-  waves: ParticleWave[],
-  now: number,
+  field: WhaleField,
   reducedMotion: boolean,
 ) {
   const unit = Math.max(1.85, scale * 3.55)
@@ -163,9 +178,9 @@ function drawDataCallouts(
     context.save()
     context.shadowBlur = 5
     context.shadowColor = 'rgba(91, 183, 255, .5)'
-    drawDotText(context, callout.value, x, y, unit, '#83e3ff', 0.96 * pulse, waves, now, reducedMotion)
+    drawDotText(context, callout.value, x, y, unit, '#83e3ff', 0.96 * pulse, field, reducedMotion)
     context.shadowColor = 'rgba(168, 116, 255, .45)'
-    drawDotText(context, callout.change, x, y + unit * 9, unit * 0.84, '#bd91ff', 0.88 * pulse, waves, now, reducedMotion)
+    drawDotText(context, callout.change, x, y + unit * 9, unit * 0.84, '#bd91ff', 0.88 * pulse, field, reducedMotion)
     context.restore()
   }
   context.globalAlpha = 1
@@ -301,7 +316,14 @@ export function AuroraBackground() {
     let startTime = performance.now()
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const dpr = Math.min(window.devicePixelRatio || 1, 1.75)
-    const waveEmitter = createParticleWaveEmitter()
+    const whaleField: WhaleField = {
+      x: -9999,
+      y: -9999,
+      targetX: -9999,
+      targetY: -9999,
+      radius: 0,
+      active: false,
+    }
 
     const layout = () => {
       width = root.clientWidth
@@ -320,21 +342,22 @@ export function AuroraBackground() {
       const time = (now - startTime) / 1000
       context.clearRect(0, 0, width, height)
       context.globalCompositeOperation = 'lighter'
+      if (whaleField.active && !reducedMotion) {
+        whaleField.x += (whaleField.targetX - whaleField.x) * 0.24
+        whaleField.y += (whaleField.targetY - whaleField.y) * 0.24
+        whaleField.radius += (WHALE_WAVE_OPTIONS.maxRadius - whaleField.radius) * 0.075
+        if (WHALE_WAVE_OPTIONS.maxRadius - whaleField.radius < 0.1) {
+          whaleField.radius = WHALE_WAVE_OPTIONS.maxRadius
+        }
+      }
       for (const particle of particles) {
         const baseX = offsetX + particle.x * scale
         const baseY = offsetY + particle.y * scale
         let x = baseX + Math.sin(time * particle.speed + particle.phase) * particle.driftX
         let y = baseY + Math.cos(time * particle.speed * 0.82 + particle.phase) * particle.driftY
 
-        if (!reducedMotion && waveEmitter.waves.length > 0) {
-          const displaced = displaceByParticleWaves(
-            x,
-            y,
-            waveEmitter.waves,
-            now,
-            WHALE_WAVE_OPTIONS,
-            particle.edge ? 0.55 : 1,
-          )
+        if (!reducedMotion && whaleField.active) {
+          const displaced = displaceByWhaleField(x, y, whaleField, particle.edge ? 0.55 : 1)
           x = displaced.x
           y = displaced.y
         }
@@ -359,7 +382,7 @@ export function AuroraBackground() {
         }
       }
       context.globalCompositeOperation = 'source-over'
-      drawDataCallouts(context, scale, offsetX, offsetY, time, waveEmitter.waves, now, reducedMotion)
+      drawDataCallouts(context, scale, offsetX, offsetY, time, whaleField, reducedMotion)
       animationFrame = requestAnimationFrame(draw)
     }
 
@@ -379,31 +402,29 @@ export function AuroraBackground() {
     image.src = MASTER_SRC
 
     const onPointerMove = (event: PointerEvent) => {
-      if (waveEmitter.waves.length > 0) return
       const rect = canvas.getBoundingClientRect()
       const pointerX = event.clientX - rect.left
       const pointerY = event.clientY - rect.top
-      const activationRadiusSquared = 48 ** 2
-      let nearbyParticles = 0
-      for (const particle of particles) {
-        const particleX = offsetX + particle.x * scale
-        const particleY = offsetY + particle.y * scale
-        const deltaX = particleX - pointerX
-        const deltaY = particleY - pointerY
-        if (deltaX * deltaX + deltaY * deltaY > activationRadiusSquared) continue
-        nearbyParticles += 1
-        if (nearbyParticles >= 12) break
+      if (!whaleField.active) {
+        const activationRadiusSquared = 48 ** 2
+        let nearbyParticles = 0
+        for (const particle of particles) {
+          const particleX = offsetX + particle.x * scale
+          const particleY = offsetY + particle.y * scale
+          const deltaX = particleX - pointerX
+          const deltaY = particleY - pointerY
+          if (deltaX * deltaX + deltaY * deltaY > activationRadiusSquared) continue
+          nearbyParticles += 1
+          if (nearbyParticles >= 12) break
+        }
+        if (nearbyParticles < 12) return
+        whaleField.x = pointerX
+        whaleField.y = pointerY
+        whaleField.radius = 0
+        whaleField.active = true
       }
-      if (nearbyParticles < 12) return
-      emitParticleWave(
-        waveEmitter,
-        pointerX,
-        pointerY,
-        performance.now(),
-        26,
-        105,
-        1,
-      )
+      whaleField.targetX = pointerX
+      whaleField.targetY = pointerY
     }
     // Browsers throttle background rAF, but this dashboard is left open in a
     // tab for days at a time — stop drawing outright rather than relying on
