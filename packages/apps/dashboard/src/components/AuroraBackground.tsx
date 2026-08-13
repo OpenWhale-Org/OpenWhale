@@ -5,8 +5,6 @@ import {
   createParticleWaveEmitter,
   displaceByParticleWaves,
   emitParticleWave,
-  pruneParticleWaves,
-  resetParticleWaveEmitter,
   type ParticleWave,
 } from '@/lib/particle-waves'
 
@@ -22,8 +20,7 @@ const EXCLUDED_DETAILS = [
 const WHALE_WAVE_OPTIONS = {
   maxRadius: 180,
   duration: 780,
-  strength: 26,
-  bandWidth: 25,
+  strength: 42,
 }
 
 const DATA_CALLOUTS = [
@@ -323,8 +320,6 @@ export function AuroraBackground() {
       const time = (now - startTime) / 1000
       context.clearRect(0, 0, width, height)
       context.globalCompositeOperation = 'lighter'
-      pruneParticleWaves(waveEmitter, now, WHALE_WAVE_OPTIONS.duration)
-
       for (const particle of particles) {
         const baseX = offsetX + particle.x * scale
         const baseY = offsetY + particle.y * scale
@@ -384,19 +379,25 @@ export function AuroraBackground() {
     image.src = MASTER_SRC
 
     const onPointerMove = (event: PointerEvent) => {
+      if (waveEmitter.waves.length > 0) return
       const rect = canvas.getBoundingClientRect()
+      const pointerX = event.clientX - rect.left
+      const pointerY = event.clientY - rect.top
+      const whaleLeft = offsetX + WHALE_BOUNDS.x * scale
+      const whaleTop = offsetY + WHALE_BOUNDS.y * scale
+      const whaleRight = whaleLeft + WHALE_BOUNDS.width * scale
+      const whaleBottom = whaleTop + WHALE_BOUNDS.height * scale
+      if (pointerX < whaleLeft || pointerX > whaleRight || pointerY < whaleTop || pointerY > whaleBottom) return
       emitParticleWave(
         waveEmitter,
-        event.clientX - rect.left,
-        event.clientY - rect.top,
+        pointerX,
+        pointerY,
         performance.now(),
         26,
         105,
         1,
-        600,
       )
     }
-    const onPointerLeave = () => { resetParticleWaveEmitter(waveEmitter) }
     // Browsers throttle background rAF, but this dashboard is left open in a
     // tab for days at a time — stop drawing outright rather than relying on
     // how aggressively a given browser decides to throttle.
@@ -409,14 +410,12 @@ export function AuroraBackground() {
     layout()
     animationFrame = requestAnimationFrame(draw)
     canvas.addEventListener('pointermove', onPointerMove)
-    canvas.addEventListener('pointerleave', onPointerLeave)
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
       canvas.removeEventListener('pointermove', onPointerMove)
-      canvas.removeEventListener('pointerleave', onPointerLeave)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])

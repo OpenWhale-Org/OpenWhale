@@ -3,17 +3,20 @@
 import { useEffect, useRef } from 'react'
 import {
   createParticleWaveEmitter,
-  displaceByParticleWaves,
+  displaceByDirectionalParticleWaves,
   emitParticleWave,
   pruneParticleWaves,
   resetParticleWaveEmitter,
 } from '@/lib/particle-waves'
 
 const TEXT_WAVE_OPTIONS = {
-  maxRadius: 180,
+  maxRadius: 250,
   duration: 680,
   strength: 19,
   bandWidth: 32,
+  forwardStretch: 1.2,
+  sideStretch: 0.88,
+  swirl: 0.08,
 }
 
 type CopyParticle = {
@@ -216,7 +219,7 @@ export function AuroraParticleCopy() {
       for (const particle of particles) {
         const displaced = reducedMotion
           ? particle
-          : displaceByParticleWaves(particle.x, particle.y, waveEmitter.waves, now, TEXT_WAVE_OPTIONS)
+          : displaceByDirectionalParticleWaves(particle.x, particle.y, waveEmitter.waves, now, TEXT_WAVE_OPTIONS)
         const shimmer = reducedMotion ? 1 : 0.91 + Math.sin(time * 0.85 + particle.phase) * 0.09
         const x = displaced.x + (reducedMotion ? 0 : Math.sin(time * 0.48 + particle.phase) * 0.18)
         const y = displaced.y + (reducedMotion ? 0 : Math.cos(time * 0.42 + particle.phase) * 0.18)
@@ -253,8 +256,7 @@ export function AuroraParticleCopy() {
         performance.now(),
         30,
         115,
-        1,
-        520,
+        2,
       )
     }
     const onPointerLeave = () => { resetParticleWaveEmitter(waveEmitter) }
