@@ -246,7 +246,11 @@ body {
 .aurora-login-copy::before { position:absolute; z-index:-1; inset:-38px -76px; content:""; background:radial-gradient(ellipse at 30% 48%,rgba(5,8,27,.7),rgba(5,8,27,.34) 55%,transparent 77%);filter:blur(7px) }
 .aurora-login-kicker,.aurora-login-eyebrow { color: #b69bff; font-size: 10px; font-weight: 700; letter-spacing: .24em; }
 .aurora-login-copy h1 { margin: 15px 0 18px; font-size: clamp(48px, 5.4vw, 82px); font-weight: 630; line-height: .98; letter-spacing: -.055em; color: #fff; text-wrap: balance; }
+.aurora-login-copy h1 span { display:block; }
 .aurora-login-copy p { max-width: 500px; color: rgba(237, 232, 255, .74); font-size: clamp(15px, 1.4vw, 19px); line-height: 1.55; }
+.aurora-particle-copy-source { opacity:0; }
+.aurora-particle-copy-canvas { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+@media (forced-colors: active) { .aurora-particle-copy-source { opacity:1; }.aurora-particle-copy-canvas { display:none; } }
 .aurora-login-signal { display: flex; align-items: center; gap: 8px; color: rgba(239,235,255,.72); font-size: 11px; letter-spacing: .04em; }
 .aurora-login-signal i { width: 7px; height: 7px; border-radius: 50%; background: #65e4b8; box-shadow: 0 0 14px #32d6a0; }
 .aurora-login-panel { position: relative; display: grid; min-height: 100vh; place-items: center; overflow: hidden; border-left:1px solid rgba(101,109,157,.12); padding: 44px; background: linear-gradient(145deg, #080b15, #0b0f1b); }
