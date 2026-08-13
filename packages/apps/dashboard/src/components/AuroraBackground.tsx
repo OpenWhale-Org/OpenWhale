@@ -349,7 +349,7 @@ export function AuroraBackground() {
           const dy = y - pointer.y
           const distance = Math.hypot(dx, dy) || 1
           if (distance < POINTER_RADIUS) {
-            const force = (1 - distance / POINTER_RADIUS) ** 1.7 * (particle.edge ? 6.5 : 16) * pointer.influence
+            const force = (1 - distance / POINTER_RADIUS) ** 1.7 * (particle.edge ? 20 : 42) * pointer.influence
             const tangentX = -dy / distance
             const tangentY = dx / distance
             x += dx / distance * force * 0.72 + tangentX * force * 0.68
