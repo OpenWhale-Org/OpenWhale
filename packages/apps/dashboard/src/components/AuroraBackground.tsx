@@ -11,7 +11,7 @@ const EXCLUDED_DETAILS = [
   { x: 854, y: 812, radius: 116 },
   { x: 1160, y: 812, radius: 116 },
 ]
-const POINTER_RADIUS = 250
+const POINTER_RADIUS = 180
 
 const DATA_CALLOUTS = [
   { value: '89,742.61', change: '+1.28%', x: 965, y: 98, anchorX: 1038, anchorY: 133 },

@@ -203,7 +203,7 @@ export function AuroraParticleCopy() {
         const style = readStyle(kicker)
         samplingContext.font = style.font
         drawSpacedText(samplingContext, kicker.textContent ?? '', bounds.x, bounds.y, style.letterSpacing)
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#b99fff', '#8b72ff', '#62d7ff'], 0.95, 10))
+        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#d2c2ff', '#a78fff', '#83e6ff'], 1, 10))
       }
 
       headingLines.forEach((line, index) => {
@@ -211,7 +211,7 @@ export function AuroraParticleCopy() {
         const style = readStyle(line)
         samplingContext.font = style.font
         drawSpacedText(samplingContext, line.textContent ?? '', bounds.x, bounds.y, style.letterSpacing)
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 4, ['#f7f5ff', '#bca9ff', '#72d9ff'], 1, 20 + index))
+        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 4, ['#ffffff', '#d2c4ff', '#92e7ff'], 1, 20 + index))
       })
 
       if (description) {
@@ -222,7 +222,7 @@ export function AuroraParticleCopy() {
         lines.forEach((line, index) => {
           drawSpacedText(samplingContext, line, bounds.x, bounds.y + index * style.lineHeight, style.letterSpacing)
         })
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#e2dcf4', '#b8abe8', '#78d2ee'], 0.84, 30))
+        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#f1edff', '#cbbdf2', '#91def5'], 0.92, 30))
       }
       particles = nextParticles
     }
@@ -243,7 +243,7 @@ export function AuroraParticleCopy() {
         const y = displaced.y + (reducedMotion ? 0 : Math.cos(time * 0.42 + particle.phase) * 0.18)
 
         context.fillStyle = particle.color
-        context.globalAlpha = particle.alpha * shimmer * 0.16
+        context.globalAlpha = particle.alpha * shimmer * 0.24
         context.beginPath()
         context.arc(x, y, particle.radius * 2.5, 0, Math.PI * 2)
         context.fill()
