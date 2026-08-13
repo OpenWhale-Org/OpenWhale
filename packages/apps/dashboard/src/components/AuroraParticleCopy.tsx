@@ -1,8 +1,23 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import {
+  createParticleWaveEmitter,
+  displaceByParticleWaves,
+  emitParticleWave,
+  pruneParticleWaves,
+  resetParticleWaveEmitter,
+} from '@/lib/particle-waves'
 
-const POINTER_RADIUS = 250
+const TEXT_WAVE_OPTIONS = {
+  maxRadius: 250,
+  duration: 680,
+  strength: 19,
+  bandWidth: 32,
+  forwardStretch: 1.2,
+  sideStretch: 0.88,
+  swirl: 0.08,
+}
 
 type CopyParticle = {
   x: number
@@ -17,15 +32,6 @@ type TextStyle = {
   font: string
   letterSpacing: number
   lineHeight: number
-}
-
-type PointerState = {
-  x: number
-  y: number
-  targetX: number
-  targetY: number
-  influence: number
-  targetInfluence: number
 }
 
 function hash(x: number, y: number, salt = 0) {
@@ -121,23 +127,6 @@ function sampleRegion(
   return particles
 }
 
-function displaceTextParticle(particle: CopyParticle, pointer: PointerState) {
-  const dx = particle.x - pointer.x
-  const dy = particle.y - pointer.y
-  const distance = Math.hypot(dx, dy) || 1
-  if (distance >= POINTER_RADIUS || pointer.influence <= 0.002) return { x: particle.x, y: particle.y }
-
-  const force = (1 - distance / POINTER_RADIUS) ** 1.55 * 42 * pointer.influence
-  const radialX = dx / distance
-  const radialY = dy / distance
-  const tangentX = -radialY
-  const tangentY = radialX
-  return {
-    x: particle.x + radialX * force + tangentX * force * 0.28,
-    y: particle.y + radialY * force + tangentY * force * 0.28,
-  }
-}
-
 export function AuroraParticleCopy() {
   const rootRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef<HTMLDivElement>(null)
@@ -157,14 +146,7 @@ export function AuroraParticleCopy() {
     const startTime = performance.now()
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const dpr = Math.min(window.devicePixelRatio || 1, 1.75)
-    const pointer: PointerState = {
-      x: -9999,
-      y: -9999,
-      targetX: -9999,
-      targetY: -9999,
-      influence: 0,
-      targetInfluence: 0,
-    }
+    const waveEmitter = createParticleWaveEmitter()
 
     const rebuild = () => {
       const rootBounds = root.getBoundingClientRect()
@@ -231,13 +213,13 @@ export function AuroraParticleCopy() {
       const time = (now - startTime) / 1000
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
       context.clearRect(0, 0, width, height)
-      pointer.x += (pointer.targetX - pointer.x) * 0.14
-      pointer.y += (pointer.targetY - pointer.y) * 0.14
-      pointer.influence += (pointer.targetInfluence - pointer.influence) * 0.095
+      pruneParticleWaves(waveEmitter, now, TEXT_WAVE_OPTIONS.duration)
       context.globalCompositeOperation = 'lighter'
 
       for (const particle of particles) {
-        const displaced = reducedMotion ? particle : displaceTextParticle(particle, pointer)
+        const displaced = reducedMotion
+          ? particle
+          : displaceByParticleWaves(particle.x, particle.y, waveEmitter.waves, now, TEXT_WAVE_OPTIONS)
         const shimmer = reducedMotion ? 1 : 0.91 + Math.sin(time * 0.85 + particle.phase) * 0.09
         const x = displaced.x + (reducedMotion ? 0 : Math.sin(time * 0.48 + particle.phase) * 0.18)
         const y = displaced.y + (reducedMotion ? 0 : Math.cos(time * 0.42 + particle.phase) * 0.18)
@@ -259,15 +241,25 @@ export function AuroraParticleCopy() {
 
     const onPointerMove = (event: PointerEvent) => {
       const bounds = root.getBoundingClientRect()
-      pointer.targetX = event.clientX - bounds.left
-      pointer.targetY = event.clientY - bounds.top
-      const insideBrand = event.clientX >= bounds.left - POINTER_RADIUS
-        && event.clientX <= bounds.right + POINTER_RADIUS
-        && event.clientY >= bounds.top - POINTER_RADIUS
-        && event.clientY <= bounds.bottom + POINTER_RADIUS
-      pointer.targetInfluence = insideBrand ? 1 : 0
+      const insideBrand = event.clientX >= bounds.left - TEXT_WAVE_OPTIONS.maxRadius
+        && event.clientX <= bounds.right + TEXT_WAVE_OPTIONS.maxRadius
+        && event.clientY >= bounds.top - TEXT_WAVE_OPTIONS.maxRadius
+        && event.clientY <= bounds.bottom + TEXT_WAVE_OPTIONS.maxRadius
+      if (!insideBrand) {
+        resetParticleWaveEmitter(waveEmitter)
+        return
+      }
+      emitParticleWave(
+        waveEmitter,
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        performance.now(),
+        30,
+        115,
+        2,
+      )
     }
-    const onPointerLeave = () => { pointer.targetInfluence = 0 }
+    const onPointerLeave = () => { resetParticleWaveEmitter(waveEmitter) }
     // Same reason as AuroraBackground: this dashboard lives in a tab for days,
     // so stop drawing when it is hidden instead of trusting rAF throttling.
     const onVisibility = () => {
