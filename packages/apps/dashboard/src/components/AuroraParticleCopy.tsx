@@ -2,21 +2,15 @@
 
 import { useEffect, useRef } from 'react'
 import {
-  createParticleWaveEmitter,
-  displaceByDirectionalParticleWaves,
-  emitParticleWave,
-  pruneParticleWaves,
-  resetParticleWaveEmitter,
-} from '@/lib/particle-waves'
+  advanceParticleField,
+  createParticleField,
+  displaceByParticleField,
+  moveParticleField,
+} from '@/lib/particle-field'
 
-const TEXT_WAVE_OPTIONS = {
-  maxRadius: 250,
-  duration: 680,
-  strength: 19,
-  bandWidth: 32,
-  forwardStretch: 1.2,
-  sideStretch: 0.88,
-  swirl: 0.08,
+const TEXT_FIELD_OPTIONS = {
+  maxRadius: 180,
+  strength: 42,
 }
 
 type CopyParticle = {
@@ -146,7 +140,7 @@ export function AuroraParticleCopy() {
     const startTime = performance.now()
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const dpr = Math.min(window.devicePixelRatio || 1, 1.75)
-    const waveEmitter = createParticleWaveEmitter()
+    const textField = createParticleField()
 
     const rebuild = () => {
       const rootBounds = root.getBoundingClientRect()
@@ -213,13 +207,13 @@ export function AuroraParticleCopy() {
       const time = (now - startTime) / 1000
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
       context.clearRect(0, 0, width, height)
-      pruneParticleWaves(waveEmitter, now, TEXT_WAVE_OPTIONS.duration)
+      if (textField.active && !reducedMotion) advanceParticleField(textField, TEXT_FIELD_OPTIONS)
       context.globalCompositeOperation = 'lighter'
 
       for (const particle of particles) {
         const displaced = reducedMotion
           ? particle
-          : displaceByDirectionalParticleWaves(particle.x, particle.y, waveEmitter.waves, now, TEXT_WAVE_OPTIONS)
+          : displaceByParticleField(particle.x, particle.y, textField, TEXT_FIELD_OPTIONS)
         const shimmer = reducedMotion ? 1 : 0.91 + Math.sin(time * 0.85 + particle.phase) * 0.09
         const x = displaced.x + (reducedMotion ? 0 : Math.sin(time * 0.48 + particle.phase) * 0.18)
         const y = displaced.y + (reducedMotion ? 0 : Math.cos(time * 0.42 + particle.phase) * 0.18)
@@ -241,25 +235,22 @@ export function AuroraParticleCopy() {
 
     const onPointerMove = (event: PointerEvent) => {
       const bounds = root.getBoundingClientRect()
-      const insideBrand = event.clientX >= bounds.left - TEXT_WAVE_OPTIONS.maxRadius
-        && event.clientX <= bounds.right + TEXT_WAVE_OPTIONS.maxRadius
-        && event.clientY >= bounds.top - TEXT_WAVE_OPTIONS.maxRadius
-        && event.clientY <= bounds.bottom + TEXT_WAVE_OPTIONS.maxRadius
-      if (!insideBrand) {
-        resetParticleWaveEmitter(waveEmitter)
-        return
+      const pointerX = event.clientX - bounds.left
+      const pointerY = event.clientY - bounds.top
+      if (!textField.active) {
+        const activationRadiusSquared = 34 ** 2
+        let nearbyParticles = 0
+        for (const particle of particles) {
+          const deltaX = particle.x - pointerX
+          const deltaY = particle.y - pointerY
+          if (deltaX * deltaX + deltaY * deltaY > activationRadiusSquared) continue
+          nearbyParticles += 1
+          if (nearbyParticles >= 8) break
+        }
+        if (nearbyParticles < 8) return
       }
-      emitParticleWave(
-        waveEmitter,
-        event.clientX - bounds.left,
-        event.clientY - bounds.top,
-        performance.now(),
-        30,
-        115,
-        2,
-      )
+      moveParticleField(textField, pointerX, pointerY)
     }
-    const onPointerLeave = () => { resetParticleWaveEmitter(waveEmitter) }
     // Same reason as AuroraBackground: this dashboard lives in a tab for days,
     // so stop drawing when it is hidden instead of trusting rAF throttling.
     const onVisibility = () => {
@@ -271,14 +262,12 @@ export function AuroraParticleCopy() {
     rebuild()
     animationFrame = requestAnimationFrame(draw)
     window.addEventListener('pointermove', onPointerMove)
-    document.documentElement.addEventListener('pointerleave', onPointerLeave)
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
       window.removeEventListener('pointermove', onPointerMove)
-      document.documentElement.removeEventListener('pointerleave', onPointerLeave)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
