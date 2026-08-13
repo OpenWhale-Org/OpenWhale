@@ -10,13 +10,10 @@ import {
 } from '@/lib/particle-waves'
 
 const TEXT_WAVE_OPTIONS = {
-  maxRadius: 250,
+  maxRadius: 180,
   duration: 680,
   strength: 19,
   bandWidth: 32,
-  forwardStretch: 1.2,
-  sideStretch: 0.88,
-  swirl: 0.08,
 }
 
 type CopyParticle = {
@@ -256,7 +253,8 @@ export function AuroraParticleCopy() {
         performance.now(),
         30,
         115,
-        2,
+        1,
+        520,
       )
     }
     const onPointerLeave = () => { resetParticleWaveEmitter(waveEmitter) }

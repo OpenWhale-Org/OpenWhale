@@ -1,10 +1,7 @@
 export type ParticleWave = {
   x: number
   y: number
-  directionX: number
-  directionY: number
   bornAt: number
-  phase: number
 }
 
 export type ParticleWaveOptions = {
@@ -12,9 +9,6 @@ export type ParticleWaveOptions = {
   duration: number
   strength: number
   bandWidth: number
-  forwardStretch: number
-  sideStretch: number
-  swirl: number
 }
 
 export type ParticleWaveEmitter = {
@@ -41,6 +35,7 @@ export function emitParticleWave(
   minimumDistance: number,
   maximumInterval: number,
   maxWaves = 3,
+  minimumWaveInterval = 0,
 ) {
   const hasPreviousPoint = Number.isFinite(emitter.lastX) && Number.isFinite(emitter.lastY)
   const deltaX = hasPreviousPoint ? x - emitter.lastX : 1
@@ -48,17 +43,13 @@ export function emitParticleWave(
   const distance = Math.hypot(deltaX, deltaY)
   const elapsed = now - emitter.lastAt
 
+  if (hasPreviousPoint && elapsed < minimumWaveInterval) return
   if (hasPreviousPoint && distance < minimumDistance && elapsed < maximumInterval) return
 
-  const directionX = distance > 0.01 ? deltaX / distance : 1
-  const directionY = distance > 0.01 ? deltaY / distance : 0
   emitter.waves.push({
     x,
     y,
-    directionX,
-    directionY,
     bornAt: now,
-    phase: ((x * 0.017 + y * 0.031 + now * 0.0007) % 1) * Math.PI * 2,
   })
   emitter.waves = emitter.waves.slice(-maxWaves)
   emitter.lastX = x
@@ -94,36 +85,25 @@ export function displaceByParticleWaves(
 
     const relativeX = x - wave.x
     const relativeY = y - wave.y
-    const along = relativeX * wave.directionX + relativeY * wave.directionY
-    const across = -relativeX * wave.directionY + relativeY * wave.directionX
-
-    // The wave is stretched in the pointer direction and kept tighter in its wake.
-    // This makes each disturbance read as a short moving plume instead of a circle.
-    const alongStretch = along >= 0 ? options.forwardStretch : 0.92
-    const ellipticalDistance = Math.hypot(along / alongStretch, across / options.sideStretch)
-    const progress = 1 - (1 - age) ** 2.35
+    const distance = Math.hypot(relativeX, relativeY)
+    const expansion = Math.min(1, age / 0.72)
+    const progress = 1 - (1 - expansion) ** 1.55
     const waveFront = options.maxRadius * progress
     const width = options.bandWidth * (0.72 + progress * 0.48)
-    const distanceFromFront = (ellipticalDistance - waveFront) / width
+    const distanceFromFront = (distance - waveFront) / width
     const band = Math.exp(-distanceFromFront * distanceFromFront * 1.8)
     if (band < 0.006) continue
 
     const fadeIn = Math.min(1, age / 0.09)
-    const envelope = fadeIn * (1 - age) ** 1.05
-    const distance = Math.hypot(relativeX, relativeY) || 1
-    const radialX = relativeX / distance
-    const radialY = relativeY / distance
-    const tangentX = -radialY
-    const tangentY = radialX
-    const angle = Math.atan2(across, along)
-    const organicPulse = 0.9 + Math.sin(angle * 2.6 + wave.phase + age * 5.2) * 0.1
-    const directionCosine = along / Math.max(1, distance)
-    const forwardBias = 0.12 + ((directionCosine + 1) * 0.5) ** 1.8 * 0.88
-    const force = options.strength * strengthScale * band * envelope * organicPulse * forwardBias
-    const swirl = Math.sin(angle * 1.8 + wave.phase + progress * 3.4) * options.swirl
+    const fadeOut = age < 0.72 ? 1 : (1 - age) / 0.28
+    const envelope = fadeIn * fadeOut
+    const safeDistance = distance || 1
+    const radialX = relativeX / safeDistance
+    const radialY = relativeY / safeDistance
+    const force = options.strength * strengthScale * band * envelope
 
-    offsetX += radialX * force + tangentX * force * swirl
-    offsetY += radialY * force + tangentY * force * swirl
+    offsetX += radialX * force
+    offsetY += radialY * force
   }
 
   // Several fresh waves may overlap while the pointer is moving quickly. Keep the

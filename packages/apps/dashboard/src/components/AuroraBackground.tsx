@@ -24,9 +24,6 @@ const WHALE_WAVE_OPTIONS = {
   duration: 780,
   strength: 26,
   bandWidth: 25,
-  forwardStretch: 1.28,
-  sideStretch: 0.84,
-  swirl: 0.12,
 }
 
 const DATA_CALLOUTS = [
@@ -395,7 +392,8 @@ export function AuroraBackground() {
         performance.now(),
         26,
         105,
-        2,
+        1,
+        600,
       )
     }
     const onPointerLeave = () => { resetParticleWaveEmitter(waveEmitter) }
