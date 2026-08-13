@@ -20,6 +20,8 @@ type CopyParticle = {
   color: string
   alpha: number
   phase: number
+  glowAlpha: number
+  glowScale: number
 }
 
 type TextStyle = {
@@ -94,6 +96,8 @@ function sampleRegion(
   palette: string[],
   alpha: number,
   salt: number,
+  glowAlpha = 0.24,
+  glowScale = 2.5,
 ) {
   const particles: CopyParticle[] = []
   const left = Math.max(0, Math.floor(bounds.x))
@@ -114,6 +118,8 @@ function sampleRegion(
         color: palette[colorIndex] ?? palette[0],
         alpha: alpha * (0.78 + hash(x, y, salt + 2) * 0.22),
         phase: hash(x, y, salt + 3) * Math.PI * 2,
+        glowAlpha,
+        glowScale,
       })
     }
   }
@@ -187,7 +193,18 @@ export function AuroraParticleCopy() {
         const style = readStyle(line)
         samplingContext.font = style.font
         drawSpacedText(samplingContext, line.textContent ?? '', bounds.x, bounds.y, style.letterSpacing)
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 4, ['#ffffff', '#d2c4ff', '#92e7ff'], 1, 20 + index))
+        nextParticles.push(...sampleRegion(
+          samplingContext,
+          width,
+          height,
+          bounds,
+          3,
+          ['#ffffff', '#eee9ff', '#c2f3ff'],
+          1,
+          20 + index,
+          0.34,
+          2.8,
+        ))
       })
 
       if (description) {
@@ -219,9 +236,9 @@ export function AuroraParticleCopy() {
         const y = displaced.y + (reducedMotion ? 0 : Math.cos(time * 0.42 + particle.phase) * 0.18)
 
         context.fillStyle = particle.color
-        context.globalAlpha = particle.alpha * shimmer * 0.24
+        context.globalAlpha = particle.alpha * shimmer * particle.glowAlpha
         context.beginPath()
-        context.arc(x, y, particle.radius * 2.5, 0, Math.PI * 2)
+        context.arc(x, y, particle.radius * particle.glowScale, 0, Math.PI * 2)
         context.fill()
         context.globalAlpha = particle.alpha * shimmer
         context.beginPath()
