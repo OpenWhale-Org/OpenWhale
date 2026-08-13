@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AuroraBackground } from '@/components/AuroraBackground'
 import { AuroraLogo } from '@/components/AuroraLogo'
+import { AuroraParticleCopy } from '@/components/AuroraParticleCopy'
 import { Logo } from '@/components/Logo'
 import { useUiMode } from '@/components/UiModeProvider'
 
@@ -88,11 +89,7 @@ export default function LoginPage() {
         <AuroraBackground />
         <div className="aurora-login-brand-content">
           <AuroraLogo size="lg" />
-          <div className="aurora-login-copy">
-            <span className="aurora-login-kicker">AI TRADING INFRASTRUCTURE</span>
-            <h1>Trade deeper.<br />Move smarter.</h1>
-            <p>Build, observe and operate intelligent strategies from one calm, connected workspace.</p>
-          </div>
+          <AuroraParticleCopy />
           <div className="aurora-login-signal"><i /> Live market intelligence</div>
         </div>
       </section>
