@@ -317,6 +317,29 @@ describe('TriggerManager', () => {
       expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), { timezone: 'Asia/Shanghai' })
     })
 
+    // Scheduling happens during ACTIVATION, so a typo used to stop the whole
+    // instance from starting with an error that never mentioned the time zone.
+    it('rejects an unknown time zone by name instead of failing deep in scheduling', () => {
+      strategy = new MockStrategy({ id: 'test', monitors: [], instructions: [makeInstruction()] })
+      const trigger = makeTrigger({
+        conditions: [{ type: 'cron', expression: '0 8 * * *', timezone: 'Asia/Shanghi' }],
+      })
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
+
+      expect(() => manager.start(queue)).toThrow(/Asia\/Shanghi/)
+    })
+
+    it('leaves the process time zone alone when none is configured', () => {
+      const schedule = vi.spyOn(cron, 'schedule').mockReturnValue({ stop: vi.fn() } as never)
+      strategy = new MockStrategy({ id: 'test', monitors: [], instructions: [makeInstruction()] })
+      const trigger = makeTrigger({ conditions: [{ type: 'cron', expression: '0 8 * * *' }] })
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
+
+      manager.start(queue)
+
+      expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), undefined)
+    })
+
     it('fires when cron ticks', async () => {
       vi.useFakeTimers()
       strategy = new MockStrategy({ id: 'test', monitors: [], instructions: [makeInstruction()] })

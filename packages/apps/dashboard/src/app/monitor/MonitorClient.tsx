@@ -59,13 +59,7 @@ export function MonitorClient({ monitors }: Props) {
   const refresh = useCallback(async () => {
     const res = await fetch('/api/monitor/status')
     if (res.ok) {
-      const raw = await res.json() as MonitorStatus[]
-      const next = raw.map(status => ({
-        ...status,
-        activeKeys: status.activeKeys.filter(({ key }) => key.trim().length > 0),
-        manualKeys: status.manualKeys.filter(key => key.trim().length > 0),
-        dataKeys: status.dataKeys.filter(key => key.trim().length > 0),
-      }))
+      const next = await res.json() as MonitorStatus[]
       setStatuses(next)
       setSelectedId((prev) => prev ?? next[0]?.id ?? null)
     }
@@ -240,13 +234,24 @@ function MonitorDetail({ status, events, connected, onChanged }: {
           <div className="flex flex-wrap gap-1.5">
             {status.activeKeys.map(({ key: k, refCount }) => {
               const manual = status.manualKeys.includes(k)
+              // A blank key means a subscription's structured keyParams never got
+              // composed into a key, so it is subscribed to nothing and collects
+              // nothing — silently. Hiding these rows was how that bug survived a
+              // day of live cycles; the blank chip is the only visible symptom, so
+              // it is called out rather than filtered away.
+              const unresolved = k.trim().length === 0
               return (
                 <span
                   key={k}
                   className="text-xs px-2 py-1 rounded-md font-mono flex items-center gap-1.5"
-                  style={{ background: 'var(--background)', border: `1px solid ${manual ? 'var(--accent)' : 'var(--border)'}` }}
+                  title={unresolved ? 'Subscribed with an empty key — its keyParams were never resolved, so it receives nothing' : undefined}
+                  style={{
+                    background: 'var(--background)',
+                    border: `1px solid ${unresolved ? 'var(--danger)' : manual ? 'var(--accent)' : 'var(--border)'}`,
+                    ...(unresolved ? { color: 'var(--danger)' } : {}),
+                  }}
                 >
-                  {k} <span style={{ color: 'var(--muted)' }}>×{refCount}</span>
+                  {unresolved ? '⚠ unresolved key' : k} <span style={{ color: 'var(--muted)' }}>×{refCount}</span>
                   {manual && (
                     <button onClick={() => void unwatch(k)} disabled={busy} title="Stop manual watch" style={{ color: 'var(--danger)' }}>✕</button>
                   )}

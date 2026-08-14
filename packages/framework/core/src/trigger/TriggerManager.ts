@@ -41,6 +41,23 @@ interface InstanceEntry {
   subscriptions: MonitorSource[]
 }
 
+/**
+ * Fail a bad IANA zone with a message that names it.
+ *
+ * node-cron hands the string to the platform, so a typo like 'Asia/Shanghi'
+ * surfaces deep inside scheduling — and scheduling happens during instance
+ * ACTIVATION, so one wrong letter stops the whole instance from starting with
+ * an error that never mentions the time zone. Checking here turns that into a
+ * plain parameter error.
+ */
+function assertTimeZone(timezone: string): void {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: timezone })
+  } catch {
+    throw new Error(`Unknown IANA time zone "${timezone}" on a cron trigger — expected e.g. "Asia/Shanghai" or "UTC"`)
+  }
+}
+
 export class TriggerManager {
   private readonly instances = new Map<string, InstanceEntry>()
   private readonly monitorRegistry: MonitorRegistry
@@ -425,6 +442,7 @@ export class TriggerManager {
     condition: CronCondition,
     queue: ExecutionQueue,
   ): void {
+    if (condition.timezone !== undefined) assertTimeZone(condition.timezone)
     const task = cron.schedule(condition.expression, async () => {
       const now = Date.now()
       const triggerState = this.triggerStates.get(trigger.id)
