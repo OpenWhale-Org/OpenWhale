@@ -268,18 +268,26 @@ export function AuroraParticleCopy() {
       pointer.targetInfluence = insideBrand ? 1 : 0
     }
     const onPointerLeave = () => { pointer.targetInfluence = 0 }
+    // Same reason as AuroraBackground: this dashboard lives in a tab for days,
+    // so stop drawing when it is hidden instead of trusting rAF throttling.
+    const onVisibility = () => {
+      cancelAnimationFrame(animationFrame)
+      if (!document.hidden) animationFrame = requestAnimationFrame(draw)
+    }
     const resizeObserver = new ResizeObserver(rebuild)
     resizeObserver.observe(root)
     rebuild()
     animationFrame = requestAnimationFrame(draw)
     window.addEventListener('pointermove', onPointerMove)
     document.documentElement.addEventListener('pointerleave', onPointerLeave)
+    document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
       window.removeEventListener('pointermove', onPointerMove)
       document.documentElement.removeEventListener('pointerleave', onPointerLeave)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
 

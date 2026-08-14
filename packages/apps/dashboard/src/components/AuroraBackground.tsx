@@ -384,9 +384,16 @@ export function AuroraBackground() {
     const image = new Image()
     image.onload = () => {
       const sampled = buildParticles(image)
+      // Below the floor the whale reads as noise, so the procedural fallback
+      // stays. Say so: an empty background and a deliberately plain one look
+      // identical on screen, and the usual cause is the source image being
+      // unreachable rather than anything about the art.
       if (sampled.length > 250) particles = sampled
+      else console.warn(`AuroraBackground: ${MASTER_SRC} yielded only ${sampled.length} particles — keeping the procedural field`)
     }
-    image.onerror = () => undefined
+    image.onerror = () => {
+      console.warn(`AuroraBackground: could not load ${MASTER_SRC} — keeping the procedural field`)
+    }
     image.src = MASTER_SRC
 
     const onPointerMove = (event: PointerEvent) => {
@@ -396,18 +403,27 @@ export function AuroraBackground() {
       pointerRef.current.targetInfluence = 1
     }
     const onPointerLeave = () => { pointerRef.current.targetInfluence = 0 }
+    // Browsers throttle background rAF, but this dashboard is left open in a
+    // tab for days at a time — stop drawing outright rather than relying on
+    // how aggressively a given browser decides to throttle.
+    const onVisibility = () => {
+      cancelAnimationFrame(animationFrame)
+      if (!document.hidden) animationFrame = requestAnimationFrame(draw)
+    }
     const resizeObserver = new ResizeObserver(layout)
     resizeObserver.observe(root)
     layout()
     animationFrame = requestAnimationFrame(draw)
     canvas.addEventListener('pointermove', onPointerMove)
     canvas.addEventListener('pointerleave', onPointerLeave)
+    document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
       canvas.removeEventListener('pointermove', onPointerMove)
       canvas.removeEventListener('pointerleave', onPointerLeave)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
 
