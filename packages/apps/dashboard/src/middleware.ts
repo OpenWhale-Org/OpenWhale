@@ -31,7 +31,10 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Public assets are needed before authentication (notably the particle-whale
-  // source image on /login), so exclude file requests as well as Next assets.
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.[^/]+$).*)'],
+  // The login page loads public assets before there is a session, so static
+  // files have to bypass the redirect. Extensions are listed rather than
+  // matched as "anything with a dot": `.*\.[^/]+$` would also exempt any
+  // future page route whose last segment happens to contain one, and that
+  // exemption would be invisible at the point such a route is added.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpe?g|svg|ico|webp|gif|avif|woff2?)$).*)'],
 }
