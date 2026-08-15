@@ -32,6 +32,33 @@ export function ScriptsClient() {
   )
 }
 
+/** An attachment a script returned alongside its report. */
+interface ScriptFile { name: string; mime?: string; content: string }
+interface ScriptOutput { text: string; json?: unknown; files?: ScriptFile[] }
+
+const sizeLabel = (s: string): string => {
+  const kb = new Blob([s]).size / 1024
+  return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(kb))} KB`
+}
+
+/**
+ * Hand the file to the browser from memory — the script never wrote it to the
+ * server, so there is no URL to link and nothing left behind after the save.
+ */
+function downloadFile(file: ScriptFile): void {
+  const blob = new Blob([file.content], { type: file.mime ?? 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Revoking in the same tick cancels the save in Safari — the download reads
+  // the blob asynchronously after the click returns.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}
+
 /**
  * Seed the form from what the field ALREADY shows.
  *
@@ -58,7 +85,7 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
 function ScriptCard({ script }: { script: ScriptInfo }) {
   const [values, setValues] = useState<Record<string, string>>(() => seedValues(script.paramsFields))
   const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<{ text: string; json?: unknown } | null>(null)
+  const [result, setResult] = useState<ScriptOutput | null>(null)
   const [runError, setRunError] = useState('')
   const [showJson, setShowJson] = useState(false)
   const [ranAt, setRanAt] = useState<Date | null>(null)
@@ -108,7 +135,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         const decoder = new TextDecoder()
         let buffer = ''
         const lines: string[] = []
-        let done: { text: string; json?: unknown } | undefined
+        let done: ScriptOutput | undefined
         let failed: string | undefined
         for (;;) {
           const chunk = await reader.read()
@@ -120,10 +147,10 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           buffer = parts.pop() ?? ''
           for (const part of parts) {
             if (!part.trim()) continue
-            let frame: { type?: string; text?: string; json?: unknown; error?: string }
+            let frame: { type?: string; text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
             try { frame = JSON.parse(part) } catch { continue }
             if (frame.type === 'line') { lines.push(frame.text ?? ''); setResult({ text: lines.join('\n') }) }
-            else if (frame.type === 'result') done = { text: frame.text ?? '', ...(frame.json !== undefined ? { json: frame.json } : {}) }
+            else if (frame.type === 'result') done = { text: frame.text ?? '', ...(frame.json !== undefined ? { json: frame.json } : {}), ...(frame.files?.length ? { files: frame.files } : {}) }
             else if (frame.type === 'error') failed = frame.error ?? 'script failed'
           }
         }
@@ -136,9 +163,9 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
       } else {
         // Older gateway without the streaming route.
         const legacy = await post('/run')
-        const body = await legacy.json() as { text?: string; json?: unknown; error?: string }
+        const body = await legacy.json() as { text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
         if (!legacy.ok) throw new Error(body.error ?? `HTTP ${legacy.status}`)
-        setResult({ text: body.text ?? '', ...(body.json !== undefined ? { json: body.json } : {}) })
+        setResult({ text: body.text ?? '', ...(body.json !== undefined ? { json: body.json } : {}), ...(body.files?.length ? { files: body.files } : {}) })
         setRanAt(new Date())
       }
     } catch (err) {
@@ -187,6 +214,17 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                 {showJson ? 'Report' : 'JSON'}
               </button>
             )}
+            {result.files?.map(f => (
+              <button
+                key={f.name}
+                onClick={() => downloadFile(f)}
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}
+                title={`${f.mime ?? 'text/plain'} · ${sizeLabel(f.content)}`}
+              >
+                ⤓ {f.name}
+              </button>
+            ))}
             <button
               onClick={async () => {
                 // Copy what is on screen, not always the report: with the JSON

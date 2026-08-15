@@ -17,6 +17,23 @@ export interface ScriptResult {
   text: string
   /** Structured payload for programmatic callers (shown as collapsible JSON). */
   json?: unknown
+  /**
+   * Attachments the operator can save — a standalone HTML report, a CSV, an
+   * SQL dump. The dashboard offers each as a download; nothing is written to
+   * disk on the server, so there is no report directory to grow unbounded and
+   * nothing to clean up or authorize separately.
+   *
+   * Content travels inline in the result, so keep attachments to the size of
+   * a report rather than a dataset. A file that would not comfortably fit in
+   * a browser tab belongs behind its own streaming route instead.
+   */
+  files?: Array<{
+    /** Suggested filename, extension included. */
+    name: string
+    /** Defaults to 'text/plain; charset=utf-8'. */
+    mime?: string
+    content: string
+  }>
 }
 
 export interface ScriptContext {
