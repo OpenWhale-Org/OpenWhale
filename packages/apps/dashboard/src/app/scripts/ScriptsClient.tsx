@@ -306,15 +306,18 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           </div>
           {view === 'html' && htmlFile ? (
             /*
-             * srcDoc + a sandbox with scripting OFF: the report renders inside
-             * the dashboard's document, so it gets the least privilege that
-             * still displays it. Our reports are static HTML by design — if one
-             * ever needs scripting, it belongs in its own tab (↗ Open), not here.
+             * `allow-scripts` WITHOUT `allow-same-origin`: the report's own
+             * interactivity (hiding a series, jumping to a section) runs, but
+             * the document sits in an opaque origin — it cannot reach this
+             * page's DOM, cookies, or storage, and cannot navigate the top
+             * frame. That pairing is what makes running the script safe; adding
+             * `allow-same-origin` alongside it would hand the report this
+             * origin and undo the sandbox entirely.
              */
             <iframe
               title={htmlFile.name}
               srcDoc={htmlFile.content}
-              sandbox=""
+              sandbox="allow-scripts"
               className="w-full rounded-md"
               style={{
                 background: 'var(--background)', border: '1px solid var(--border)',
