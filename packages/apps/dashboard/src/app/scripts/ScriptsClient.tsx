@@ -44,6 +44,10 @@ export function ScriptsClient() {
 function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> {
   const out: Record<string, string> = {}
   for (const f of fields ?? []) {
+    // A multi-select starts empty on purpose — seeding it with the first
+    // option would silently pick one item out of a list the user came here
+    // to choose from, and "none selected" is a meaningful state for it.
+    if (f.multiple) continue
     if (f.default !== undefined) out[f.name] = String(f.default)
     else if (f.type === 'options' && f.options?.[0] !== undefined) out[f.name] = String(f.options[0].value)
     else if (f.type === 'boolean') out[f.name] = 'false'
@@ -235,6 +239,60 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
   )
 }
 
+/**
+ * Checkbox list for a field declaring `multiple` — stored comma-separated, the
+ * same wire format Instances already uses, so a script reads one string and
+ * splits it.
+ *
+ * A native <select multiple> was the obvious choice and the wrong one: it
+ * shows three rows, needs ctrl-click to add without clearing the rest, and
+ * gives no count. Picking several settlements is the whole point of the
+ * field, so the control has to make picking several the easy path.
+ */
+function MultiSelect({ options, value, onChange }: {
+  options: NonNullable<ParamFieldDef['options']>
+  value: string
+  onChange: (v: string) => void
+}) {
+  const chosen = value ? value.split(',').filter(Boolean) : []
+  const toggle = (v: string) => {
+    const next = chosen.includes(v) ? chosen.filter(x => x !== v) : [...chosen, v]
+    onChange(next.join(','))
+  }
+  return (
+    <div className="rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)', minWidth: '22rem' }}>
+      <div className="flex items-center justify-between px-2 py-1" style={{ borderBottom: '1px solid var(--border)' }}>
+        <span className="text-xs" style={{ color: 'var(--muted)' }}>
+          {chosen.length === 0 ? 'none selected — script picks its default' : `${chosen.length} selected`}
+        </span>
+        {chosen.length > 0 && (
+          <button type="button" onClick={() => onChange('')} className="text-xs px-1.5 py-0.5 rounded" style={{ color: 'var(--muted)' }}>
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="flex flex-col overflow-y-auto" style={{ maxHeight: '11rem' }}>
+        {options.map(o => {
+          const v = String(o.value)
+          const on = chosen.includes(v)
+          return (
+            <button
+              key={v}
+              type="button"
+              onClick={() => toggle(v)}
+              className="flex items-start gap-2 text-left text-xs px-2 py-1 font-mono"
+              style={{ background: on ? 'var(--surface)' : 'transparent', color: 'var(--foreground)' }}
+            >
+              <span style={{ color: on ? 'var(--accent)' : 'var(--muted)' }}>{on ? '☑' : '☐'}</span>
+              <span className="min-w-0">{o.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function FieldInput({ field, value, onChange }: { field: ParamFieldDef; value: string; onChange: (v: string) => void }) {
   return (
     <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }}>
@@ -242,7 +300,9 @@ function FieldInput({ field, value, onChange }: { field: ParamFieldDef; value: s
         {field.displayName ?? field.name}
         {field.description && <span title={field.description}> ⓘ</span>}
       </span>
-      {field.type === 'options' && field.options ? (
+      {field.multiple && field.options ? (
+        <MultiSelect options={field.options} value={value} onChange={onChange} />
+      ) : field.type === 'options' && field.options ? (
         <select
           value={value}
           onChange={e => onChange(e.target.value)}
