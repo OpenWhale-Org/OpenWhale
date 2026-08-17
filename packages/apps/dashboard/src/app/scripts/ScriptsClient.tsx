@@ -64,10 +64,23 @@ export function ScriptsClient() {
     }
   }
 
-  if (error) return <div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div>
-  if (scripts === null) return <div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
+  /** Page header — same shape as the instances page: title left, actions right. */
+  const header = (right?: React.ReactNode) => (
+    <div className="flex items-start justify-between gap-4 mb-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Scripts</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+          Plugin-shipped operator utilities, run on demand
+        </p>
+      </div>
+      <div className="flex gap-2 shrink-0">{right}</div>
+    </div>
+  )
+
+  if (error) return <div>{header()}<div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div></div>
+  if (scripts === null) return <div>{header()}<div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div></div>
   if (scripts.length === 0) {
-    return <div className="text-sm" style={{ color: 'var(--muted)' }}>No scripts registered — plugins provide them via `scripts: [...]`.</div>
+    return <div>{header()}<div className="text-sm" style={{ color: 'var(--muted)' }}>No scripts registered — plugins provide them via `scripts: [...]`.</div></div>
   }
 
   const entry = (id: string): ScriptShelfEntry => shelf.items[id] ?? {}
@@ -88,7 +101,10 @@ export function ScriptsClient() {
     const next = patch(id, { unmounted: !on })
     if (on) delete next.items[id]!.unmounted
     void save(next)
-    if (!on) setNotice('Unmounted — bring it back any time from Manage.')
+    // Bridges the two words on purpose: the control says "minimize", the
+    // manager says "mounted" — the notice is where the operator learns they
+    // are the same thing.
+    if (!on) setNotice('Minimized — it is now unmounted. Bring it back any time from Manage.')
   }
 
   /** Drop a card on a card: reorder within the group, or re-file into the target's folder. */
@@ -116,27 +132,35 @@ export function ScriptsClient() {
 
   if (manage) {
     return (
-      <MountManager
-        scripts={scripts}
-        isMounted={(id) => !entry(id).unmounted}
-        onToggle={setMounted}
-        onDone={() => { setManage(false); setNotice('') }}
-        error={saveError}
-      />
+      <div>
+        {header(
+          <button onClick={() => { setManage(false); setNotice('') }} className="btn btn-primary">
+            Done
+          </button>,
+        )}
+        <MountManager
+          scripts={scripts}
+          isMounted={(id) => !entry(id).unmounted}
+          onToggle={setMounted}
+          error={saveError}
+        />
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
+    <div>
+      {header(
         <button
           onClick={() => { setManage(true); setNotice('') }}
-          className="text-xs px-2 py-1 rounded-md"
-          style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+          className="btn btn-primary"
           title="Mount or unmount scripts, by package"
         >
           Manage
-        </button>
+        </button>,
+      )}
+      <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
         <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
           {mounted.length} of {scripts.length} mounted · drag a card to reorder or re-file it
         </span>
@@ -215,6 +239,7 @@ export function ScriptsClient() {
           ))}
         </div>
       ))}
+      </div>
     </div>
   )
 }
@@ -278,11 +303,10 @@ function layout(
  * where something came from ("I don't use the pair-arb tools"), while folders
  * are the arrangement you build by hand on the page itself.
  */
-function MountManager({ scripts, isMounted, onToggle, onDone, error }: {
+function MountManager({ scripts, isMounted, onToggle, error }: {
   scripts: ScriptInfo[]
   isMounted: (id: string) => boolean
   onToggle: (id: string, on: boolean) => void
-  onDone: () => void
   error: string
 }) {
   const byPackage = new Map<string, ScriptInfo[]>()
@@ -295,10 +319,6 @@ function MountManager({ scripts, isMounted, onToggle, onDone, error }: {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <button onClick={onDone} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}>
-          ← Done
-        </button>
-        <span className="text-sm font-medium">Manage scripts</span>
         <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
           {mountedCount} of {scripts.length} mounted · unmounting only hides it from the page
         </span>
@@ -627,16 +647,6 @@ function ScriptCard({ script, folder, folders, onSetFolder, onUnmount }: {
         </div>
         <div className="shrink-0 flex items-center gap-2">
           {onSetFolder && <FolderMenu {...(folder !== undefined ? { current: folder } : {})} folders={folders ?? []} onPick={onSetFolder} />}
-          {onUnmount && (
-            <button
-              onClick={onUnmount}
-              className="px-2 py-1.5 rounded-md text-xs"
-              style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-              title="Take it off the shelf — it stays registered and runnable, and can be mounted again from Manage"
-            >
-              Unmount
-            </button>
-          )}
           <button
             onClick={() => void run()}
             disabled={running}
@@ -645,6 +655,20 @@ function ScriptCard({ script, folder, folders, onSetFolder, onUnmount }: {
           >
             {running ? 'Running…' : '▶ Run'}
           </button>
+          {/* Window-style minimize, in the corner where one belongs. Reads as
+              "put this away", which is what it does — the script stays
+              registered and comes back from Manage. */}
+          {onUnmount && (
+            <button
+              onClick={onUnmount}
+              className="w-6 h-6 rounded-md flex items-center justify-center leading-none"
+              style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)' }}
+              title="Minimize — take it off this page; restore it from Manage"
+              aria-label="Minimize this script"
+            >
+              —
+            </button>
+          )}
         </div>
       </div>
 
