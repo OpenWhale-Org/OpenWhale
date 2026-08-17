@@ -1,6 +1,12 @@
 /**
- * How the Scripts page is arranged: folders, their order, and which scripts
- * the operator has taken off the shelf.
+ * How the Scripts page is arranged: which folder each script sits in, its
+ * position, and whether the operator has taken it off the shelf.
+ *
+ * Shaped like the STRATEGY layout on purpose — a folder is a NAME carried by
+ * its members plus a sortOrder, not an entity with an id. Same data model,
+ * same drag-and-drop semantics, one thing for the operator to learn instead of
+ * two: renaming a folder is renaming a string, and folder order derives from
+ * the smallest sortOrder inside it.
  *
  * This is presentation state, not runtime state — an unmounted script is still
  * registered and still runnable through the API; it just stops occupying the
@@ -13,22 +19,21 @@
  */
 import type { DatabaseAdapter } from '@openwhaleorg/core'
 
-export interface ScriptFolder {
-  id: string
-  name: string
-  /** Qualified script ids ('<plugin>/<id>'), in display order. */
-  scripts: string[]
-  collapsed?: boolean
+export interface ScriptShelfEntry {
+  /** Folder name; absent/empty = ungrouped. */
+  folder?: string
+  sortOrder?: number
+  /** Taken off the shelf — hidden from the page, restorable from Manage. */
+  unmounted?: boolean
 }
 
+/** Qualified script id ('<plugin>/<id>') → its placement. */
 export interface ScriptShelf {
-  folders: ScriptFolder[]
-  /** Qualified script ids taken off the shelf; restorable at any time. */
-  unmounted: string[]
+  items: Record<string, ScriptShelfEntry>
 }
 
 const KEY = 'scripts.shelf'
-const EMPTY: ScriptShelf = { folders: [], unmounted: [] }
+const EMPTY: ScriptShelf = { items: {} }
 
 export class ScriptShelfService {
   constructor(private readonly db: DatabaseAdapter) {}
@@ -52,7 +57,7 @@ export class ScriptShelfService {
       return normalize(JSON.parse(row.value))
     } catch {
       // Corrupt JSON must not take the Scripts page down — an empty shelf just
-      // shows every script, which is the pre-feature behaviour.
+      // shows every script, ungrouped, which is the pre-feature behaviour.
       return EMPTY
     }
   }
@@ -72,21 +77,21 @@ export class ScriptShelfService {
  * Accept only what the shape allows. The payload comes from the browser, and a
  * malformed shelf would otherwise be stored and then crash every later render
  * — a page that can no longer load is the one thing an arrangement feature
- * must never cause.
+ * must never cause. Entries that carry no placement at all are dropped rather
+ * than stored as empty objects that accumulate forever.
  */
 function normalize(raw: unknown): ScriptShelf {
-  const obj = (raw ?? {}) as Partial<ScriptShelf>
-  const seen = new Set<string>()
-  const folders: ScriptFolder[] = []
-  for (const f of Array.isArray(obj.folders) ? obj.folders : []) {
-    if (typeof f?.id !== 'string' || typeof f?.name !== 'string') continue
-    // One script belongs to one folder: a duplicate would render twice and the
-    // two copies would drift apart on the next move.
-    const scripts = (Array.isArray(f.scripts) ? f.scripts : [])
-      .filter((s): s is string => typeof s === 'string' && !seen.has(s) && (seen.add(s), true))
-    folders.push({ id: f.id, name: f.name.slice(0, 60), scripts, ...(f.collapsed ? { collapsed: true } : {}) })
+  const src = (raw as { items?: unknown } | null)?.items
+  if (!src || typeof src !== 'object') return EMPTY
+  const items: Record<string, ScriptShelfEntry> = {}
+  for (const [id, value] of Object.entries(src as Record<string, unknown>)) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 200) continue
+    const v = (value ?? {}) as ScriptShelfEntry
+    const entry: ScriptShelfEntry = {}
+    if (typeof v.folder === 'string' && v.folder.trim() !== '') entry.folder = v.folder.trim().slice(0, 60)
+    if (typeof v.sortOrder === 'number' && Number.isFinite(v.sortOrder)) entry.sortOrder = v.sortOrder
+    if (v.unmounted === true) entry.unmounted = true
+    if (Object.keys(entry).length > 0) items[id] = entry
   }
-  const unmounted = (Array.isArray(obj.unmounted) ? obj.unmounted : [])
-    .filter((s): s is string => typeof s === 'string')
-  return { folders, unmounted: [...new Set(unmounted)] }
+  return { items }
 }
