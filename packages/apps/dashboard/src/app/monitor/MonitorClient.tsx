@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
-import type { MonitorDefinition, ParamFieldCatalogue } from '@openwhaleorg/core'
+import type { MonitorDefinition, ParamFieldCatalogue, MonitorInstanceView, CredentialInfo } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { MonitorBoards } from './MonitorBoards'
+import { MonitorInstancesPanel, type ImplementationInfo } from './MonitorInstancesPanel'
 import { LogsPanel } from '@/components/LogsPanel'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
 import { SymbolPicker } from '@/components/SymbolPicker'
@@ -40,6 +41,11 @@ interface MonitorRecord {
 
 interface Props {
   monitors: MonitorDefinition[]
+  /** Instance data, server-rendered; refetched client-side whenever anything changes. */
+  instances: MonitorInstanceView[]
+  implementations: ImplementationInfo[]
+  pendingKeys: Record<string, string[]>
+  credentials: CredentialInfo[]
 }
 
 /** 'exchange/ticker' → { pkg: 'exchange', short: 'ticker' } */
@@ -48,20 +54,35 @@ function splitId(id: string): { pkg: string; short: string } {
   return idx === -1 ? { pkg: 'core', short: id } : { pkg: id.slice(0, idx), short: id.slice(idx + 1) }
 }
 
-export function MonitorClient({ monitors }: Props) {
+export function MonitorClient({ monitors, instances: initialInstances, implementations, pendingKeys: initialPending, credentials }: Props) {
   const [statuses, setStatuses] = useState<MonitorStatus[]>([])
+  const [instances, setInstances] = useState(initialInstances)
+  const [pendingKeys, setPendingKeys] = useState(initialPending)
   // Deep link from an instance's event row: /monitor?sel=<monitor id>
   const preselect = useSearchParams().get('sel')
   const [selectedId, setSelectedId] = useState<string | null>(preselect)
   const [events, setEvents] = useState<SseEvent[]>([])
   const [connected, setConnected] = useState(false)
 
+  /**
+   * Statuses and instances refresh TOGETHER: activating an instance changes
+   * which keys a monitor serves, so refetching one without the other leaves
+   * the header claiming keys the panel says nothing is serving.
+   */
   const refresh = useCallback(async () => {
-    const res = await fetch('/api/monitor/status')
-    if (res.ok) {
-      const next = await res.json() as MonitorStatus[]
+    const [statusRes, instRes] = await Promise.all([
+      fetch('/api/monitor/status'),
+      fetch('/api/monitor-instances'),
+    ])
+    if (statusRes.ok) {
+      const next = await statusRes.json() as MonitorStatus[]
       setStatuses(next)
       setSelectedId((prev) => prev ?? next[0]?.id ?? null)
+    }
+    if (instRes.ok) {
+      const data = await instRes.json() as { instances: MonitorInstanceView[]; pendingKeys: Record<string, string[]> }
+      setInstances(data.instances)
+      setPendingKeys(data.pendingKeys)
     }
   }, [])
 
@@ -136,6 +157,10 @@ export function MonitorClient({ monitors }: Props) {
             events={events.filter(e => e.monitor === selected.id)}
             connected={connected}
             onChanged={() => void refresh()}
+            instances={instances}
+            implementations={implementations}
+            pendingKeys={pendingKeys}
+            credentials={credentials}
           />
         ) : (
           <p className="text-sm p-8 text-center" style={{ color: 'var(--muted)' }}>Select a monitor.</p>
@@ -147,11 +172,15 @@ export function MonitorClient({ monitors }: Props) {
 
 // ── Detail ────────────────────────────────────────────────────────────────────
 
-function MonitorDetail({ status, events, connected, onChanged }: {
+function MonitorDetail({ status, events, connected, onChanged, instances, implementations, pendingKeys, credentials }: {
   status: MonitorStatus
   events: SseEvent[]
   connected: boolean
   onChanged: () => void
+  instances: MonitorInstanceView[]
+  implementations: ImplementationInfo[]
+  pendingKeys: Record<string, string[]>
+  credentials: CredentialInfo[]
 }) {
   const [historyKey, setHistoryKey] = useState<string | null>(null)
   const [showLogs, setShowLogs] = useState(false)
@@ -206,6 +235,17 @@ function MonitorDetail({ status, events, connected, onChanged }: {
       </div>
 
       {showLogs && <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />}
+
+      {/* Instances — the runners behind this contract. Above ADD WATCH because
+          watching a key does nothing until something is active to serve it. */}
+      <MonitorInstancesPanel
+        contract={status.id}
+        instances={instances}
+        implementations={implementations}
+        pendingKeys={pendingKeys}
+        credentials={credentials}
+        onChanged={onChanged}
+      />
 
       {/* Add a watch */}
       <section className="rounded-lg p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>

@@ -91,6 +91,8 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
   const [width, setWidth] = useState(640)
   const [view, setView] = useState<[number, number] | null>(null)   // zoomed x-domain
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)  // px coords
+  /** Grab-and-drag pan: the x-domain at mousedown plus where the grab started. */
+  const [pan, setPan] = useState<{ x0: number; x1: number; startPx: number } | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const clipId = useMemo(() => `chart-clip-${++clipCounter}`, [])
@@ -144,7 +146,20 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
     const px = (x: number) => x1 === x0 ? (PAD.left + plotW / 2) : PAD.left + ((x - x0) / (x1 - x0)) * plotW
     const xAt = (pixel: number) => x0 + ((pixel - PAD.left) / plotW) * (x1 - x0)
     const py = (y: number) => PAD.top + (1 - (y - y0) / (y1 - y0)) * (H - PAD.top - PAD.bottom)
+    const yAt = (pixel: number) => y1 - ((pixel - PAD.top) / (H - PAD.top - PAD.bottom)) * (y1 - y0)
     const paths = visible.map(s => (s.points ?? []).map((p, i) => `${i === 0 ? 'M' : 'L'}${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join(' '))
+    /**
+     * Closed version of each line, for the gradient wash under a lone series.
+     * The floor is the ZERO line when the range straddles it — filling a
+     * percent series down to the frame bottom would shade "−3%" as if it were
+     * as much of something as "+3%".
+     */
+    const floorY = y0 < 0 && y1 > 0 ? py(0) : H - PAD.bottom
+    const areas = visible.map((s, i) => {
+      const pts = s.points ?? []
+      if (pts.length < 2) return ''
+      return `${paths[i]} L${px(pts[pts.length - 1]!.x).toFixed(1)},${floorY.toFixed(1)} L${px(pts[0]!.x).toFixed(1)},${floorY.toFixed(1)} Z`
+    })
     const inWindow = (x: number) => x >= x0 && x <= x1
     const candleCount = Math.max(0, ...visible.map(s => (s.candles ?? []).filter(c => inWindow(c.x)).length))
     const candleW = candleCount > 0 ? Math.max(1.5, Math.min(12, (plotW / candleCount) * 0.7)) : 0
@@ -159,7 +174,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
       for (const c of s.candles ?? []) if (inWindow(c.x)) windowValues.push(c.o, c.h, c.l, c.c)
     }
     const tickDecimals = decimalsFromValues(windowValues, gridDecimals + 1)
-    return { px, py, xAt, paths, gridValues, xTicks, x0, x1, y0, y1, candleW, inWindow, gridDecimals, tickDecimals }
+    return { px, py, xAt, yAt, paths, areas, gridValues, xTicks, x0, x1, y0, y1, candleW, inWindow, gridDecimals, tickDecimals }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, hidden, view, W, H])
 
@@ -186,6 +201,37 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
     svg.addEventListener('wheel', onWheel, { passive: false })
     return () => svg.removeEventListener('wheel', onWheel)
   }, [geom, dataDomain])
+
+  /**
+   * Pan while the button is held. The listeners live on the WINDOW, not the
+   * svg: dragging a chart to its edge naturally takes the cursor outside it,
+   * and an svg-scoped mouseup would drop the grab there and leave the chart
+   * stuck mid-drag. The window pair also survives releasing over a tooltip.
+   */
+  useEffect(() => {
+    if (!pan || !dataDomain) return
+    const span = pan.x1 - pan.x0
+    const fullSpan = dataDomain[1] - dataDomain[0]
+    const move = (e: MouseEvent) => {
+      const rect = svgRef.current?.getBoundingClientRect()
+      if (!rect || span <= 0 || plotW <= 0) return
+      // Nothing to pan to when the whole history is already on screen
+      if (span >= fullSpan) return
+      const shift = -(((e.clientX - rect.left) - pan.startPx) / plotW) * span
+      let n0 = pan.x0 + shift
+      let n1 = pan.x1 + shift
+      if (n0 < dataDomain[0]) { n0 = dataDomain[0]; n1 = n0 + span }
+      if (n1 > dataDomain[1]) { n1 = dataDomain[1]; n0 = n1 - span }
+      setView([n0, n1])
+    }
+    const up = () => setPan(null)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+  }, [pan, dataDomain, plotW])
 
   const formatX = (x: number) => xKind === 'time'
     ? formatTime(x, geom ? geom.x1 - geom.x0 : 0)
@@ -271,7 +317,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
   }, [series, hidden, geom, mode, hoverX, hoverY, drag])
 
   let hoveredX: number | null = null
-  if (mode === 'line' && geom && hoverX !== null && drag === null && refXs.length > 0) {
+  if (mode === 'line' && geom && hoverX !== null && drag === null && pan === null && refXs.length > 0) {
     const inWin = refXs.filter(geom.inWindow)
     const pool = inWin.length > 0 ? inWin : refXs
     hoveredX = pool.reduce((best, x) => Math.abs(geom.px(x) - hoverX) < Math.abs(geom.px(best) - hoverX) ? x : best, pool[0]!)
@@ -285,14 +331,24 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const x = localX(e)
     if (x === null) return
+    // While panning the crosshair would chase the cursor across a moving
+    // series — all motion, no reading. Suppress it until the grab is released.
+    if (pan) { setHoverX(null); setHoverY(null); return }
     setHoverX(x)
     if (svgRef.current) setHoverY(e.clientY - svgRef.current.getBoundingClientRect().top)
     if (drag) setDrag({ from: drag.from, to: x })
   }
 
+  /**
+   * Plain drag PANS (the trading-chart convention, and what a zoomed-in chart
+   * begs for); shift-drag keeps the box-select zoom, which is the only way to
+   * jump straight to a range.
+   */
   function onDown(e: React.MouseEvent<SVGSVGElement>) {
     const x = localX(e)
-    if (x !== null) setDrag({ from: x, to: x })
+    if (x === null) return
+    if (e.shiftKey) { setDrag({ from: x, to: x }); return }
+    if (geom) setPan({ x0: geom.x0, x1: geom.x1, startPx: x })
   }
 
   function onUp() {
@@ -313,6 +369,10 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
   }
 
   const lineSeries = series.filter(s => (s.points?.length ?? 0) > 0)
+  /** Exactly one curve on screen — the only case where a filled wash reads. */
+  const drawn = visible.filter(s => (s.points?.length ?? 0) > 0)
+  const soloLine = mode === 'line' && drawn.length === 1
+  const washColor = SERIES_COLORS[(soloLine ? series.indexOf(drawn[0]!) : 0) % SERIES_COLORS.length]
 
   return (
     <div ref={wrapRef} className="relative">
@@ -339,7 +399,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
             </button>
           )
         })}
-        {view && (
+        {view ? (
           <button
             onClick={() => setView(null)}
             className="ml-auto text-xs px-2 py-0.5 rounded-full cursor-pointer"
@@ -348,6 +408,12 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
           >
             ⟲ Reset zoom
           </button>
+        ) : (
+          // Drag-to-pan is invisible until tried, and shift-drag would never be
+          // guessed at all — so the chart says so while it is fully zoomed out.
+          <span className="ml-auto text-[10px]" style={{ color: 'var(--border)' }}>
+            scroll to zoom · drag to pan · shift-drag to select
+          </span>
         )}
       </div>
 
@@ -360,10 +426,12 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
             width={W}
             height={H}
             className="block max-w-full select-none"
-            style={{ cursor: drag ? 'col-resize' : 'crosshair' }}
+            style={{ cursor: pan ? 'grabbing' : drag ? 'col-resize' : 'grab' }}
             onMouseMove={onMove}
             onMouseDown={onDown}
             onMouseUp={onUp}
+            /* pan is torn down by its own window listener — clearing it here
+               would drop the grab the moment the drag reaches the edge */
             onMouseLeave={() => { setHoverX(null); setHoverY(null); setDrag(null) }}
             onDoubleClick={() => setView(null)}
           >
@@ -371,6 +439,10 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
               <clipPath id={clipId}>
                 <rect x={PAD.left} y={0} width={plotW} height={H - PAD.bottom} />
               </clipPath>
+              <linearGradient id={`${clipId}-wash`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={washColor} stopOpacity="0.22" />
+                <stop offset="100%" stopColor={washColor} stopOpacity="0" />
+              </linearGradient>
             </defs>
 
             {/* Recessive grid + y tick labels */}
@@ -379,6 +451,11 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
                 <line x1={PAD.left} x2={W - PAD.right} y1={geom.py(v)} y2={geom.py(v)} stroke="var(--border)" strokeWidth="1" opacity={gi === 0 || gi === 4 ? 0.4 : 0.7} />
                 <text x={W - PAD.right + 6} y={geom.py(v) + 4} fontSize="11" fill="var(--muted)">{formatValue(v, unit, geom.gridDecimals)}</text>
               </g>
+            ))}
+            {/* Vertical rules under the x labels — they tie a spike to its time
+                without competing with the series (hence the low opacity) */}
+            {geom.xTicks.map((t, ti) => (
+              <line key={`vx-${ti}`} x1={geom.px(t)} x2={geom.px(t)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--border)" strokeWidth="1" opacity="0.28" />
             ))}
             {/* Zero reference when the range crosses it (percent-style panels) */}
             {geom.y0 < 0 && geom.y1 > 0 && (
@@ -445,7 +522,14 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
                 </>
               ) : (
                 visible.map((s, vi) => (s.points?.length ?? 0) > 0 && (
-                  <path key={s.label} d={geom.paths[vi]!} fill="none" stroke={SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                  <g key={s.label}>
+                    {/* A single curve gets a wash under it — with several series
+                        overlapping fills turn into mud, so only the lone case */}
+                    {soloLine && geom.areas[vi] && (
+                      <path d={geom.areas[vi]!} fill={`url(#${clipId}-wash)`} stroke="none" />
+                    )}
+                    <path d={geom.paths[vi]!} fill="none" stroke={SERIES_COLORS[series.indexOf(s) % SERIES_COLORS.length]} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                  </g>
                 ))
               )}
             </g>
@@ -462,6 +546,18 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
                 stroke="var(--accent)"
                 strokeWidth="1"
               />
+            )}
+
+            {/* Horizontal crosshair + the level it sits on, read off the axis.
+                Reading a spike's height off gridlines alone is guesswork. */}
+            {hoverY !== null && drag === null && pan === null && hoverY > PAD.top && hoverY < H - PAD.bottom && (
+              <g>
+                <line x1={PAD.left} x2={W - PAD.right} y1={hoverY} y2={hoverY} stroke="var(--muted)" strokeWidth="1" strokeDasharray="3 3" opacity="0.45" />
+                <rect x={W - PAD.right + 2} y={hoverY - 9} width={PAD.right - 4} height={18} rx="3" fill="var(--surface)" stroke="var(--border)" />
+                <text x={W - PAD.right + 6} y={hoverY + 4} fontSize="11" fill="var(--foreground)">
+                  {formatValue(geom.yAt(hoverY), unit, geom.gridDecimals)}
+                </text>
+              </g>
             )}
 
             {/* Crosshair + point markers */}
