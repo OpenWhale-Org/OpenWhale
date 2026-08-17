@@ -4,20 +4,62 @@ import { useEffect, useState } from 'react'
 import type { ScriptInfo, ParamFieldDef } from '@openwhaleorg/core'
 
 /**
+ * How the page is arranged. Server-side state (see the gateway's scriptShelf):
+ * a folder holds an ordered list of script ids, and `unmounted` is what the
+ * operator has taken off the shelf.
+ */
+interface ScriptFolder { id: string; name: string; scripts: string[]; collapsed?: boolean }
+interface ScriptShelf { folders: ScriptFolder[]; unmounted: string[] }
+
+const EMPTY_SHELF: ScriptShelf = { folders: [], unmounted: [] }
+
+const newFolderId = () => `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+
+/**
  * Scripts — plugin-shipped operator utilities, run on click. One card per
  * script: a small flat param form (derived from the script's zod schema) and
  * the monospace report it returns. No lifecycle, no persistence — anything
  * recurring belongs in a monitor or strategy.
+ *
+ * Plugins keep adding scripts and the page grew into one long column of cards,
+ * so the shelf sits on top of that: folders to group them, and unmounting to
+ * put the ones you never run out of sight. UNMOUNTING IS COSMETIC — the script
+ * stays registered and runnable through the API; this only decides what the
+ * page shows. Nothing here can break a plugin, which is the point.
  */
 export function ScriptsClient() {
   const [scripts, setScripts] = useState<ScriptInfo[] | null>(null)
+  const [shelf, setShelf] = useState<ScriptShelf>(EMPTY_SHELF)
   const [error, setError] = useState('')
+  const [saveError, setSaveError] = useState('')
+  /** Arranging mode: cards collapse to rows, because you cannot tidy a shelf you have to scroll. */
+  const [manage, setManage] = useState(false)
+  const [showUnmounted, setShowUnmounted] = useState(false)
 
   useEffect(() => {
     void fetch('/api/scripts')
       .then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); setScripts(await r.json() as ScriptInfo[]) })
       .catch(err => setError(err instanceof Error ? err.message : String(err)))
+    // A shelf that fails to load degrades to "show everything, ungrouped" —
+    // never to a blank page.
+    void fetch('/api/scripts/shelf')
+      .then(async r => { if (r.ok) setShelf(await r.json() as ScriptShelf) })
+      .catch(() => {})
   }, [])
+
+  /** Optimistic: the arrangement is cheap to redraw and the write is one row. */
+  async function save(next: ScriptShelf) {
+    setShelf(next)
+    setSaveError('')
+    try {
+      const res = await fetch('/api/scripts/shelf', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (err) {
+      setSaveError(`Arrangement not saved: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
 
   if (error) return <div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div>
   if (scripts === null) return <div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
@@ -25,9 +67,190 @@ export function ScriptsClient() {
     return <div className="text-sm" style={{ color: 'var(--muted)' }}>No scripts registered — plugins provide them via `scripts: [...]`.</div>
   }
 
+  const byId = new Map(scripts.map(s => [s.id, s]))
+  const unmounted = new Set(shelf.unmounted)
+  const foldered = new Set(shelf.folders.flatMap(f => f.scripts))
+  /* Stale ids are normal: a plugin gets uninstalled and its scripts vanish
+     from the registry while the shelf still names them. Resolve through the
+     registry and drop what no longer exists rather than rendering a ghost. */
+  const resolve = (ids: string[]) => ids.map(id => byId.get(id)).filter((s): s is ScriptInfo => s !== undefined)
+  const ungrouped = scripts.filter(s => !foldered.has(s.id) && !unmounted.has(s.id))
+  const unmountedScripts = scripts.filter(s => unmounted.has(s.id))
+
+  const moveTo = (id: string, folderId: string) => {
+    const folders = shelf.folders.map(f => ({ ...f, scripts: f.scripts.filter(s => s !== id) }))
+    const target = folders.find(f => f.id === folderId)
+    if (target) target.scripts = [...target.scripts, id]
+    void save({ ...shelf, folders, unmounted: shelf.unmounted.filter(s => s !== id) })
+  }
+  const setMounted = (id: string, mounted: boolean) => void save({
+    ...shelf,
+    unmounted: mounted ? shelf.unmounted.filter(s => s !== id) : [...new Set([...shelf.unmounted, id])],
+  })
+  const addFolder = () => void save({
+    ...shelf, folders: [...shelf.folders, { id: newFolderId(), name: 'New folder', scripts: [] }],
+  })
+  const renameFolder = (fid: string, name: string) => void save({
+    ...shelf, folders: shelf.folders.map(f => f.id === fid ? { ...f, name } : f),
+  })
+  /* Deleting a folder must not delete what is in it — its scripts fall back to
+     Ungrouped, where they are visible and can be re-filed. */
+  const deleteFolder = (fid: string) => void save({ ...shelf, folders: shelf.folders.filter(f => f.id !== fid) })
+  const moveFolder = (fid: string, delta: number) => {
+    const folders = [...shelf.folders]
+    const i = folders.findIndex(f => f.id === fid)
+    const j = i + delta
+    if (i < 0 || j < 0 || j >= folders.length) return
+    ;[folders[i], folders[j]] = [folders[j]!, folders[i]!]
+    void save({ ...shelf, folders })
+  }
+  const toggleCollapse = (fid: string) => void save({
+    ...shelf, folders: shelf.folders.map(f => f.id === fid ? { ...f, collapsed: !f.collapsed } : f),
+  })
+
+  const rowProps = { folders: shelf.folders, moveTo, setMounted }
+
   return (
     <div className="flex flex-col gap-4">
-      {scripts.map(s => <ScriptCard key={s.id} script={s} />)}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setManage(v => !v)}
+          className="text-xs px-2 py-1 rounded-md"
+          style={{ border: '1px solid var(--border)', color: manage ? 'var(--accent)' : 'var(--muted)' }}
+          title="Group scripts into folders, or take the ones you never run off the shelf"
+        >
+          {manage ? 'Done' : 'Manage'}
+        </button>
+        {manage && (
+          <button onClick={addFolder} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
+            + Folder
+          </button>
+        )}
+        <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
+          {scripts.length - unmountedScripts.length} of {scripts.length} mounted
+        </span>
+      </div>
+
+      {saveError && <div className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{saveError}</div>}
+
+      {shelf.folders.map((f, i) => {
+        const items = resolve(f.scripts).filter(s => !unmounted.has(s.id))
+        const open = manage || !f.collapsed
+        return (
+          <section key={f.id} className="rounded-lg" style={{ border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'var(--surface)' }}>
+              <button onClick={() => toggleCollapse(f.id)} className="text-xs" style={{ color: 'var(--muted)' }} title={f.collapsed ? 'Expand' : 'Collapse'}>
+                {f.collapsed ? '▸' : '▾'}
+              </button>
+              {manage ? (
+                <input
+                  value={f.name}
+                  onChange={(e) => renameFolder(f.id, e.target.value)}
+                  className="text-sm font-medium rounded px-2 py-0.5"
+                  style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+                />
+              ) : (
+                <span className="text-sm font-medium">{f.name}</span>
+              )}
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>{items.length}</span>
+              {manage && (
+                <div className="ml-auto flex items-center gap-1">
+                  <button onClick={() => moveFolder(f.id, -1)} disabled={i === 0} className="text-xs px-1.5 py-0.5 rounded" style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: i === 0 ? 0.4 : 1 }}>↑</button>
+                  <button onClick={() => moveFolder(f.id, 1)} disabled={i === shelf.folders.length - 1} className="text-xs px-1.5 py-0.5 rounded" style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: i === shelf.folders.length - 1 ? 0.4 : 1 }}>↓</button>
+                  <button onClick={() => deleteFolder(f.id)} className="text-xs px-1.5 py-0.5 rounded" style={{ border: '1px solid var(--border)', color: 'var(--danger)' }} title="Delete the folder — its scripts move to Ungrouped">
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+            {open && (
+              <div className="flex flex-col gap-4 p-3">
+                {items.length === 0
+                  ? <p className="text-xs" style={{ color: 'var(--muted)' }}>Empty — file scripts here from Manage.</p>
+                  : items.map(s => manage
+                    ? <ManageRow key={s.id} script={s} folderId={f.id} {...rowProps} />
+                    : <ScriptCard key={s.id} script={s} />)}
+              </div>
+            )}
+          </section>
+        )
+      })}
+
+      {ungrouped.length > 0 && (
+        <div className="flex flex-col gap-4">
+          {shelf.folders.length > 0 && (
+            <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>UNGROUPED</span>
+          )}
+          {ungrouped.map(s => manage
+            ? <ManageRow key={s.id} script={s} folderId="" {...rowProps} />
+            : <ScriptCard key={s.id} script={s} />)}
+        </div>
+      )}
+
+      {unmountedScripts.length > 0 && (
+        <section className="rounded-lg" style={{ border: '1px dashed var(--border)' }}>
+          <button
+            onClick={() => setShowUnmounted(v => !v)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs"
+            style={{ color: 'var(--muted)' }}
+          >
+            <span>{showUnmounted ? '▾' : '▸'}</span>
+            UNMOUNTED ({unmountedScripts.length})
+            <span className="ml-auto">still registered — hidden from this page only</span>
+          </button>
+          {showUnmounted && (
+            <div className="flex flex-col gap-1 px-3 pb-3">
+              {unmountedScripts.map(s => (
+                <div key={s.id} className="flex items-center gap-2 text-xs py-1" style={{ borderTop: '1px solid var(--border)' }}>
+                  <span className="font-medium">{s.name}</span>
+                  <span className="font-mono" style={{ color: 'var(--muted)' }}>{s.id}</span>
+                  <button
+                    onClick={() => setMounted(s.id, true)}
+                    className="ml-auto px-2 py-1 rounded-md"
+                    style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}
+                  >
+                    Mount
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}
+
+/** A script as one line while arranging: where it lives, and whether it is on the shelf. */
+function ManageRow({ script, folderId, folders, moveTo, setMounted }: {
+  script: ScriptInfo
+  /** '' = currently ungrouped. */
+  folderId: string
+  folders: ScriptFolder[]
+  moveTo: (id: string, folderId: string) => void
+  setMounted: (id: string, mounted: boolean) => void
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs rounded-md px-3 py-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <span className="font-medium truncate">{script.name}</span>
+      <span className="font-mono truncate" style={{ color: 'var(--muted)' }}>{script.id}</span>
+      <select
+        value={folderId}
+        onChange={(e) => moveTo(script.id, e.target.value)}
+        className="ml-auto rounded-md px-2 py-1"
+        style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+      >
+        <option value="">Ungrouped</option>
+        {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+      </select>
+      <button
+        onClick={() => setMounted(script.id, false)}
+        className="px-2 py-1 rounded-md"
+        style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+        title="Take it off the shelf — it stays registered and runnable, just hidden here"
+      >
+        Unmount
+      </button>
     </div>
   )
 }

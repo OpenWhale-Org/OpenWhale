@@ -20,7 +20,7 @@ import { installFromNpm, installFromFile, uninstallPlugin, listInstalledPlugins 
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
 import { sseHandler } from './events.js'
 import { activityMeter } from './activity.js'
-import { getAuth } from './authService.js'
+import { getAuth, getScriptShelf } from './authService.js'
 import { SESSION_COOKIE, readCookie, setSessionCookie, clearSessionCookie } from './auth.js'
 import type { AuthedRequest } from './auth.js'
 
@@ -260,6 +260,17 @@ export function buildRouter(): Router {
   router.get('/api/scripts', h(async (_req, res) => {
     const runtime = await ensureStarted()
     res.json(await runtime.listScripts())
+  }))
+
+  /* Shelf = how the page is arranged (folders + what is taken off it).
+     Declared BEFORE the /:owner/:sid routes so 'shelf' is never read as a
+     plugin name. Purely presentational: an unmounted script still runs. */
+  router.get('/api/scripts/shelf', h(async (_req, res) => {
+    res.json(await getScriptShelf().get())
+  }))
+
+  router.put('/api/scripts/shelf', h(async (req, res) => {
+    res.json(await getScriptShelf().put(req.body))
   }))
 
   router.post('/api/scripts/:owner/:sid/run', h(async (req, res) => {

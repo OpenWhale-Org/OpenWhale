@@ -28,7 +28,7 @@ import express from 'express'
 import { getLogger } from '@openwhaleorg/core'
 import { ensureStarted } from './runtime.js'
 import { buildRouter } from './routes.js'
-import { getAuth } from './authService.js'
+import { getAuth, getScriptShelf } from './authService.js'
 import { requireAuth } from './auth.js'
 
 // ── env files ─────────────────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ ensureStarted()
   .then(async () => {
     const auth = getAuth()
     await auth.initialize()
+    await getScriptShelf().initialize()
     if (!await auth.bootstrap()) {
       // Fail closed, exactly as a missing OPENWHALE_MASTER_KEY does. Serving
       // an unauthenticated trading API because configuration was incomplete
