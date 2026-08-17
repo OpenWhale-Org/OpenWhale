@@ -11,7 +11,7 @@ import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
 import { z } from 'zod'
-import { BaseStrategy, getDataDir, decodeMonitorKey, recentLogs } from '@openwhaleorg/core'
+import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
@@ -189,6 +189,43 @@ export function buildRouter(): Router {
     const runtime = await ensureStarted()
     const hours = Math.min(Math.max(Number(req.query['hours'] ?? 24) || 24, 1), 24 * 30)
     res.json(await runtime.accountEquitySeries(req.params['name']!, Date.now() - hours * 3_600_000))
+  }))
+
+  router.get('/api/portfolio/equity-series', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const ranges = {
+      '24h': { hours: 24, bucketMs: 5 * 60_000 },
+      '7d': { hours: 24 * 7, bucketMs: 30 * 60_000 },
+      '30d': { hours: 24 * 30, bucketMs: 2 * 3_600_000 },
+    } as const
+    const range = String(req.query['range'] ?? '7d').toLowerCase()
+    const selected = ranges[range as keyof typeof ranges]
+    if (!selected) {
+      res.status(400).json({ error: 'range must be one of 24h, 7d, or 30d' })
+      return
+    }
+
+    const to = Date.now()
+    const from = to - selected.hours * 3_600_000
+    const accounts = (await runtime.listAccounts())
+      .filter(account => account.status === 'ready')
+      .map(account => account.name)
+    const recordsByAccount = Object.fromEntries(await Promise.all(accounts.map(async account => [
+      account,
+      await runtime.accountEquitySeries(account, from),
+    ])))
+
+    res.json({
+      range,
+      sampledAt: to,
+      ...aggregateAccountEquity({
+        recordsByAccount,
+        expectedAccounts: accounts,
+        from,
+        to,
+        bucketMs: selected.bucketMs,
+      }),
+    })
   }))
 
   router.delete('/api/accounts/:name/snapshots', h(async (req, res) => {
