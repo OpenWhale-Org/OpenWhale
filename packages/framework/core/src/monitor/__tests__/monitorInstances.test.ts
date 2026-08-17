@@ -187,4 +187,70 @@ describe('monitor contract / implementation / instance', () => {
     await runner.fire('binance', 43)
     expect(seen).toHaveLength(1)
   })
+
+  it('editing params of an ACTIVE instance rebuilds the runner and keeps its keys', async () => {
+    const runtime = setupRuntime()
+    const builtWith: Array<unknown> = []
+    const startedKeys: string[] = []
+
+    class TunedMonitor extends BaseMonitor<string, { v: number }> {
+      override readonly mode = MonitorMode.Subscribe
+      constructor(ctx: MonitorContext) {
+        super({ ...(ctx.dataDir !== undefined ? { dataDir: ctx.dataDir } : {}) })
+        builtWith.push(ctx.params?.['window'])
+      }
+      get monitorName() { return 'tuned' }
+      override get keySchema(): ZodObject<ZodRawShape> { return z.object({ venue: z.string() }) }
+      protected override startSubscribe(key: string): void { startedKeys.push(key) }
+      protected override stopSubscribe(): void {}
+    }
+
+    runtime.loadPlugin(() => ({
+      name: 'tuner', version: '0.0.0', monitors: [], executors: [], strategies: [],
+      monitorImplementations: [{
+        id: 'tuned', contract: 'tuned',
+        params: z.object({ window: z.number().default(10) }),
+        create: (ctx) => new TunedMonitor(ctx),
+      }],
+    }), {})
+
+    const facade = runtime.getMonitor('tuner/tuned')!
+    const inst = await runtime.createMonitorInstance({ implementation: 'tuner/tuned' })
+    await runtime.activateMonitorInstance(inst.id)
+    facade.subscribe(facade.keyFor({ venue: 'binance' }))
+    expect(builtWith.at(-1)).toBe(10)          // schema default reached create()
+    expect(startedKeys).toEqual(['binance'])
+
+    await runtime.updateMonitorInstanceParams(inst.id, { window: 42 })
+
+    // Rebuilt from the new params, and the key it served came back on its own
+    expect(builtWith.at(-1)).toBe(42)
+    expect(startedKeys).toEqual(['binance', 'binance'])
+    const view = (await runtime.listMonitorInstances()).find(v => v.id === inst.id)!
+    expect(view.active).toBe(true)
+    expect(view.params).toEqual({ window: 42 })
+    expect(view.servingKeys).toEqual(['binance'])
+  })
+
+  it('rejects invalid params WITHOUT taking the running instance down', async () => {
+    const runtime = setupRuntime()
+    runtime.loadPlugin(() => ({
+      name: 'strict', version: '0.0.0', monitors: [], executors: [], strategies: [],
+      monitorImplementations: [{
+        id: 'strict-feed', contract: 'feed',
+        params: z.object({ window: z.number() }),
+        create: (ctx) => new GenericFeedMonitor(ctx),
+      }],
+    }), {})
+
+    const inst = await runtime.createMonitorInstance({ implementation: 'strict/strict-feed', params: { window: 5 } })
+    await runtime.activateMonitorInstance(inst.id)
+    await expect(runtime.updateMonitorInstanceParams(inst.id, { window: 'soon' }))
+      .rejects.toThrow(/Invalid params/)
+
+    // Still running on the old set — validation happens before anything is torn down
+    const view = (await runtime.listMonitorInstances()).find(v => v.id === inst.id)!
+    expect(view.active).toBe(true)
+    expect(view.params).toEqual({ window: 5 })
+  })
 })

@@ -44,9 +44,11 @@ export interface MonitorImplementation {
   credential?: { type: string; level: 'optional' | 'required' }
   /**
    * Top-level tuning parameters (throttles, poll intervals, thresholds).
-   * Filled per INSTANCE on the dashboard at creation, editable while the
-   * instance is inactive, FROZEN once activated. Defaults apply via Zod;
-   * validated values reach create() as ctx.params.
+   * Filled per INSTANCE on the dashboard at creation and editable at any
+   * time — the runner is built FROM them, so editing an active instance
+   * rebuilds it (deactivate → save → activate; its keys come back, its
+   * in-memory state does not). Defaults apply via Zod; validated values reach
+   * create() as ctx.params.
    */
   params?: ZodObject<ZodRawShape>
   /** Build the runner. Its monitorName MUST equal the contract's data name. */

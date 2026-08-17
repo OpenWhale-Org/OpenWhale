@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS monitor_instances (
   implementation TEXT NOT NULL,   -- implementation id, e.g. 'exchange/funding-rates'
   contract       TEXT NOT NULL,   -- contract id (monitorName) the implementation serves
   credential     TEXT,            -- bound credential name, per the implementation's declaration
-  params         TEXT,            -- JSON instance tuning params; editable while inactive, frozen once active
+  params         TEXT,            -- JSON instance tuning params; editable any time (an active instance is rebuilt around the edit)
   active         INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL

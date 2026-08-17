@@ -119,7 +119,16 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
         {[...groups.entries()].map(([pkg, items]) => (
           <div key={pkg} className="flex flex-col gap-1">
             <span className="text-xs font-semibold uppercase px-1" style={{ color: 'var(--muted)' }}>{pkg}</span>
-            {items.map((m) => (
+            {items.map((m) => {
+              /* Two independent facts, deliberately shown as two marks:
+                 RUNNING = an instance of this contract is activated (something
+                 is capable of collecting); SUBSCRIBED = keys are actually being
+                 watched. A monitor can run with nothing subscribed, and can
+                 have subscriptions nothing is serving — that second case is the
+                 silent failure this marker exists to expose. */
+              const mine = instances.filter(i => i.contract === m.id)
+              const running = mine.filter(i => i.active).length
+              return (
               <button
                 key={m.id}
                 onClick={() => setSelectedId(m.id)}
@@ -130,9 +139,24 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{splitId(m.id).short}</span>
+                  {mine.length > 0 && (
+                    <span
+                      className="text-[10px] shrink-0"
+                      style={{ color: running > 0 ? 'var(--success, #22c55e)' : 'var(--muted)' }}
+                      title={running > 0
+                        ? `${running} of ${mine.length} instance${mine.length > 1 ? 's' : ''} running`
+                        : `${mine.length} instance${mine.length > 1 ? 's' : ''}, none running`}
+                    >
+                      {running > 0 ? '◉' : '○'}{mine.length > 1 ? ` ${running}/${mine.length}` : ''}
+                    </span>
+                  )}
+                  <span className="text-sm font-medium truncate">{splitId(m.id).short}</span>
                   {m.activeKeys.length > 0 && (
-                    <span className="text-xs px-1.5 rounded-full" style={{ background: 'var(--accent)', color: '#fff' }}>
+                    <span
+                      className="text-xs px-1.5 rounded-full shrink-0"
+                      style={{ background: 'var(--accent)', color: '#fff' }}
+                      title={`${m.activeKeys.length} key${m.activeKeys.length > 1 ? 's' : ''} subscribed`}
+                    >
                       {m.activeKeys.length}
                     </span>
                   )}
@@ -143,7 +167,8 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
                   </p>
                 )}
               </button>
-            ))}
+              )
+            })}
           </div>
         ))}
       </aside>

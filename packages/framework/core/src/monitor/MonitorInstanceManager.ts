@@ -349,20 +349,34 @@ export class MonitorInstanceManager {
   }
 
   /**
-   * Update an instance's tuning params. Params FREEZE on activation — the
-   * running monitor was constructed from them; deactivate first to edit.
+   * Update an instance's tuning params.
+   *
+   * The runner is CONSTRUCTED from its params, so an active instance cannot
+   * absorb an edit in place — it is deactivated and re-activated around the
+   * save, which rebuilds it from the new set. Deactivation returns the keys it
+   * served to the contract's pending set and activation re-routes them, so the
+   * same keys come back on their own; what does not survive is the runner's
+   * in-memory state (rolling windows, throttle clocks, open sockets).
+   *
+   * Validation runs FIRST, before anything is torn down: a typo must not take
+   * a live collector off the air.
    */
   async updateInstanceParams(id: string, params: Record<string, unknown>): Promise<void> {
-    const entity = await this.options.store.get(id)
-    if (!entity) throw new Error(`Unknown monitor instance "${id}"`)
-    if (this.actives.has(id)) {
-      throw new Error(`Monitor instance "${id}" is active — params are frozen; deactivate it to edit`)
-    }
-    const rec = this.contracts.get(entity.contract)?.impls.get(entity.implementation)
+    const existing = await this.options.store.get(id)
+    if (!existing) throw new Error(`Unknown monitor instance "${id}"`)
+    const rec = this.contracts.get(existing.contract)?.impls.get(existing.implementation)
     if (rec) this.validateParams(rec.impl, params)
+
+    const wasActive = this.actives.has(id)
+    if (wasActive) await this.deactivate(id)
+    // Re-read: deactivate() persisted its own copy of the entity
+    const entity = (await this.options.store.get(id))!
     entity.params = params
     entity.updatedAt = new Date().toISOString()
     await this.options.store.save(entity)
+    // If this throws (params the schema accepts but the runner rejects), the
+    // instance stays inactive and the store agrees — a state you can retry from.
+    if (wasActive) await this.activate(id)
   }
 
   /** The implementation's params schema (dashboard form derivation). */
@@ -406,8 +420,8 @@ export class MonitorInstanceManager {
     }
 
     const ctx: MonitorContext = this.probeContext()
-    // Params freeze here: the runner is constructed from the validated set
-    // (schema defaults applied), so edits require deactivate → edit → activate.
+    // The runner is constructed from the validated set (schema defaults
+    // applied) — which is why editing params rebuilds an active instance.
     if (rec.impl.params) {
       const parsed = rec.impl.params.safeParse(entity.params ?? {})
       if (!parsed.success) {

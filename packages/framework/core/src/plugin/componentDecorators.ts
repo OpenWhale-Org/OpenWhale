@@ -39,7 +39,7 @@ export interface OwMonitorMeta {
   credential?: { type: string; level: 'optional' | 'required' }
   /**
    * Top-level tuning params (Zod object, .meta() drives the form). Filled per
-   * instance at creation, editable while inactive, frozen once activated.
+   * instance at creation, editable any time (an active one is rebuilt).
    */
   params?: ZodObject<ZodRawShape>
 }

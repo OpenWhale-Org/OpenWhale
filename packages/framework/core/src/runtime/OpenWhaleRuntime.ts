@@ -321,7 +321,7 @@ export class OpenWhaleRuntime implements IRuntime {
     return this.monitorInstances.createInstance(input)
   }
 
-  /** Update an inactive instance's tuning params (params freeze while active). */
+  /** Update an instance's tuning params; an active one is rebuilt around the edit. */
   updateMonitorInstanceParams(id: string, params: Record<string, unknown>): Promise<void> {
     return this.monitorInstances.updateInstanceParams(id, params)
   }

@@ -133,15 +133,21 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
 
-  /** Radio semantics: activating swaps out the sibling of the SAME implementation. */
+  /**
+   * Radio semantics: picking one swaps out the sibling of the SAME
+   * implementation. Clicking the ALREADY-active one does nothing — a radio
+   * that turns itself off on a second click means one stray click stops a
+   * live collector. Stopping is the explicit button next to it.
+   */
   async function choose(inst: MonitorInstanceView) {
-    if (inst.active) {
-      if (await post(`/api/monitor-instances/${inst.id}`, { action: 'deactivate' })) await onChanged()
-      return
-    }
+    if (inst.active) return
     const sibling = mine.find(i => i.active && i.implementation === inst.implementation && i.id !== inst.id)
     if (sibling && !await post(`/api/monitor-instances/${sibling.id}`, { action: 'deactivate' })) return
     if (await post(`/api/monitor-instances/${inst.id}`, { action: 'activate' })) await onChanged()
+  }
+
+  async function stop(inst: MonitorInstanceView) {
+    if (await post(`/api/monitor-instances/${inst.id}`, { action: 'deactivate' })) await onChanged()
   }
 
   async function remove(id: string) {
@@ -208,17 +214,18 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
       ) : (
         <div className="flex flex-col">
           {mine.map((inst) => {
-            const editable = !inst.active && (inst.paramsFields?.length ?? 0) > 0
+            // Params are editable while running too — saving rebuilds the runner
+            const editable = (inst.paramsFields?.length ?? 0) > 0
             return (
               <div key={inst.id} className="flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
                 <div className="flex items-center gap-2 py-2 flex-wrap">
                   {/* Radio, not a toggle: the runtime allows one active per implementation */}
                   <button
                     onClick={() => void choose(inst)}
-                    disabled={busy}
+                    disabled={busy || inst.active}
                     className="flex items-center gap-2 text-xs min-w-0"
-                    title={inst.active ? 'Active — click to stop it' : 'Activate (stops the current one)'}
-                    style={{ color: inst.active ? 'var(--foreground)' : 'var(--muted)' }}
+                    title={inst.active ? 'Running' : 'Activate — stops the current one first'}
+                    style={{ color: inst.active ? 'var(--foreground)' : 'var(--muted)', cursor: inst.active ? 'default' : 'pointer' }}
                   >
                     <span style={{ color: inst.active ? 'var(--success, #22c55e)' : 'var(--muted)' }}>
                       {inst.active ? '◉' : '○'}
@@ -252,9 +259,22 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                         })}
                         className="text-[10px] px-2 py-1 rounded-md"
                         style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-                        title="Params are editable while inactive; they freeze on activation"
+                        title={inst.active
+                          ? 'Edit params — saving rebuilds the runner (its keys come back, its in-memory state does not)'
+                          : 'Edit params'}
                       >
                         Params
+                      </button>
+                    )}
+                    {inst.active && (
+                      <button
+                        onClick={() => void stop(inst)}
+                        disabled={busy}
+                        className="text-[10px] px-2 py-1 rounded-md"
+                        style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+                        title="Stop this instance — its keys go unserved until something else covers them"
+                      >
+                        Stop
                       </button>
                     )}
                     <button
@@ -279,8 +299,9 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                       disabled={busy}
                       className="text-xs px-3 py-1.5 rounded-md"
                       style={{ background: 'var(--accent)', color: '#fff' }}
+                      title={inst.active ? 'Saves, then rebuilds the running instance from the new params' : undefined}
                     >
-                      Save Params
+                      {inst.active ? 'Save & Restart' : 'Save Params'}
                     </button>
                   </div>
                 )}
