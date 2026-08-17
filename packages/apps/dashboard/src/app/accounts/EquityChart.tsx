@@ -84,8 +84,9 @@ export function EquityChart({ account }: { account: string }) {
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     if (!geom || !series || series.length === 0 || !svgRef.current) return
+    // 1:1 with the SVG's own units — see the width/height note on the element
     const rect = svgRef.current.getBoundingClientRect()
-    const mx = ((e.clientX - rect.left) / rect.width) * W
+    const mx = e.clientX - rect.left
     let best = 0
     let bestDist = Infinity
     geom.points.forEach(([px], i) => {
@@ -158,11 +159,18 @@ export function EquityChart({ account }: { account: string }) {
         </p>
       ) : (
         <div className="relative" ref={wrapRef}>
+          {/* NO viewBox: width/height are the real pixel size, so one SVG unit
+              is one CSS pixel and every px↔chart conversion below is identity.
+              With `viewBox + w-full + a pinned height` the two aspect ratios
+              disagree, and preserveAspectRatio then letterboxes the drawing —
+              it renders narrower than the box and CENTRED, while the hover math
+              and the tooltip both assumed it filled the box. That is what put
+              the crosshair on a different point than the cursor. */}
           <svg
             ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
-            className="w-full"
-            style={{ display: 'block', height: H }}
+            width={W}
+            height={H}
+            className="block max-w-full"
             onMouseMove={onMove}
             onMouseLeave={() => setHover(null)}
           >
@@ -200,7 +208,7 @@ export function EquityChart({ account }: { account: string }) {
             <div
               className="absolute pointer-events-none px-2 py-1 rounded-md text-xs whitespace-nowrap"
               style={{
-                left: `${(geom!.points[hover]![0] / W) * 100}%`,
+                left: `${geom!.points[hover]![0]}px`,
                 top: 0,
                 transform: geom!.points[hover]![0] > W * 0.7 ? 'translateX(-105%)' : 'translateX(8px)',
                 background: 'var(--surface)',
