@@ -885,7 +885,12 @@ export function InstancesClient({ initialInstances }: Props) {
                 {folder === undefined && groups.length > 1 && (
                   <div className="text-xs mt-2" style={{ color: 'var(--muted)' }}>Ungrouped</div>
                 )}
-                {(folder === undefined || !collapsedFolders.has(folder)) && items.map((inst) => (
+                {/* A GRID, not a column: 13 instances as full-width rows is a
+                    page you scroll rather than read. Cards stay drag-and-drop
+                    targets exactly as before. */}
+                {(folder === undefined || !collapsedFolders.has(folder)) && (
+                <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' }}>
+                {items.map((inst) => (
                   <div
                     key={inst.id}
                     draggable
@@ -915,6 +920,8 @@ export function InstancesClient({ initialInstances }: Props) {
                     />
                   </div>
                 ))}
+                </div>
+                )}
               </div>
             ))
           })()}
@@ -1478,6 +1485,142 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 // ── Instance card ─────────────────────────────────────────────────────────────
 
+/** Compact money for a stat cell: the sign carries the colour, the digits stay short. */
+function statMoney(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '—'
+  const abs = Math.abs(v)
+  const body = abs >= 100_000 ? `${(v / 1_000).toFixed(1)}k`
+    : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return v > 0 ? `+${body}` : body
+}
+
+const moneyColor = (v: number | null | undefined): string =>
+  v === null || v === undefined ? 'var(--muted)'
+    : v > 0.005 ? 'var(--success)' : v < -0.005 ? 'var(--danger)' : 'var(--muted)'
+
+/** One labelled figure in the card's stat row. */
+function Stat({ label, value, color, title }: { label: string; value: string; color?: string; title?: string }) {
+  return (
+    <div className="min-w-0" title={title}>
+      <div className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{label}</div>
+      <div className="text-sm font-mono truncate" style={{ color: color ?? 'var(--foreground)' }}>{value}</div>
+    </div>
+  )
+}
+
+/**
+ * Everything that is neither "what is this" nor "run it" lives behind the ⋯.
+ *
+ * Rendered as ONE popup rather than nested menus: a folder picker opened from
+ * inside another menu closes its parent the moment you click it (both listen
+ * for a click outside themselves), so the sections are inlined here instead.
+ */
+function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolder }: {
+  instance: StrategyInstanceView
+  folders: string[]
+  onEdit: string
+  onDuplicate: () => void
+  onDelete: () => void
+  onSetFolder?: (name: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [draft, setDraft] = useState('')
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onClickAway(e: MouseEvent) {
+      if (!boxRef.current?.contains(e.target as Node)) { setOpen(false); setConfirmDelete(false) }
+    }
+    document.addEventListener('mousedown', onClickAway)
+    return () => document.removeEventListener('mousedown', onClickAway)
+  }, [open])
+
+  const item = 'w-full text-left px-3 py-1.5 text-xs'
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-6 h-6 rounded-md flex items-center justify-center leading-none"
+        style={{ color: 'var(--muted)' }}
+        title="More"
+        aria-label="More actions"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 z-[100] mt-1 rounded-md shadow-lg flex flex-col py-1"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: '12rem' }}
+        >
+          <Link href={onEdit} className={item} style={{ color: 'var(--foreground)' }}>Edit</Link>
+          <button type="button" className={item} style={{ color: 'var(--foreground)' }}
+            onClick={() => { onDuplicate(); setOpen(false) }}>
+            Duplicate
+          </button>
+
+          {onSetFolder && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-[10px]" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>FOLDER</div>
+              {folders.map(f => (
+                <button key={f} type="button" className={`${item} flex items-center gap-2`} style={{ color: 'var(--foreground)' }}
+                  onClick={() => { onSetFolder(f); setOpen(false) }}>
+                  <span style={{ color: f === instance.folder ? 'var(--accent)' : 'var(--muted)' }}>{f === instance.folder ? '●' : '○'}</span>
+                  📁 {f}
+                </button>
+              ))}
+              {instance.folder && (
+                <button type="button" className={item} style={{ color: 'var(--muted)' }}
+                  onClick={() => { onSetFolder(''); setOpen(false) }}>
+                  Remove from folder
+                </button>
+              )}
+              <form className="flex gap-1 px-2 py-1"
+                onSubmit={(e) => { e.preventDefault(); if (draft.trim()) { onSetFolder(draft.trim()); setDraft(''); setOpen(false) } }}>
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="New folder…"
+                  className="flex-1 min-w-0 rounded px-2 py-1 text-xs"
+                  style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }} />
+                <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Add</button>
+              </form>
+            </>
+          )}
+
+          {/* Two-step, and only reachable from in here — the old layout put a red
+              Delete directly beside Activate, one slip apart from each other. */}
+          <button
+            type="button"
+            className={item}
+            style={{ color: 'var(--danger)', borderTop: '1px solid var(--border)' }}
+            onClick={() => {
+              if (!confirmDelete) { setConfirmDelete(true); return }
+              onDelete(); setOpen(false); setConfirmDelete(false)
+            }}
+          >
+            {confirmDelete ? 'Delete for good?' : 'Delete'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One instance as a card in a grid.
+ *
+ * The shape follows the reference dashboard: identity at the top (icon, name,
+ * a couple of chips), the numbers that matter in a labelled row, and exactly
+ * ONE action button at the bottom that states the current state rather than
+ * naming a verb — a running instance reads "Running", not "Deactivate".
+ * Stopping it is a deliberate second click, which is the point: the old card
+ * offered a one-click Deactivate next to a one-click Delete.
+ *
+ * There is no inline expand any more. It duplicated /instances/[id], which the
+ * ↗ and Edit both already open, and a full detail panel unfolding inside one
+ * cell of a three-column grid reflows every card beside it.
+ */
 function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
@@ -1489,148 +1632,132 @@ function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDupl
   onSetFolder?: (name: string) => void
   onSetIcon?: (emoji: string) => void
 }) {
-  const [confirming, setConfirming] = useState<'deactivate' | 'delete' | null>(null)
-  const [expanded, setExpanded] = useState(false)
+  const [confirmStop, setConfirmStop] = useState(false)
   const base = instance.params?.base ?? {}
   const bindings = instance.credentials
     ? Object.entries(instance.credentials).map(([slot, target]) => `${slot} → ${target}`)
     : instance.accounts ?? []
-
-  const smallButton = (label: string, onClick: () => void, style: React.CSSProperties) => (
-    <button onClick={onClick} className="px-3 py-1.5 rounded-md text-xs" style={style}>{label}</button>
-  )
+  // The venue/account chip: the first binding's TARGET is the recognisable half
+  const account = bindings[0]?.split('→').pop()?.trim()
+  const paramValues = Object.values(base).map(v => String(v)).filter(v => v !== '' && v !== 'false')
+  const paramChip = paramValues.slice(0, 2).join(' · ')
+  const strategyShort = instance.strategyId.split('/').pop() ?? instance.strategyId
 
   return (
     <div
-      className="rounded-lg"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)', opacity: instance.active ? 1 : 0.85 }}
+      className="rounded-lg p-4 flex flex-col gap-3 h-full"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
     >
-      {/* Header row */}
-      <div className="p-4 flex items-start justify-between gap-4">
-        <button
-          className="flex flex-col gap-1 min-w-0 text-left flex-1"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          <div className="flex items-center gap-2 flex-wrap">
-            {onSetIcon
-              ? <IconMenu current={iconFor(instance)} onPick={onSetIcon}>
-                  <span className="text-lg leading-none">{iconFor(instance)}</span>
-                </IconMenu>
-              : <span className="text-lg leading-none">{iconFor(instance)}</span>}
-            <span className="font-medium truncate">{instance.name}</span>
-            <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={{
-                background: instance.active ? '#14532d' : '#292524',
-                color: instance.active ? 'var(--success)' : 'var(--muted)',
-              }}
-            >
-              {instance.active ? 'active' : 'stopped'}
+      {/* Identity */}
+      <div className="flex items-start gap-3">
+        {onSetIcon
+          ? <IconMenu current={iconFor(instance)} onPick={onSetIcon}>
+              <span className="text-2xl leading-none">{iconFor(instance)}</span>
+            </IconMenu>
+          : <span className="text-2xl leading-none">{iconFor(instance)}</span>}
+        <div className="min-w-0 flex-1">
+          <div className="font-medium truncate" title={instance.name}>{instance.name}</div>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono truncate"
+              style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
+              title={`${instance.strategyId} · ${instance.id}`}>
+              {strategyShort}
             </span>
-            {pnl && (
-              <span
-                className="text-xs font-mono px-2 py-0.5 rounded-full"
-                title={`realized ${pnl.realized.toFixed(2)} · fees ${pnl.fees.toFixed(2)} · funding ${pnl.funding.toFixed(2)}${pnl.unrealized !== null ? ` · unrealized ${pnl.unrealized.toFixed(2)}` : ''}`}
-                style={{
-                  background: 'var(--background)',
-                  border: '1px solid var(--border)',
-                  color: pnl.net > 0.005 ? 'var(--success)' : pnl.net < -0.005 ? 'var(--danger)' : 'var(--muted)',
-                }}
-              >
-                {pnl.net > 0 ? '+' : ''}{pnl.net.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                {pnl.unrealized !== null && Math.abs(pnl.unrealized) > 0.005 && (
-                  <span style={{ color: pnl.unrealized > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                    {' '}u{pnl.unrealized > 0 ? '+' : ''}{pnl.unrealized.toFixed(2)}
-                  </span>
-                )}
+            {account && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded truncate"
+                style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+                title={bindings.join(', ')}>
+                {account}
               </span>
             )}
-            <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>
-              {expanded ? '▲' : '▼'}
-            </span>
           </div>
-          {instance.description && (
-            <span className="text-xs" style={{ color: 'var(--muted)' }}>{instance.description}</span>
-          )}
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            strategy: <span style={{ color: 'var(--accent)' }}>{instance.strategyId}</span>
-            {' · '}id: {instance.id}
-          </span>
-          {bindings.length > 0 && (
-            <span className="text-xs" style={{ color: 'var(--muted)' }}>
-              accounts: {bindings.join(', ')}
-            </span>
-          )}
-          {Object.keys(base).length > 0 && (
-            <div className="flex flex-wrap gap-3 mt-1">
-              {Object.entries(base).map(([key, value]) => (
-                <ParamBadge
-                  key={key}
-                  label={key}
-                  value={typeof value === 'string' && value.length > 14 ? value.slice(0, 12) + '…' : String(value)}
-                />
-              ))}
-            </div>
-          )}
-        </button>
-
-        <div className="shrink-0 flex gap-2 flex-wrap justify-end">
-          {onSetFolder && <FolderMenu current={instance.folder} folders={folders} onPick={onSetFolder} />}
-          <Link
-            href={`/instances/${instance.id}`}
-            className="px-3 py-1.5 rounded-md text-xs"
-            style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
-          >
-            Board ↗
-          </Link>
-          {confirming ? (
-            <>
-              <span className="text-xs self-center" style={{ color: 'var(--muted)' }}>
-                {confirming === 'delete' ? 'Delete for good?' : 'Stop this instance?'}
-              </span>
-              {smallButton('Cancel', () => setConfirming(null),
-                { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' })}
-              {smallButton('Confirm', () => { (confirming === 'delete' ? onDelete : onDeactivate)(); setConfirming(null) },
-                { background: 'var(--danger)', color: '#fff' })}
-            </>
-          ) : instance.active ? (
-            <>
-              {/* Editing a running instance is allowed — the params panel there
-                  restarts it on save rather than refusing the edit. */}
-              <Link
-                href={`/instances/${instance.id}`}
-                className="px-3 py-1.5 rounded-md text-xs"
-                style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-              >
-                Edit
-              </Link>
-              {smallButton('Duplicate', onDuplicate,
-                { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' })}
-              {smallButton('Deactivate', () => setConfirming('deactivate'),
-                { background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' })}
-            </>
-          ) : (
-            <>
-              {smallButton('Activate', onActivate,
-                { background: 'var(--accent)', color: '#fff' })}
-              <Link
-                href={`/instances/${instance.id}`}
-                className="px-3 py-1.5 rounded-md text-xs"
-                style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-              >
-                Edit
-              </Link>
-              {smallButton('Duplicate', onDuplicate,
-                { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' })}
-              {smallButton('Delete', () => setConfirming('delete'),
-                { background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' })}
-            </>
-          )}
+        </div>
+        <div className="shrink-0 flex items-center gap-1">
+          {/* Status is a dot, not a word: it is glanceable across a whole grid */}
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ background: instance.active ? 'var(--success)' : 'var(--border)' }}
+            title={instance.active ? 'Running' : 'Stopped'}
+          />
+          <CardMenu
+            instance={instance}
+            folders={folders}
+            onEdit={`/instances/${instance.id}`}
+            onDuplicate={onDuplicate}
+            onDelete={onDelete}
+            {...(onSetFolder ? { onSetFolder } : {})}
+          />
         </div>
       </div>
 
-      {/* Detail panel */}
-      {expanded && <div className="rounded-b-lg overflow-hidden"><InstanceDetail instanceId={instance.id} /></div>}
+      {/* The three numbers worth watching. Realized and fees ride along in the
+          tooltip — they explain the net, they are not separately actionable. */}
+      <div className="grid grid-cols-3 gap-2">
+        <Stat
+          label="PnL"
+          value={pnl ? statMoney(pnl.net) : '—'}
+          color={moneyColor(pnl?.net)}
+          {...(pnl ? { title: `realized ${pnl.realized.toFixed(2)} · fees ${pnl.fees.toFixed(2)}` } : {})}
+        />
+        <Stat
+          label="Unrealized"
+          value={pnl && pnl.unrealized !== null ? statMoney(pnl.unrealized) : '—'}
+          color={moneyColor(pnl?.unrealized)}
+        />
+        <Stat
+          label="Funding"
+          value={pnl ? statMoney(pnl.funding) : '—'}
+          color={moneyColor(pnl?.funding)}
+        />
+      </div>
+
+      {/* Footer: what it trades, then the one action */}
+      <div className="flex items-center gap-2 mt-auto pt-1">
+        {paramChip && (
+          <span className="text-[10px] font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
+            title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
+            {paramChip}
+          </span>
+        )}
+        <div className="ml-auto shrink-0 flex items-center gap-1.5">
+          <Link
+            href={`/instances/${instance.id}`}
+            className="w-7 h-7 rounded-md flex items-center justify-center text-xs"
+            style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+            title="Open the board"
+          >
+            ↗
+          </Link>
+          {instance.active ? (
+            confirmStop ? (
+              <div className="flex items-center gap-1">
+                <button onClick={() => setConfirmStop(false)} className="px-2 py-1.5 rounded-md text-xs"
+                  style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
+                  Cancel
+                </button>
+                <button onClick={() => { onDeactivate(); setConfirmStop(false) }} className="px-2 py-1.5 rounded-md text-xs"
+                  style={{ background: 'var(--danger)', color: '#fff' }}>
+                  Stop
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmStop(true)}
+                className="px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5"
+                style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
+                title="Running — click to stop it"
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
+                Running
+              </button>
+            )
+          ) : (
+            <button onClick={onActivate} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>
+              ▶ Activate
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -2060,13 +2187,3 @@ function LogRow({ row }: { row: { ts: number; level: string; module?: string; ms
   )
 }
 
-function ParamBadge({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="text-xs flex items-center gap-1" style={{ color: 'var(--muted)' }}>
-      {label}:
-      <span className="px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
-        {value}
-      </span>
-    </span>
-  )
-}
