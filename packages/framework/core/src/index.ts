@@ -113,6 +113,8 @@ export { MonitorInstanceManager, ContractMonitor } from './monitor/MonitorInstan
 export { DBMonitorInstanceStore, MemoryMonitorInstanceStore } from './monitor/MonitorInstanceStore.js'
 export { DBAccountStore, MemoryAccountStore } from './account/AccountStore.js'
 export { DBAccountSnapshotStore, MemoryAccountSnapshotStore } from './account/AccountSnapshotStore.js'
+export { aggregateAccountEquity } from './account/aggregateAccountEquity.js'
+export type { CombinedAccountEquityPoint, CombinedAccountEquitySeries } from './account/aggregateAccountEquity.js'
 
 // Executor
 export { BaseExecutor, ExecutionTimeoutError } from './executor/BaseExecutor.js'

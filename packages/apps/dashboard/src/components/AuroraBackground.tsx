@@ -1,6 +1,13 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import {
+  advanceParticleField,
+  createParticleField,
+  displaceByParticleField,
+  moveParticleField,
+  type ParticleField,
+} from '@/lib/particle-field'
 
 const MASTER_SRC = '/market-whale-master.png'
 const FALLBACK_MASTER_WIDTH = 1672
@@ -11,7 +18,10 @@ const EXCLUDED_DETAILS = [
   { x: 854, y: 812, radius: 116 },
   { x: 1160, y: 812, radius: 116 },
 ]
-const POINTER_RADIUS = 178
+const WHALE_WAVE_OPTIONS = {
+  maxRadius: 180,
+  strength: 42,
+}
 
 const DATA_CALLOUTS = [
   { value: '89,742.61', change: '+1.28%', x: 965, y: 98, anchorX: 1038, anchorY: 133 },
@@ -58,15 +68,6 @@ type Sample = {
   active: boolean
 }
 
-type PointerState = {
-  x: number
-  y: number
-  targetX: number
-  targetY: number
-  influence: number
-  targetInfluence: number
-}
-
 function hash(x: number, y: number, salt = 0) {
   const value = Math.sin(x * 12.9898 + y * 78.233 + salt * 37.719) * 43758.5453
   return value - Math.floor(value)
@@ -78,24 +79,6 @@ function isExcluded(x: number, y: number) {
   return EXCLUDED_DETAILS.some(detail => Math.hypot(x - detail.x, y - detail.y) < detail.radius)
 }
 
-function displaceByPointer(x: number, y: number, pointer: PointerState, strength: number, radius = POINTER_RADIUS) {
-  if (pointer.influence <= 0.002) return { x, y }
-  const dx = x - pointer.x
-  const dy = y - pointer.y
-  const distance = Math.hypot(dx, dy) || 1
-  if (distance >= radius) return { x, y }
-
-  const force = (1 - distance / radius) ** 1.65 * strength * pointer.influence
-  const radialX = dx / distance
-  const radialY = dy / distance
-  const tangentX = -radialY
-  const tangentY = radialX
-  return {
-    x: x + radialX * force * 0.88 + tangentX * force * 0.42,
-    y: y + radialY * force * 0.88 + tangentY * force * 0.42,
-  }
-}
-
 function drawDotText(
   context: CanvasRenderingContext2D,
   text: string,
@@ -104,7 +87,7 @@ function drawDotText(
   unit: number,
   color: string,
   alpha: number,
-  pointer: PointerState,
+  field: ParticleField,
   reducedMotion: boolean,
 ) {
   let cursor = x
@@ -121,7 +104,9 @@ function drawDotText(
         if (row[column] !== '1') continue
         const baseX = cursor + column * unit
         const baseY = y + rowIndex * unit
-        const point = reducedMotion ? { x: baseX, y: baseY } : displaceByPointer(baseX, baseY, pointer, 28, POINTER_RADIUS * 1.08)
+        const point = reducedMotion
+          ? { x: baseX, y: baseY }
+          : displaceByParticleField(baseX, baseY, field, WHALE_WAVE_OPTIONS, 0.68)
         context.moveTo(point.x + unit * 0.25, point.y)
         context.arc(point.x, point.y, Math.max(0.62, unit * 0.29), 0, Math.PI * 2)
       }
@@ -139,7 +124,7 @@ function drawDataCallouts(
   offsetX: number,
   offsetY: number,
   time: number,
-  pointer: PointerState,
+  field: ParticleField,
   reducedMotion: boolean,
 ) {
   const unit = Math.max(1.85, scale * 3.55)
@@ -176,9 +161,9 @@ function drawDataCallouts(
     context.save()
     context.shadowBlur = 5
     context.shadowColor = 'rgba(91, 183, 255, .5)'
-    drawDotText(context, callout.value, x, y, unit, '#83e3ff', 0.96 * pulse, pointer, reducedMotion)
+    drawDotText(context, callout.value, x, y, unit, '#83e3ff', 0.96 * pulse, field, reducedMotion)
     context.shadowColor = 'rgba(168, 116, 255, .45)'
-    drawDotText(context, callout.change, x, y + unit * 9, unit * 0.84, '#bd91ff', 0.88 * pulse, pointer, reducedMotion)
+    drawDotText(context, callout.change, x, y + unit * 9, unit * 0.84, '#bd91ff', 0.88 * pulse, field, reducedMotion)
     context.restore()
   }
   context.globalAlpha = 1
@@ -297,7 +282,6 @@ function buildFallbackParticles() {
 export function AuroraBackground() {
   const rootRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const pointerRef = useRef({ x: -9999, y: -9999, targetX: -9999, targetY: -9999, influence: 0, targetInfluence: 0 })
 
   useEffect(() => {
     const root = rootRef.current
@@ -315,6 +299,7 @@ export function AuroraBackground() {
     let startTime = performance.now()
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const dpr = Math.min(window.devicePixelRatio || 1, 1.75)
+    const whaleField = createParticleField()
 
     const layout = () => {
       width = root.clientWidth
@@ -333,28 +318,19 @@ export function AuroraBackground() {
       const time = (now - startTime) / 1000
       context.clearRect(0, 0, width, height)
       context.globalCompositeOperation = 'lighter'
-      const pointer = pointerRef.current
-      pointer.x += (pointer.targetX - pointer.x) * 0.12
-      pointer.y += (pointer.targetY - pointer.y) * 0.12
-      pointer.influence += (pointer.targetInfluence - pointer.influence) * 0.08
-
+      if (whaleField.active && !reducedMotion) {
+        advanceParticleField(whaleField, WHALE_WAVE_OPTIONS)
+      }
       for (const particle of particles) {
         const baseX = offsetX + particle.x * scale
         const baseY = offsetY + particle.y * scale
         let x = baseX + Math.sin(time * particle.speed + particle.phase) * particle.driftX
         let y = baseY + Math.cos(time * particle.speed * 0.82 + particle.phase) * particle.driftY
 
-        if (pointer.influence > 0.002 && !reducedMotion) {
-          const dx = x - pointer.x
-          const dy = y - pointer.y
-          const distance = Math.hypot(dx, dy) || 1
-          if (distance < POINTER_RADIUS) {
-            const force = (1 - distance / POINTER_RADIUS) ** 1.7 * (particle.edge ? 6.5 : 16) * pointer.influence
-            const tangentX = -dy / distance
-            const tangentY = dx / distance
-            x += dx / distance * force * 0.72 + tangentX * force * 0.68
-            y += dy / distance * force * 0.72 + tangentY * force * 0.68
-          }
+        if (!reducedMotion && whaleField.active) {
+          const displaced = displaceByParticleField(x, y, whaleField, WHALE_WAVE_OPTIONS, particle.edge ? 0.55 : 1)
+          x = displaced.x
+          y = displaced.y
         }
 
         const twinkle = reducedMotion ? 0.9 : 0.86 + Math.sin(time * particle.speed + particle.phase) * 0.1
@@ -377,7 +353,7 @@ export function AuroraBackground() {
         }
       }
       context.globalCompositeOperation = 'source-over'
-      drawDataCallouts(context, scale, offsetX, offsetY, time, pointer, reducedMotion)
+      drawDataCallouts(context, scale, offsetX, offsetY, time, whaleField, reducedMotion)
       animationFrame = requestAnimationFrame(draw)
     }
 
@@ -398,11 +374,24 @@ export function AuroraBackground() {
 
     const onPointerMove = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect()
-      pointerRef.current.targetX = event.clientX - rect.left
-      pointerRef.current.targetY = event.clientY - rect.top
-      pointerRef.current.targetInfluence = 1
+      const pointerX = event.clientX - rect.left
+      const pointerY = event.clientY - rect.top
+      if (!whaleField.active) {
+        const activationRadiusSquared = 48 ** 2
+        let nearbyParticles = 0
+        for (const particle of particles) {
+          const particleX = offsetX + particle.x * scale
+          const particleY = offsetY + particle.y * scale
+          const deltaX = particleX - pointerX
+          const deltaY = particleY - pointerY
+          if (deltaX * deltaX + deltaY * deltaY > activationRadiusSquared) continue
+          nearbyParticles += 1
+          if (nearbyParticles >= 12) break
+        }
+        if (nearbyParticles < 12) return
+      }
+      moveParticleField(whaleField, pointerX, pointerY)
     }
-    const onPointerLeave = () => { pointerRef.current.targetInfluence = 0 }
     // Browsers throttle background rAF, but this dashboard is left open in a
     // tab for days at a time — stop drawing outright rather than relying on
     // how aggressively a given browser decides to throttle.
@@ -415,14 +404,12 @@ export function AuroraBackground() {
     layout()
     animationFrame = requestAnimationFrame(draw)
     canvas.addEventListener('pointermove', onPointerMove)
-    canvas.addEventListener('pointerleave', onPointerLeave)
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
       canvas.removeEventListener('pointermove', onPointerMove)
-      canvas.removeEventListener('pointerleave', onPointerLeave)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
