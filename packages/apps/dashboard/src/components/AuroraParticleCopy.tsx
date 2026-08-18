@@ -1,8 +1,17 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import {
+  advanceParticleField,
+  createParticleField,
+  displaceByParticleField,
+  moveParticleField,
+} from '@/lib/particle-field'
 
-const POINTER_RADIUS = 250
+const TEXT_FIELD_OPTIONS = {
+  maxRadius: 180,
+  strength: 42,
+}
 
 type CopyParticle = {
   x: number
@@ -11,21 +20,14 @@ type CopyParticle = {
   color: string
   alpha: number
   phase: number
+  glowAlpha: number
+  glowScale: number
 }
 
 type TextStyle = {
   font: string
   letterSpacing: number
   lineHeight: number
-}
-
-type PointerState = {
-  x: number
-  y: number
-  targetX: number
-  targetY: number
-  influence: number
-  targetInfluence: number
 }
 
 function hash(x: number, y: number, salt = 0) {
@@ -94,6 +96,8 @@ function sampleRegion(
   palette: string[],
   alpha: number,
   salt: number,
+  glowAlpha = 0.24,
+  glowScale = 2.5,
 ) {
   const particles: CopyParticle[] = []
   const left = Math.max(0, Math.floor(bounds.x))
@@ -114,28 +118,13 @@ function sampleRegion(
         color: palette[colorIndex] ?? palette[0],
         alpha: alpha * (0.78 + hash(x, y, salt + 2) * 0.22),
         phase: hash(x, y, salt + 3) * Math.PI * 2,
+        glowAlpha,
+        glowScale,
       })
     }
   }
   context.clearRect(0, 0, width, height)
   return particles
-}
-
-function displaceTextParticle(particle: CopyParticle, pointer: PointerState) {
-  const dx = particle.x - pointer.x
-  const dy = particle.y - pointer.y
-  const distance = Math.hypot(dx, dy) || 1
-  if (distance >= POINTER_RADIUS || pointer.influence <= 0.002) return { x: particle.x, y: particle.y }
-
-  const force = (1 - distance / POINTER_RADIUS) ** 1.55 * 42 * pointer.influence
-  const radialX = dx / distance
-  const radialY = dy / distance
-  const tangentX = -radialY
-  const tangentY = radialX
-  return {
-    x: particle.x + radialX * force + tangentX * force * 0.28,
-    y: particle.y + radialY * force + tangentY * force * 0.28,
-  }
 }
 
 export function AuroraParticleCopy() {
@@ -157,14 +146,7 @@ export function AuroraParticleCopy() {
     const startTime = performance.now()
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const dpr = Math.min(window.devicePixelRatio || 1, 1.75)
-    const pointer: PointerState = {
-      x: -9999,
-      y: -9999,
-      targetX: -9999,
-      targetY: -9999,
-      influence: 0,
-      targetInfluence: 0,
-    }
+    const textField = createParticleField()
 
     const rebuild = () => {
       const rootBounds = root.getBoundingClientRect()
@@ -203,7 +185,7 @@ export function AuroraParticleCopy() {
         const style = readStyle(kicker)
         samplingContext.font = style.font
         drawSpacedText(samplingContext, kicker.textContent ?? '', bounds.x, bounds.y, style.letterSpacing)
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#b99fff', '#8b72ff', '#62d7ff'], 0.95, 10))
+        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#d2c2ff', '#a78fff', '#83e6ff'], 1, 10))
       }
 
       headingLines.forEach((line, index) => {
@@ -211,7 +193,18 @@ export function AuroraParticleCopy() {
         const style = readStyle(line)
         samplingContext.font = style.font
         drawSpacedText(samplingContext, line.textContent ?? '', bounds.x, bounds.y, style.letterSpacing)
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 4, ['#f7f5ff', '#bca9ff', '#72d9ff'], 1, 20 + index))
+        nextParticles.push(...sampleRegion(
+          samplingContext,
+          width,
+          height,
+          bounds,
+          3,
+          ['#ffffff', '#eee9ff', '#c2f3ff'],
+          1,
+          20 + index,
+          0.34,
+          2.8,
+        ))
       })
 
       if (description) {
@@ -222,7 +215,7 @@ export function AuroraParticleCopy() {
         lines.forEach((line, index) => {
           drawSpacedText(samplingContext, line, bounds.x, bounds.y + index * style.lineHeight, style.letterSpacing)
         })
-        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#e2dcf4', '#b8abe8', '#78d2ee'], 0.84, 30))
+        nextParticles.push(...sampleRegion(samplingContext, width, height, bounds, 2, ['#f1edff', '#cbbdf2', '#91def5'], 0.92, 30))
       }
       particles = nextParticles
     }
@@ -231,21 +224,21 @@ export function AuroraParticleCopy() {
       const time = (now - startTime) / 1000
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
       context.clearRect(0, 0, width, height)
-      pointer.x += (pointer.targetX - pointer.x) * 0.14
-      pointer.y += (pointer.targetY - pointer.y) * 0.14
-      pointer.influence += (pointer.targetInfluence - pointer.influence) * 0.095
+      if (textField.active && !reducedMotion) advanceParticleField(textField, TEXT_FIELD_OPTIONS)
       context.globalCompositeOperation = 'lighter'
 
       for (const particle of particles) {
-        const displaced = reducedMotion ? particle : displaceTextParticle(particle, pointer)
+        const displaced = reducedMotion
+          ? particle
+          : displaceByParticleField(particle.x, particle.y, textField, TEXT_FIELD_OPTIONS)
         const shimmer = reducedMotion ? 1 : 0.91 + Math.sin(time * 0.85 + particle.phase) * 0.09
         const x = displaced.x + (reducedMotion ? 0 : Math.sin(time * 0.48 + particle.phase) * 0.18)
         const y = displaced.y + (reducedMotion ? 0 : Math.cos(time * 0.42 + particle.phase) * 0.18)
 
         context.fillStyle = particle.color
-        context.globalAlpha = particle.alpha * shimmer * 0.16
+        context.globalAlpha = particle.alpha * shimmer * particle.glowAlpha
         context.beginPath()
-        context.arc(x, y, particle.radius * 2.5, 0, Math.PI * 2)
+        context.arc(x, y, particle.radius * particle.glowScale, 0, Math.PI * 2)
         context.fill()
         context.globalAlpha = particle.alpha * shimmer
         context.beginPath()
@@ -259,15 +252,22 @@ export function AuroraParticleCopy() {
 
     const onPointerMove = (event: PointerEvent) => {
       const bounds = root.getBoundingClientRect()
-      pointer.targetX = event.clientX - bounds.left
-      pointer.targetY = event.clientY - bounds.top
-      const insideBrand = event.clientX >= bounds.left - POINTER_RADIUS
-        && event.clientX <= bounds.right + POINTER_RADIUS
-        && event.clientY >= bounds.top - POINTER_RADIUS
-        && event.clientY <= bounds.bottom + POINTER_RADIUS
-      pointer.targetInfluence = insideBrand ? 1 : 0
+      const pointerX = event.clientX - bounds.left
+      const pointerY = event.clientY - bounds.top
+      if (!textField.active) {
+        const activationRadiusSquared = 34 ** 2
+        let nearbyParticles = 0
+        for (const particle of particles) {
+          const deltaX = particle.x - pointerX
+          const deltaY = particle.y - pointerY
+          if (deltaX * deltaX + deltaY * deltaY > activationRadiusSquared) continue
+          nearbyParticles += 1
+          if (nearbyParticles >= 8) break
+        }
+        if (nearbyParticles < 8) return
+      }
+      moveParticleField(textField, pointerX, pointerY)
     }
-    const onPointerLeave = () => { pointer.targetInfluence = 0 }
     // Same reason as AuroraBackground: this dashboard lives in a tab for days,
     // so stop drawing when it is hidden instead of trusting rAF throttling.
     const onVisibility = () => {
@@ -279,14 +279,12 @@ export function AuroraParticleCopy() {
     rebuild()
     animationFrame = requestAnimationFrame(draw)
     window.addEventListener('pointermove', onPointerMove)
-    document.documentElement.addEventListener('pointerleave', onPointerLeave)
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
       window.removeEventListener('pointermove', onPointerMove)
-      document.documentElement.removeEventListener('pointerleave', onPointerLeave)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])

@@ -9,6 +9,8 @@ import type { StrategyParams } from './instance.js'
 import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { AvailabilityChecker, ParamFieldDef, ParamIllustration } from './definition.js'
+import type { IPortfolioJournal } from './portfolio.js'
+import type { PortfolioUpdate } from './portfolio.js'
 
 /**
  * Monitor dependency declaration.
@@ -142,6 +144,17 @@ export interface StrategyRunTrace {
   steps: Array<{ ts: number; step: string; data?: Record<string, unknown> }>
 }
 
+/**
+ * A strategy-owned portfolio projection for instance dashboards.
+ *
+ * The framework only standardizes the execution mode and observation time;
+ * positions, fills, and risk metrics remain strategy-domain data.
+ */
+export interface StrategyPortfolioSnapshot {
+  mode: 'paper' | 'live'
+  updatedAt: number
+}
+
 /** Runtime-injected hooks for mid-run monitor sources (see IStrategy.setDynamicSources). */
 export interface DynamicSourceHooks {
   addSubscription(source: MonitorSource): void
@@ -190,11 +203,17 @@ export interface IStrategy {
    * monitorData(label) when the strategy does run.
    */
   subscriptions?(params: StrategyParams): MonitorSource[]
+  /** Current portfolio projection, when the strategy maintains one. */
+  getPortfolioSnapshot?(): Promise<StrategyPortfolioSnapshot | undefined>
+  /** Complete current projection for idempotent journal recovery. */
+  getPortfolioUpdate?(): Promise<PortfolioUpdate | undefined>
   run(context: StrategyContext): Promise<ExecutionInstruction[]>
   getMetrics(): StrategyMetrics
   setMonitorReader(label: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void
   setStore(store: IStrategyStore): void
+  /** Runtime-injected instance-scoped portfolio journal. */
+  setPortfolioJournal?(journal: IPortfolioJournal): void
   setHttpClient(client: HttpClient): void
   setParams(params: StrategyParams): void
   setLlmBindings(bindings: Record<string, LlmSlotBinding>): void
@@ -226,4 +245,3 @@ export interface IStrategy {
   /** Validate an executor declaration (label or index) and return its label. Used in evaluate(). */
   executor(labelOrIndex: string | number): string
 }
-

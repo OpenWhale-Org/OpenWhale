@@ -58,7 +58,7 @@ export default function LoginPage() {
       <section className="aurora-login-brand">
         <AuroraBackground />
         <div className="aurora-login-brand-content">
-          <AuroraLogo size="lg" />
+          <AuroraLogo size="lg" particle />
           <AuroraParticleCopy />
           <div className="aurora-login-signal"><i /> Live market intelligence</div>
         </div>
