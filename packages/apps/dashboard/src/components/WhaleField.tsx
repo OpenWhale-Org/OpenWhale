@@ -374,6 +374,13 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       brainHost.add(gltf.scene)
     })
 
+    /* One ring, shared by everything that pings: the hover sonar, the signal
+       sources and the brain's own burst. Declared up here because all three
+       use it — it previously sat with the hover sonar, below the effects that
+       reference it, which is a temporal dead zone TypeScript will not flag
+       because the use is inside a callback it cannot prove runs immediately. */
+    const sonarGeo = new THREE.RingGeometry(0.988, 1, 96)
+
     /* ── A1.3 · signal in, decision out ────────────────────────────────────
        Two separate things, and keeping them separate is the point. A monitor
        emit means the whale HEARD something: a source lights up nearby and
@@ -485,7 +492,6 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
        FOV a shell projects to an ellipse the further it sits from screen
        centre, and what this wants to read as is a plain circular ping. */
     const SONAR_N = 3
-    const sonarGeo = new THREE.RingGeometry(0.988, 1, 96)
     const sonars = Array.from({ length: SONAR_N }, (_, i) => {
       const mat = new THREE.MeshBasicMaterial({
         color: 0x8ef0b4, transparent: true, opacity: 0,
