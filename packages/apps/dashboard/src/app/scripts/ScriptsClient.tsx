@@ -38,6 +38,8 @@ export function ScriptsClient() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   /** Says where an unmounted script went — otherwise it just vanishes on click. */
   const [notice, setNotice] = useState('')
+  /** Which card or folder has its grip held — native DnD has no handle concept. */
+  const [armed, setArmed] = useState<string | null>(null)
 
   useEffect(() => {
     void fetch('/api/scripts')
@@ -162,7 +164,7 @@ export function ScriptsClient() {
       <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
-          {mounted.length} of {scripts.length} mounted · drag a card to reorder or re-file it
+          {mounted.length} of {scripts.length} mounted · drag the ⠿ grip to reorder or re-file
         </span>
       </div>
 
@@ -182,14 +184,19 @@ export function ScriptsClient() {
         <div key={folder ?? '·'} className="flex flex-col gap-3">
           {folder !== undefined && (
             <div
-              draggable
-              onDragStart={(e) => { e.dataTransfer.setData('ow/sfolder', folder); e.dataTransfer.effectAllowed = 'move' }}
+              draggable={armed === `folder:${folder}`}
+              onDragEnd={() => setArmed(null)}
+              onDragStart={(e) => {
+                if (armed !== `folder:${folder}`) { e.preventDefault(); return }
+                e.dataTransfer.setData('ow/sfolder', folder)
+                e.dataTransfer.effectAllowed = 'move'
+              }}
               onDragOver={(e) => { if (e.dataTransfer.types.includes('ow/sfolder')) e.preventDefault() }}
               onDrop={(e) => {
                 const dragged = e.dataTransfer.getData('ow/sfolder')
                 if (dragged) { e.preventDefault(); dropFolder(dragged, folder) }
               }}
-              className="flex items-center gap-2 mt-2 cursor-grab select-none"
+              className="flex items-center gap-2 mt-2 select-none"
             >
               <button
                 className="flex items-center gap-2 text-left text-sm font-medium"
@@ -204,7 +211,13 @@ export function ScriptsClient() {
                 <span>📁 {folder}</span>
                 <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
               </button>
-              <span className="text-xs" style={{ color: 'var(--muted)' }} title="Drag to reorder folders">⠿</span>
+              <span
+                onPointerDown={() => setArmed(`folder:${folder}`)}
+                className="text-xs cursor-grab select-none px-0.5"
+                style={{ color: 'var(--muted)' }}
+                title="Drag to reorder folders"
+                aria-hidden
+              >⠿</span>
             </div>
           )}
           {folder === undefined && groups.length > 1 && (
@@ -213,14 +226,23 @@ export function ScriptsClient() {
           {(folder === undefined || !collapsed.has(folder)) && items.map((s) => (
             <div
               key={s.id}
-              draggable
-              /* Unlike a strategy card, a script card is a FORM — selecting
-                 text in a param input would otherwise start dragging the whole
-                 card. Drags that begin on a control are not drags. */
+              /* Draggable ONLY while the grip is held.
+                 The wrapper used to be draggable outright, which made the whole
+                 card a drag surface — on a card that is mostly a form, every
+                 press felt like it might pick the card up. Native drag-and-drop
+                 has no notion of a handle, so the flag is armed on pointerdown
+                 over the grip and disarmed when the drag ends. The Strategies
+                 page reaches the same result through pointer events; both pages
+                 end up with one grabbable spot, which is the point. */
+              draggable={armed === s.id}
+              onDragEnd={() => setArmed(null)}
               onDragStart={(e) => {
-                if ((e.target as HTMLElement).closest('input, textarea, select, button, a')) { e.preventDefault(); return }
+                if (armed !== s.id) { e.preventDefault(); return }
                 e.dataTransfer.setData('ow/scard', s.id)
                 e.dataTransfer.effectAllowed = 'move'
+                // Carry the card, not the glyph — the grip alone is a useless ghost
+                const card = (e.currentTarget as HTMLElement).firstElementChild
+                if (card) e.dataTransfer.setDragImage(card as Element, 24, 24)
               }}
               onDragOver={(e) => { if (e.dataTransfer.types.includes('ow/scard')) e.preventDefault() }}
               onDrop={(e) => {
@@ -232,6 +254,7 @@ export function ScriptsClient() {
                 script={s}
                 folder={entry(s.id).folder}
                 folders={folderNames}
+                onGrip={() => setArmed(s.id)}
                 onSetFolder={(name) => setFolder(s.id, name)}
                 onUnmount={() => setMounted(s.id, false)}
               />
@@ -523,10 +546,12 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
   return out
 }
 
-function ScriptCard({ script, folder, folders, onSetFolder, onUnmount }: {
+function ScriptCard({ script, folder, folders, onGrip, onSetFolder, onUnmount }: {
   script: ScriptInfo
   folder?: string
   folders?: string[]
+  /** Arms the wrapper's draggable flag. Fired by the grip, nowhere else. */
+  onGrip?: (e: React.PointerEvent) => void
   onSetFolder?: (name: string) => void
   onUnmount?: () => void
 }) {
@@ -634,9 +659,16 @@ function ScriptCard({ script, folder, folders, onSetFolder, onUnmount }: {
     <div className="rounded-lg p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex items-start gap-2">
-          {/* The card itself is the drag handle (the wrapper carries draggable);
-              the grip is there so it looks like one. */}
-          {onSetFolder && <span className="text-xs mt-0.5 cursor-grab select-none" style={{ color: 'var(--border)' }} title="Drag to reorder or move between folders">⠿</span>}
+          {/* The only grabbable spot on the card. */}
+          {onSetFolder && (
+            <span
+              onPointerDown={onGrip}
+              className="text-xs mt-0.5 cursor-grab select-none px-0.5"
+              style={{ color: 'var(--muted)' }}
+              title="Drag to reorder or move between folders"
+              aria-hidden
+            >⠿</span>
+          )}
           <div className="min-w-0">
             <div className="font-medium">{script.name}</div>
             <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
 import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ExecutionResult } from '@openwhaleorg/core'
@@ -748,6 +748,7 @@ export function InstancesClient({ initialInstances }: Props) {
   const dragRef = useRef<DragState | null>(null)
   /* The drop handlers close over `groups`, which is computed inside the render
      below — so they are published here each render and read at pointer-up. */
+  const [layout, setLayout] = useLayout()
   const dropRef = useRef<{ card: (a: string, b: string) => void; folder: (a: string, b: string) => void }>({ card: () => {}, folder: () => {} })
 
   const beginDrag = (kind: 'card' | 'folder', id: string, e: React.PointerEvent) => {
@@ -757,6 +758,8 @@ export function InstancesClient({ initialInstances }: Props) {
     const startX = e.clientX
     const startY = e.clientY
     const attr = kind === 'card' ? 'data-card-id' : 'data-folder-id'
+    const box = (e.currentTarget as HTMLElement).closest(`[${attr}]`)?.getBoundingClientRect()
+    const rect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : undefined
     let started = false
 
     const publish = (d: DragState | null) => { dragRef.current = d; setDrag(d) }
@@ -768,7 +771,7 @@ export function InstancesClient({ initialInstances }: Props) {
       if (!started) { started = true; document.body.style.userSelect = 'none' }
       const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(`[${attr}]`)
       const over = el?.getAttribute(attr) ?? null
-      publish({ kind, id, dx, dy, over: over === id ? null : over })
+      publish({ kind, id, dx, dy, over: over === id ? null : over, ...(rect ? { rect } : {}) })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -786,17 +789,31 @@ export function InstancesClient({ initialInstances }: Props) {
   const dragStyle = (kind: 'card' | 'folder', id: string): React.CSSProperties => {
     if (drag?.kind !== kind) return {}
     if (drag.id === id) {
+      // Out of the flow and pinned to where it started, so the reflow behind it
+      // cannot drag it off the cursor.
+      if (drag.rect) {
+        return {
+          position: 'fixed',
+          left: drag.rect.left + drag.dx,
+          top: drag.rect.top + drag.dy,
+          width: drag.rect.width,
+          zIndex: 50, pointerEvents: 'none',
+          cursor: 'grabbing', boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
+          transform: 'rotate(1.2deg)',
+        }
+      }
       return {
         transform: `translate(${drag.dx}px, ${drag.dy}px)`,
         position: 'relative', zIndex: 50, pointerEvents: 'none',
         cursor: 'grabbing', boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
       }
     }
-    if (drag.over === id) {
-      return { outline: '2px dashed var(--accent)', outlineOffset: '2px', borderRadius: '0.5rem' }
-    }
+    // No outline on the target any more. The gap that opened where the card
+    // would land says it better than a dashed box around a neighbour did —
+    // that box only ever said "something is happening near this card".
     return {}
   }
+
   const [pnl, setPnl] = useState<Record<string, PnlTotals>>({})
   const [statsKey, setStatsKey] = useState(0)
 
@@ -858,6 +875,15 @@ export function InstancesClient({ initialInstances }: Props) {
           with the cards below instead of lagging a poll behind. */}
       <StatsBar refreshKey={statsKey} />
 
+      {instances.length > 0 && (
+        <div className="flex items-center gap-3 mt-4">
+          <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
+            drag the ⠿ grip to reorder or re-file
+          </span>
+          <LayoutSwitch value={layout} onChange={setLayout} />
+        </div>
+      )}
+
       {actionError && (
         <p className="text-sm px-3 py-2 rounded-md mb-3" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
           {actionError}
@@ -886,19 +912,30 @@ export function InstancesClient({ initialInstances }: Props) {
             const groups = groupByFolder(instances)
             const folderNames = groups.map(g => g.folder).filter((f): f is string => f !== undefined)
 
-            const dropCard = async (dragId: string, targetId: string) => {
-              if (dragId === targetId) return
-              // Reorder within the drag card's group; dropping onto a card of
-              // ANOTHER group moves it there (before the target).
+            /**
+             * Where everything sits if the card is dropped on the target.
+             *
+             * The same function drives the live preview and the commit, so what
+             * you watch slide into place is exactly what gets saved — a preview
+             * computed separately from the commit is a preview that eventually
+             * lies about the result.
+             */
+            const reordered = (dragId: string, targetId: string) => {
               const next = groups.map(g => ({ ...g, items: [...g.items] }))
               const from = next.find(g => g.items.some(i => i.id === dragId))
               const to = next.find(g => g.items.some(i => i.id === targetId))
-              if (!from || !to) return
+              if (!from || !to) return undefined
               const dragged = from.items.splice(from.items.findIndex(i => i.id === dragId), 1)[0]!
-              const at = to.items.findIndex(i => i.id === targetId)
-              to.items.splice(at, 0, dragged)
-              if (from !== to) await patchInstanceMeta(dragId, { folder: to.folder ?? '' })
-              await persistLayout(next)
+              to.items.splice(to.items.findIndex(i => i.id === targetId), 0, dragged)
+              return { next, moved: from !== to ? to.folder ?? '' : undefined }
+            }
+
+            const dropCard = async (dragId: string, targetId: string) => {
+              if (dragId === targetId) return
+              const plan = reordered(dragId, targetId)
+              if (!plan) return
+              if (plan.moved !== undefined) await patchInstanceMeta(dragId, { folder: plan.moved })
+              await persistLayout(plan.next)
               await refresh()
             }
 
@@ -919,14 +956,19 @@ export function InstancesClient({ initialInstances }: Props) {
               await refresh()
             }
 
-            return groups.map(({ folder, items }) => (
+            // While a card is over a target, draw the arrangement it would land
+            // in. The gap that opens is the drop indicator.
+            const preview = drag?.kind === 'card' && drag.over
+              ? reordered(drag.id, drag.over)?.next ?? groups
+              : groups
+
+            return preview.map(({ folder, items }) => (
               <div key={folder ?? '·'} className="flex flex-col gap-3">
                 {folder !== undefined && (
                   <div
                     data-folder-id={folder}
-                    onPointerDown={(e) => beginDrag('folder', folder, e)}
-                    className="flex items-center gap-2 mt-2 cursor-grab select-none"
-                    style={{ touchAction: 'none', ...dragStyle('folder', folder) }}
+                    className="flex items-center gap-2 mt-2 select-none"
+                    style={dragStyle('folder', folder)}
                   >
                     <button
                       className="flex items-center gap-2 text-left text-sm font-medium"
@@ -941,7 +983,7 @@ export function InstancesClient({ initialInstances }: Props) {
                       <span>📁 {folder}</span>
                       <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
                     </button>
-                    <span className="text-xs" style={{ color: 'var(--muted)' }} title="Drag to reorder folders">⠿</span>
+                    <DragHandle title="Drag to reorder folders" onPointerDown={(e) => beginDrag('folder', folder, e)} />
                   </div>
                 )}
                 {folder === undefined && groups.length > 1 && (
@@ -951,17 +993,26 @@ export function InstancesClient({ initialInstances }: Props) {
                     page you scroll rather than read. Cards stay drag-and-drop
                     targets exactly as before. */}
                 {(folder === undefined || !collapsedFolders.has(folder)) && (
-                <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' }}>
+                <div
+                  className={layout === 'grid' ? 'grid gap-3' : 'flex flex-col gap-1.5'}
+                  style={layout === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } : undefined}
+                >
                 {items.map((inst) => (
-                  <div
+                  <Slide
                     key={inst.id}
-                    data-card-id={inst.id}
-                    onPointerDown={(e) => beginDrag('card', inst.id, e)}
-                    className="cursor-grab"
-                    style={{ touchAction: 'none', ...dragStyle('card', inst.id) }}
+                    {...(drag?.kind === 'card' && drag.id === inst.id && drag.rect
+                      ? { hole: drag.rect.height }
+                      : {})}
                   >
-                    <InstanceCard
+                  <div
+                    data-card-id={inst.id}
+                    style={dragStyle('card', inst.id)}
+                  >
+                    {(() => {
+                      const Item = layout === 'list' ? InstanceRow : InstanceCard
+                      return <Item
                       instance={inst}
+                      dragHandle={<DragHandle title="Drag to reorder or re-file" onPointerDown={(e) => beginDrag('card', inst.id, e)} />}
                       pnl={pnl[inst.id]}
                       folders={folderNames}
                       onActivate={() => act(inst.id, 'activate')}
@@ -977,7 +1028,9 @@ export function InstancesClient({ initialInstances }: Props) {
                         await refresh()
                       }}
                     />
+                    })()}
                   </div>
+                  </Slide>
                 ))}
                 </div>
                 )}
@@ -998,6 +1051,16 @@ interface DragState {
   dy: number
   /** The id under the cursor — where it would land. */
   over: string | null
+  /**
+   * Where the element sat on screen when the drag began.
+   *
+   * Load-bearing: while dragging, the others reflow to open a gap, which would
+   * move the dragged element's own base position too — and a translate measured
+   * from the pointer would then drift away from the cursor by exactly however
+   * far the reflow pushed it. Pinning it to this rect takes it out of the flow
+   * entirely, so reordering underneath cannot touch it.
+   */
+  rect?: { left: number; top: number; width: number; height: number }
 }
 
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */
@@ -1567,6 +1630,173 @@ const moneyColor = (v: number | null | undefined): string =>
   v === null || v === undefined ? 'var(--muted)'
     : v > 0.005 ? 'var(--success)' : v < -0.005 ? 'var(--danger)' : 'var(--muted)'
 
+/**
+ * Animates its own position changes — this is the "others step aside" part.
+ *
+ * `hole` is the slot the carried card left behind. Pinning that card with
+ * position:fixed takes it out of the flow, which collapses its slot — so the
+ * layout would close up instead of opening a gap, and there would be nothing to
+ * show where the drop lands. Holding the slot at its old height turns the
+ * absence into the drop indicator, and because the slot is the same DOM node it
+ * glides to each new target along with everything else.
+ *
+ * FLIP: after every render, compare where this element is now with where it was
+ * last time. If it moved, put it back with a transform and let a transition
+ * carry it to the new place. The browser never animates a grid or flex reflow on
+ * its own, so without this the neighbours would teleport into their new slots.
+ *
+ * `still` is for the element being carried — it is pinned to the cursor and must
+ * not have a second transform fighting for the same property.
+ */
+function Slide({ children, hole }: { children: React.ReactNode; hole?: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const prev = useRef<{ left: number; top: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const now = el.getBoundingClientRect()
+    const was = prev.current
+    prev.current = { left: now.left, top: now.top }
+    if (!was) return
+    const dx = was.left - now.left
+    const dy = was.top - now.top
+    // Sub-pixel drift is not a move; animating it just adds jitter
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
+    el.style.transition = 'none'
+    el.style.transform = `translate(${dx}px, ${dy}px)`
+    // Two frames: one to land the starting transform, one to release it
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.style.transition = 'transform 180ms cubic-bezier(.2,.8,.2,1)'
+        el.style.transform = ''
+      })
+    })
+  })
+
+  return (
+    <div
+      ref={ref}
+      style={hole === undefined ? undefined : {
+        height: hole,
+        borderRadius: '0.5rem',
+        border: '1px dashed color-mix(in srgb, var(--accent) 55%, transparent)',
+        background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/**
+ * The layouts the list can be drawn in.
+ *
+ * A registry, not a boolean: more are coming, and a boolean would have to be
+ * unpicked the moment a third arrives. Adding one is adding a row here plus a
+ * branch where the group renders.
+ */
+const LAYOUTS = [
+  { id: 'grid', label: 'Grid', glyph: '▦', hint: 'Cards in a grid' },
+  { id: 'list', label: 'List', glyph: '☰', hint: 'One row per instance' },
+] as const
+
+type LayoutId = typeof LAYOUTS[number]['id']
+
+const LAYOUT_KEY = 'ow:instances-layout'
+
+/**
+ * Which layout to draw, remembered across visits.
+ *
+ * localStorage rather than the server: this is one operator's viewing
+ * preference, not a property of the instances. It also has to survive a reload
+ * without a round trip, and the initial read is deliberately lazy — reading
+ * storage during render would break SSR hydration.
+ */
+function useLayout(): [LayoutId, (id: LayoutId) => void] {
+  const [layout, setLayout] = useState<LayoutId>('grid')
+  useEffect(() => {
+    const saved = window.localStorage.getItem(LAYOUT_KEY)
+    if (LAYOUTS.some(l => l.id === saved)) setLayout(saved as LayoutId)
+  }, [])
+  const choose = (id: LayoutId) => {
+    setLayout(id)
+    try { window.localStorage.setItem(LAYOUT_KEY, id) } catch { /* private mode — the choice just will not stick */ }
+  }
+  return [layout, choose]
+}
+
+/** Segmented control: one button per registered layout. */
+function LayoutSwitch({ value, onChange }: { value: LayoutId; onChange: (id: LayoutId) => void }) {
+  return (
+    <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+      {LAYOUTS.map(l => (
+        <button
+          key={l.id}
+          onClick={() => onChange(l.id)}
+          title={l.hint}
+          aria-pressed={value === l.id}
+          className="px-2 py-1 text-xs flex items-center gap-1.5"
+          style={{
+            background: value === l.id ? 'var(--accent)' : 'transparent',
+            color: value === l.id ? '#fff' : 'var(--muted)',
+          }}
+        >
+          <span aria-hidden>{l.glyph}</span>{l.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The drag handle — the only place a drag can start.
+ *
+ * The whole card used to be the drag surface. On a card that is mostly buttons
+ * and numbers that reads as a trap: every press felt like it might pick the
+ * card up, so selecting a symbol or reading a figure came with a flinch. A
+ * handle makes the grabbable part visible and leaves the rest of the card
+ * ordinary.
+ *
+ * A <span>, not a <button>: beginDrag deliberately ignores presses that land on
+ * a control, and it is not a control — nothing happens on click, only on drag.
+ */
+/**
+ * The grip. Dragging starts here and nowhere else.
+ *
+ * The whole card used to be the handle, which made every click a potential
+ * drag — you could not press Activate without the card twitching. Confining it
+ * to a grip costs one small icon and buys back the rest of the card.
+ *
+ * Drawn as six dots in SVG rather than the braille glyph it was before: `⠿`
+ * renders at whatever size and weight the text font decides, and in --muted at
+ * text-xs it was effectively invisible — a handle nobody can find is the same
+ * as no handle. Two columns of three, on currentColor, so it scales and themes
+ * with everything else.
+ *
+ * `touchAction: none` sits on the grip alone: the page still scrolls under a
+ * finger everywhere else on the card.
+ */
+function DragHandle({ onPointerDown, title }: {
+  onPointerDown: (e: React.PointerEvent) => void
+  title: string
+}) {
+  return (
+    <span
+      onPointerDown={onPointerDown}
+      title={title}
+      className="drag-grip cursor-grab select-none inline-flex items-center justify-center"
+      style={{ width: 18, height: 20, color: 'var(--muted)', touchAction: 'none' }}
+    >
+      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden>
+        <circle cx="2" cy="3" r="1.35" /><circle cx="8" cy="3" r="1.35" />
+        <circle cx="2" cy="8" r="1.35" /><circle cx="8" cy="8" r="1.35" />
+        <circle cx="2" cy="13" r="1.35" /><circle cx="8" cy="13" r="1.35" />
+      </svg>
+    </span>
+  )
+}
+
 /** One labelled figure in the card's stat row. */
 function Stat({ label, value, color, title }: { label: string; value: string; color?: string; title?: string }) {
   return (
@@ -1690,10 +1920,12 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
  * ↗ and Edit both already open, and a full detail panel unfolding inside one
  * cell of a three-column grid reflows every card beside it.
  */
-function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
+function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
   folders: string[]
+  /** Rendered in the header. Supplied by the list, which owns the drag state. */
+  dragHandle?: React.ReactNode
   onActivate: () => void
   onDeactivate: () => void
   onDuplicate: () => void
@@ -1701,7 +1933,6 @@ function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDupl
   onSetFolder?: (name: string) => void
   onSetIcon?: (emoji: string) => void
 }) {
-  const [confirmStop, setConfirmStop] = useState(false)
   const base = instance.params?.base ?? {}
   const bindings = instance.credentials
     ? Object.entries(instance.credentials).map(([slot, target]) => `${slot} → ${target}`)
@@ -1756,6 +1987,10 @@ function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDupl
             onDelete={onDelete}
             {...(onSetFolder ? { onSetFolder } : {})}
           />
+          {/* Last in the row: the grip is the least-used control on the card,
+              and putting it at the edge keeps it out of the way of the two
+              things that are used — the status dot and the menu. */}
+          {dragHandle}
         </div>
       </div>
 
@@ -1788,44 +2023,167 @@ function InstanceCard({ instance, pnl, folders, onActivate, onDeactivate, onDupl
             {paramChip}
           </span>
         )}
-        <div className="ml-auto shrink-0 flex items-center gap-1.5">
-          <Link
-            href={`/instances/${instance.id}`}
-            className="w-7 h-7 rounded-md flex items-center justify-center text-xs"
-            style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-            title="Open the board"
-          >
-            ↗
-          </Link>
-          {instance.active ? (
-            confirmStop ? (
-              <div className="flex items-center gap-1">
-                <button onClick={() => setConfirmStop(false)} className="px-2 py-1.5 rounded-md text-xs"
-                  style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
-                  Cancel
-                </button>
-                <button onClick={() => { onDeactivate(); setConfirmStop(false) }} className="px-2 py-1.5 rounded-md text-xs"
-                  style={{ background: 'var(--danger)', color: '#fff' }}>
-                  Stop
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmStop(true)}
-                className="px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5"
-                style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
-                title="Running — click to stop it"
-              >
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
-                Running
-              </button>
-            )
-          ) : (
-            <button onClick={onActivate} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>
-              ▶ Activate
-            </button>
-          )}
+        <div className="ml-auto shrink-0">
+          <RunControl instance={instance} onActivate={onActivate} onDeactivate={onDeactivate} />
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Open-the-board link plus the one action: activate, or stop behind a confirm.
+ *
+ * Extracted because the card and the row both need it, and a duplicated copy of
+ * "the button that starts and stops live trading" is the last thing that should
+ * be allowed to drift between two layouts.
+ */
+function RunControl({ instance, onActivate, onDeactivate }: {
+  instance: StrategyInstanceView
+  onActivate: () => void
+  onDeactivate: () => void
+}) {
+  const [confirmStop, setConfirmStop] = useState(false)
+  return (
+    <div className="flex items-center gap-1.5">
+      <Link
+        href={`/instances/${instance.id}`}
+        className="w-7 h-7 rounded-md flex items-center justify-center text-xs"
+        style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+        title="Open the board"
+      >
+        ↗
+      </Link>
+      {instance.active ? (
+        confirmStop ? (
+          <div className="flex items-center gap-1">
+            <button onClick={() => setConfirmStop(false)} className="px-2 py-1.5 rounded-md text-xs"
+              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
+              Cancel
+            </button>
+            <button onClick={() => { onDeactivate(); setConfirmStop(false) }} className="px-2 py-1.5 rounded-md text-xs"
+              style={{ background: 'var(--danger)', color: '#fff' }}>
+              Stop
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmStop(true)}
+            className="px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5"
+            style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
+            title="Running — click to stop it"
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
+            Running
+          </button>
+        )
+      ) : (
+        <button onClick={onActivate} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>
+          ▶ Activate
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One instance as a row.
+ *
+ * Same data and the same sub-components as the card — RunControl, CardMenu,
+ * IconMenu, statMoney — laid out horizontally. Nothing here recomputes what the
+ * card computes; two layouts that derive their own numbers would eventually
+ * disagree, and then the layout switch would look like a data bug.
+ *
+ * The columns are fixed rather than auto so figures line up down the page. A
+ * list whose numbers do not form a column is just a cramped grid.
+ */
+function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
+  instance: StrategyInstanceView
+  pnl?: PnlTotals
+  folders: string[]
+  dragHandle?: React.ReactNode
+  onActivate: () => void
+  onDeactivate: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+  onSetFolder?: (name: string) => void
+  onSetIcon?: (emoji: string) => void
+}) {
+  const base = instance.params?.base ?? {}
+  const bindings = instance.credentials
+    ? Object.entries(instance.credentials).map(([slot, target]) => `${slot} → ${target}`)
+    : instance.accounts ?? []
+  const account = bindings[0]?.split('→').pop()?.trim()
+  const paramValues = Object.values(base).map(v => String(v)).filter(v => v !== '' && v !== 'false')
+  const strategyShort = instance.strategyId.split('/').pop() ?? instance.strategyId
+
+  return (
+    <div
+      className="rounded-md px-3 py-2 grid items-center gap-3"
+      style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        gridTemplateColumns: 'auto minmax(9rem,1.4fr) minmax(7rem,auto) 5.5rem 5.5rem 5.5rem minmax(0,1fr) auto',
+      }}
+    >
+      {onSetIcon
+        ? <IconMenu current={iconFor(instance)} onPick={onSetIcon}>
+            <span className="text-lg leading-none">{iconFor(instance)}</span>
+          </IconMenu>
+        : <span className="text-lg leading-none">{iconFor(instance)}</span>}
+
+      <div className="min-w-0 flex items-center gap-2">
+        <span
+          className="w-2 h-2 rounded-full shrink-0"
+          style={{ background: instance.active ? 'var(--success)' : 'var(--border)' }}
+          title={instance.active ? 'Running' : 'Stopped'}
+        />
+        <span className="font-medium text-sm truncate" title={instance.name}>{instance.name}</span>
+      </div>
+
+      <div className="min-w-0 flex items-center gap-1.5">
+        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono truncate"
+          style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
+          title={`${instance.strategyId} · ${instance.id}`}>
+          {strategyShort}
+        </span>
+        {account && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded truncate"
+            style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+            title={bindings.join(', ')}>
+            {account}
+          </span>
+        )}
+      </div>
+
+      {/* Labels ride in the title: a column of repeated "PnL" is noise once the
+          header above is gone, but the number still has to say what it is. */}
+      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.net) }}
+        title={pnl ? `PnL · realized ${pnl.realized.toFixed(2)} · fees ${pnl.fees.toFixed(2)}` : 'PnL'}>
+        {pnl ? statMoney(pnl.net) : '—'}
+      </div>
+      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.unrealized) }} title="Unrealized">
+        {pnl && pnl.unrealized !== null ? statMoney(pnl.unrealized) : '—'}
+      </div>
+      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.funding) }} title="Funding">
+        {pnl ? statMoney(pnl.funding) : '—'}
+      </div>
+
+      <div className="text-[10px] font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
+        title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
+        {paramValues.slice(0, 3).join(' · ')}
+      </div>
+
+      <div className="shrink-0 flex items-center gap-1">
+        <RunControl instance={instance} onActivate={onActivate} onDeactivate={onDeactivate} />
+        <CardMenu
+          instance={instance}
+          folders={folders}
+          onEdit={`/instances/${instance.id}`}
+          onDuplicate={onDuplicate}
+          onDelete={onDelete}
+          {...(onSetFolder ? { onSetFolder } : {})}
+        />
+        {dragHandle}
       </div>
     </div>
   )

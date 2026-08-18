@@ -382,3 +382,11 @@ body {
   .aurora-motion-base,.aurora-motion-ribbon,.aurora-market-whale,.market-whale-trails path,.market-whale-signal,.market-whale-nodes circle,.market-whale-eye-ring,.aurora-particles i { animation: none!important; }
   .aurora-motion-follow,.aurora-market-whale,.aurora-particles { transform: none!important; }
 }
+
+/* Drag grips — visible enough to find, quiet enough to ignore. The card was
+   already busy; a grip at full contrast reads as a control you are supposed to
+   press. It brightens when the pointer is on the card that owns it. */
+.drag-grip { opacity: .45; transition: opacity 120ms, color 120ms; }
+.drag-grip:hover { opacity: 1; color: var(--foreground); }
+*:hover > .drag-grip, *:hover .drag-grip { opacity: .8; }
+.drag-grip:active { cursor: grabbing; }
