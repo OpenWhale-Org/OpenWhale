@@ -126,18 +126,19 @@ describe('PortfolioJournal', () => {
   })
 })
 
-describe('模拟盘专用', () => {
+describe('simulations only', () => {
   it('refuses a live snapshot — that account belongs to the pnl_* ledger', async () => {
     await expect(journal.commit({
       commitId: 'c-live',
-      // 绕过类型：插件、反序列化的旧数据、JS 调用方都能做到这件事，
-      // 所以 commit() 在运行期也要挡一道
+      // Bypassing the type the way a plugin, a deserialised old row, or any JS
+      // caller would — which is why commit() checks at runtime too
       snapshot: { ...snapshot(1_000, 10_000), mode: 'live' as unknown as 'paper' },
     })).rejects.toThrow(/simulated trading only/)
   })
 
   it('leaves nothing behind when it refuses', async () => {
-    // 拒绝必须发生在事务之前 —— 写进去一半的账比不写更难查
+    // The refusal has to land before the transaction — half-written books are
+    // harder to untangle than books that were never written
     await journal.commit({ commitId: 'c-ok', snapshot: snapshot(1_000, 10_000) })
     await expect(journal.commit({
       commitId: 'c-live-2',

@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS monitor_instances (
   implementation TEXT NOT NULL,   -- implementation id, e.g. 'exchange/funding-rates'
   contract       TEXT NOT NULL,   -- contract id (monitorName) the implementation serves
   credential     TEXT,            -- bound credential name, per the implementation's declaration
-  params         TEXT,            -- JSON instance tuning params; editable any time (an active instance is rebuilt around the edit)
+  params         TEXT,            -- JSON instance tuning params; editable while inactive, frozen once active
   active         INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL
@@ -124,17 +124,23 @@ CREATE INDEX IF NOT EXISTS idx_strategy_store_instance ON strategy_store (instan
 
 -- Strategy-owned portfolio history for SIMULATED trading only.
 --
--- 分工（按数据来源划，不是按用途划）：
---   pnl_order_claims / pnl_fills / pnl_funding — 实盘。依据是交易所的事实：
---     执行器认领订单号，采集器把真实成交与资费拉回来再归属到实例。
---   executions/*.jsonl                          — 实盘。每一片的计划与实际。
---   strategy_store                              — 当前状态，会被覆盖。
---   run traces                                  — 抽样的审计轨迹。
---   portfolio_*（本节）                          — 模拟盘。交易所不知道这些单
---     存在，没有事实可拉，只能由策略自述 —— 这是它唯一不与上面重复的地方。
+-- The split is by where the data comes from, not by what it is used for:
+--   pnl_order_claims / pnl_fills / pnl_funding — live. Evidence is the venue:
+--     executors claim order ids, a collector pulls the real fills and funding
+--     back and attributes them to an instance through those claims.
+--   executions/*.jsonl                          — live. Every slice's plan
+--     against what actually happened.
+--   strategy_store                              — current state, overwritten.
+--   run traces                                  — sampled audit trail.
+--   portfolio_* (this section)                  — simulations. The venue does
+--     not know these orders exist, so there is nothing to pull and the
+--     strategy's own account is all there is. That is the one thing here that
+--     does not duplicate something above.
 --
--- 实盘不写这里。同一笔交易两边都记就有了两份互相矛盾的账，而自述的这份没有
--- 订单号，对不了账。PortfolioMode 因此不含 'live'。
+-- Live does not write here. Recording one trade on both sides produces two
+-- ledgers that disagree, and this one has no order id to reconcile with.
+-- PortfolioMode therefore excludes 'live'.
+
 CREATE TABLE IF NOT EXISTS portfolio_commits (
   instance_id TEXT NOT NULL,
   commit_id   TEXT NOT NULL,
