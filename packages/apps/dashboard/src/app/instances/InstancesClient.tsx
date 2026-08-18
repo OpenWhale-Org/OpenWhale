@@ -736,6 +736,67 @@ export function InstancesClient({ initialInstances }: Props) {
   const [loading, setLoading] = useState(false)
   const [actionError, setActionError] = useState('')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+
+  /* Reordering is POINTER-based, not HTML5 drag-and-drop.
+     The native API paints a translucent CLONE of the element and gives no
+     control over it: what follows the cursor is a picture, while the card you
+     grabbed sits untouched in the grid. Here the real element is translated,
+     so the thing moving is the thing you picked up.
+     `pointer-events: none` on the dragged card is what lets elementFromPoint
+     see the card UNDER the cursor rather than the one being carried. */
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const dragRef = useRef<DragState | null>(null)
+  /* The drop handlers close over `groups`, which is computed inside the render
+     below — so they are published here each render and read at pointer-up. */
+  const dropRef = useRef<{ card: (a: string, b: string) => void; folder: (a: string, b: string) => void }>({ card: () => {}, folder: () => {} })
+
+  const beginDrag = (kind: 'card' | 'folder', id: string, e: React.PointerEvent) => {
+    // Left button only, and never from a control: a card is mostly buttons.
+    if (e.button !== 0) return
+    if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
+    const startX = e.clientX
+    const startY = e.clientY
+    const attr = kind === 'card' ? 'data-card-id' : 'data-folder-id'
+    let started = false
+
+    const publish = (d: DragState | null) => { dragRef.current = d; setDrag(d) }
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+      // A few pixels of slop, so a click on the card body stays a click
+      if (!started && Math.hypot(dx, dy) < 5) return
+      if (!started) { started = true; document.body.style.userSelect = 'none' }
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(`[${attr}]`)
+      const over = el?.getAttribute(attr) ?? null
+      publish({ kind, id, dx, dy, over: over === id ? null : over })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.userSelect = ''
+      const over = dragRef.current?.over
+      publish(null)
+      if (started && over) (kind === 'card' ? dropRef.current.card : dropRef.current.folder)(id, over)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /** The element being carried, and the one it is hovering over. */
+  const dragStyle = (kind: 'card' | 'folder', id: string): React.CSSProperties => {
+    if (drag?.kind !== kind) return {}
+    if (drag.id === id) {
+      return {
+        transform: `translate(${drag.dx}px, ${drag.dy}px)`,
+        position: 'relative', zIndex: 50, pointerEvents: 'none',
+        cursor: 'grabbing', boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
+      }
+    }
+    if (drag.over === id) {
+      return { outline: '2px dashed var(--accent)', outlineOffset: '2px', borderRadius: '0.5rem' }
+    }
+    return {}
+  }
   const [pnl, setPnl] = useState<Record<string, PnlTotals>>({})
   const [statsKey, setStatsKey] = useState(0)
 
@@ -841,6 +902,11 @@ export function InstancesClient({ initialInstances }: Props) {
               await refresh()
             }
 
+            dropRef.current = {
+              card: (a, b) => { void dropCard(a, b) },
+              folder: (a, b) => { void dropFolder(a, b) },
+            }
+
             const dropFolder = async (dragName: string, targetName: string) => {
               if (dragName === targetName) return
               const next = groups.map(g => ({ ...g, items: [...g.items] }))
@@ -857,14 +923,10 @@ export function InstancesClient({ initialInstances }: Props) {
               <div key={folder ?? '·'} className="flex flex-col gap-3">
                 {folder !== undefined && (
                   <div
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('ow/folder', folder); e.dataTransfer.effectAllowed = 'move' }}
-                    onDragOver={(e) => { if (e.dataTransfer.types.includes('ow/folder')) e.preventDefault() }}
-                    onDrop={(e) => {
-                      const dragged = e.dataTransfer.getData('ow/folder')
-                      if (dragged) { e.preventDefault(); void dropFolder(dragged, folder) }
-                    }}
+                    data-folder-id={folder}
+                    onPointerDown={(e) => beginDrag('folder', folder, e)}
                     className="flex items-center gap-2 mt-2 cursor-grab select-none"
+                    style={{ touchAction: 'none', ...dragStyle('folder', folder) }}
                   >
                     <button
                       className="flex items-center gap-2 text-left text-sm font-medium"
@@ -893,13 +955,10 @@ export function InstancesClient({ initialInstances }: Props) {
                 {items.map((inst) => (
                   <div
                     key={inst.id}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('ow/card', inst.id); e.dataTransfer.effectAllowed = 'move' }}
-                    onDragOver={(e) => { if (e.dataTransfer.types.includes('ow/card')) e.preventDefault() }}
-                    onDrop={(e) => {
-                      const dragged = e.dataTransfer.getData('ow/card')
-                      if (dragged) { e.preventDefault(); void dropCard(dragged, inst.id) }
-                    }}
+                    data-card-id={inst.id}
+                    onPointerDown={(e) => beginDrag('card', inst.id, e)}
+                    className="cursor-grab"
+                    style={{ touchAction: 'none', ...dragStyle('card', inst.id) }}
                   >
                     <InstanceCard
                       instance={inst}
@@ -929,6 +988,16 @@ export function InstancesClient({ initialInstances }: Props) {
       )}
     </div>
   )
+}
+
+/** A reorder in flight: what is being carried, how far, and over what. */
+interface DragState {
+  kind: 'card' | 'folder'
+  id: string
+  dx: number
+  dy: number
+  /** The id under the cursor — where it would land. */
+  over: string | null
 }
 
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */
