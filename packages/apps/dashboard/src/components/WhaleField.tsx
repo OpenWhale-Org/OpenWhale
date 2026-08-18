@@ -44,6 +44,26 @@ const BRAIN_TO_BODY = 10.6 / (2.9 * 26)
 /** Model-space body length, from the sculpt and matched by the GLB loader. */
 const BODY_LENGTH = 2.9
 
+/** A soft round glow, for signal sources and coins. */
+function glowTexture(inner: string, outer: string): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+  grad.addColorStop(0, inner)
+  grad.addColorStop(0.45, outer)
+  grad.addColorStop(1, 'rgba(0,0,0,0)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 64, 64)
+  const t = new THREE.Texture(c)
+  t.needsUpdate = true
+  return t
+}
+
+/** The three things a decision can come out as, straight from the site's A1.3. */
+type Reaction = 'coins' | 'sonar' | 'thrust'
+const REACTIONS: Reaction[] = ['coins', 'sonar', 'thrust']
+
 /** Where the camera starts, and what Reset puts it back to. */
 const HOME = { theta: 0.7, phi: 1.35, radius: 96 }
 
@@ -53,6 +73,11 @@ const RIM_DOWN = 0xd85f6a
 const RIM_DOWN_2 = 0xf09aa2
 const RIM_FLAT = 0x8f7ae0
 const RIM_FLAT_2 = 0xc9b8ff
+
+/** The brain, its storm and its output all take the whale's own colour — a
+    violet brain inside a red-rimmed whale reads as a different object that
+    happens to be nearby, rather than as that whale thinking. */
+const toneColor = (up: boolean | null) => (up === null ? RIM_FLAT_2 : up ? RIM_UP_2 : RIM_DOWN_2)
 
 /**
  * Where each whale sits.
@@ -71,12 +96,25 @@ function layout(i: number, n: number): THREE.Vector3 {
   return new THREE.Vector3(Math.cos(a) * r * shell, y * shell * 0.42, Math.sin(a) * r * shell)
 }
 
-export function WhaleField({ instances, selectedId, onHover, onSelect }: {
+export interface WhaleFieldHandle {
+  /** Back to the opening view. */
+  reset(): void
+  /** A monitor emitted something this instance listens to: a source pings and
+      feeds the brain. It does NOT mean the brain acted. */
+  signal(): void
+  /** A run produced instructions: the brain storms, flashes, and does one of
+      the three things. */
+  react(): void
+}
+
+export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef }: {
   instances: WhaleDatum[]
   selectedId: string | null
   /** `screen` also carries the canvas size, so the caller can keep its card inside it. */
   onHover: (id: string | null, screen: { x: number; y: number; w: number; h: number } | null) => void
   onSelect: (id: string | null) => void
+  /** Filled with the imperative controls once the scene is up. */
+  handleRef?: React.MutableRefObject<WhaleFieldHandle | null>
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   /* The scene owns the camera, so Reset is published out of the effect rather
@@ -181,6 +219,11 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
       heading: number
       /** Per-whale weight on the roll wobble, so the pod is not one metronome. */
       wobble: number
+      /** Resting tail settings, to restore after a thrust. */
+      baseAmp: number
+      baseSpeed: number
+      /** Forward displacement from an A1.3 thrust. */
+      surge: number
       baseScale: number
       up: boolean | null
     }
@@ -224,6 +267,9 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
           // Loosely a shoal: all within a quarter turn of each other.
           heading: -0.4 + ((i * 0.37) % 1) * 0.8,
           wobble: 0.5 + (i % 5) * 0.23,
+          baseAmp: w.uniforms.uAmp.value,
+          baseSpeed: w.uniforms.uSpeed.value,
+          surge: 0,
           baseScale: 6.5 + (i % 3) * 1.1,
           up,
         })
@@ -255,6 +301,10 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
           // gain reads weaker on it — lifted until the pectorals actually
           // stroke, and varied per whale so they are not in unison.
           p.w.uniforms.uFinFlap.value = 0.17 + (pod.indexOf(p) % 3) * 0.02
+          // Re-baseline after the swap, or a thrust would restore the sculpt's
+          // settings onto the model and leave it swimming wrong.
+          p.baseAmp = p.w.uniforms.uAmp.value
+          p.baseSpeed = p.w.uniforms.uSpeed.value
         }
         modelGeo = real
       })
@@ -315,6 +365,112 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
       gltf.scene.position.copy(centre.multiplyScalar(-k))
       brainHost.add(gltf.scene)
     })
+
+    /* ── A1.3 · signal in, decision out ────────────────────────────────────
+       Two separate things, and keeping them separate is the point. A monitor
+       emit means the whale HEARD something: a source lights up nearby and
+       feeds a stream into the brain. It says nothing about whether the brain
+       did anything. Only a run that produced instructions makes it act, and
+       then it storms, flashes, and picks one of three outputs. Firing the
+       reaction on every emit would say the strategy trades on every tick,
+       which is the opposite of what these strategies do. */
+    const glowMap = glowTexture('rgba(255,255,255,1)', 'rgba(190,165,255,0.85)')
+    const coinMap = glowTexture('rgba(255,240,190,1)', 'rgba(245,190,70,0.85)')
+
+    /** One signal source: a dot, rings that widen off it, and a stream of
+        motes travelling from it into the brain. Three rigs, reused. */
+    const SIG_MOTES = 22
+    const signals = Array.from({ length: 3 }, () => {
+      const dotMat = new THREE.SpriteMaterial({
+        map: glowMap, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      })
+      const dot = new THREE.Sprite(dotMat)
+      dot.renderOrder = 6
+      dot.visible = false
+      scene.add(dot)
+
+      const rings = Array.from({ length: 3 }, (_, k) => {
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0xbea5ff, transparent: true, opacity: 0,
+          depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        })
+        const m = new THREE.Mesh(sonarGeo, mat)
+        m.visible = false
+        m.renderOrder = 6
+        scene.add(m)
+        return { m, mat, ph: k / 3 }
+      })
+
+      const pos = new Float32Array(SIG_MOTES * 3)
+      const geoM = new THREE.BufferGeometry()
+      geoM.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+      const streamMat = new THREE.PointsMaterial({
+        map: glowMap, color: 0xd8c8ff, size: 1.5, sizeAttenuation: true,
+        transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+      })
+      const stream = new THREE.Points(geoM, streamMat)
+      stream.renderOrder = 6
+      stream.visible = false
+      scene.add(stream)
+
+      return {
+        dot, dotMat, rings, stream, streamMat, geoM, pos,
+        t: -1, from: new THREE.Vector3(), jitter: new Float32Array(SIG_MOTES * 3),
+      }
+    })
+    let nextSignal = 0
+
+    /* The thinking storm: motes whipping round the brain, faster as it goes. */
+    const STORM_N = 90
+    const stormPos = new Float32Array(STORM_N * 3)
+    const stormSeed = Array.from({ length: STORM_N }, (_, i) => ({
+      r: 0.8 + (i % 7) * 0.13,
+      a: (i / STORM_N) * Math.PI * 2,
+      y: -0.5 + ((i * 0.37) % 1),
+      sp: 2.4 + (i % 5) * 0.5,
+    }))
+    const stormGeo = new THREE.BufferGeometry()
+    stormGeo.setAttribute('position', new THREE.BufferAttribute(stormPos, 3))
+    const stormMat = new THREE.PointsMaterial({
+      map: glowMap, color: 0xc4b0ff, size: 0.55, sizeAttenuation: true,
+      transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+    })
+    const storm = new THREE.Points(stormGeo, stormMat)
+    storm.renderOrder = 6
+    storm.visible = false
+    brainHost.add(storm)
+
+    /* Coins out of the blowhole. */
+    const COIN_N = 60
+    const coinPos = new Float32Array(COIN_N * 3)
+    const coinVel = new Float32Array(COIN_N * 3)
+    const coinGeo = new THREE.BufferGeometry()
+    coinGeo.setAttribute('position', new THREE.BufferAttribute(coinPos, 3))
+    const coinMat = new THREE.PointsMaterial({
+      map: coinMap, color: 0xffd86b, size: 1.3, sizeAttenuation: true,
+      transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+    })
+    const coins = new THREE.Points(coinGeo, coinMat)
+    coins.renderOrder = 6
+    coins.visible = false
+    scene.add(coins)
+
+    /* Sonar fired FROM the brain (distinct from the hover ping). */
+    const burst = Array.from({ length: 3 }, (_, k) => {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xb9a6ff, transparent: true, opacity: 0,
+        depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      })
+      const m = new THREE.Mesh(sonarGeo, mat)
+      m.visible = false
+      m.renderOrder = 6
+      scene.add(m)
+      return { m, mat, ph: k / 3 }
+    })
+
+    /** The reaction in flight: elapsed time, and which of the three it is. */
+    let react: { t: number; kind: Reaction } | null = null
 
     /* Hover sonar: rings widening out of the whale's body centre.
        Flat rings turned to face the camera, NOT sphere shells — under a wide
@@ -413,6 +569,36 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
 
+    const brainWorld = new THREE.Vector3()
+    const tmpV = new THREE.Vector3()
+
+    /** Fire a signal source. Ignored unless a whale is actually in close-up —
+        these are close-up furniture, not a wide-shot fireworks display. */
+    const fireSignal = () => {
+      const chosen = pod.find(x => x.id === selRef.current)
+      if (!chosen) return
+      const rig = signals[nextSignal % signals.length]!
+      nextSignal++
+      // Somewhere off the whale's flank, ahead of it — a source you can see
+      // arrive rather than one that materialises inside the body.
+      const a = (nextSignal * 2.399) % (Math.PI * 2)
+      const R = chosen.baseScale * 2.6
+      rig.from.copy(chosen.w.root.position).add(
+        tmpV.set(Math.cos(a) * R, (((nextSignal * 0.61) % 1) - 0.5) * R * 0.7, Math.sin(a) * R),
+      )
+      for (let i = 0; i < rig.jitter.length; i++) rig.jitter[i] = (Math.random() - 0.5) * 2
+      rig.t = 0
+    }
+
+    /** Fire the decision. Restarts if one is already running — a burst of runs
+        should look busy, not queue up a backlog to replay later. */
+    const fireReaction = () => {
+      if (!pod.some(x => x.id === selRef.current)) return
+      react = { t: 0, kind: REACTIONS[Math.floor(Math.random() * REACTIONS.length)]! }
+    }
+
+    if (handleRef) handleRef.current = { reset: () => resetRef.current(), signal: fireSignal, react: fireReaction }
+
     resetRef.current = () => {
       selectCbRef.current(null)
       orbit.theta = HOME.theta
@@ -509,6 +695,11 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
           p.home.y + Math.sin(t * 0.42 + p.phase) * p.bob,
           p.home.z + Math.sin(t * 0.2 + p.phase) * p.range * 0.7,
         )
+        // The A1.3 surge rides on top of the cruise, along the way it faces.
+        if (p.surge > 0) {
+          p.w.root.position.x += Math.sin(p.heading) * p.surge
+          p.w.root.position.z += Math.cos(p.heading) * p.surge
+        }
         p.w.root.rotation.y = p.heading + Math.sin(t * 0.19 + p.phase) * 0.1
         p.w.root.rotation.x = Math.cos(t * 0.42 + p.phase) * 0.055
         p.w.root.rotation.z = Math.sin(t * 0.33 + p.phase * 0.7) * 0.13 * p.wobble
@@ -554,6 +745,14 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
         brainFade += (bt - brainFade) * Math.min(1, dt * 3)
         brainHost.visible = brainFade > 0.01
         if (chosen && brainParent !== chosen.id) {
+          const c = toneColor(chosen.up)
+          brainUniforms.uColor.value.set(c)
+          stormMat.color.set(c)
+          for (const b of burst) b.mat.color.set(c)
+          for (const rig of signals) {
+            rig.streamMat.color.set(c)
+            for (const r of rig.rings) r.mat.color.set(c)
+          }
           chosen.w.orient.add(brainHost)
           brainHost.position.copy(BRAIN_AT)
           brainHost.rotation.set(0, 0, 0)
@@ -590,6 +789,143 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
         }
       }
 
+      /* ── signals in ─────────────────────────────────────────────────── */
+      {
+        const chosen = pod.find(x => x.id === selRef.current)
+        if (chosen) brainHost.getWorldPosition(brainWorld)
+        for (const rig of signals) {
+          if (rig.t < 0) continue
+          rig.t += dt
+          const SIG_DUR = 2.1
+          const u = rig.t / SIG_DUR
+          if (u >= 1 || !chosen) {
+            rig.t = -1
+            rig.dot.visible = false
+            rig.stream.visible = false
+            for (const r of rig.rings) r.m.visible = false
+            continue
+          }
+          const fade = u < 0.12 ? u / 0.12 : 1 - smooth(0.7, 1, u)
+          rig.dot.visible = true
+          rig.dot.position.copy(rig.from)
+          rig.dot.scale.setScalar(chosen.baseScale * 0.22)
+          rig.dotMat.opacity = fade
+          for (const r of rig.rings) {
+            const ru = (rig.t * 0.9 + r.ph) % 1
+            r.m.visible = true
+            r.m.position.copy(rig.from)
+            r.m.lookAt(camera.position)
+            r.m.scale.setScalar(chosen.baseScale * (0.15 + ru * 1.1))
+            r.mat.opacity = 0.7 * (1 - ru) * (1 - ru) * fade
+          }
+          // The stream leaves the source and arrives at the brain — the motes
+          // are spread along the path so it reads as a flow, not a bullet.
+          rig.stream.visible = true
+          rig.streamMat.opacity = fade
+          for (let i = 0; i < SIG_MOTES; i++) {
+            const lead = (u * 1.45 - i / SIG_MOTES) % 1
+            const k = lead < 0 ? 0 : lead
+            tmpV.copy(rig.from).lerp(brainWorld, k)
+            const spread = (1 - k) * chosen.baseScale * 0.22
+            rig.pos[i * 3] = tmpV.x + rig.jitter[i * 3]! * spread
+            rig.pos[i * 3 + 1] = tmpV.y + rig.jitter[i * 3 + 1]! * spread
+            rig.pos[i * 3 + 2] = tmpV.z + rig.jitter[i * 3 + 2]! * spread
+          }
+          rig.geoM.attributes.position!.needsUpdate = true
+          // Hearing something nudges the brain, it does not light it up.
+          brainUniforms.uIntensity.value += 0.25 * fade * Math.max(0, Math.sin(u * Math.PI))
+        }
+      }
+
+      /* ── decision out ──────────────────────────────────────────────────── */
+      {
+        const chosen = pod.find(x => x.id === selRef.current)
+        if (react && chosen) {
+          react.t += dt
+          const rt = react.t
+          // S3 storm 0-0.9s, S4 flash 0.9-1.2s, S5 output 1.2s on.
+          const stormU = Math.min(1, rt / 0.9)
+          storm.visible = rt < 1.4
+          if (storm.visible) {
+            stormMat.opacity = 0.9 * (rt < 0.9 ? stormU : 1 - (rt - 0.9) / 0.5)
+            for (let i = 0; i < STORM_N; i++) {
+              const sd = stormSeed[i]!
+              // Accelerating: the swirl tightens and speeds up into the flash.
+              const ang = sd.a + rt * sd.sp * (1 + stormU * 2.5)
+              const rr = sd.r * (1 - stormU * 0.35)
+              stormPos[i * 3] = Math.cos(ang) * rr
+              stormPos[i * 3 + 1] = sd.y * rr
+              stormPos[i * 3 + 2] = Math.sin(ang) * rr
+            }
+            stormGeo.attributes.position!.needsUpdate = true
+          }
+          if (rt >= 0.9 && rt < 1.35) brainUniforms.uIntensity.value += 2.6 * (1 - (rt - 0.9) / 0.45)
+
+          const ot = rt - 1.2 // output clock
+          if (react.kind === 'sonar' && ot >= 0) {
+            for (const b of burst) {
+              const bu = (ot * 0.7 + b.ph) % 1
+              b.m.visible = ot < 2.2
+              b.m.position.copy(brainWorld)
+              b.m.lookAt(camera.position)
+              b.m.scale.setScalar(chosen.baseScale * (0.2 + bu * 3.4))
+              b.mat.opacity = 0.8 * (1 - bu) * (1 - bu) * (1 - smooth(1.6, 2.2, ot))
+            }
+          }
+          if (react.kind === 'coins') {
+            if (ot >= 0 && ot < dt * 1.5) {
+              // Launch once, from the blowhole: model space, on the back.
+              tmpV.set(0.15, 0.34, 0).applyMatrix4(chosen.w.orient.matrixWorld)
+              for (let i = 0; i < COIN_N; i++) {
+                coinPos[i * 3] = tmpV.x
+                coinPos[i * 3 + 1] = tmpV.y
+                coinPos[i * 3 + 2] = tmpV.z
+                const sp = chosen.baseScale * (0.5 + Math.random() * 0.9)
+                coinVel[i * 3] = (Math.random() - 0.5) * sp
+                coinVel[i * 3 + 1] = sp * (1.1 + Math.random() * 0.8)
+                coinVel[i * 3 + 2] = (Math.random() - 0.5) * sp
+              }
+              coins.visible = true
+            }
+            if (coins.visible) {
+              const g = chosen.baseScale * 1.7
+              for (let i = 0; i < COIN_N; i++) {
+                coinVel[i * 3 + 1] -= g * dt
+                coinPos[i * 3] += coinVel[i * 3]! * dt
+                coinPos[i * 3 + 1] += coinVel[i * 3 + 1]! * dt
+                coinPos[i * 3 + 2] += coinVel[i * 3 + 2]! * dt
+              }
+              coinGeo.attributes.position!.needsUpdate = true
+              coinMat.opacity = 1 - smooth(1.4, 2.6, ot)
+              if (ot > 2.6) coins.visible = false
+            }
+          }
+          if (react.kind === 'thrust' && ot >= 0) {
+            // The nerve reaches the tail: the beat doubles and the whale surges
+            // along its own heading, easing back off over a couple of seconds.
+            const kick = Math.max(0, 1 - ot / 1.6)
+            chosen.w.uniforms.uAmp.value = Math.min(0.32, chosen.baseAmp * (1 + 2.2 * kick))
+            chosen.w.uniforms.uSpeed.value = chosen.baseSpeed * (1 + 2.4 * kick)
+            chosen.surge = kick * chosen.baseScale * 5.5
+          }
+
+          if (rt > 4.2) {
+            react = null
+            storm.visible = false
+            coins.visible = false
+            for (const b of burst) b.m.visible = false
+            chosen.w.uniforms.uAmp.value = chosen.baseAmp
+            chosen.w.uniforms.uSpeed.value = chosen.baseSpeed
+            chosen.surge = 0
+          }
+        } else if (react) {
+          react = null
+          storm.visible = false
+          coins.visible = false
+          for (const b of burst) b.m.visible = false
+        }
+      }
+
       motes.rotation.y = t * 0.006
 
       renderer.render(scene, camera)
@@ -611,6 +947,11 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
       window.removeEventListener('keyup', onKeyUp)
       for (const p of pod) (p.w.mesh.material as THREE.Material).dispose()
       for (const sn of sonars) sn.mat.dispose()
+      for (const rig of signals) { rig.dotMat.dispose(); rig.streamMat.dispose(); rig.geoM.dispose(); for (const r of rig.rings) r.mat.dispose() }
+      for (const b of burst) b.mat.dispose()
+      stormGeo.dispose(); stormMat.dispose(); coinGeo.dispose(); coinMat.dispose()
+      glowMap.dispose(); coinMap.dispose()
+      if (handleRef) handleRef.current = null
       brainMat.dispose()
       modelGeo?.dispose()
       sonarGeo.dispose()

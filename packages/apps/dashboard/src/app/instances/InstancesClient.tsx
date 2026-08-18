@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSortable, DragHandle } from '../../components/Sortable'
 import { useLayout, LayoutSwitch, LAYOUTS } from '../../components/LayoutSwitch'
 import dynamic from 'next/dynamic'
-import type { WhaleDatum } from '../../components/WhaleField'
+import type { WhaleDatum, WhaleFieldHandle } from '../../components/WhaleField'
 
 /* three.js is ~170 kB and only the 3D view needs it — statically imported it
    rode along on every visit to this page. Loaded on demand instead, so picking
@@ -951,6 +951,32 @@ export function InstancesClient({ initialInstances }: Props) {
         />
       )}
 
+      {/* The list's three money columns are unlabelled numbers without this.
+          It shares ROW_COLUMNS with the rows, so it cannot drift out of
+          alignment with them — a header maintained separately eventually
+          would. Sticky, because the folder groups make the list long. */}
+      {layout === 'list' && visible.length > 0 && (
+        <div
+          className="grid items-center gap-3 px-3 py-1.5 mt-3 sticky z-20 rounded-md"
+          style={{
+            gridTemplateColumns: ROW_COLUMNS,
+            top: 0,
+            background: 'var(--background)',
+            borderBottom: '1px solid var(--border)',
+            color: 'var(--muted)',
+          }}
+        >
+          <span />
+          <span className="text-xs">Instance</span>
+          <span className="text-xs">Strategy · Account</span>
+          <span className="text-xs text-right">PnL</span>
+          <span className="text-xs text-right">Unrealized</span>
+          <span className="text-xs text-right">Funding</span>
+          <span className="text-xs">Parameters</span>
+          <span />
+        </div>
+      )}
+
       {instances.length === 0 ? (
         <EmptyState onNew={() => setShowForm(true)} />
       ) : visible.length === 0 ? (
@@ -1144,6 +1170,48 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
   const byId = new Map(instances.map(i => [i.id, i]))
   const hovered = hover ? byId.get(hover.id) : undefined
   const chosen = selected ? byId.get(selected) : undefined
+  const field = useRef<WhaleFieldHandle | null>(null)
+
+  /* Which (monitor, key) pairs the selected instance actually consumes. The
+     emit stream is the whole system's firehose; without this every whale would
+     light up for traffic it never sees. Until it arrives, nothing fires —
+     showing the firehose would be worse than showing nothing. */
+  const [scope, setScope] = useState<Array<{ monitor: string; key: string }> | null>(null)
+  useEffect(() => {
+    setScope(null)
+    if (!selected) return
+    let gone = false
+    void fetch(`/api/instances/${selected}/scope`)
+      .then(async (r) => {
+        if (r.ok && !gone) setScope(((await r.json()) as { monitors: Array<{ monitor: string; key: string }> }).monitors)
+      })
+      .catch(() => { /* advisory — no scope simply means no signals */ })
+    return () => { gone = true }
+  }, [selected])
+
+  /* The A1.3 loop, wired to the two things that already exist.
+
+     A monitor emit is the whale HEARING something: a source pings nearby and
+     feeds the brain. A run only makes the brain act when it produced
+     instructions — a run that looked and decided to do nothing is the normal
+     case for these strategies, and firing the whole decision animation on it
+     would claim they trade on every tick. */
+  useEffect(() => {
+    if (!selected) return
+    return subscribeLiveEvents((raw) => {
+      const event = raw as LiveEvent
+      if (event.type === 'monitor_emit') {
+        if (!scope) return
+        const heard = scope.some(sc => sc.monitor === event.monitor && (sc.key === '*' || sc.key === event.key))
+        if (heard) field.current?.signal()
+        return
+      }
+      if (event.type === 'strategy_run' && event.instanceId === selected) {
+        if (event.instructions.length > 0) field.current?.react()
+        else field.current?.signal() // it looked, and decided not to act
+      }
+    })
+  }, [selected, scope])
 
   const data: WhaleDatum[] = instances.map(i => ({
     id: i.id,
@@ -1156,7 +1224,13 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
 
   return (
     <div className="relative mt-4">
-      <WhaleField instances={data} selectedId={selected} onHover={onHover} onSelect={onSelect} />
+      <WhaleField
+        instances={data}
+        selectedId={selected}
+        onHover={onHover}
+        onSelect={onSelect}
+        handleRef={field}
+      />
 
       {/* Follows the pointer, offset so the cursor never sits on top of it.
           Same glass panel the site's dive scene uses, down to the bubbles —

@@ -55,6 +55,7 @@ export const hyperliquidPlugin = definePlugin({
     {
       type: 'hyperliquid',
       displayName: 'Hyperliquid',
+      logo: '/brands/hyperliquid.png',
       icon: '💧',
       description: 'Perp DEX. Wallet address alone is read-only; add a private key to trade.',
       documentationUrl: 'https://hyperliquid.gitbook.io/hyperliquid-docs',

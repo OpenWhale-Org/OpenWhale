@@ -452,8 +452,10 @@ function TypeMark({ logo, icon, label, size = 22 }: {
         src={logo}
         alt=""
         onError={() => setBroken(true)}
-        className="shrink-0 object-contain"
-        style={{ width: size, height: size, borderRadius: Math.round(size / 4) }}
+        className="shrink-0 object-cover"
+        /* Fully round, not rounded: most of these bitmaps ship on an opaque
+           square, and against a dark row the corners read as a white box. */
+        style={{ width: size, height: size, borderRadius: '50%' }}
       />
     )
   }

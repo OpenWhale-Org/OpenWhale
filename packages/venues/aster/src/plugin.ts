@@ -32,6 +32,7 @@ export const asterPlugin = definePlugin({
     {
       type: 'aster',
       displayName: 'Aster',
+      logo: '/brands/aster.png',
       icon: '✳️',
       description: 'Perp DEX with a Binance-style API.',
       documentationUrl: 'https://docs.asterdex.com',

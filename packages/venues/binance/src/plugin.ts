@@ -53,6 +53,7 @@ export const binancePlugin = definePlugin({
     {
       type: 'binance',
       displayName: 'Binance',
+      logo: '/brands/binance.png',
       icon: '🟡',
       description: 'Perps and spot on one key. Supports Portfolio Margin and a testnet.',
       documentationUrl: 'https://www.binance.com/en/support/faq/how-to-create-api-keys-on-binance-360002502072',

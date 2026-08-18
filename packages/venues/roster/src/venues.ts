@@ -16,6 +16,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'bybit',
     displayName: 'Bybit',
+    logo: '/brands/bybit.png',
     icon: '🟠',
     description: 'Perps and spot on one key. Has a sandbox.',
     documentationUrl: 'https://bybit-exchange.github.io/docs/v5/intro',
@@ -26,6 +27,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'okx',
     displayName: 'OKX',
+    logo: '/brands/okx.png',
     icon: '⚫',
     description: 'Perps and spot on one key; issues a passphrase alongside the pair.',
     documentationUrl: 'https://www.okx.com/docs-v5/en/',
@@ -44,6 +46,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'bitget',
     displayName: 'Bitget',
+    logo: '/brands/bitget.png',
     icon: '🔵',
     description: 'Perps and spot on one key. No sandbox — every order is live.',
     documentationUrl: 'https://www.bitget.com/api-doc/common/intro',
@@ -64,6 +67,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kraken',
     displayName: 'Kraken (Spot)',
+    logo: '/brands/kraken.png',
     icon: '🐙',
     description: 'Spot only. Kraken derivatives live on a separate platform and key.',
     documentationUrl: 'https://docs.kraken.com/rest/',
@@ -74,6 +78,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kraken-futures',
     displayName: 'Kraken Futures',
+    logo: '/brands/kraken.png',
     icon: '🦑',
     description: 'Kraken’s derivatives platform — a separate key from Kraken Spot.',
     documentationUrl: 'https://docs.futures.kraken.com/',
@@ -120,6 +125,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'mexc',
     displayName: 'MEXC',
+    logo: '/brands/mexc.png',
     icon: '🔹',
     description: 'Perps and spot on one key.',
     documentationUrl: 'https://mexcdevelop.github.io/apidocs/spot_v3_en/',
@@ -129,6 +135,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kucoin',
     displayName: 'KuCoin (Spot)',
+    logo: '/brands/kucoin.png',
     icon: '🟢',
     description: 'Spot only — KuCoin Futures is a separate key.',
     documentationUrl: 'https://www.kucoin.com/docs/beginners/introduction',
@@ -138,6 +145,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kucoin-futures',
     displayName: 'KuCoin Futures',
+    logo: '/brands/kucoin.png',
     icon: '🟩',
     description: 'KuCoin’s derivatives platform — a separate key from KuCoin Spot.',
     documentationUrl: 'https://www.kucoin.com/docs/beginners/introduction',
@@ -148,6 +156,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'bingx',
     displayName: 'BingX',
+    logo: '/brands/bingx.png',
     icon: '✖️',
     description: 'Perps and spot on one key.',
     documentationUrl: 'https://bingx-api.github.io/docs/',
