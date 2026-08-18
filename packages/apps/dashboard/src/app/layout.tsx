@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import './globals.css'
 import { AppShell } from '@/components/AppShell'
-import { parseUiMode, UI_MODE_COOKIE } from '@/lib/ui-mode'
 import { SESSION_COOKIE } from '@/lib/auth'
 import { fetchCurrentUser } from '@/lib/data'
 
@@ -17,12 +16,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const store = await cookies()
   const signedIn = store.has(SESSION_COOKIE)
   const username = signedIn ? (await fetchCurrentUser()).user?.username : undefined
-  const initialMode = parseUiMode(store.get(UI_MODE_COOKIE)?.value)
 
   return (
     <html lang="en">
       <body className="min-h-screen" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
-        <AppShell initialMode={initialMode} signedIn={signedIn} {...(username ? { username } : {})}>
+        <AppShell signedIn={signedIn} {...(username ? { username } : {})}>
           {children}
         </AppShell>
       </body>

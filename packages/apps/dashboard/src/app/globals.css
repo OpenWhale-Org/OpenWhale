@@ -1,29 +1,33 @@
 @import 'tailwindcss';
 
 :root {
-  /* ── Core palette (see /ui-design for the living standard) ── */
-  --background: #0f1117;        /* app canvas */
-  --foreground: #e2e8f0;        /* primary text */
-  --surface: #1a1f2e;           /* panels, cards, table headers */
-  --surface-raised: #232a3b;    /* popovers, modals, hovered rows */
-  --surface-inset: #12151d;     /* wells: code blocks, chart plots, empty states */
-  --border: #2d3748;            /* hairlines everywhere — 1px, never darker */
-  --foreground-soft: #94a3b8;   /* secondary text: descriptions, cell metadata */
-  --muted: #64748b;             /* tertiary text: labels, captions, axis text */
+  /* ── Core palette (see /ui-design for the living standard) ──
+     These were Aurora's values. Classic was retired on 2026-08-17 and its
+     palette deleted rather than kept beside this one: two palettes is how
+     hardcoded colours creep in — someone eyeballs a shade against whichever
+     theme they happen to be running, and it lands wrong on the other. ── */
+  --background: #090b14;        /* app canvas */
+  --foreground: #f5f3fa;        /* primary text */
+  --surface: #12172a;           /* panels, cards, table headers */
+  --surface-raised: #181e34;    /* popovers, modals, hovered rows */
+  --surface-inset: #0d1120;     /* wells: code blocks, chart plots, empty states */
+  --border: rgba(220, 214, 255, 0.1);  /* hairlines everywhere — 1px, never darker */
+  --foreground-soft: #aaa6ba;   /* secondary text: descriptions, cell metadata */
+  --muted: #78758b;             /* tertiary text: labels, captions, axis text */
 
   /* ── Accent (exactly one hue; everything interactive) ── */
-  --accent: #7c3aed;
-  --accent-hover: #6d28d9;
-  --accent-soft: rgba(124, 58, 237, 0.14);   /* selected/active fills */
-  --ring: rgba(124, 58, 237, 0.45);          /* focus outlines */
+  --accent: #8267f5;
+  --accent-hover: #927cff;
+  --accent-soft: rgba(130, 103, 245, 0.15);  /* selected/active fills */
+  --ring: rgba(130, 103, 245, 0.38);         /* focus outlines */
 
   /* ── Semantics (meaning only — never decoration) ── */
-  --success: #22c55e;
-  --success-soft: rgba(34, 197, 94, 0.12);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245, 158, 11, 0.12);
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.12);
+  --success: #32d6a0;
+  --success-soft: rgba(50, 214, 160, 0.11);
+  --warning: #f6c85f;
+  --warning-soft: rgba(246, 200, 95, 0.11);
+  --danger: #ff6f82;
+  --danger-soft: rgba(255, 111, 130, 0.11);
 
   /* ── Type ── */
   --font-sans: 'Inter', system-ui, sans-serif;
@@ -177,37 +181,9 @@ body {
 /* ──────────────────────────────────────────────────────────────────────────
    Aurora UI — opt-in theme. Classic remains the :root/default above.
    ────────────────────────────────────────────────────────────────────────── */
-.aurora-theme {
-  --background: #090b14;
-  --foreground: #f5f3fa;
-  --surface: #12172a;
-  --surface-raised: #181e34;
-  --surface-inset: #0d1120;
-  --border: rgba(220, 214, 255, 0.1);
-  --foreground-soft: #aaa6ba;
-  --muted: #78758b;
-  --accent: #8267f5;
-  --accent-hover: #927cff;
-  --accent-soft: rgba(130, 103, 245, 0.15);
-  --ring: rgba(130, 103, 245, 0.38);
-  --success: #32d6a0;
-  --success-soft: rgba(50, 214, 160, 0.11);
-  --warning: #f6c85f;
-  --warning-soft: rgba(246, 200, 95, 0.11);
-  --danger: #ff6f82;
-  --danger-soft: rgba(255, 111, 130, 0.11);
-  color: var(--foreground);
-}
-
-.classic-nav-link {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  border-radius: 0.375rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  transition: color 120ms, background-color 120ms;
-}
+/* 主题类保留为结构选择器的挂钩（.aurora-sidebar 等一整套都挂在这层下面），
+   但它不再重定义任何 token —— 调色板只有 :root 一处。 */
+.aurora-theme { color: var(--foreground); }
 
 .aurora-app-shell {
   display: flex;
@@ -252,8 +228,6 @@ body {
 .aurora-nav-link.is-active { border-color: rgba(145, 112, 255, .55); color: #fff; background: linear-gradient(100deg, rgba(116, 83, 230, .25), rgba(92, 91, 190, .2)); box-shadow: inset 3px 0 0 #8267f5; }
 .aurora-sidebar-footer { flex: none; padding: 12px; border-top: 1px solid var(--border); }
 .aurora-sidebar-footer .aurora-nav-link:first-child { margin-bottom: 8px; color: #d9d2f7; background: radial-gradient(circle at 12px 50%, rgba(151, 104, 255, .2), transparent 30px); }
-.aurora-switch-back { border-top: 1px solid var(--border); border-radius: 0; padding-top: 12px; height: 48px; }
-
 .aurora-workspace { min-width: 0; flex: 1; }
 .aurora-topbar { display: flex; height: 54px; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid var(--border); background: rgba(9, 11, 20, .78); backdrop-filter: blur(18px); }
 .aurora-topbar-context { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
@@ -265,10 +239,6 @@ body {
 .aurora-icon-button { display: grid; min-width: 34px; height: 30px; place-items: center; border: 1px solid var(--border); border-radius: 9px; color: var(--foreground-soft); background: rgba(255,255,255,.025); font-size: 11px; }
 .aurora-avatar { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid rgba(151, 127, 255, .65); border-radius: 50%; background: #192044; color: #f3efff; font-size: 10px; }
 .aurora-signout { padding: 5px 7px; color: var(--muted); font-size: 10px; }
-
-.aurora-preview-button { display: inline-flex; height: 31px; align-items: center; gap: 6px; border: 1px solid rgba(155, 126, 255, .5); border-radius: 999px; padding: 0 10px; background: linear-gradient(90deg, rgba(94, 92, 210, .2), rgba(187, 103, 234, .18)); color: #ded7ff; font-size: 11px; box-shadow: 0 0 22px rgba(120, 80, 255, .09); }
-.aurora-preview-spark { color: #c492ff; }
-.aurora-preview-beta { border-radius: 999px; padding: 2px 5px; background: rgba(255,255,255,.1); font-size: 8px; letter-spacing: .08em; }
 
 /* Aurora login and pointer-driven background */
 .aurora-login-shell { min-height: 100vh; background: #090b14; }
@@ -340,9 +310,7 @@ body {
 .aurora-login-submit:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.12); }.aurora-login-submit:disabled { opacity: .5; }
 .aurora-login-meta { display: flex; align-items: center; justify-content: space-between; padding-top: 17px; border-top: 1px solid var(--border); color: var(--muted); font-size: 9px; }.aurora-login-meta span { display: flex; align-items: center; gap: 6px; }.aurora-login-meta i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }.aurora-login-meta button { color: #9f88ff; }
 .aurora-login-warning { border: 1px solid rgba(246,200,95,.18); border-radius: 8px; padding: 10px; background: rgba(246,200,95,.07); color: #d8bd7e; font-size: 10px; line-height: 1.5; }
-.aurora-login-error { color: var(--danger); font-size: 11px; }.aurora-classic-login-switch { display: flex; align-items: center; justify-content: center; gap: 6px; color: #a78bfa; font-size: 11px; }.aurora-classic-login-switch small { border-radius: 999px; padding: 2px 4px; background: var(--accent-soft); font-size: 7px; }
-
-@keyframes aurora-breathe { to { transform: scale(1.08) translate3d(-2%, 1%, 0); filter: hue-rotate(8deg); } }
+.aurora-login-error { color: var(--danger); font-size: 11px; }@keyframes aurora-breathe { to { transform: scale(1.08) translate3d(-2%, 1%, 0); filter: hue-rotate(8deg); } }
 @keyframes aurora-ribbon { to { transform: rotate(-10deg) translate3d(8%, 15%, 0) scale(1.1); opacity: .52; } }
 @keyframes sonar-pulse { 0% { transform: scale(.78); opacity: 0 } 35% { opacity: 1 } 100% { transform: scale(1.1); opacity: 0 } }
 @keyframes whale-float { to { transform: translate(calc(var(--shift-x) * .3 + 5px), calc(var(--shift-y) * .3 - 10px)) rotate(-2.4deg); } }

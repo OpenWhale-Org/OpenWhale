@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
-import { useUiMode } from './UiModeProvider'
 
 type IconName = 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users'
 
@@ -43,9 +42,9 @@ function Icon({ name }: { name: IconName }) {
   }
 }
 
-function NavLink({ href, label, icon, active, aurora = false }: { href: string; label: string; icon: IconName; active: boolean; aurora?: boolean }) {
+function NavLink({ href, label, icon, active }: { href: string; label: string; icon: IconName; active: boolean }) {
   return (
-    <Link href={href} className={aurora ? `aurora-nav-link${active ? ' is-active' : ''}` : 'classic-nav-link'} style={aurora ? undefined : { background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--muted)' }}>
+    <Link href={href} className={`aurora-nav-link${active ? ' is-active' : ''}`}>
       <Icon name={icon} />
       <span>{label}</span>
     </Link>
@@ -54,16 +53,7 @@ function NavLink({ href, label, icon, active, aurora = false }: { href: string; 
 
 export function Nav() {
   const pathname = usePathname()
-  const { mode, setMode } = useUiMode()
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
-
-  if (mode === 'classic') {
-    return (
-      <nav className="classic-nav w-52 shrink-0 flex flex-col gap-1 p-4 border-r" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-        {links.map(link => <NavLink key={link.href} href={link.href} label={link.label} icon={link.icon} active={isActive(link.href)} />)}
-      </nav>
-    )
-  }
 
   return (
     <aside className="aurora-sidebar">
@@ -72,24 +62,20 @@ export function Nav() {
         <span className="aurora-beta"><span>AURORA</span><b>BETA</b></span>
       </div>
       <nav className="aurora-nav">
-        <NavLink href="/overview" label="Overview" icon="overview" active={isActive('/overview')} aurora />
+        <NavLink href="/overview" label="Overview" icon="overview" active={isActive('/overview')} />
         {auroraGroups.map(group => {
           const grouped = links.filter(link => link.group === group)
           if (grouped.length === 0) return null
           return (
             <div className="aurora-nav-group" key={group}>
               <div className="aurora-nav-heading">{group}</div>
-              {grouped.map(link => <NavLink key={link.href} href={link.href} label={link.auroraLabel ?? link.label} icon={link.icon} active={isActive(link.href)} aurora />)}
+              {grouped.map(link => <NavLink key={link.href} href={link.href} label={link.auroraLabel ?? link.label} icon={link.icon} active={isActive(link.href)} />)}
             </div>
           )
         })}
       </nav>
       <div className="aurora-sidebar-footer">
-        <NavLink href="/assistant" label="Assistant" icon="assistant" active={isActive('/assistant')} aurora />
-        <button className="aurora-nav-link aurora-switch-back" onClick={() => setMode('classic')}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 7H4v12h12v-5M15 3h5v5M20 3l-9 9" /></svg>
-          <span>Switch to Classic UI</span>
-        </button>
+        <NavLink href="/assistant" label="Assistant" icon="assistant" active={isActive('/assistant')} />
       </div>
     </aside>
   )

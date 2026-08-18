@@ -6,11 +6,9 @@ import { AuroraBackground } from '@/components/AuroraBackground'
 import { AuroraLogo } from '@/components/AuroraLogo'
 import { AuroraParticleCopy } from '@/components/AuroraParticleCopy'
 import { Logo } from '@/components/Logo'
-import { useUiMode } from '@/components/UiModeProvider'
 
 export default function LoginPage() {
   const params = useSearchParams()
-  const { mode, setMode } = useUiMode()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -48,40 +46,12 @@ export default function LoginPage() {
   }
 
   const configWarning = configured === false && (
-    <p className={mode === 'aurora' ? 'aurora-login-warning' : 'text-xs rounded-md p-2'} style={mode === 'aurora' ? undefined : { color: 'var(--warning)', background: 'var(--background)' }}>
+    <p className="aurora-login-warning">
       No account exists yet. Set <code>OPENWHALE_ADMIN_USER</code> and{' '}
       <code>OPENWHALE_ADMIN_PASSWORD</code> in the repo-root <code>.env</code> and restart the gateway.
     </p>
   )
 
-  if (mode === 'classic') {
-    return (
-      <div className="flex items-center justify-center" style={{ minHeight: '70vh' }}>
-        <form onSubmit={submit} className="rounded-lg p-6 flex flex-col gap-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)', width: '22rem' }}>
-          <div className="flex items-center gap-2">
-            <span style={{ color: 'var(--accent)' }}><Logo size={22} /></span>
-            <span className="text-sm font-semibold">Sign in to OpenWhale</span>
-          </div>
-          {configWarning}
-          <label className="flex flex-col gap-1">
-            <span className="text-xs" style={{ color: 'var(--muted)' }}>Username</span>
-            <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required autoFocus className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }} />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs" style={{ color: 'var(--muted)' }}>Password</span>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }} />
-          </label>
-          {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
-          <button type="submit" disabled={busy} className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </button>
-          <button type="button" onClick={() => setMode('aurora')} className="aurora-classic-login-switch">
-            <span>✦</span> Experience Aurora UI <small>BETA</small>
-          </button>
-        </form>
-      </div>
-    )
-  }
 
   return (
     <div className="aurora-login-page">
@@ -118,7 +88,6 @@ export default function LoginPage() {
           </button>
           <div className="aurora-login-meta">
             <span><i /> Secure gateway connection</span>
-            <button type="button" onClick={() => setMode('classic')}>Switch to Classic UI</button>
           </div>
         </form>
       </section>
