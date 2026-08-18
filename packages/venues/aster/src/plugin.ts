@@ -32,6 +32,8 @@ export const asterPlugin = definePlugin({
     {
       type: 'aster',
       displayName: 'Aster',
+      icon: '✳️',
+      description: 'Perp DEX with a Binance-style API.',
       documentationUrl: 'https://docs.asterdex.com',
       schema: z.object({
         apiKey: z.string().meta({ displayName: 'API Key' }),

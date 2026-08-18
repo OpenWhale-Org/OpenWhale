@@ -16,6 +16,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'bybit',
     displayName: 'Bybit',
+    icon: '🟠',
+    description: 'Perps and spot on one key. Has a sandbox.',
     documentationUrl: 'https://bybit-exchange.github.io/docs/v5/intro',
     markets: { 'exchange/perp': 'bybit', 'exchange/spot': 'bybit' },
     credentialStyle: 'key-secret',
@@ -24,6 +26,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'okx',
     displayName: 'OKX',
+    icon: '⚫',
+    description: 'Perps and spot on one key; issues a passphrase alongside the pair.',
     documentationUrl: 'https://www.okx.com/docs-v5/en/',
     markets: { 'exchange/perp': 'okx', 'exchange/spot': 'okx' },
     // OKX issues a passphrase alongside the key pair — all three are required
@@ -40,6 +44,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'bitget',
     displayName: 'Bitget',
+    icon: '🔵',
+    description: 'Perps and spot on one key. No sandbox — every order is live.',
     documentationUrl: 'https://www.bitget.com/api-doc/common/intro',
     markets: { 'exchange/perp': 'bitget', 'exchange/spot': 'bitget' },
     credentialStyle: 'key-secret-passphrase',
@@ -48,6 +54,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'gate',
     displayName: 'Gate.io',
+    icon: '🚪',
+    description: 'Perps and spot on one key. Has a sandbox.',
     documentationUrl: 'https://www.gate.com/docs/developers/apiv4/',
     markets: { 'exchange/perp': 'gate', 'exchange/spot': 'gate' },
     credentialStyle: 'key-secret',
@@ -56,6 +64,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kraken',
     displayName: 'Kraken (Spot)',
+    icon: '🐙',
+    description: 'Spot only. Kraken derivatives live on a separate platform and key.',
     documentationUrl: 'https://docs.kraken.com/rest/',
     // Spot only: Kraken's derivatives live on a separate platform + key
     markets: { 'exchange/spot': 'kraken' },
@@ -64,6 +74,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kraken-futures',
     displayName: 'Kraken Futures',
+    icon: '🦑',
+    description: 'Kraken’s derivatives platform — a separate key from Kraken Spot.',
     documentationUrl: 'https://docs.futures.kraken.com/',
     markets: { 'exchange/perp': 'krakenfutures' },
     credentialStyle: 'key-secret',
@@ -72,6 +84,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'upbit',
     displayName: 'Upbit',
+    icon: '🔷',
+    description: 'Korean spot venue.',
     documentationUrl: 'https://docs.upbit.com/kr/reference/',
     // Korea's largest spot venue — no derivatives, and quotes are mostly KRW
     markets: { 'exchange/spot': 'upbit' },
@@ -80,6 +94,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'lighter',
     displayName: 'Lighter',
+    icon: '🪶',
+    description: 'Perp DEX.',
     documentationUrl: 'https://apidocs.lighter.xyz/',
     // zk-rollup orderbook DEX: perps only, signed with a rollup key
     markets: { 'exchange/perp': 'lighter' },
@@ -104,6 +120,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'mexc',
     displayName: 'MEXC',
+    icon: '🔹',
+    description: 'Perps and spot on one key.',
     documentationUrl: 'https://mexcdevelop.github.io/apidocs/spot_v3_en/',
     markets: { 'exchange/perp': 'mexc', 'exchange/spot': 'mexc' },
     credentialStyle: 'key-secret',
@@ -111,6 +129,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kucoin',
     displayName: 'KuCoin (Spot)',
+    icon: '🟢',
+    description: 'Spot only — KuCoin Futures is a separate key.',
     documentationUrl: 'https://www.kucoin.com/docs/beginners/introduction',
     markets: { 'exchange/spot': 'kucoin' },
     credentialStyle: 'key-secret-passphrase',
@@ -118,6 +138,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'kucoin-futures',
     displayName: 'KuCoin Futures',
+    icon: '🟩',
+    description: 'KuCoin’s derivatives platform — a separate key from KuCoin Spot.',
     documentationUrl: 'https://www.kucoin.com/docs/beginners/introduction',
     markets: { 'exchange/perp': 'kucoinfutures' },
     credentialStyle: 'key-secret-passphrase',
@@ -126,6 +148,8 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'bingx',
     displayName: 'BingX',
+    icon: '✖️',
+    description: 'Perps and spot on one key.',
     documentationUrl: 'https://bingx-api.github.io/docs/',
     markets: { 'exchange/perp': 'bingx', 'exchange/spot': 'bingx' },
     credentialStyle: 'key-secret',

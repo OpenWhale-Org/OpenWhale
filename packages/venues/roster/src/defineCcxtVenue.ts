@@ -28,6 +28,12 @@ export interface CcxtVenueSpec {
   /** Plugin name AND credential type — the venue's identity everywhere. */
   name: string
   displayName: string
+  /** Brand mark for the credential picker: an https URL or a `data:` URI. */
+  logo?: string
+  /** Single glyph, used when there is no logo. Omit both and the first letter is used. */
+  icon?: string
+  /** One line on what trading this venue gets you, shown in the picker. */
+  description?: string
   documentationUrl: string
   /**
    * kind → ccxt exchange id. A venue whose products sit behind separate ccxt
@@ -122,6 +128,9 @@ export function defineCcxtVenue(spec: CcxtVenueSpec) {
     credentialTypes: [{
       type: spec.name,
       displayName: spec.displayName,
+      ...(spec.logo !== undefined ? { logo: spec.logo } : {}),
+      ...(spec.icon !== undefined ? { icon: spec.icon } : {}),
+      ...(spec.description !== undefined ? { description: spec.description } : {}),
       documentationUrl: spec.documentationUrl,
       schema: z.object(credentialShape(spec)),
       // Balance is the cheapest call that proves the key is accepted AND

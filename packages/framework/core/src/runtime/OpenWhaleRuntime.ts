@@ -860,6 +860,9 @@ export class OpenWhaleRuntime implements IRuntime {
       return {
       type: def.type,
       ...(def.displayName !== undefined ? { displayName: def.displayName } : {}),
+      ...(def.logo !== undefined ? { logo: def.logo } : {}),
+      ...(def.icon !== undefined ? { icon: def.icon } : {}),
+      ...(def.description !== undefined ? { description: def.description } : {}),
       pluginName: this.credentialTypeOwners.get(def.type) ?? 'core',
       ...(def.documentationUrl !== undefined ? { documentationUrl: def.documentationUrl } : {}),
       kinds,

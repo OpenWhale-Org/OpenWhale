@@ -95,6 +95,25 @@ export interface CredentialTypeDefinition {
   /** Credential type id, e.g. 'binance', 'telegram'. */
   type: string
   displayName?: string
+  /**
+   * Brand mark for the picker: an https URL, or a `data:` URI to keep it
+   * self-contained. A data URI is the better default — it survives offline,
+   * cannot break when someone else's CDN moves, and asks nothing of the
+   * operator's browser beyond the page they already loaded.
+   *
+   * The dashboard falls back to `icon`, then to the first letter of the name,
+   * so this is always optional and a broken image never leaves a blank.
+   */
+  logo?: string
+  /**
+   * A single glyph for the picker — an emoji, or any one character. Used when
+   * there is no logo. Optional in turn: a type with neither is drawn from the
+   * first character of its name, so a plugin never has to invent artwork to
+   * look complete.
+   */
+  icon?: string
+  /** One line on what this credential is for, shown under the name. */
+  description?: string
   documentationUrl?: string
   /** Field schema (Zod + .meta()) — drives the dashboard credential form. */
   schema?: ZodObject<ZodRawShape>
@@ -123,6 +142,11 @@ export interface CredentialTypeDefinition {
 export interface CredentialTypeInfo {
   type: string
   displayName?: string
+  /** Brand mark (URL or data: URI). Falls back to `icon`, then the first letter. */
+  logo?: string
+  /** Single glyph for the picker; absent means "derive one from the name". */
+  icon?: string
+  description?: string
   /** Registering plugin (the dashboard's picker groups by this); built-ins are 'core'. */
   pluginName: string
   documentationUrl?: string

@@ -29,6 +29,8 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'anthropic',
     displayName: 'Anthropic',
+    icon: '🧠',
+    description: 'Claude models, direct from Anthropic.',
     documentationUrl: 'https://console.anthropic.com/settings/keys',
     schema: z.object({ apiKey: apiKeyField }),
     test: async (data: RawCredentialData) => {
@@ -38,6 +40,8 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'openai',
     displayName: 'OpenAI',
+    icon: '⚛️',
+    description: 'GPT models, direct from OpenAI.',
     documentationUrl: 'https://platform.openai.com/api-keys',
     schema: z.object({ apiKey: apiKeyField }),
     test: async (data: RawCredentialData) => {
@@ -47,6 +51,8 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'google',
     displayName: 'Google (Gemini)',
+    icon: '♊',
+    description: 'Gemini models via Google AI Studio.',
     documentationUrl: 'https://aistudio.google.com/apikey',
     schema: z.object({ apiKey: apiKeyField }),
     test: async (data: RawCredentialData) => {
@@ -56,6 +62,8 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'anthropic-compatible',
     displayName: 'Anthropic-compatible (Kimi / GLM / proxy…)',
+    icon: '🧩',
+    description: 'Any endpoint that speaks the Anthropic protocol — Kimi, GLM, a proxy.',
     schema: z.object({
       apiKey: apiKeyField,
       baseURL: z.string().url().meta({ displayName: 'Base URL', placeholder: 'https://api.moonshot.cn/anthropic', description: 'Anthropic-protocol endpoint root' }),
@@ -70,6 +78,8 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'openai-compatible',
     displayName: 'OpenAI-compatible (DeepSeek / Ollama / proxy…)',
+    icon: '🔌',
+    description: 'Any endpoint that speaks the OpenAI protocol — DeepSeek, Ollama, a proxy.',
     schema: z.object({
       apiKey: apiKeyField,
       baseURL: z.string().url().meta({ displayName: 'Base URL', placeholder: 'https://api.deepseek.com/v1', description: 'OpenAI-compatible endpoint root' }),

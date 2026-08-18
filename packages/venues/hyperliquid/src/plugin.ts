@@ -55,6 +55,8 @@ export const hyperliquidPlugin = definePlugin({
     {
       type: 'hyperliquid',
       displayName: 'Hyperliquid',
+      icon: '💧',
+      description: 'Perp DEX. Wallet address alone is read-only; add a private key to trade.',
       documentationUrl: 'https://hyperliquid.gitbook.io/hyperliquid-docs',
       schema: z.object({
         walletAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).meta({ displayName: 'Wallet Address', placeholder: '0x...' }),
