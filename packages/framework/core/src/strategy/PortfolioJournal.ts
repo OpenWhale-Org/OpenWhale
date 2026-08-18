@@ -1,6 +1,7 @@
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type {
   IPortfolioJournal,
+  PortfolioMode,
   PortfolioDecisionEvent,
   PortfolioEquityPoint,
   PortfolioFillEvent,
@@ -16,7 +17,7 @@ import type {
 interface SnapshotRow {
   [key: string]: unknown
   ts: number
-  mode: 'paper' | 'live'
+  mode: PortfolioMode
   starting_equity: number
   equity: number
   available: number
@@ -178,6 +179,15 @@ export class PortfolioJournal implements IPortfolioJournal {
   ) {}
 
   async commit(update: PortfolioUpdate): Promise<void> {
+    // 类型上 PortfolioMode 已经不含 'live'，但类型只管得住 TS 调用方 —— 插件
+    // 传进来的对象、反序列化的旧数据、JS 调用方都绕得过去。实盘的账一旦混进
+    // 这里就再也分不开了（这份自述没有订单号，对不了账），所以运行期也挡一道。
+    if ((update.snapshot.mode as string) !== 'paper') {
+      throw new Error(
+        `PortfolioJournal is for simulated trading only — got mode='${String(update.snapshot.mode)}'. `
+        + 'Live PnL belongs to the pnl_* attribution ledger, which is sourced from the venue itself.',
+      )
+    }
     await this.db.transaction(async () => {
       const inserted = await this.db.run(
         `INSERT OR IGNORE INTO portfolio_commits (instance_id, commit_id, ts) VALUES (?, ?, ?)`,

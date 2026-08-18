@@ -9,7 +9,7 @@ import type { StrategyParams } from './instance.js'
 import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { AvailabilityChecker, ParamFieldDef, ParamIllustration } from './definition.js'
-import type { IPortfolioJournal } from './portfolio.js'
+import type { IPortfolioJournal, PortfolioMode } from './portfolio.js'
 import type { PortfolioUpdate } from './portfolio.js'
 
 /**
@@ -151,7 +151,8 @@ export interface StrategyRunTrace {
  * positions, fills, and risk metrics remain strategy-domain data.
  */
 export interface StrategyPortfolioSnapshot {
-  mode: 'paper' | 'live'
+  /** 只有模拟盘。实盘走 pnl_* 归因账本 —— 见 types/portfolio.ts 的说明。 */
+  mode: PortfolioMode
   updatedAt: number
 }
 

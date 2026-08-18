@@ -125,3 +125,25 @@ describe('PortfolioJournal', () => {
     expect(report?.marketBars.map(bar => bar.timestamp)).toEqual([3_000, 4_000])
   })
 })
+
+describe('模拟盘专用', () => {
+  it('refuses a live snapshot — that account belongs to the pnl_* ledger', async () => {
+    await expect(journal.commit({
+      commitId: 'c-live',
+      // 绕过类型：插件、反序列化的旧数据、JS 调用方都能做到这件事，
+      // 所以 commit() 在运行期也要挡一道
+      snapshot: { ...snapshot(1_000, 10_000), mode: 'live' as unknown as 'paper' },
+    })).rejects.toThrow(/simulated trading only/)
+  })
+
+  it('leaves nothing behind when it refuses', async () => {
+    // 拒绝必须发生在事务之前 —— 写进去一半的账比不写更难查
+    await journal.commit({ commitId: 'c-ok', snapshot: snapshot(1_000, 10_000) })
+    await expect(journal.commit({
+      commitId: 'c-live-2',
+      snapshot: { ...snapshot(2_000, 9_000), mode: 'live' as unknown as 'paper' },
+    })).rejects.toThrow()
+    const report = await journal.report()
+    expect(report?.equity).toHaveLength(1)
+  })
+})

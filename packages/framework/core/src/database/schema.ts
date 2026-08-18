@@ -122,9 +122,19 @@ CREATE TABLE IF NOT EXISTS strategy_store (
 
 CREATE INDEX IF NOT EXISTS idx_strategy_store_instance ON strategy_store (instance_id);
 
--- Strategy-owned portfolio history. Unlike strategy_store (current recovery
--- state) and run traces (sampled audit), this journal is append-only reporting
--- data used by paper and live portfolio projections.
+-- Strategy-owned portfolio history for SIMULATED trading only.
+--
+-- 分工（按数据来源划，不是按用途划）：
+--   pnl_order_claims / pnl_fills / pnl_funding — 实盘。依据是交易所的事实：
+--     执行器认领订单号，采集器把真实成交与资费拉回来再归属到实例。
+--   executions/*.jsonl                          — 实盘。每一片的计划与实际。
+--   strategy_store                              — 当前状态，会被覆盖。
+--   run traces                                  — 抽样的审计轨迹。
+--   portfolio_*（本节）                          — 模拟盘。交易所不知道这些单
+--     存在，没有事实可拉，只能由策略自述 —— 这是它唯一不与上面重复的地方。
+--
+-- 实盘不写这里。同一笔交易两边都记就有了两份互相矛盾的账，而自述的这份没有
+-- 订单号，对不了账。PortfolioMode 因此不含 'live'。
 CREATE TABLE IF NOT EXISTS portfolio_commits (
   instance_id TEXT NOT NULL,
   commit_id   TEXT NOT NULL,
