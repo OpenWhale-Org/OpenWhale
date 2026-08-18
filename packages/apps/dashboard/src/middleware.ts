@@ -36,5 +36,8 @@ export const config = {
   // matched as "anything with a dot": `.*\.[^/]+$` would also exempt any
   // future page route whose last segment happens to contain one, and that
   // exemption would be invisible at the point such a route is added.
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpe?g|svg|ico|webp|gif|avif|woff2?)$).*)'],
+  // glb/gltf earn their place the hard way: the whale model was being treated
+  // as a page and bounced to /login, so an expired session handed GLTFLoader an
+  // HTML login page and the pod view hung on "Loading the pod…".
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpe?g|svg|ico|webp|gif|avif|woff2?|glb|gltf)$).*)'],
 }
