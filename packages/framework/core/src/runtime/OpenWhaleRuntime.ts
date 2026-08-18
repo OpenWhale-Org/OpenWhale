@@ -24,6 +24,8 @@ import type { RawCredentialData } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
 import { appendRunTrace, readRunTraces, countRunsSince } from '../strategy/runStore.js'
+import { PortfolioJournal } from '../strategy/PortfolioJournal.js'
+import type { PortfolioReport, PortfolioReportQuery } from '../types/portfolio.js'
 import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
 import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
@@ -605,6 +607,20 @@ export class OpenWhaleRuntime implements IRuntime {
   /** The live strategy object behind an ACTIVE instance; undefined when deactivated. */
   getStrategy(instanceId: string): unknown {
     return this.triggerManager.getStrategy(instanceId)
+  }
+
+  /** Current strategy-owned portfolio projection for an active instance. */
+  async instancePortfolio(instanceId: string): Promise<import('../types/strategy.js').StrategyPortfolioSnapshot | undefined> {
+    return this.triggerManager.getStrategy(instanceId)?.getPortfolioSnapshot?.()
+  }
+
+  /** Historical portfolio report for paper or live strategy projections. */
+  async instancePortfolioReport(instanceId: string, query?: PortfolioReportQuery): Promise<PortfolioReport | undefined> {
+    if (!this.database) return undefined
+    const journal = new PortfolioJournal(instanceId, this.database)
+    const current = await this.triggerManager.getStrategy(instanceId)?.getPortfolioUpdate?.()
+    if (current) await journal.commit(current)
+    return journal.report(query)
   }
 
   /** Persisted run traces (newest first) — survive deactivation and restarts. */

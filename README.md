@@ -34,6 +34,7 @@ OpenWhale is a TypeScript framework for building automated economic strategies. 
 | **Instance** | A strategy + params + account bindings, activated as a unit. Everything observable hangs off the instance: live events, executions, run traces, logs. |
 | **Account** | A named entity binding a credential to an account implementation (generic or venue-specialized). Strategies read balances and positions only through their bound account's Reader. |
 | **Trigger** | Cron schedules and monitor conditions (multi-source AND within a time window). Subscriptions keep monitors collecting without waking the strategy; a live strategy can add sources it discovers at runtime (`addMonitorSource`). |
+| **Portfolio journal** | Optional instance-scoped history owned by a strategy. Strategies commit idempotent snapshots, fills, decisions, and market bars; Core stores them transactionally and derives equity, drawdown, and trade reports without knowing the strategy's trace format. |
 
 ```
 Monitor (data collection)

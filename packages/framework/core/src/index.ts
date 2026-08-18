@@ -41,6 +41,7 @@ export type {
   CustomProviderConfig,
   IStrategy,
   StrategyRunTrace,
+  StrategyPortfolioSnapshot,
   AccountSlotMeta,
   ScriptDefinition,
   ScriptContext,
@@ -49,6 +50,20 @@ export type {
   StrategyInstance,
   StrategyInstanceView,
   StrategyParams,
+  PortfolioMode,
+  PortfolioFillIntent,
+  PortfolioPositionSnapshot,
+  PortfolioSnapshot,
+  PortfolioFillEvent,
+  PortfolioDecisionEvent,
+  PortfolioMarketBar,
+  PortfolioUpdate,
+  PortfolioReportQuery,
+  PortfolioEquityPoint,
+  PortfolioTrade,
+  PortfolioReportSummary,
+  PortfolioReport,
+  IPortfolioJournal,
   AdapterKindMap,
   NamespacedKind,
   KnownKind,
@@ -137,6 +152,7 @@ export type { CoreMessage, LlmCallOptions, LlmToolCallOptions, LlmCallSettings }
 export { LlmClient } from './strategy/llm.js'
 export type { IStrategyStore } from './strategy/StrategyStore.js'
 export { DBStrategyStore } from './strategy/StrategyStore.js'
+export { PortfolioJournal } from './strategy/PortfolioJournal.js'
 export { HttpClient, HttpError } from './strategy/HttpClient.js'
 export type { HttpRequestOptions, HttpResponse } from './strategy/HttpClient.js'
 
