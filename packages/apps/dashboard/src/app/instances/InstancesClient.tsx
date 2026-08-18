@@ -780,7 +780,7 @@ export function InstancesClient({ initialInstances }: Props) {
   const [status, setStatus] = useState<'all' | 'running' | 'stopped'>('all')
   const [sort, setSort] = useState<SortId>('manual')
   /** 3D view only: which whale the pointer is on, and which one is selected. */
-  const [whaleHover, setWhaleHover] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [whaleHover, setWhaleHover] = useState<{ id: string; x: number; y: number; w: number; h: number } | null>(null)
   const [whaleSelected, setWhaleSelected] = useState<string | null>(null)
   /* Reordering lives in components/Sortable — every panel in the dashboard
      shares it. The handlers below close over `groups`, which is computed in
@@ -974,7 +974,7 @@ export function InstancesClient({ initialInstances }: Props) {
           pnl={pnl}
           hover={whaleHover}
           selected={whaleSelected}
-          onHover={(id, at) => setWhaleHover(id && at ? { id, x: at.x, y: at.y } : null)}
+          onHover={(id, at) => setWhaleHover(id && at ? { id, ...at } : null)}
           onSelect={setWhaleSelected}
           onActivate={(id) => act(id, 'activate')}
           onDeactivate={(id) => act(id, 'deactivate')}
@@ -1134,9 +1134,9 @@ export function InstancesClient({ initialInstances }: Props) {
 function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onActivate, onDeactivate }: {
   instances: StrategyInstanceView[]
   pnl: Record<string, PnlTotals>
-  hover: { id: string; x: number; y: number } | null
+  hover: { id: string; x: number; y: number; w: number; h: number } | null
   selected: string | null
-  onHover: (id: string | null, at: { x: number; y: number } | null) => void
+  onHover: (id: string | null, at: { x: number; y: number; w: number; h: number } | null) => void
   onSelect: (id: string | null) => void
   onActivate: (id: string) => void
   onDeactivate: (id: string) => void
@@ -1164,12 +1164,16 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
       {hovered && hover && (
         <div
           className={`whale-card ${tone(pnl[hovered.id]?.net)}`}
-          /* Flips to the cursor's left when the dossier is open, so the two
-             never stack. The card is ~250px wide and the panel takes the right
-             46% of the frame. */
-          style={chosen
-            ? { right: 'calc(min(30rem, 46%) + 1rem)', top: hover.y - 14 }
-            : { left: hover.x + 20, top: hover.y - 14 }}
+          /* Kept inside the canvas on both axes. Vertically it is clamped so
+             the panel never runs off the bottom edge; horizontally it flips to
+             the cursor's left when the dossier is open, so the two never stack.
+             CARD_H is the panel's own height with a sparkline in it. */
+          style={{
+            top: Math.max(8, Math.min(hover.y - 14, hover.h - CARD_H - 8)),
+            ...(chosen
+              ? { right: 'calc(min(30rem, 46%) + 1rem)' }
+              : { left: Math.min(hover.x + 20, Math.max(8, hover.w - CARD_W - 8)) }),
+          }}
         >
           <span className="bub b1" /><span className="bub b2" /><span className="bub b3" />
           <span className="bub b4" /><span className="bub b5" /><span className="bub b6" />
@@ -1296,6 +1300,11 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
     </div>
   )
 }
+
+/* The hover panel's own footprint, for keeping it inside the canvas. Measured
+   rather than computed: it is a fixed layout — name, figure, sparkline, foot. */
+const CARD_W = 260
+const CARD_H = 190
 
 /** Small segmented control — the same shape as the layout switch beside it. */
 function Segmented({ value, onChange, options }: {

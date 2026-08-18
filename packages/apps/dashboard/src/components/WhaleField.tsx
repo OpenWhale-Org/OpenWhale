@@ -74,7 +74,8 @@ function layout(i: number, n: number): THREE.Vector3 {
 export function WhaleField({ instances, selectedId, onHover, onSelect }: {
   instances: WhaleDatum[]
   selectedId: string | null
-  onHover: (id: string | null, screen: { x: number; y: number } | null) => void
+  /** `screen` also carries the canvas size, so the caller can keep its card inside it. */
+  onHover: (id: string | null, screen: { x: number; y: number; w: number; h: number } | null) => void
   onSelect: (id: string | null) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -175,7 +176,9 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
       driftA: number
       driftB: number
       range: number
-      roll: number
+      /** The way it faces. Set once — a pod that all points one way reads as a
+          pod; one deriving heading from its path reads as debris. */
+      heading: number
       /** Per-whale weight on the roll wobble, so the pod is not one metronome. */
       wobble: number
       baseScale: number
@@ -218,7 +221,8 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
           driftA: 0.085 + (i % 7) * 0.011,
           driftB: 0.071 + (i % 5) * 0.014,
           range: 11 + (i % 4) * 4,
-          roll: 0,
+          // Loosely a shoal: all within a quarter turn of each other.
+          heading: -0.4 + ((i * 0.37) % 1) * 0.8,
           wobble: 0.5 + (i % 5) * 0.23,
           baseScale: 6.5 + (i % 3) * 1.1,
           up,
@@ -433,8 +437,6 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
     const clock = new THREE.Clock()
     const right = new THREE.Vector3()
     const fwd = new THREE.Vector3()
-    const tmpNow = new THREE.Vector3()
-    const tmpNext = new THREE.Vector3()
     const bodyCentre = new THREE.Vector3()
     let brainFade = 0
     let brainParent: string | null = null
@@ -476,10 +478,10 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
           el.style.cursor = now >= 0 ? 'pointer' : (drag.on ? 'grabbing' : 'grab')
           hoverCbRef.current(
             now >= 0 ? (pod[now]?.id ?? null) : null,
-            now >= 0 ? { x: pointer.x, y: pointer.y } : null,
+            now >= 0 ? { x: pointer.x, y: pointer.y, w: el.clientWidth, h: el.clientHeight } : null,
           )
         } else if (now >= 0) {
-          hoverCbRef.current(pod[now]?.id ?? null, { x: pointer.x, y: pointer.y })
+          hoverCbRef.current(pod[now]?.id ?? null, { x: pointer.x, y: pointer.y, w: el.clientWidth, h: el.clientHeight })
         }
       }
 
@@ -494,39 +496,22 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
         const lift = Math.max(p.hot, p.sel)
 
         p.w.uniforms.uTime.value = t
-        /* Each whale cruises its own slow Lissajous loop around where it lives.
-           Incommensurate frequencies, so the pod never falls into step and the
-           field never looks choreographed. Heading is taken from the actual
-           velocity a moment ahead, which is why they bank into their turns
-           instead of sliding sideways. */
-        const swim = (u: number, out: THREE.Vector3) => {
-          out.set(
-            p.home.x + Math.sin(u * p.driftA + p.phase) * p.range,
-            p.home.y + Math.sin(u * 0.32 + p.phase) * p.bob,
-            p.home.z + Math.cos(u * p.driftB + p.phase * 1.3) * p.range,
-          )
-        }
-        swim(t, tmpNow)
-        swim(t + 0.35, tmpNext)
-        p.w.root.position.copy(tmpNow)
-        tmpNext.sub(tmpNow)
-        if (tmpNext.lengthSq() > 1e-6) {
-          // Model forward is -Z after the orient group, so yaw is atan2(x, z).
-          const yaw = Math.atan2(tmpNext.x, tmpNext.z)
-          const pitch = Math.asin(Math.max(-1, Math.min(1, tmpNext.y / tmpNext.length()))) * 0.6
-          p.w.root.rotation.y = angleLerp(p.w.root.rotation.y, yaw, Math.min(1, dt * 2.2))
-          p.w.root.rotation.x += (-pitch - p.w.root.rotation.x) * Math.min(1, dt * 2.2)
-          // A touch of roll into the turn — a whale that yaws bolt upright
-          // reads as a game object on a spline.
-          const turn = angleDelta(p.w.root.rotation.y, yaw)
-          p.roll += (turn * 1.6 - p.roll) * Math.min(1, dt * 2)
-          // Wobble on top of the heading, the same three the site's pod carries.
-          // Without it a whale tracks its path like a rail car; a real one is
-          // always correcting slightly against the water.
-          p.w.root.rotation.y += Math.sin(t * 0.19 + p.phase) * 0.1
-          p.w.root.rotation.x += Math.cos(t * 0.42 + p.phase) * 0.055
-          p.w.root.rotation.z = p.roll + Math.sin(t * 0.33 + p.phase * 0.7) * 0.13 * p.wobble
-        }
+        /* Heading is FIXED, and only wobbles.
+           Deriving it from the path's velocity was wrong: the path is a closed
+           loop, so the heading swept a full turn every cycle, and taking pitch
+           from the vertical component sent whales nose-up the moment their
+           horizontal speed passed through zero. They tumbled. The site does
+           none of that — its pod holds a heading and adds three small sines,
+           and the swimming reads from the BODY animation (tail and pectorals),
+           not from the whale being flown around. Same here. */
+        p.w.root.position.set(
+          p.home.x + Math.sin(t * 0.27 + p.phase * 1.6) * p.range,
+          p.home.y + Math.sin(t * 0.42 + p.phase) * p.bob,
+          p.home.z + Math.sin(t * 0.2 + p.phase) * p.range * 0.7,
+        )
+        p.w.root.rotation.y = p.heading + Math.sin(t * 0.19 + p.phase) * 0.1
+        p.w.root.rotation.x = Math.cos(t * 0.42 + p.phase) * 0.055
+        p.w.root.rotation.z = Math.sin(t * 0.33 + p.phase * 0.7) * 0.13 * p.wobble
         p.w.root.scale.setScalar(p.baseScale * (1 + lift * 0.1))
 
         const dist = camera.position.distanceTo(p.w.root.position)
@@ -674,18 +659,6 @@ export function WhaleField({ instances, selectedId, onHover, onSelect }: {
       </button>
     </div>
   )
-}
-
-/** Shortest signed way round from a to b — plain subtraction jumps at ±pi. */
-function angleDelta(a: number, b: number) {
-  let d = (b - a) % (Math.PI * 2)
-  if (d > Math.PI) d -= Math.PI * 2
-  if (d < -Math.PI) d += Math.PI * 2
-  return d
-}
-
-function angleLerp(a: number, b: number, t: number) {
-  return a + angleDelta(a, b) * t
 }
 
 function smooth(e0: number, e1: number, x: number) {
