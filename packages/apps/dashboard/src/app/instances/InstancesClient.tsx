@@ -758,8 +758,6 @@ export function InstancesClient({ initialInstances }: Props) {
     const startX = e.clientX
     const startY = e.clientY
     const attr = kind === 'card' ? 'data-card-id' : 'data-folder-id'
-    const box = (e.currentTarget as HTMLElement).closest(`[${attr}]`)?.getBoundingClientRect()
-    const rect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : undefined
     let started = false
 
     const publish = (d: DragState | null) => { dragRef.current = d; setDrag(d) }
@@ -771,7 +769,7 @@ export function InstancesClient({ initialInstances }: Props) {
       if (!started) { started = true; document.body.style.userSelect = 'none' }
       const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(`[${attr}]`)
       const over = el?.getAttribute(attr) ?? null
-      publish({ kind, id, dx, dy, over: over === id ? null : over, ...(rect ? { rect } : {}) })
+      publish({ kind, id, dx, dy, over: over === id ? null : over })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -789,30 +787,18 @@ export function InstancesClient({ initialInstances }: Props) {
   const dragStyle = (kind: 'card' | 'folder', id: string): React.CSSProperties => {
     if (drag?.kind !== kind) return {}
     if (drag.id === id) {
-      // Out of the flow and pinned to where it started, so the reflow behind it
-      // cannot drag it off the cursor.
-      if (drag.rect) {
-        return {
-          position: 'fixed',
-          left: drag.rect.left + drag.dx,
-          top: drag.rect.top + drag.dy,
-          width: drag.rect.width,
-          zIndex: 50, pointerEvents: 'none',
-          cursor: 'grabbing', boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
-          transform: 'rotate(1.2deg)',
-        }
-      }
       return {
         transform: `translate(${drag.dx}px, ${drag.dy}px)`,
         position: 'relative', zIndex: 50, pointerEvents: 'none',
         cursor: 'grabbing', boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
       }
     }
-    // No outline on the target any more. The gap that opened where the card
-    // would land says it better than a dashed box around a neighbour did —
-    // that box only ever said "something is happening near this card".
+    if (drag.over === id) {
+      return { outline: '2px dashed var(--accent)', outlineOffset: '2px', borderRadius: '0.5rem' }
+    }
     return {}
   }
+
 
   const [pnl, setPnl] = useState<Record<string, PnlTotals>>({})
   const [statsKey, setStatsKey] = useState(0)
@@ -956,13 +942,7 @@ export function InstancesClient({ initialInstances }: Props) {
               await refresh()
             }
 
-            // While a card is over a target, draw the arrangement it would land
-            // in. The gap that opens is the drop indicator.
-            const preview = drag?.kind === 'card' && drag.over
-              ? reordered(drag.id, drag.over)?.next ?? groups
-              : groups
-
-            return preview.map(({ folder, items }) => (
+            return groups.map(({ folder, items }) => (
               <div key={folder ?? '·'} className="flex flex-col gap-3">
                 {folder !== undefined && (
                   <div
@@ -998,13 +978,8 @@ export function InstancesClient({ initialInstances }: Props) {
                   style={layout === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } : undefined}
                 >
                 {items.map((inst) => (
-                  <Slide
-                    key={inst.id}
-                    {...(drag?.kind === 'card' && drag.id === inst.id && drag.rect
-                      ? { hole: drag.rect.height }
-                      : {})}
-                  >
                   <div
+                    key={inst.id}
                     data-card-id={inst.id}
                     style={dragStyle('card', inst.id)}
                   >
@@ -1030,7 +1005,6 @@ export function InstancesClient({ initialInstances }: Props) {
                     />
                     })()}
                   </div>
-                  </Slide>
                 ))}
                 </div>
                 )}
@@ -1051,16 +1025,6 @@ interface DragState {
   dy: number
   /** The id under the cursor — where it would land. */
   over: string | null
-  /**
-   * Where the element sat on screen when the drag began.
-   *
-   * Load-bearing: while dragging, the others reflow to open a gap, which would
-   * move the dragged element's own base position too — and a translate measured
-   * from the pointer would then drift away from the cursor by exactly however
-   * far the reflow pushed it. Pinning it to this rect takes it out of the flow
-   * entirely, so reordering underneath cannot touch it.
-   */
-  rect?: { left: number; top: number; width: number; height: number }
 }
 
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */
@@ -1629,65 +1593,6 @@ function statMoney(v: number | null | undefined): string {
 const moneyColor = (v: number | null | undefined): string =>
   v === null || v === undefined ? 'var(--muted)'
     : v > 0.005 ? 'var(--success)' : v < -0.005 ? 'var(--danger)' : 'var(--muted)'
-
-/**
- * Animates its own position changes — this is the "others step aside" part.
- *
- * `hole` is the slot the carried card left behind. Pinning that card with
- * position:fixed takes it out of the flow, which collapses its slot — so the
- * layout would close up instead of opening a gap, and there would be nothing to
- * show where the drop lands. Holding the slot at its old height turns the
- * absence into the drop indicator, and because the slot is the same DOM node it
- * glides to each new target along with everything else.
- *
- * FLIP: after every render, compare where this element is now with where it was
- * last time. If it moved, put it back with a transform and let a transition
- * carry it to the new place. The browser never animates a grid or flex reflow on
- * its own, so without this the neighbours would teleport into their new slots.
- *
- * `still` is for the element being carried — it is pinned to the cursor and must
- * not have a second transform fighting for the same property.
- */
-function Slide({ children, hole }: { children: React.ReactNode; hole?: number }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const prev = useRef<{ left: number; top: number } | null>(null)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const now = el.getBoundingClientRect()
-    const was = prev.current
-    prev.current = { left: now.left, top: now.top }
-    if (!was) return
-    const dx = was.left - now.left
-    const dy = was.top - now.top
-    // Sub-pixel drift is not a move; animating it just adds jitter
-    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
-    el.style.transition = 'none'
-    el.style.transform = `translate(${dx}px, ${dy}px)`
-    // Two frames: one to land the starting transform, one to release it
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        el.style.transition = 'transform 180ms cubic-bezier(.2,.8,.2,1)'
-        el.style.transform = ''
-      })
-    })
-  })
-
-  return (
-    <div
-      ref={ref}
-      style={hole === undefined ? undefined : {
-        height: hole,
-        borderRadius: '0.5rem',
-        border: '1px dashed color-mix(in srgb, var(--accent) 55%, transparent)',
-        background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
 
 /**
  * The layouts the list can be drawn in.
