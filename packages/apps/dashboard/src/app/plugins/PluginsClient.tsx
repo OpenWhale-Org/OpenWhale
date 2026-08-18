@@ -21,12 +21,7 @@ export function PluginsClient({ initialPlugins }: Props) {
       <div className="flex justify-end mb-4">
         <button
           onClick={() => setShowForm((v) => !v)}
-          className="px-4 py-2 rounded-md text-sm transition-colors"
-          style={{
-            background: showForm ? 'var(--surface)' : 'var(--accent)',
-            color: '#fff',
-            border: showForm ? '1px solid var(--border)' : 'none',
-          }}
+          className={`btn ${showForm ? 'btn-secondary' : 'btn-primary'}`}
         >
           {showForm ? 'Cancel' : '+ Install Plugin'}
         </button>
@@ -38,8 +33,7 @@ export function PluginsClient({ initialPlugins }: Props) {
 
       {plugins.length === 0 && !showForm ? (
         <div
-          className="rounded-lg p-8 text-center text-sm"
-          style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px dashed var(--border)' }}
+          className="alert alert-muted border-dashed p-8 text-center"
         >
           No plugins installed. Built-in plugins loaded from code (e.g. hyperliquid) appear here too.
         </div>
@@ -107,8 +101,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-lg p-5 mb-4 flex flex-col gap-4"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      className="card p-5 mb-4 flex flex-col gap-4"
     >
       <h2 className="font-semibold text-base">Install Plugin</h2>
 
@@ -119,12 +112,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
             key={m}
             type="button"
             onClick={() => setMode(m)}
-            className="px-3 py-1.5 rounded-md text-sm transition-colors"
-            style={{
-              background: mode === m ? 'var(--accent)' : 'var(--background)',
-              color: mode === m ? '#fff' : 'var(--muted)',
-              border: `1px solid ${mode === m ? 'var(--accent)' : 'var(--border)'}`,
-            }}
+            className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}
           >
             {m === 'npm' ? 'From npm' : 'From file'}
           </button>
@@ -133,37 +121,35 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
 
       {mode === 'npm' ? (
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--muted)' }}>
-            Package name or local path <span style={{ color: 'var(--danger)' }}>*</span>
-            <span className="ml-1" style={{ opacity: 0.6 }}>— @scope/pkg, name@1.2.0, or an absolute directory like /Users/me/my-plugin (must be built)</span>
+          <label className="text-xs text-muted">
+            Package name or local path <span className="text-danger">*</span>
+            <span className="ml-1 opacity-60">— @scope/pkg, name@1.2.0, or an absolute directory like /Users/me/my-plugin (must be built)</span>
           </label>
           <input
             value={pkg}
             onChange={(e) => setPkg(e.target.value)}
             required
             placeholder="@scope/package-name or /abs/path/to/package"
-            className="rounded-md px-3 py-2 text-sm font-mono"
-            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            className="input font-mono"
           />
         </div>
       ) : (
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--muted)' }}>
-            Plugin bundle <span style={{ color: 'var(--danger)' }}>*</span>
-            <span className="ml-1" style={{ opacity: 0.6 }}>— built ESM .js/.mjs, default-exporting a plugin factory</span>
+          <label className="text-xs text-muted">
+            Plugin bundle <span className="text-danger">*</span>
+            <span className="ml-1 opacity-60">— built ESM .js/.mjs, default-exporting a plugin factory</span>
           </label>
           <input
             type="file"
             accept=".js,.mjs"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="text-sm"
-            style={{ color: 'var(--muted)' }}
+            className="text-sm text-muted"
           />
         </div>
       )}
 
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--muted)' }}>
+        <label className="text-xs text-muted">
           Config (JSON) — passed to the plugin factory
         </label>
         <textarea
@@ -172,18 +158,17 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
           rows={3}
           spellCheck={false}
           placeholder='{ "testnet": true }'
-          className="rounded-md px-3 py-2 text-sm font-mono resize-y"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+          className="input font-mono resize-y"
         />
       </div>
 
-      <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3a2e1a', color: 'var(--warning)' }}>
+      <p className="alert alert-warning text-xs">
         ⚠️ Installing a plugin runs third-party code inside the engine process with full access to
         credentials and accounts. Only install packages you trust.
       </p>
 
       {error && (
-        <p className="text-sm px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
+        <p className="alert alert-danger whitespace-pre-wrap">
           {error}
         </p>
       )}
@@ -191,8 +176,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
       <button
         type="submit"
         disabled={installing || (mode === 'npm' ? !pkg.trim() : !file)}
-        className="self-end px-4 py-2 rounded-md text-sm"
-        style={{ background: 'var(--accent)', color: '#fff', opacity: installing ? 0.6 : 1 }}
+        className="btn btn-primary self-end"
       >
         {installing ? 'Installing… (npm may take a minute)' : 'Install'}
       </button>
@@ -224,29 +208,28 @@ function PluginCard({ plugin, onChanged }: { plugin: InstalledPluginView; onChan
 
   return (
     <div
-      className="rounded-lg p-4 flex flex-col gap-2"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      className="card p-4 flex flex-col gap-2"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium">{plugin.name}</span>
-            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+            <span className="badge badge-neutral">
               v{plugin.version}
             </span>
-            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+            <span className="badge badge-neutral">
               {builtIn ? 'built-in'
                 : plugin.source!.kind === 'npm' ? `npm: ${plugin.source!.package}`
                 : plugin.source!.kind === 'local' ? `local: ${plugin.source!.path}`
                 : `file: ${plugin.source!.originalName}`}
             </span>
             {plugin.loadError && (
-              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
+              <span className="badge badge-danger">
                 load failed
               </span>
             )}
           </div>
-          <div className="flex flex-wrap gap-3 text-xs" style={{ color: 'var(--muted)' }}>
+          <div className="flex flex-wrap gap-3 text-xs text-muted">
             <span>{plugin.monitors.length} monitors</span>
             <span>{plugin.executors.length} executors</span>
             <span>{plugin.strategies.length} strategies</span>
@@ -255,12 +238,12 @@ function PluginCard({ plugin, onChanged }: { plugin: InstalledPluginView; onChan
             {plugin.installedAt && <span>installed {new Date(plugin.installedAt).toLocaleString()}</span>}
           </div>
           {plugin.strategies.length > 0 && (
-            <span className="text-xs font-mono" style={{ color: 'var(--muted)', opacity: 0.7 }}>
+            <span className="text-xs font-mono text-muted opacity-70">
               {plugin.strategies.join(' · ')}
             </span>
           )}
           {plugin.loadError && (
-            <span className="text-xs" style={{ color: 'var(--danger)' }}>{plugin.loadError}</span>
+            <span className="text-xs text-danger">{plugin.loadError}</span>
           )}
         </div>
 
@@ -270,16 +253,14 @@ function PluginCard({ plugin, onChanged }: { plugin: InstalledPluginView; onChan
               <>
                 <button
                   onClick={() => setConfirming(false)}
-                  className="px-3 py-1.5 rounded-md text-xs"
-                  style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+                  className="btn btn-sm btn-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => void uninstall()}
                   disabled={removing}
-                  className="px-3 py-1.5 rounded-md text-xs"
-                  style={{ background: 'var(--danger)', color: '#fff', opacity: removing ? 0.6 : 1 }}
+                  className="btn btn-sm btn-danger-solid"
                 >
                   {removing ? 'Removing…' : 'Confirm'}
                 </button>
@@ -287,8 +268,7 @@ function PluginCard({ plugin, onChanged }: { plugin: InstalledPluginView; onChan
             ) : (
               <button
                 onClick={() => setConfirming(true)}
-                className="px-3 py-1.5 rounded-md text-xs"
-                style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}
+                className="btn btn-sm btn-danger"
               >
                 Uninstall
               </button>
@@ -298,7 +278,7 @@ function PluginCard({ plugin, onChanged }: { plugin: InstalledPluginView; onChan
       </div>
 
       {error && (
-        <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
+        <p className="alert alert-danger text-xs">
           {error}
         </p>
       )}
