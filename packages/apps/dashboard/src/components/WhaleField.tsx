@@ -79,6 +79,10 @@ const RIM_FLAT_2 = 0xc9b8ff
     happens to be nearby, rather than as that whale thinking. */
 const toneColor = (up: boolean | null) => (up === null ? RIM_FLAT_2 : up ? RIM_UP_2 : RIM_DOWN_2)
 
+/** How far a stopped instance fades back: opacity ceiling, and rim strength. */
+const DIM_OPACITY = 0.42
+const DIM_RIM = 0.35
+
 /**
  * Where each whale sits.
  *
@@ -196,9 +200,11 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
     scene.add(fill)
 
     /* ---- the pod ----
-       The procedural sculpt renders immediately and the real model swaps in
-       behind it, exactly as the site does. A slow network still gets a whale;
-       it just gets the rougher one for a moment. */
+       Nothing is drawn until the real model is in hand. Swapping the sculpt
+       out from under a whale that had already surfaced was worse than waiting:
+       the body visibly changed shape mid-swim. The sculpt stays as the
+       fallback for a fetch that fails outright — an empty tank is not an
+       improvement on a rougher whale. */
     const geo = createWhaleGeometry()
     let modelGeo: THREE.BufferGeometry | null = null
     let dead = false
@@ -210,15 +216,15 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       sel: number
       phase: number
       bob: number
-      /** Cruise loop: two incommensurate rates and how far it ranges. */
-      driftA: number
-      driftB: number
+      /** How far it ranges around where it lives. */
       range: number
       /** The way it faces. Set once — a pod that all points one way reads as a
           pod; one deriving heading from its path reads as debris. */
       heading: number
       /** Per-whale weight on the roll wobble, so the pod is not one metronome. */
       wobble: number
+      /** Stopped instances read as ghosts: see `DIM` where it is applied. */
+      active: boolean
       /** Resting tail settings, to restore after a thrust. */
       baseAmp: number
       baseSpeed: number
@@ -228,6 +234,16 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       up: boolean | null
     }
     const pod: Pod[] = []
+    /** Wave envelope for whichever body is in use. The model's tail is shorter
+        than the sculpt's, so its envelope has to come from its own bounding
+        box or the sway lands on the wrong half of the animal. */
+    const envelopeFor = (g: THREE.BufferGeometry) => {
+      g.computeBoundingBox()
+      const bb = g.boundingBox!
+      const span = bb.max.x - bb.min.x
+      return { a: bb.min.x + span * 0.55, b: bb.min.x + span * 0.02 }
+    }
+
     const build = () => {
       for (const p of pod) {
         scene.remove(p.w.root)
@@ -236,7 +252,8 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       pod.length = 0
       const list = dataRef.current
       list.forEach((d, i) => {
-        const w = createWhale(6.5 + (i % 3) * 1.1, modelGeo ?? geo)
+        const body = modelGeo ?? geo
+        const w = createWhale(6.5 + (i % 3) * 1.1, body)
         const mat = w.mesh.material as THREE.MeshPhysicalMaterial
         // Body pressed almost black so the rim does the talking, exactly as on
         // the site — a lit body at this density turns the field into porridge.
@@ -246,11 +263,27 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
         const up = pnl === undefined ? null : pnl >= 0
         w.uniforms.uRim.value.set(up === null ? RIM_FLAT : up ? RIM_UP : RIM_DOWN)
         w.uniforms.uRim2.value.set(up === null ? RIM_FLAT_2 : up ? RIM_UP_2 : RIM_DOWN_2)
+        // A stopped instance is a ghost: the rim is what carries presence here,
+        // so dimming it is what actually reads as "not running" — an unlit
+        // whale at full opacity just looks like a whale in shadow.
+        if (!d.active) {
+          w.uniforms.uRim.value.multiplyScalar(DIM_RIM)
+          w.uniforms.uRim2.value.multiplyScalar(DIM_RIM)
+        }
         // A stopped instance still swims, just barely: a motionless whale reads
         // as a broken render, not as "not running".
         w.uniforms.uAmp.value = d.active ? 0.11 : 0.035
         w.uniforms.uSpeed.value = (d.active ? 1.4 : 0.5) + (i % 4) * 0.09
         w.uniforms.uPhase.value = i * 1.7
+        if (modelGeo) {
+          const env = envelopeFor(modelGeo)
+          w.uniforms.uEnvA.value = env.a
+          w.uniforms.uEnvB.value = env.b
+          // A short fluke needs an exaggerated stroke before the motion reads.
+          w.uniforms.uAmp.value = Math.min(0.2, w.uniforms.uAmp.value * 3)
+          w.uniforms.uTailLift.value = 2.2
+          w.uniforms.uFinFlap.value = 0.17 + (i % 3) * 0.02
+        }
         const home = layout(i, list.length)
         w.root.position.copy(home)
         w.mesh.userData.podIndex = i
@@ -258,11 +291,8 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
         pod.push({
           w, home, id: d.id, hot: 0, sel: 0, phase: i * 1.7,
           bob: 0.6 + (i % 5) * 0.21,
-          // Slow enough to read as cruising rather than orbiting: a full loop
-          // takes the better part of a minute, over a radius comparable to the
-          // whale's own length.
-          driftA: 0.085 + (i % 7) * 0.011,
-          driftB: 0.071 + (i % 5) * 0.014,
+          // A radius comparable to the whale's own length — enough to read as
+          // cruising, not so much that the pod drifts apart.
           range: 11 + (i % 4) * 4,
           // Loosely a shoal: all within a quarter turn of each other.
           heading: -0.4 + ((i * 0.37) % 1) * 0.8,
@@ -270,45 +300,23 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
           baseAmp: w.uniforms.uAmp.value,
           baseSpeed: w.uniforms.uSpeed.value,
           surge: 0,
+          active: d.active,
           baseScale: 6.5 + (i % 3) * 1.1,
           up,
         })
       })
     }
-    build()
-
-    /* Swap in the real body once it lands. The wave envelope has to be
-       re-derived from the new bounding box — the model is shorter in the tail
-       than the sculpt, so the sculpt's envelope would sway the wrong half —
-       and the amplitude is tripled because a short fluke needs an exaggerated
-       stroke before the motion reads at all. */
     loadWhaleGeometry('/models/whale.glb')
       .then((real) => {
         if (dead) return
-        real.computeBoundingBox()
-        const bb = real.boundingBox!
-        const span = bb.max.x - bb.min.x
-        const envA = bb.min.x + span * 0.55
-        const envB = bb.min.x + span * 0.02
-        for (const p of pod) {
-          p.w.mesh.geometry = real
-          p.w.uniforms.uEnvA.value = envA
-          p.w.uniforms.uEnvB.value = envB
-          p.w.uniforms.uAmp.value = Math.min(0.2, p.w.uniforms.uAmp.value * 3)
-          p.w.uniforms.uTailLift.value = 2.2
-          // The fin gate in the shader is expressed in model-space thresholds
-          // tuned against the sculpt. The GLB is a rounder body, so the same
-          // gain reads weaker on it — lifted until the pectorals actually
-          // stroke, and varied per whale so they are not in unison.
-          p.w.uniforms.uFinFlap.value = 0.17 + (pod.indexOf(p) % 3) * 0.02
-          // Re-baseline after the swap, or a thrust would restore the sculpt's
-          // settings onto the model and leave it swimming wrong.
-          p.baseAmp = p.w.uniforms.uAmp.value
-          p.baseSpeed = p.w.uniforms.uSpeed.value
-        }
         modelGeo = real
       })
-      .catch(() => { /* the sculpt stays — never leave the view empty */ })
+      .catch(() => { /* fall through to the sculpt below */ })
+      .finally(() => {
+        if (dead) return
+        build()
+        setReady(true)
+      })
 
     /* The brain, shown only during a close-up: additive fresnel shell, the same
        material the site's compiler act uses. */
@@ -710,8 +718,12 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
         // front of the one you are pointing at.
         const clear = 1 - 0.55 * smooth(70, 240, dist)
         const mat = p.w.mesh.material as THREE.MeshPhysicalMaterial
-        mat.opacity = clear + (1 - clear) * lift
-        mat.color.setScalar(0.12 + lift * 0.16)
+        const solid = clear + (1 - clear) * lift
+        // Stopped whales stay translucent, but hovering still brings one
+        // forward — you have to be able to inspect the ones that are not
+        // running, and that is most of them most of the time.
+        mat.opacity = p.active ? solid : solid * (DIM_OPACITY + (1 - DIM_OPACITY) * lift)
+        mat.color.setScalar((p.active ? 0.12 : 0.07) + lift * 0.16)
       }
 
       /* Close-up. The subject is framed LEFT of centre, which is done by
@@ -931,7 +943,6 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       renderer.render(scene, camera)
     }
     tick()
-    setReady(true)
 
     return () => {
       dead = true
@@ -979,8 +990,8 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       }}
     >
       {!ready && (
-        <div className="absolute inset-0 grid place-items-center text-xs" style={{ color: 'var(--muted)' }}>
-          Diving…
+        <div className="absolute inset-0 grid place-items-center" style={{ color: 'var(--muted)' }}>
+          <span className="text-xs">Loading the pod…</span>
         </div>
       )}
       {/* Bottom-left, opposite the dossier, so it never sits under one. */}
