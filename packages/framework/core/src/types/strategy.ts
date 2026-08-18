@@ -151,7 +151,7 @@ export interface StrategyRunTrace {
  * positions, fills, and risk metrics remain strategy-domain data.
  */
 export interface StrategyPortfolioSnapshot {
-  /** 只有模拟盘。实盘走 pnl_* 归因账本 —— 见 types/portfolio.ts 的说明。 */
+  /** Simulations only. Live PnL lives in the pnl_* ledger — see types/portfolio.ts. */
   mode: PortfolioMode
   updatedAt: number
 }

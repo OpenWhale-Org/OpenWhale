@@ -179,9 +179,11 @@ export class PortfolioJournal implements IPortfolioJournal {
   ) {}
 
   async commit(update: PortfolioUpdate): Promise<void> {
-    // 类型上 PortfolioMode 已经不含 'live'，但类型只管得住 TS 调用方 —— 插件
-    // 传进来的对象、反序列化的旧数据、JS 调用方都绕得过去。实盘的账一旦混进
-    // 这里就再也分不开了（这份自述没有订单号，对不了账），所以运行期也挡一道。
+    // PortfolioMode already excludes 'live', but a type only binds TypeScript
+    // callers — a plugin's object, a deserialised old row, and any JS caller
+    // walk straight past it. Once live rows land here the two ledgers cannot be
+    // told apart again (this one has no order id to reconcile with), so the
+    // check is enforced at runtime as well.
     if ((update.snapshot.mode as string) !== 'paper') {
       throw new Error(
         `PortfolioJournal is for simulated trading only — got mode='${String(update.snapshot.mode)}'. `

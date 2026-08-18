@@ -1,17 +1,21 @@
 /**
- * 这本台账服务的是**交易所不知道的那些交易**。
+ * This journal accounts for trades the venue does not know about.
  *
- * 实盘不走这里。实盘的成交、资费、归属已经有一整条路：执行器下单时认领订单号
- * （pnl_order_claims），采集器从交易所把真实成交和资费拉回来（pnl_fills /
- * pnl_funding），再顺着认领归属到实例；执行记录里另有每一片的计划与实际。
- * 那条路的依据是**交易所的事实**。
+ * Live trading does not come here. It already has a path whose evidence is the
+ * venue itself: executors claim the order ids they place (pnl_order_claims), a
+ * collector pulls the real fills and funding back (pnl_fills / pnl_funding) and
+ * attributes them to an instance through those claims, and the execution
+ * records hold every slice's plan against what actually happened.
  *
- * 模拟盘没有那个事实可依 —— 交易所根本不知道这些单存在 —— 所以只能由策略
- * 自述，也就必须另有去处。这就是这本台账存在的全部理由。
+ * A simulation has no such evidence — the venue has no idea those orders exist
+ * — so the strategy's own account is all there is, and it needs somewhere else
+ * to live. That is the entire reason this journal exists.
  *
- * 两者不能混：同一笔实盘交易若两边都记，就有了两份互相矛盾的账，而且自述的
- * 那份没有订单号，对不了账。所以这里**没有 'live'** —— 不是忘了写，是不允许。
- * 将来可以加 'backtest'，它同样属于「交易所不知道」的那一类。
+ * The two must not mix. Recording one real trade on both sides produces two
+ * ledgers that disagree, and the self-reported one carries no order id, so
+ * nothing can reconcile it. Hence there is no 'live' here — not an omission,
+ * a prohibition. A future 'backtest' would belong, for the same reason paper
+ * does: the venue does not know about it either.
  */
 export type PortfolioMode = 'paper'
 export type PortfolioFillIntent = 'open' | 'reduce' | 'close'
