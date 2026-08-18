@@ -87,12 +87,25 @@ export function ExplorerClient() {
         </div>
       )}
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: '220px 280px 1fr', minHeight: 420 }}>
+      {/* A definite height, so all three panels end on the same line and each
+          scrolls inside itself. Without one the row was sized by whichever
+          panel happened to be tallest, and the records list — capped at its own
+          fixed maxHeight — left dead space below it. */}
+      <div
+        className="grid gap-3"
+        style={{
+          gridTemplateColumns: '220px 280px 1fr',
+          height: 'calc(100vh - 15rem)', minHeight: 420,
+        }}
+      >
         {/* Contracts */}
-        <div className="rounded-lg overflow-y-auto" style={panelStyle}>
-          <div className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+        <div className="rounded-lg overflow-hidden flex flex-col" style={panelStyle}>
+          <div className="px-3 py-2 text-xs font-medium shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
             Contracts ({contracts.length})
           </div>
+          {/* min-h-0 is what lets a flex child actually shrink and scroll — its
+              default min-height:auto makes it grow to fit instead. */}
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
           {contracts.length === 0 && (
             <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No data yet — watch something first.</p>
           )}
@@ -107,21 +120,23 @@ export function ExplorerClient() {
               }}
             >
               <div className="font-mono text-xs">{c.monitor}</div>
-              <div className="text-[10px]" style={{ color: 'var(--muted)' }}>{c.keys} keys · {formatBytes(c.bytes)}</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>{c.keys} keys · {formatBytes(c.bytes)}</div>
             </button>
           ))}
+          </div>
         </div>
 
         {/* Keys */}
-        <div className="rounded-lg overflow-y-auto" style={panelStyle}>
-          <div className="px-3 py-2 text-xs font-medium flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+        <div className="rounded-lg overflow-hidden flex flex-col" style={panelStyle}>
+          <div className="px-3 py-2 text-xs font-medium flex items-center justify-between shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
             <span>Keys {monitor ? `(${keys.length})` : ''}</span>
             {monitor && (
-              <button onClick={() => void openFolder(monitor)} className="text-[10px] underline" style={{ color: 'var(--muted)' }}>
+              <button onClick={() => void openFolder(monitor)} className="text-xs underline" style={{ color: 'var(--muted)' }}>
                 open folder
               </button>
             )}
           </div>
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
           {!monitor && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Pick a contract.</p>}
           {monitor && keys.map(k => (
             <button
@@ -134,14 +149,15 @@ export function ExplorerClient() {
               }}
             >
               <div className="font-mono text-xs break-all">{k.key}</div>
-              <div className="text-[10px]" style={{ color: 'var(--muted)' }}>{formatBytes(k.bytes)} · {formatTime(k.updatedAt)}</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>{formatBytes(k.bytes)} · {formatTime(k.updatedAt)}</div>
             </button>
           ))}
+          </div>
         </div>
 
         {/* Records */}
         <div className="rounded-lg overflow-hidden flex flex-col" style={panelStyle}>
-          <div className="px-3 py-2 text-xs font-medium flex items-center gap-2" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+          <div className="px-3 py-2 text-xs font-medium flex items-center gap-2 shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
             <span className="flex-1 font-mono truncate">{selectedKey ? `${monitor} / ${selectedKey}` : 'Records'}</span>
             {selectedKey && (
               <>
@@ -163,7 +179,7 @@ export function ExplorerClient() {
               </>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto" style={{ maxHeight: 560 }}>
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
             {!selectedKey && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Pick a key.</p>}
             {selectedKey && records === null && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Loading…</p>}
             {selectedKey && records?.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Empty file.</p>}
@@ -177,7 +193,7 @@ export function ExplorerClient() {
                     onClick={() => setExpanded(isOpen ? null : i)}
                     className="w-full text-left px-3 py-1.5 flex gap-3 items-baseline"
                   >
-                    <span className="text-[10px] font-mono shrink-0" style={{ color: 'var(--muted)' }}>{formatTime(r.ts)}</span>
+                    <span className="text-xs font-mono shrink-0" style={{ color: 'var(--muted)' }}>{formatTime(r.ts)}</span>
                     {!isOpen && (
                       <span className="text-xs font-mono truncate" style={{ color: 'var(--foreground)' }}>{oneLine}</span>
                     )}

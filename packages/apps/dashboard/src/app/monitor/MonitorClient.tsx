@@ -141,7 +141,7 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
                 <div className="flex items-center gap-2">
                   {mine.length > 0 && (
                     <span
-                      className="text-[10px] shrink-0"
+                      className="text-xs shrink-0"
                       style={{ color: running > 0 ? 'var(--success, #22c55e)' : 'var(--muted)' }}
                       title={running > 0
                         ? `${running} of ${mine.length} instance${mine.length > 1 ? 's' : ''} running`

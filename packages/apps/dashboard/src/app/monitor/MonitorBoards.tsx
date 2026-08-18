@@ -194,7 +194,7 @@ function MultiOptionPicker({ options, selected, onChange }: {
             className="px-3 py-2 text-xs font-mono"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: 'none', borderBottom: '1px solid var(--border)', outline: 'none' }}
           />
-          <div className="flex gap-2 px-3 py-1.5 text-[10px] items-center" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
+          <div className="flex gap-2 px-3 py-1.5 text-xs items-center" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
             <button type="button" onClick={selectMatches} className="hover:underline">
               {q ? `add ${matches.length}` : 'all'}
             </button>

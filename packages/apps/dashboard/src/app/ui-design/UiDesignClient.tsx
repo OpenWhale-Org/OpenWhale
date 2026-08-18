@@ -45,7 +45,7 @@ function Section({ title, blurb, children }: { title: string; blurb: string; chi
 function Specimen({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="card p-4 flex flex-col gap-3">
-      <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{label}</span>
+      <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{label}</span>
       {children}
     </div>
   )
@@ -53,7 +53,7 @@ function Specimen({ label, children }: { label: string; children: React.ReactNod
 
 function Code({ children }: { children: string }) {
   return (
-    <code className="mono text-[11px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-inset)', color: 'var(--foreground-soft)' }}>
+    <code className="mono text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-inset)', color: 'var(--foreground-soft)' }}>
       {children}
     </code>
   )
@@ -130,7 +130,7 @@ export function UiDesignClient() {
           <div className="flex items-baseline gap-4"><span className="text-base font-semibold">Section heading</span><Code>text-base font-semibold</Code></div>
           <div className="flex items-baseline gap-4"><span className="text-sm">Body & controls</span><Code>text-sm / 13px controls</Code></div>
           <div className="flex items-baseline gap-4"><span className="text-xs" style={{ color: 'var(--foreground-soft)' }}>Metadata & descriptions</span><Code>text-xs + --foreground-soft</Code></div>
-          <div className="flex items-baseline gap-4"><span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Overline label</span><Code>text-[11px] uppercase tracking-wider + --muted</Code></div>
+          <div className="flex items-baseline gap-4"><span className="text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Overline label</span><Code>text-xs uppercase tracking-wider + --muted</Code></div>
           <div className="flex items-baseline gap-4"><span className="mono tabular text-sm">0.067409 · −0.22% · $60,285.83</span><Code>.mono .tabular</Code><span className="text-xs" style={{ color: 'var(--muted)' }}>prices, rates, ids</span></div>
         </div>
       </Section>
@@ -194,17 +194,17 @@ export function UiDesignClient() {
           <Specimen label="Text / number / select / textarea — .input">
             <div className="flex flex-col gap-3">
               <div>
-                <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Instance name</label>
+                <label className="block text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Instance name</label>
                 <input className="input" placeholder="e.g. HL–BN funding cycle" />
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Shown on the board and in notifications.</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Max notional</label>
+                  <label className="block text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Max notional</label>
                   <input className="input tabular" type="number" defaultValue={1000} />
                 </div>
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Venue</label>
+                  <label className="block text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Venue</label>
                   <select className="input" defaultValue="hyperliquid">
                     <option value="hyperliquid">hyperliquid</option>
                     <option value="binance">binance</option>
@@ -296,7 +296,7 @@ export function UiDesignClient() {
             <thead>
               <tr style={{ background: 'var(--surface)' }}>
                 {['Symbol', 'Side', 'Notional', 'uPnL', 'Status'].map((h, i) => (
-                  <th key={h} className={`px-3 py-2 text-[11px] uppercase tracking-wider font-medium ${i >= 2 && i <= 3 ? 'text-right' : 'text-left'}`} style={{ color: 'var(--muted)' }}>{h}</th>
+                  <th key={h} className={`px-3 py-2 text-xs uppercase tracking-wider font-medium ${i >= 2 && i <= 3 ? 'text-right' : 'text-left'}`} style={{ color: 'var(--muted)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -346,7 +346,7 @@ export function UiDesignClient() {
         </div>
 
         <div className="card p-4 mt-3">
-          <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+          <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
             Scatter — a relationship, not a sequence
           </span>
           <svg viewBox="0 0 560 120" className="w-full mt-2" style={{ display: 'block', height: 120 }}>
@@ -373,7 +373,7 @@ export function UiDesignClient() {
       <Section title="Overlays" blurb="Popovers and modals live on the raised surface with a hairline — no shadows, no blur. Modals dim the canvas at 60%.">
         <div className="card p-4 flex items-start gap-6 flex-wrap">
           <div>
-            <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Popover / menu</span>
+            <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Popover / menu</span>
             <div className="mt-2 w-44 rounded-md p-1" style={{ background: 'var(--surface-raised)', border: '1px solid var(--border)' }}>
               {['Rename', 'Move to folder', 'Change icon'].map(item => (
                 <button key={item} className="w-full text-left text-sm px-2 py-1.5 rounded hover:[background:var(--accent-soft)]">{item}</button>
@@ -383,7 +383,7 @@ export function UiDesignClient() {
             </div>
           </div>
           <div>
-            <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Modal</span>
+            <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Modal</span>
             <div className="mt-2">
               <button className="btn btn-secondary" onClick={() => setModalOpen(true)}>Open modal demo</button>
             </div>

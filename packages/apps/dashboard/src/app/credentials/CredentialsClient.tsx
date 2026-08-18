@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Modal } from '@/components/Modal'
+import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
 import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 
 interface Props {
@@ -81,10 +83,13 @@ function SchemaCredentialForm({
   typeInfo,
   onSubmit,
   loading,
+  submitError,
 }: {
   typeInfo: CredentialTypeInfo
   onSubmit: (name: string, data: Record<string, unknown>) => Promise<void>
   loading: boolean
+  /** Raised by the caller's POST. Shown in the footer, beside the button it belongs to. */
+  submitError?: string
 }) {
   const fields = typeInfo.jsonSchema ? fieldsFromJsonSchema(typeInfo.jsonSchema) : []
   const [name, setName] = useState('')
@@ -136,7 +141,11 @@ function SchemaCredentialForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    /* Fields scroll, actions do not. Save at the end of a long form is Save you
+       have to go looking for — on a venue with six fields it was already off
+       the bottom of the dialog when it opened. */
+    <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3 px-5 py-4">
       {(typeInfo.kinds.length > 0 || typeInfo.documentationUrl) && (
         <div className="flex items-center gap-2 flex-wrap text-xs" style={{ color: 'var(--muted)' }}>
           {typeInfo.kinds.map((k) => (
@@ -193,7 +202,14 @@ function SchemaCredentialForm({
         </p>
       )}
 
-      <div className="flex justify-end gap-2">
+      </div>
+
+      <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+        {submitError && (
+          <span className="flex-1 min-w-0 text-xs truncate" style={{ color: 'var(--danger)' }} title={submitError}>
+            {submitError}
+          </span>
+        )}
         {typeInfo.hasTest && (
           <button
             type="button"
@@ -224,7 +240,9 @@ function GenericCredentialForm({
   onSubmit,
   loading,
   fixedType,
+  submitError,
 }: {
+  submitError?: string
   onSubmit: (name: string, data: Record<string, unknown>, customType: string) => Promise<void>
   loading: boolean
   /** When set, the type is known but has no schema — only the data is free-form. */
@@ -250,7 +268,8 @@ function GenericCredentialForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3 px-5 py-4">
       <InputField label="Name" value={name} onChange={setName} placeholder="e.g. My Account" required />
       {!fixedType && (
         <InputField
@@ -279,14 +298,23 @@ function GenericCredentialForm({
         />
         {jsonError && <span className="text-xs" style={{ color: 'var(--danger)' }}>{jsonError}</span>}
       </div>
-      <button
-        type="submit"
-        disabled={loading || !name || !type}
-        className="self-end px-4 py-2 rounded-md text-sm"
-        style={{ background: 'var(--accent)', color: '#fff', opacity: loading ? 0.6 : 1 }}
-      >
-        {loading ? 'Saving…' : 'Save'}
-      </button>
+      </div>
+
+      <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+        {submitError && (
+          <span className="flex-1 min-w-0 text-xs truncate" style={{ color: 'var(--danger)' }} title={submitError}>
+            {submitError}
+          </span>
+        )}
+        <button
+          type="submit"
+          disabled={loading || !name || !type}
+          className="px-4 py-2 rounded-md text-sm"
+          style={{ background: 'var(--accent)', color: '#fff', opacity: loading ? 0.6 : 1 }}
+        >
+          {loading ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </form>
   )
 }
@@ -310,14 +338,24 @@ function TypePicker({
   const [category, setCategory] = useState<string>('All')
   const [query, setQuery] = useState('')
 
-  const entries = [
+  const entries: TypeEntry[] = [
     ...credentialTypes.map((t) => ({
       id: t.type,
       label: t.displayName ?? t.type,
       category: t.pluginName ?? 'core',
       kinds: t.kinds,
+      ...(t.logo !== undefined ? { logo: t.logo } : {}),
+      ...(t.icon !== undefined ? { icon: t.icon } : {}),
+      ...(t.description !== undefined ? { description: t.description } : {}),
     })),
-    { id: 'other', label: 'Other (free-form)', category: 'custom', kinds: [] as string[] },
+    {
+      id: 'other',
+      label: 'Other (free-form)',
+      category: 'custom',
+      kinds: [] as string[],
+      icon: '📄',
+      description: 'Store any JSON under a name. No schema, no form, no test.',
+    },
   ]
 
   const categories = ['All', ...Array.from(new Set(entries.map(e => e.category))).sort()]
@@ -328,9 +366,12 @@ function TypePicker({
   )
 
   return (
-    <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)', minHeight: 220 }}>
+    /* Fills the dialog body: the list is the step, so it should end where the
+       dialog does rather than at some fixed pixel height with dead space under
+       it. Both columns scroll inside themselves, without a visible track. */
+    <div className="flex-1 min-h-0 flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       {/* Category sidebar */}
-      <div className="flex flex-col w-40 shrink-0 py-2" style={{ background: 'var(--background)', borderRight: '1px solid var(--border)' }}>
+      <div className="flex flex-col w-40 shrink-0 py-2 overflow-y-auto scroll-hidden" style={{ background: 'var(--background)', borderRight: '1px solid var(--border)' }}>
         {categories.map((c) => {
           const count = c === 'All' ? entries.length : entries.filter(e => e.category === c).length
           const active = category === c
@@ -339,7 +380,7 @@ function TypePicker({
               key={c}
               type="button"
               onClick={() => setCategory(c)}
-              className="flex items-center justify-between px-3 py-1.5 text-sm text-left"
+              className="flex items-center justify-between px-3 py-1.5 text-sm text-left shrink-0"
               style={{
                 background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
                 color: active ? 'var(--foreground)' : 'var(--muted)',
@@ -354,8 +395,8 @@ function TypePicker({
       </div>
 
       {/* Search + type list */}
-      <div className="flex-1 flex flex-col">
-        <div className="p-2" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div className="p-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -364,41 +405,131 @@ function TypePicker({
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
           />
         </div>
-        <div className="flex-1 overflow-y-auto" style={{ maxHeight: 260 }}>
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
           {visible.length === 0 && (
             <p className="text-xs px-3 py-4 text-center" style={{ color: 'var(--muted)' }}>No types match “{query}”.</p>
           )}
-          {visible.map((e) => {
-            const active = selected === e.id
-            return (
-              <button
-                key={e.id}
-                type="button"
-                onClick={() => onSelect(e.id)}
-                className="w-full flex items-center justify-between px-3 py-2 text-left text-sm"
-                style={{
-                  background: active ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
-                  color: 'var(--foreground)',
-                  borderBottom: '1px solid var(--border)',
-                }}
-              >
-                <span>{e.label}</span>
-                <span className="flex gap-1">
-                  {e.kinds.map(k => (
-                    <span key={k} className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
-                      {k}
-                    </span>
-                  ))}
-                </span>
-              </button>
-            )
-          })}
+          {visible.map((e) => (
+            <TypeRow key={e.id} entry={e} active={selected === e.id} onSelect={() => onSelect(e.id)} />
+          ))}
         </div>
       </div>
     </div>
   )
 }
 
+interface TypeEntry {
+  id: string
+  label: string
+  category: string
+  kinds: string[]
+  logo?: string
+  icon?: string
+  description?: string
+}
+
+/**
+ * A type's mark: its logo, else its glyph, else the first letter of its name.
+ *
+ * The letter is drawn in a bordered chip so it reads as a mark rather than as
+ * a stray character next to the name, and a logo that fails to load falls back
+ * to the same chain — a broken image never leaves a hole in the row.
+ */
+function TypeMark({ logo, icon, label, size = 22 }: {
+  logo?: string | undefined
+  icon?: string | undefined
+  label: string
+  size?: number
+}) {
+  const [broken, setBroken] = useState(false)
+  const showLogo = logo !== undefined && !broken
+
+  if (showLogo) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- logos come from
+      // plugins as URLs or data: URIs; next/image needs build-time known hosts.
+      <img
+        src={logo}
+        alt=""
+        onError={() => setBroken(true)}
+        className="shrink-0 object-contain"
+        style={{ width: size, height: size, borderRadius: Math.round(size / 4) }}
+      />
+    )
+  }
+  if (icon !== undefined) {
+    return (
+      <span className="shrink-0 grid place-items-center" style={{ width: size, height: size, fontSize: Math.round(size * 0.73), lineHeight: 1 }} aria-hidden>
+        {icon}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="shrink-0 grid place-items-center"
+      style={{
+        width: size, height: size, borderRadius: Math.round(size / 3.6),
+        fontSize: Math.round(size * 0.5), fontWeight: 600,
+        background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)',
+      }}
+      aria-hidden
+    >
+      {(Array.from(label)[0] ?? '?').toUpperCase()}
+    </span>
+  )
+}
+
+/** One row: mark, name, the kinds it can materialize into, and its blurb. */
+function TypeRow({ entry, active, onSelect }: { entry: TypeEntry; active: boolean; onSelect: () => void }) {
+  const [showDescription, setShowDescription] = useState(false)
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
+      <button
+        type="button"
+        onClick={onSelect}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm"
+        style={{
+          background: active ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
+          color: 'var(--foreground)',
+        }}
+      >
+        <TypeMark logo={entry.logo} icon={entry.icon} label={entry.label} />
+        <span className="flex-1 min-w-0 truncate">{entry.label}</span>
+        <span className="flex gap-1 shrink-0">
+          {entry.kinds.map(k => (
+            <span key={k} className="text-xs px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+              {k}
+            </span>
+          ))}
+        </span>
+        {entry.description && (
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(ev) => { ev.stopPropagation(); setShowDescription(v => !v) }}
+            className="shrink-0 w-4 h-4 grid place-items-center rounded-full text-xs"
+            style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
+            title={showDescription ? 'Hide description' : 'What is this?'}
+          >
+            ?
+          </span>
+        )}
+      </button>
+      {showDescription && entry.description && (
+        <p className="text-xs px-3 pb-2 pl-[3.1rem]" style={{ color: 'var(--muted)' }}>{entry.description}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Two steps, like a new strategy instance: pick the type, then fill its form.
+ *
+ * One dialog across both — remounting the shell between steps would replay the
+ * open animation and lose the scroll position. Going back keeps the type
+ * selected, so a mis-click costs one click rather than the whole form.
+ */
 function AddCredentialForm({
   credentialTypes,
   onSuccess,
@@ -408,11 +539,13 @@ function AddCredentialForm({
   onSuccess: () => void
   onCancel: () => void
 }) {
+  const [step, setStep] = useState<'type' | 'fields'>('type')
   const [type, setType] = useState(credentialTypes[0]?.type ?? 'other')
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
   const selected = credentialTypes.find((t) => t.type === type)
+  const label = selected?.displayName ?? (type === 'other' ? 'Other (free-form)' : type)
 
   async function submit(name: string, data: Record<string, unknown>, typeOverride?: string) {
     setLoading(true)
@@ -436,43 +569,88 @@ function AddCredentialForm({
   }
 
   return (
-    <div
-      className="rounded-lg p-5 mb-4 flex flex-col gap-4"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-    >
-      <h2 className="font-semibold text-base">Add Credential</h2>
-
-      {/* Type picker — category sidebar + search (n8n-style) */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Type</label>
-        <TypePicker credentialTypes={credentialTypes} selected={type} onSelect={setType} />
-      </div>
-
-      {selected?.jsonSchema ? (
-        <SchemaCredentialForm key={selected.type} typeInfo={selected} onSubmit={submit} loading={loading} />
-      ) : selected ? (
-        <GenericCredentialForm key={selected.type} fixedType={selected.type} onSubmit={(n, d, t) => submit(n, d, t)} loading={loading} />
-      ) : (
-        <GenericCredentialForm key="other" onSubmit={(n, d, t) => submit(n, d, t)} loading={loading} />
-      )}
-
-      {submitError && (
-        <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
-          {submitError}
-        </p>
-      )}
-
-      <div className="flex justify-start">
+    <Modal onClose={onCancel} maxWidth="46rem" height="min(82vh, 46rem)">
+      <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+        {step === 'fields' && (
+          <button
+            type="button"
+            onClick={() => setStep('type')}
+            className="w-7 h-7 rounded-md flex items-center justify-center leading-none shrink-0"
+            style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
+            title="Back to types"
+            aria-label="Back to types"
+          >
+            ‹
+          </button>
+        )}
+        <h2 className="font-semibold text-base flex-1 min-w-0 truncate">
+          {step === 'type' ? 'Add Credential' : `Add ${label}`}
+        </h2>
+        <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
+          {step === 'type' ? 'Step 1 of 2' : 'Step 2 of 2'}
+        </span>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 rounded-md text-sm"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+          className="w-7 h-7 rounded-md flex items-center justify-center leading-none shrink-0"
+          style={{ color: 'var(--muted)' }}
+          aria-label="Close"
         >
-          Cancel
+          ✕
         </button>
       </div>
-    </div>
+
+      {step === 'type' ? (
+        <div className="flex-1 min-h-0 flex flex-col gap-3 px-5 py-4">
+          <p className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
+            Pick what this credential is for. The next step is its form.
+          </p>
+          <TypePicker
+            credentialTypes={credentialTypes}
+            selected={type}
+            onSelect={(t) => { setType(t); setSubmitError(''); setStep('fields') }}
+          />
+        </div>
+      ) : (
+        /* No scrolling here — the form inside owns it, so its action bar can
+           stay pinned to the bottom of the dialog. */
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex items-center gap-2.5 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            <TypeMark
+              logo={selected?.logo}
+              icon={selected?.icon ?? (type === 'other' ? '📄' : undefined)}
+              label={label}
+              size={26}
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{label}</div>
+              {selected?.description && (
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>{selected.description}</div>
+              )}
+            </div>
+            {selected?.documentationUrl && (
+              <a
+                href={selected.documentationUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-auto text-xs shrink-0 underline"
+                style={{ color: 'var(--muted)' }}
+              >
+                Docs ↗
+              </a>
+            )}
+          </div>
+
+          {selected?.jsonSchema ? (
+            <SchemaCredentialForm key={selected.type} typeInfo={selected} onSubmit={submit} loading={loading} submitError={submitError} />
+          ) : selected ? (
+            <GenericCredentialForm key={selected.type} fixedType={selected.type} onSubmit={(n, d, t) => submit(n, d, t)} loading={loading} submitError={submitError} />
+          ) : (
+            <GenericCredentialForm key="other" onSubmit={(n, d, t) => submit(n, d, t)} loading={loading} submitError={submitError} />
+          )}
+        </div>
+      )}
+    </Modal>
   )
 }
 
@@ -521,17 +699,15 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="px-4 py-2 rounded-md text-sm transition-colors"
-          style={{
-            background: showForm ? 'var(--surface)' : 'var(--accent)',
-            color: '#fff',
-            border: showForm ? '1px solid var(--border)' : 'none',
-          }}
-        >
-          {showForm ? 'Cancel' : '+ Add Credential'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowForm(true)}
+            className="px-4 py-2 rounded-md text-sm"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            + Add Credential
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -542,7 +718,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
         />
       )}
 
-      {credentials.length === 0 && !showForm ? (
+      {credentials.length === 0 ? (
         <div
           className="rounded-lg p-8 text-center text-sm"
           style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px dashed var(--border)' }}
@@ -550,7 +726,10 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
           No credentials stored yet.
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        /* Rows only. A credential is a name, a few public fields and a date —
+           a grid of cards would spread that across a lot of empty space and
+           make the fields harder to scan down the page. */
+        <div className="flex flex-col gap-2">
           {visibleCredentials.map((cred) => (
             <CredentialCard
               key={cred.id}
@@ -583,88 +762,106 @@ function CredentialCard({ credential, credentialTypes, onDelete, onChanged }: {
   onDelete: () => void
   onChanged: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
   const [editing, setEditing] = useState(false)
   const typeInfo = credentialTypes.find(t => t.type === credential.type)
 
+  /* Same header grammar as a strategy card: identity on the left, the ⋯ menu
+     on the right. Edit and a bare red Delete used to sit side by side in the
+     corner, which is the arrangement that page moved away from — one slip
+     apart from each other. */
+  const menu = (
+    <CredentialMenu
+      canEdit={Boolean(typeInfo?.jsonSchema) && !editing}
+      onEdit={() => setEditing(true)}
+      onDelete={onDelete}
+    />
+  )
+
+  const identity = (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="font-medium truncate" title={credential.name}>{credential.name}</span>
+      <span
+        className="text-xs px-1.5 py-0.5 rounded shrink-0"
+        style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+      >
+        {credential.type}
+      </span>
+    </div>
+  )
+
+  const publicFields = credential.publicData && Object.keys(credential.publicData).length > 0
+    ? (
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs font-mono min-w-0">
+        {Object.entries(credential.publicData).map(([k, v]) => (
+          <span key={k} className="truncate">
+            <span style={{ color: 'var(--muted)' }}>{k}=</span>
+            <span style={{ color: 'var(--foreground)' }}>{String(v)}</span>
+          </span>
+        ))}
+      </div>
+    )
+    : null
+
+  const editor = editing && typeInfo?.jsonSchema && (
+    <EditCredentialForm
+      credential={credential}
+      typeInfo={typeInfo}
+      onDone={() => { setEditing(false); onChanged() }}
+      onCancel={() => setEditing(false)}
+    />
+  )
+
   return (
     <div
-      className="rounded-lg p-4 flex items-center justify-between gap-4"
+      className="rounded-md px-3 py-2"
       style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
     >
-      <div className="flex flex-col gap-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium">{credential.name}</span>
-          <span
-            className="text-xs px-1.5 py-0.5 rounded"
-            style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-          >
-            {credential.type}
-          </span>
-        </div>
-        <span className="text-xs font-mono" style={{ color: 'var(--muted)', opacity: 0.6 }}>
-          {credential.id}
+      {/* Deterministic tracks, as on the strategies list: an `auto` track is
+          sized by its OWN row, which is what makes columns stagger. */}
+      <div className="grid items-center gap-3" style={{ gridTemplateColumns: 'minmax(0,1.2fr) minmax(0,2fr) 11rem 2rem' }}>
+        {identity}
+        {publicFields ?? <span />}
+        <span className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+          {new Date(credential.createdAt).toLocaleString()}
         </span>
-        {credential.publicData && Object.keys(credential.publicData).length > 0 && (
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs font-mono">
-            {Object.entries(credential.publicData).map(([k, v]) => (
-              <span key={k}>
-                <span style={{ color: 'var(--muted)' }}>{k}=</span>
-                <span style={{ color: 'var(--foreground)' }}>{String(v)}</span>
-              </span>
-            ))}
-          </div>
-        )}
-        <span className="text-xs" style={{ color: 'var(--muted)' }}>
-          created {new Date(credential.createdAt).toLocaleString()}
-        </span>
-        {editing && typeInfo?.jsonSchema && (
-          <EditCredentialForm
-            credential={credential}
-            typeInfo={typeInfo}
-            onDone={() => { setEditing(false); onChanged() }}
-            onCancel={() => setEditing(false)}
-          />
-        )}
+        <div className="flex justify-end">{menu}</div>
       </div>
-      <div className="shrink-0 flex gap-2">
-        {typeInfo?.jsonSchema && !editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="px-3 py-1.5 rounded-md text-xs"
-            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-          >
-            Edit
-          </button>
-        )}
-        {confirming ? (
-          <>
-            <button
-              onClick={() => setConfirming(false)}
-              className="px-3 py-1.5 rounded-md text-xs"
-              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onDelete}
-              className="px-3 py-1.5 rounded-md text-xs"
-              style={{ background: 'var(--danger)', color: '#fff' }}
-            >
-              Confirm
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={() => setConfirming(true)}
-            className="px-3 py-1.5 rounded-md text-xs"
-            style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}
-          >
-            Delete
-          </button>
-        )}
-      </div>
+      {editor}
     </div>
+  )
+}
+
+/** Edit and a two-step Delete, behind the same ⋯ every other card uses. */
+function CredentialMenu({ canEdit, onEdit, onDelete }: {
+  canEdit: boolean
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  return (
+    <KebabMenu>
+      {(close) => (
+        <>
+          {canEdit && (
+            <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
+              onClick={() => { onEdit(); close() }}>
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            className={MENU_ITEM}
+            style={{ color: 'var(--danger)', ...(canEdit ? { borderTop: '1px solid var(--border)' } : {}) }}
+            onClick={() => {
+              if (!confirming) { setConfirming(true); return }
+              onDelete(); close(); setConfirming(false)
+            }}
+          >
+            {confirming ? 'Delete for good?' : 'Delete'}
+          </button>
+        </>
+      )}
+    </KebabMenu>
   )
 }
 

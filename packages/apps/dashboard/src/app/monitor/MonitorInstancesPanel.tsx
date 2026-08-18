@@ -180,7 +180,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>INSTANCES ({mine.length})</span>
         {multiDomain && (
-          <span className="text-[10px]" style={{ color: 'var(--muted)' }} title="Each implementation is its own dispatch domain — one active instance each">
+          <span className="text-xs" style={{ color: 'var(--muted)' }} title="Each implementation is its own dispatch domain — one active instance each">
             {new Set(mine.map(i => i.implementation)).size} implementations · one active each
           </span>
         )}
@@ -235,20 +235,20 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                     </span>
                   </button>
                   {inst.credential && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
+                    <span className="text-xs px-1.5 py-0.5 rounded font-mono" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
                       {inst.credential}
                     </span>
                   )}
-                  <span className="text-[10px] font-mono truncate" style={{ color: 'var(--muted)' }} title={summarizeParams(inst.params)}>
+                  <span className="text-xs font-mono truncate" style={{ color: 'var(--muted)' }} title={summarizeParams(inst.params)}>
                     {summarizeParams(inst.params)}
                   </span>
                   {inst.servingKeys?.length ? (
-                    <span className="text-[10px] font-mono truncate" style={{ color: 'var(--muted)' }} title={inst.servingKeys.join(', ')}>
+                    <span className="text-xs font-mono truncate" style={{ color: 'var(--muted)' }} title={inst.servingKeys.join(', ')}>
                       serving {inst.servingKeys.length}
                     </span>
                   ) : null}
                   {inst.problem && (
-                    <span className="text-[10px]" style={{ color: 'var(--danger)' }} title={inst.problem}>⚠ {inst.problem}</span>
+                    <span className="text-xs" style={{ color: 'var(--danger)' }} title={inst.problem}>⚠ {inst.problem}</span>
                   )}
                   <div className="ml-auto flex items-center gap-1.5 shrink-0">
                     {editable && (
@@ -257,7 +257,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                           id: inst.id,
                           values: Object.fromEntries(Object.entries(inst.params ?? {}).map(([k, v]) => [k, String(v)])),
                         })}
-                        className="text-[10px] px-2 py-1 rounded-md"
+                        className="text-xs px-2 py-1 rounded-md"
                         style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
                         title={inst.active
                           ? 'Edit params — saving rebuilds the runner (its keys come back, its in-memory state does not)'
@@ -270,7 +270,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                       <button
                         onClick={() => void stop(inst)}
                         disabled={busy}
-                        className="text-[10px] px-2 py-1 rounded-md"
+                        className="text-xs px-2 py-1 rounded-md"
                         style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
                         title="Stop this instance — its keys go unserved until something else covers them"
                       >
@@ -280,7 +280,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                     <button
                       onClick={() => void remove(inst.id)}
                       disabled={busy}
-                      className="text-[10px] px-2 py-1 rounded-md"
+                      className="text-xs px-2 py-1 rounded-md"
                       style={{ border: '1px solid var(--border)', color: 'var(--danger, #ef4444)' }}
                     >
                       Delete

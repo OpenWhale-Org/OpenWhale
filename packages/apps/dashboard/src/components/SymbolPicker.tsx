@@ -250,7 +250,7 @@ export function SymbolPicker({
                       )}
                       <span>{m.symbol}</span>
                     </span>
-                    <span className="text-[10px] shrink-0" style={{ color: 'var(--muted)' }}>
+                    <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
                       {m.base}/{m.quote}{m.type !== 'swap' ? ` · ${m.type}` : ''}
                     </span>
                   </button>

@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useSortable, DragHandle } from '../../components/Sortable'
+import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
 import type { ScriptInfo, ParamFieldDef } from '@openwhaleorg/core'
 
 /**
@@ -38,8 +40,12 @@ export function ScriptsClient() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   /** Says where an unmounted script went — otherwise it just vanishes on click. */
   const [notice, setNotice] = useState('')
-  /** Which card or folder has its grip held — native DnD has no handle concept. */
-  const [armed, setArmed] = useState<string | null>(null)
+
+  const drops = useRef<{
+    reorder: (order: string[]) => void
+    refile: (id: string, folder: string) => void
+    folder: (a: string, b: string) => void
+  }>({ reorder: () => {}, refile: () => {}, folder: () => {} })
 
   useEffect(() => {
     void fetch('/api/scripts')
@@ -79,6 +85,18 @@ export function ScriptsClient() {
     </div>
   )
 
+  /* Same reordering as the strategies page, from the same module.
+
+     Called HERE, above the early returns below: the handlers it needs close
+     over `groups`, which only exists further down, but a hook that runs only
+     on some renders changes the hook count between them and React throws.
+     So the hook goes first and reads the handlers through a ref. */
+  const { beginDrag, cardStyle, folderStyle, refileStyle } = useSortable({
+    onReorder: (order) => drops.current.reorder(order),
+    onRefile: (id, folder) => drops.current.refile(id, folder),
+    onFolderMove: (a, b) => drops.current.folder(a, b),
+  })
+
   if (error) return <div>{header()}<div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div></div>
   if (scripts === null) return <div>{header()}<div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div></div>
   if (scripts.length === 0) {
@@ -109,16 +127,14 @@ export function ScriptsClient() {
     if (!on) setNotice('Minimized — it is now unmounted. Bring it back any time from Manage.')
   }
 
-  /** Drop a card on a card: reorder within the group, or re-file into the target's folder. */
-  const dropCard = (dragId: string, targetId: string) => {
-    if (dragId === targetId) return
-    const next = groups.map(g => ({ ...g, items: [...g.items] }))
-    const from = next.find(g => g.items.some(s => s.id === dragId))
-    const to = next.find(g => g.items.some(s => s.id === targetId))
-    if (!from || !to) return
-    const dragged = from.items.splice(from.items.findIndex(s => s.id === dragId), 1)[0]!
-    to.items.splice(to.items.findIndex(s => s.id === targetId), 0, dragged)
-    void save(layout(next, shelf, to !== from ? { id: dragId, folder: to.folder } : undefined))
+  /** A group's new id order, straight from the drag. */
+  const reorder = (order: string[]) => {
+    const gi = groups.findIndex(g => g.items.some(x => x.id === order[0]))
+    if (gi < 0) return
+    const byId = new Map(groups[gi]!.items.map(x => [x.id, x]))
+    const next = groups.map((g, i) =>
+      i === gi ? { ...g, items: order.map(x => byId.get(x)!).filter(Boolean) } : g)
+    void save(layout(next, shelf))
   }
 
   const dropFolder = (dragName: string, targetName: string) => {
@@ -131,6 +147,9 @@ export function ScriptsClient() {
     next.splice(ti, 0, moved!)
     void save(layout(next, shelf))
   }
+
+  /* The handlers are published to this ref further down, once `groups` exists. */
+  drops.current = { reorder, refile: setFolder, folder: dropFolder }
 
   if (manage) {
     return (
@@ -184,19 +203,9 @@ export function ScriptsClient() {
         <div key={folder ?? '·'} className="flex flex-col gap-3">
           {folder !== undefined && (
             <div
-              draggable={armed === `folder:${folder}`}
-              onDragEnd={() => setArmed(null)}
-              onDragStart={(e) => {
-                if (armed !== `folder:${folder}`) { e.preventDefault(); return }
-                e.dataTransfer.setData('ow/sfolder', folder)
-                e.dataTransfer.effectAllowed = 'move'
-              }}
-              onDragOver={(e) => { if (e.dataTransfer.types.includes('ow/sfolder')) e.preventDefault() }}
-              onDrop={(e) => {
-                const dragged = e.dataTransfer.getData('ow/sfolder')
-                if (dragged) { e.preventDefault(); dropFolder(dragged, folder) }
-              }}
+              data-folder-id={folder}
               className="flex items-center gap-2 mt-2 select-none"
+              style={folderStyle(folder)}
             >
               <button
                 className="flex items-center gap-2 text-left text-sm font-medium"
@@ -211,55 +220,32 @@ export function ScriptsClient() {
                 <span>📁 {folder}</span>
                 <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
               </button>
-              <span
-                onPointerDown={() => setArmed(`folder:${folder}`)}
-                className="text-xs cursor-grab select-none px-0.5"
-                style={{ color: 'var(--muted)' }}
-                title="Drag to reorder folders"
-                aria-hidden
-              >⠿</span>
+              <DragHandle title="Drag to reorder folders" onPointerDown={(e) => beginDrag('folder', folder, e)} />
             </div>
           )}
           {folder === undefined && groups.length > 1 && (
             <div className="text-xs mt-2" style={{ color: 'var(--muted)' }}>Ungrouped</div>
           )}
-          {(folder === undefined || !collapsed.has(folder)) && items.map((s) => (
-            <div
-              key={s.id}
-              /* Draggable ONLY while the grip is held.
-                 The wrapper used to be draggable outright, which made the whole
-                 card a drag surface — on a card that is mostly a form, every
-                 press felt like it might pick the card up. Native drag-and-drop
-                 has no notion of a handle, so the flag is armed on pointerdown
-                 over the grip and disarmed when the drag ends. The Strategies
-                 page reaches the same result through pointer events; both pages
-                 end up with one grabbable spot, which is the point. */
-              draggable={armed === s.id}
-              onDragEnd={() => setArmed(null)}
-              onDragStart={(e) => {
-                if (armed !== s.id) { e.preventDefault(); return }
-                e.dataTransfer.setData('ow/scard', s.id)
-                e.dataTransfer.effectAllowed = 'move'
-                // Carry the card, not the glyph — the grip alone is a useless ghost
-                const card = (e.currentTarget as HTMLElement).firstElementChild
-                if (card) e.dataTransfer.setDragImage(card as Element, 24, 24)
-              }}
-              onDragOver={(e) => { if (e.dataTransfer.types.includes('ow/scard')) e.preventDefault() }}
-              onDrop={(e) => {
-                const dragged = e.dataTransfer.getData('ow/scard')
-                if (dragged) { e.preventDefault(); dropCard(dragged, s.id) }
-              }}
-            >
+          {(folder === undefined || !collapsed.has(folder)) && (
+          <div
+            data-cards={folder ?? ''}
+            className="flex flex-col gap-3"
+            style={refileStyle(folder)}
+          >
+          {items.map((s) => (
+            <div key={s.id} data-card-id={s.id} style={cardStyle(s.id)}>
               <ScriptCard
                 script={s}
                 folder={entry(s.id).folder}
                 folders={folderNames}
-                onGrip={() => setArmed(s.id)}
+                dragHandle={<DragHandle title="Drag to reorder or move between folders" onPointerDown={(e) => beginDrag('card', s.id, e)} />}
                 onSetFolder={(name) => setFolder(s.id, name)}
                 onUnmount={() => setMounted(s.id, false)}
               />
             </div>
           ))}
+          </div>
+          )}
         </div>
       ))}
       </div>
@@ -400,86 +386,6 @@ function MountManager({ scripts, isMounted, onToggle, error }: {
  * Folder picker, same shape as the strategy list's: pick an existing folder,
  * type a new one, or drop out of the folder entirely.
  */
-function FolderMenu({ current, folders, onPick }: {
-  current?: string
-  folders: string[]
-  onPick: (name: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState('')
-  const boxRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onClickAway(e: MouseEvent) {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onClickAway)
-    return () => document.removeEventListener('mousedown', onClickAway)
-  }, [open])
-
-  const pick = (name: string) => { onPick(name); setOpen(false); setDraft('') }
-
-  return (
-    <div ref={boxRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="px-2 py-1.5 rounded-md text-xs"
-        title="Move to a folder"
-        style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-      >
-        📁{current ? ` ${current}` : ''}
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 z-[100] mt-1 rounded-md shadow-lg flex flex-col"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: '11rem', maxHeight: '16rem' }}
-        >
-          <div className="overflow-y-auto">
-            {folders.map(f => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => pick(f)}
-                className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2"
-                style={{ color: 'var(--foreground)' }}
-              >
-                <span style={{ color: f === current ? 'var(--accent)' : 'var(--muted)' }}>{f === current ? '●' : '○'}</span>
-                📁 {f}
-              </button>
-            ))}
-          </div>
-          <form
-            className="flex gap-1 px-2 py-2"
-            style={{ borderTop: folders.length ? '1px solid var(--border)' : 'none' }}
-            onSubmit={(e) => { e.preventDefault(); if (draft.trim()) pick(draft.trim()) }}
-          >
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="New folder…"
-              className="flex-1 min-w-0 rounded px-2 py-1 text-xs"
-              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-            />
-            <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Add</button>
-          </form>
-          {current && (
-            <button
-              type="button"
-              onClick={() => pick('')}
-              className="text-left px-3 py-1.5 text-xs"
-              style={{ color: 'var(--danger)', borderTop: '1px solid var(--border)' }}
-            >
-              Remove from folder
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** An attachment a script returned alongside its report. */
 interface ScriptFile { name: string; mime?: string; content: string }
 interface ScriptOutput { text: string; json?: unknown; files?: ScriptFile[] }
@@ -546,12 +452,12 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
   return out
 }
 
-function ScriptCard({ script, folder, folders, onGrip, onSetFolder, onUnmount }: {
+function ScriptCard({ script, folder, folders, dragHandle, onSetFolder, onUnmount }: {
   script: ScriptInfo
   folder?: string
   folders?: string[]
-  /** Arms the wrapper's draggable flag. Fired by the grip, nowhere else. */
-  onGrip?: (e: React.PointerEvent) => void
+  /** The six-dot grip. Dragging starts there and nowhere else. */
+  dragHandle?: React.ReactNode
   onSetFolder?: (name: string) => void
   onUnmount?: () => void
 }) {
@@ -657,50 +563,52 @@ function ScriptCard({ script, folder, folders, onGrip, onSetFolder, onUnmount }:
 
   return (
     <div className="rounded-lg p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      {/* Same header shape as an instance card: identity left, then the one
+          action, the ⋯ menu, and the grip LAST. Filing and minimizing used to
+          be two loose controls sitting where another page puts its menu. */}
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex items-start gap-2">
-          {/* The only grabbable spot on the card. */}
-          {onSetFolder && (
-            <span
-              onPointerDown={onGrip}
-              className="text-xs mt-0.5 cursor-grab select-none px-0.5"
-              style={{ color: 'var(--muted)' }}
-              title="Drag to reorder or move between folders"
-              aria-hidden
-            >⠿</span>
-          )}
-          <div className="min-w-0">
-            <div className="font-medium">{script.name}</div>
-            <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-              {script.id}
-              {script.description && <> — {script.description}</>}
-            </div>
+        <div className="min-w-0">
+          <div className="font-medium">{script.name}</div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+            {script.id}
+            {script.description && <> — {script.description}</>}
           </div>
         </div>
-        <div className="shrink-0 flex items-center gap-2">
-          {onSetFolder && <FolderMenu {...(folder !== undefined ? { current: folder } : {})} folders={folders ?? []} onPick={onSetFolder} />}
+        <div className="shrink-0 flex items-center gap-1">
           <button
             onClick={() => void run()}
             disabled={running}
-            className="px-4 py-1.5 rounded-md text-sm"
+            className="px-4 py-1.5 rounded-md text-sm mr-1"
             style={{ background: running ? 'var(--border)' : 'var(--accent)', color: '#fff' }}
           >
             {running ? 'Running…' : '▶ Run'}
           </button>
-          {/* Window-style minimize, in the corner where one belongs. Reads as
-              "put this away", which is what it does — the script stays
-              registered and comes back from Manage. */}
-          {onUnmount && (
-            <button
-              onClick={onUnmount}
-              className="w-6 h-6 rounded-md flex items-center justify-center leading-none"
-              style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)' }}
-              title="Minimize — take it off this page; restore it from Manage"
-              aria-label="Minimize this script"
-            >
-              —
-            </button>
+          {(onSetFolder || onUnmount) && (
+            <KebabMenu>
+              {(close) => (
+                <>
+                  {onSetFolder && (
+                    <FolderSection current={folder} folders={folders ?? []} onPick={onSetFolder} close={close} />
+                  )}
+                  {/* Still "put this away", just no longer a lone — button in a
+                      corner where the other page keeps a menu. */}
+                  {onUnmount && (
+                    <button
+                      type="button"
+                      className={MENU_ITEM}
+                      style={{ color: 'var(--foreground)', borderTop: '1px solid var(--border)' }}
+                      onClick={() => { onUnmount(); close() }}
+                      title="Take it off this page; restore it from Manage"
+                    >
+                      Minimize
+                    </button>
+                  )}
+                </>
+              )}
+            </KebabMenu>
           )}
+          {/* Last in the row, as on the strategies page. */}
+          {dragHandle}
         </div>
       </div>
 

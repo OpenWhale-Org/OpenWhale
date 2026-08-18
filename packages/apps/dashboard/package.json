@@ -11,21 +11,23 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@openwhaleorg/compiler": "workspace:*",
     "@openwhaleorg/core": "workspace:*",
     "next": "15.3.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@openwhaleorg/compiler": "workspace:*",
+    "three": "^0.185.1",
     "zod": "^4.4.1"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.7",
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.185.4",
     "prettier": "^3.5.3",
     "prettier-plugin-tailwindcss": "^0.6.12",
     "tailwindcss": "^4.1.7",
-    "@tailwindcss/postcss": "^4.1.7",
     "typescript": "^5.8.3"
   }
 }

@@ -1,6 +1,29 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSortable, DragHandle } from '../../components/Sortable'
+import { useLayout, LayoutSwitch, LAYOUTS } from '../../components/LayoutSwitch'
+import dynamic from 'next/dynamic'
+import type { WhaleDatum } from '../../components/WhaleField'
+
+/* three.js is ~170 kB and only the 3D view needs it — statically imported it
+   rode along on every visit to this page. Loaded on demand instead, so picking
+   the view is what pays for it. ssr:false because the scene wants a canvas. */
+const WhaleField = dynamic(
+  () => import('../../components/WhaleField').then(m => m.WhaleField),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="w-full rounded-lg grid place-items-center text-xs"
+        style={{ height: 'calc(100vh - 22rem)', minHeight: 420, color: 'var(--muted)', border: '1px solid var(--border)' }}
+      >
+        Diving…
+      </div>
+    ),
+  },
+)
+import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
 import Link from 'next/link'
 import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
 import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ExecutionResult } from '@openwhaleorg/core'
@@ -36,6 +59,21 @@ function newId(prefix: string): string {
 }
 
 // ── Instance icons ────────────────────────────────────────────────────────────
+const SORTS = [
+  { id: 'manual', label: 'Manual order' },
+  { id: 'name', label: 'Name A→Z' },
+  { id: 'strategy', label: 'Strategy' },
+  { id: 'pnl', label: 'PnL high→low' },
+  { id: 'pnl-asc', label: 'PnL low→high' },
+  { id: 'newest', label: 'Newest first' },
+  { id: 'oldest', label: 'Oldest first' },
+] as const
+
+type SortId = typeof SORTS[number]['id']
+
+/* The strategies page adds a third view to the shared two. */
+const INSTANCE_LAYOUTS = [...LAYOUTS, { id: 'whale', label: '3D', glyph: '🐋', hint: 'The pod, in open water' }]
+
 const ICON_POOL = ['🐋', '🐙', '🦈', '🐬', '🦑', '🐡', '🐳', '🦞', '🐊', '🦭', '⚡', '🔥', '🌊', '🌀', '☄️', '🛰️', '🧭', '⚙️', '🎯', '🧲', '💎', '🪙', '📈', '🚀']
 
 /** Persisted icon, else a stable pick derived from the id — no flicker, no write. */
@@ -630,7 +668,7 @@ export function ParamFieldsForm({
               <button
                 type="button"
                 onClick={() => setAllCollapsed(!allCollapsed)}
-                className="text-[11px] px-2 py-0.5 rounded-md"
+                className="text-xs px-2 py-0.5 rounded-md"
                 style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
               >
                 {allCollapsed ? 'Expand all' : 'Collapse all'}
@@ -659,14 +697,14 @@ export function ParamFieldsForm({
                     >
                       <path d="M6 9l6 6 6-6" />
                     </svg>
-                    <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--foreground)' }}>
+                    <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--foreground)' }}>
                       {sec || 'General'}
                     </span>
-                    <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{fieldsIn(sec).length}</span>
+                    <span className="text-xs" style={{ color: 'var(--muted)' }}>{fieldsIn(sec).length}</span>
                     {/* A collapsed group must still say whether anything inside it was touched. */}
                     {edited > 0 && (
                       <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-full"
+                        className="text-xs px-1.5 py-0.5 rounded-full"
                         style={{ background: 'var(--accent-soft, rgba(124,58,237,0.14))', color: '#a78bfa' }}
                       >
                         {edited} set
@@ -737,68 +775,27 @@ export function InstancesClient({ initialInstances }: Props) {
   const [actionError, setActionError] = useState('')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
-  /* Reordering is POINTER-based, not HTML5 drag-and-drop.
-     The native API paints a translucent CLONE of the element and gives no
-     control over it: what follows the cursor is a picture, while the card you
-     grabbed sits untouched in the grid. Here the real element is translated,
-     so the thing moving is the thing you picked up.
-     `pointer-events: none` on the dragged card is what lets elementFromPoint
-     see the card UNDER the cursor rather than the one being carried. */
-  const [drag, setDrag] = useState<DragState | null>(null)
-  const dragRef = useRef<DragState | null>(null)
-  /* The drop handlers close over `groups`, which is computed inside the render
-     below — so they are published here each render and read at pointer-up. */
-  const [layout, setLayout] = useLayout()
-  const dropRef = useRef<{ card: (a: string, b: string) => void; folder: (a: string, b: string) => void }>({ card: () => {}, folder: () => {} })
-
-  const beginDrag = (kind: 'card' | 'folder', id: string, e: React.PointerEvent) => {
-    // Left button only, and never from a control: a card is mostly buttons.
-    if (e.button !== 0) return
-    if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
-    const startX = e.clientX
-    const startY = e.clientY
-    const attr = kind === 'card' ? 'data-card-id' : 'data-folder-id'
-    let started = false
-
-    const publish = (d: DragState | null) => { dragRef.current = d; setDrag(d) }
-    const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX
-      const dy = ev.clientY - startY
-      // A few pixels of slop, so a click on the card body stays a click
-      if (!started && Math.hypot(dx, dy) < 5) return
-      if (!started) { started = true; document.body.style.userSelect = 'none' }
-      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(`[${attr}]`)
-      const over = el?.getAttribute(attr) ?? null
-      publish({ kind, id, dx, dy, over: over === id ? null : over })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = ''
-      const over = dragRef.current?.over
-      publish(null)
-      if (started && over) (kind === 'card' ? dropRef.current.card : dropRef.current.folder)(id, over)
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
-  /** The element being carried, and the one it is hovering over. */
-  const dragStyle = (kind: 'card' | 'folder', id: string): React.CSSProperties => {
-    if (drag?.kind !== kind) return {}
-    if (drag.id === id) {
-      return {
-        transform: `translate(${drag.dx}px, ${drag.dy}px)`,
-        position: 'relative', zIndex: 50, pointerEvents: 'none',
-        cursor: 'grabbing', boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
-      }
-    }
-    if (drag.over === id) {
-      return { outline: '2px dashed var(--accent)', outlineOffset: '2px', borderRadius: '0.5rem' }
-    }
-    return {}
-  }
-
+  const [layout, setLayout] = useLayout('ow:instances-layout', INSTANCE_LAYOUTS)
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState<'all' | 'running' | 'stopped'>('all')
+  const [sort, setSort] = useState<SortId>('manual')
+  /** 3D view only: which whale the pointer is on, and which one is selected. */
+  const [whaleHover, setWhaleHover] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [whaleSelected, setWhaleSelected] = useState<string | null>(null)
+  /* Reordering lives in components/Sortable — every panel in the dashboard
+     shares it. The handlers below close over `groups`, which is computed in
+     the render body, so they are re-created each render and the hook reads
+     them through a ref at pointer-up. */
+  const sortable = useRef<{
+    reorder: (order: string[]) => void
+    refile: (id: string, folder: string) => void
+    folder: (a: string, b: string) => void
+  }>({ reorder: () => {}, refile: () => {}, folder: () => {} })
+  const { beginDrag, cardStyle, folderStyle, refileStyle } = useSortable({
+    onReorder: (order) => sortable.current.reorder(order),
+    onRefile: (id, folder) => sortable.current.refile(id, folder),
+    onFolderMove: (a, b) => sortable.current.folder(a, b),
+  })
 
   const [pnl, setPnl] = useState<Record<string, PnlTotals>>({})
   const [statsKey, setStatsKey] = useState(0)
@@ -813,6 +810,41 @@ export function InstancesClient({ initialInstances }: Props) {
     const timer = setInterval(() => void loadPnl(), 30_000)
     return () => clearInterval(timer)
   }, [loadPnl])
+
+  /* Filtering and sorting happen HERE, above every view — one derived list, so
+     what you filtered to is what the grid, the list and the pod all show.
+
+     Reordering switches off whenever a filter or a non-manual sort is on: the
+     drag would have to write a sortOrder derived from a list that is not the
+     real one, and dropping a card "after" a neighbour that is currently hidden
+     means nothing. Saying so beats persisting a scrambled order. */
+  const reorderable = sort === 'manual' && query.trim() === '' && status === 'all'
+
+  const visible = (() => {
+    const q = query.trim().toLowerCase()
+    let out = instances
+    if (status !== 'all') out = out.filter(i => i.active === (status === 'running'))
+    if (q) {
+      out = out.filter(i => {
+        const accounts = i.credentials
+          ? Object.values(i.credentials).join(' ')
+          : (i.accounts ?? []).join(' ')
+        return `${i.name} ${i.strategyId} ${accounts} ${i.folder ?? ''}`.toLowerCase().includes(q)
+      })
+    }
+    if (sort === 'manual') return out
+    // No reading sorts last rather than as zero — an instance that has never
+    // traded is not "flat", and mixing it in with real zeros hides both.
+    const net = (i: StrategyInstanceView) => pnl[i.id]?.net ?? Number.NEGATIVE_INFINITY
+    const sorted = [...out]
+    if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
+    else if (sort === 'strategy') sorted.sort((a, b) => a.strategyId.localeCompare(b.strategyId) || a.name.localeCompare(b.name))
+    else if (sort === 'pnl') sorted.sort((a, b) => net(b) - net(a))
+    else if (sort === 'pnl-asc') sorted.sort((a, b) => net(a) - net(b))
+    else if (sort === 'newest') sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    else if (sort === 'oldest') sorted.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    return sorted
+  })()
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -862,11 +894,40 @@ export function InstancesClient({ initialInstances }: Props) {
       <StatsBar refreshKey={statsKey} />
 
       {instances.length > 0 && (
-        <div className="flex items-center gap-3 mt-4">
-          <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
-            drag the ⠿ grip to reorder or re-file
+        <div className="flex items-center gap-2 mt-4 flex-wrap">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by name, strategy or account…"
+            className="rounded-md px-3 h-8 text-xs min-w-0 flex-1"
+            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+          />
+          <Segmented
+            value={status}
+            onChange={(v) => setStatus(v as typeof status)}
+            options={[
+              { id: 'all', label: 'All' },
+              { id: 'running', label: 'Running' },
+              { id: 'stopped', label: 'Stopped' },
+            ]}
+          />
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortId)}
+            className="rounded-md px-2 h-8 text-xs shrink-0"
+            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            title="Sort order"
+          >
+            {SORTS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
+            {layout === 'whale'
+              ? 'drag to orbit · wheel to zoom · arrows to move'
+              : reorderable
+                ? 'drag the ⠿ grip to reorder or re-file'
+                : 'reordering is off while filtered or sorted'}
           </span>
-          <LayoutSwitch value={layout} onChange={setLayout} />
+          <LayoutSwitch value={layout} onChange={setLayout} options={INSTANCE_LAYOUTS} />
         </div>
       )}
 
@@ -892,42 +953,63 @@ export function InstancesClient({ initialInstances }: Props) {
 
       {instances.length === 0 ? (
         <EmptyState onNew={() => setShowForm(true)} />
+      ) : visible.length === 0 ? (
+        <div
+          className="rounded-lg p-8 mt-4 text-center text-sm"
+          style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px dashed var(--border)' }}
+        >
+          No instance matches this filter.
+          <button
+            type="button"
+            onClick={() => { setQuery(''); setStatus('all') }}
+            className="ml-2 underline"
+            style={{ color: 'var(--accent)' }}
+          >
+            Clear it
+          </button>
+        </div>
+      ) : layout === 'whale' ? (
+        <WhaleLayout
+          instances={visible}
+          pnl={pnl}
+          hover={whaleHover}
+          selected={whaleSelected}
+          onHover={(id, at) => setWhaleHover(id && at ? { id, x: at.x, y: at.y } : null)}
+          onSelect={setWhaleSelected}
+          onActivate={(id) => act(id, 'activate')}
+          onDeactivate={(id) => act(id, 'deactivate')}
+        />
       ) : (
         <div className="flex flex-col gap-3 mt-4">
           {(() => {
-            const groups = groupByFolder(instances)
+            const groups = groupByFolder(visible)
             const folderNames = groups.map(g => g.folder).filter((f): f is string => f !== undefined)
 
             /**
-             * Where everything sits if the card is dropped on the target.
-             *
-             * The same function drives the live preview and the commit, so what
-             * you watch slide into place is exactly what gets saved — a preview
-             * computed separately from the commit is a preview that eventually
-             * lies about the result.
+             * Commit an id order for one group. The drag has already decided
+             * everything geometrically; all that is left is to renumber.
              */
-            const reordered = (dragId: string, targetId: string) => {
-              const next = groups.map(g => ({ ...g, items: [...g.items] }))
-              const from = next.find(g => g.items.some(i => i.id === dragId))
-              const to = next.find(g => g.items.some(i => i.id === targetId))
-              if (!from || !to) return undefined
-              const dragged = from.items.splice(from.items.findIndex(i => i.id === dragId), 1)[0]!
-              to.items.splice(to.items.findIndex(i => i.id === targetId), 0, dragged)
-              return { next, moved: from !== to ? to.folder ?? '' : undefined }
-            }
-
-            const dropCard = async (dragId: string, targetId: string) => {
-              if (dragId === targetId) return
-              const plan = reordered(dragId, targetId)
-              if (!plan) return
-              if (plan.moved !== undefined) await patchInstanceMeta(dragId, { folder: plan.moved })
-              await persistLayout(plan.next)
+            const dropCard = async (order: string[]) => {
+              const gi = groups.findIndex(g => g.items.some(i => i.id === order[0]))
+              if (gi < 0) return
+              const byId = new Map(groups[gi]!.items.map(i => [i.id, i]))
+              const next = groups.map((g, i) =>
+                i === gi ? { ...g, items: order.map(x => byId.get(x)!).filter(Boolean) } : g)
+              // Renumber locally first, with the exact same formula persistLayout
+              // uses. Waiting for the round trip would repaint the OLD order for
+              // a frame the moment the drag state clears — a visible flick back.
+              const pos = new Map<string, number>()
+              next.forEach((g, i) => g.items.forEach((inst, k) => pos.set(inst.id, i * 1000 + k * 10)))
+              setInstances(prev => prev.map(x =>
+                pos.has(x.id) ? { ...x, sortOrder: pos.get(x.id)! } : x))
+              await persistLayout(next)
               await refresh()
             }
 
-            dropRef.current = {
-              card: (a, b) => { void dropCard(a, b) },
-              folder: (a, b) => { void dropFolder(a, b) },
+            /** Dropped over another folder's grid: re-file rather than reorder. */
+            const refileCard = async (id: string, folder: string) => {
+              await patchInstanceMeta(id, { folder })
+              await refresh()
             }
 
             const dropFolder = async (dragName: string, targetName: string) => {
@@ -942,13 +1024,25 @@ export function InstancesClient({ initialInstances }: Props) {
               await refresh()
             }
 
+            /* The pointer handlers live outside this render closure but the drop
+               handlers need `groups`, which is computed inside it — so they are
+               republished every render and read at pointer-up. */
+            sortable.current = {
+              reorder: (order) => { void dropCard(order) },
+              refile: (id, folder) => { void refileCard(id, folder) },
+              folder: (a, b) => { void dropFolder(a, b) },
+            }
+
+            /* No preview reorder here on purpose. The DOM order is left alone
+               for the whole drag and every card is moved by transform instead;
+               reordering mid-drag is what made the earlier versions flicker. */
             return groups.map(({ folder, items }) => (
               <div key={folder ?? '·'} className="flex flex-col gap-3">
                 {folder !== undefined && (
                   <div
                     data-folder-id={folder}
                     className="flex items-center gap-2 mt-2 select-none"
-                    style={dragStyle('folder', folder)}
+                    style={folderStyle(folder)}
                   >
                     <button
                       className="flex items-center gap-2 text-left text-sm font-medium"
@@ -963,7 +1057,12 @@ export function InstancesClient({ initialInstances }: Props) {
                       <span>📁 {folder}</span>
                       <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
                     </button>
-                    <DragHandle title="Drag to reorder folders" onPointerDown={(e) => beginDrag('folder', folder, e)} />
+                    {/* Hidden rather than disabled while filtered or sorted: a
+                        grip you can grab but that refuses to do anything is
+                        worse than no grip. */}
+                    {reorderable && (
+                      <DragHandle title="Drag to reorder folders" onPointerDown={(e) => beginDrag('folder', folder, e)} />
+                    )}
                   </div>
                 )}
                 {folder === undefined && groups.length > 1 && (
@@ -974,20 +1073,27 @@ export function InstancesClient({ initialInstances }: Props) {
                     targets exactly as before. */}
                 {(folder === undefined || !collapsedFolders.has(folder)) && (
                 <div
+                  data-cards={folder ?? ''}
                   className={layout === 'grid' ? 'grid gap-3' : 'flex flex-col gap-1.5'}
-                  style={layout === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } : undefined}
+                  style={{
+                    ...(layout === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } : {}),
+                    ...refileStyle(folder),
+                  }}
                 >
                 {items.map((inst) => (
                   <div
                     key={inst.id}
                     data-card-id={inst.id}
-                    style={dragStyle('card', inst.id)}
+                    className="h-full"
+                    style={cardStyle(inst.id)}
                   >
                     {(() => {
                       const Item = layout === 'list' ? InstanceRow : InstanceCard
                       return <Item
                       instance={inst}
-                      dragHandle={<DragHandle title="Drag to reorder or re-file" onPointerDown={(e) => beginDrag('card', inst.id, e)} />}
+                      {...(reorderable
+                        ? { dragHandle: <DragHandle title="Drag to reorder or re-file" onPointerDown={(e) => beginDrag('card', inst.id, e)} /> }
+                        : {})}
                       pnl={pnl[inst.id]}
                       folders={folderNames}
                       onActivate={() => act(inst.id, 'activate')}
@@ -1018,13 +1124,266 @@ export function InstancesClient({ initialInstances }: Props) {
 }
 
 /** A reorder in flight: what is being carried, how far, and over what. */
-interface DragState {
-  kind: 'card' | 'folder'
-  id: string
-  dx: number
-  dy: number
-  /** The id under the cursor — where it would land. */
-  over: string | null
+/**
+ * The pod view: the field itself, the card that follows the pointer, and the
+ * panel for whichever whale is selected.
+ *
+ * The hover card is DOM, not a sprite in the scene — it has to look like every
+ * other card on this page, and text drawn into a texture never quite does.
+ */
+function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onActivate, onDeactivate }: {
+  instances: StrategyInstanceView[]
+  pnl: Record<string, PnlTotals>
+  hover: { id: string; x: number; y: number } | null
+  selected: string | null
+  onHover: (id: string | null, at: { x: number; y: number } | null) => void
+  onSelect: (id: string | null) => void
+  onActivate: (id: string) => void
+  onDeactivate: (id: string) => void
+}) {
+  const byId = new Map(instances.map(i => [i.id, i]))
+  const hovered = hover ? byId.get(hover.id) : undefined
+  const chosen = selected ? byId.get(selected) : undefined
+
+  const data: WhaleDatum[] = instances.map(i => ({
+    id: i.id,
+    name: i.name,
+    strategyId: i.strategyId,
+    active: i.active,
+    pnl: pnl[i.id]?.net,
+    icon: iconFor(i),
+  }))
+
+  return (
+    <div className="relative mt-4">
+      <WhaleField instances={data} selectedId={selected} onHover={onHover} onSelect={onSelect} />
+
+      {/* Follows the pointer, offset so the cursor never sits on top of it.
+          Same glass panel the site's dive scene uses, down to the bubbles —
+          this view is quoting that page, so it should quote it exactly. */}
+      {hovered && hover && (
+        <div
+          className={`whale-card ${tone(pnl[hovered.id]?.net)}`}
+          /* Flips to the cursor's left when the dossier is open, so the two
+             never stack. The card is ~250px wide and the panel takes the right
+             46% of the frame. */
+          style={chosen
+            ? { right: 'calc(min(30rem, 46%) + 1rem)', top: hover.y - 14 }
+            : { left: hover.x + 20, top: hover.y - 14 }}
+        >
+          <span className="bub b1" /><span className="bub b2" /><span className="bub b3" />
+          <span className="bub b4" /><span className="bub b5" /><span className="bub b6" />
+          <div className="head">
+            <span className="dot" />
+            <span className="name">{hovered.name}</span>
+          </div>
+          <div className="figures">
+            <span className="pnl">
+              {pnl[hovered.id] ? statMoney(pnl[hovered.id]!.net) : '—'}
+            </span>
+            <span className="unit">net PnL</span>
+          </div>
+          <svg viewBox="0 0 220 56" preserveAspectRatio="none" aria-hidden>
+            <polyline points={sparkPoints(hovered.id, (pnl[hovered.id]?.net ?? 0) >= 0)} />
+          </svg>
+          <div className="foot">{hovered.strategyId.split('/').pop()} · {hovered.active ? 'LIVE' : 'STOPPED'}</div>
+        </div>
+      )}
+
+      {/* The selected whale's dossier. Docked to the right half while the
+          close-up holds the left — same split the detail page uses, so moving
+          between the two costs no re-reading. */}
+      {chosen && (
+        <div
+          className="absolute right-0 top-0 bottom-0 z-10 flex flex-col"
+          style={{
+            width: 'min(30rem, 46%)',
+            background: 'linear-gradient(270deg, color-mix(in srgb, var(--surface) 96%, transparent) 78%, transparent)',
+            borderLeft: '1px solid var(--border)',
+          }}
+        >
+          <div className="flex items-center gap-2 px-4 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            <span className="text-lg leading-none">{iconFor(chosen)}</span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-sm truncate" title={chosen.name}>{chosen.name}</div>
+              <div className="text-xs font-mono truncate" style={{ color: 'var(--accent)' }}>{chosen.strategyId}</div>
+            </div>
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ background: chosen.active ? 'var(--success)' : 'var(--border)' }}
+              title={chosen.active ? 'Running' : 'Stopped'}
+            />
+            <button
+              type="button"
+              onClick={() => onSelect(null)}
+              className="w-6 h-6 rounded-md flex items-center justify-center leading-none shrink-0"
+              style={{ color: 'var(--muted)' }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3 flex flex-col gap-4">
+            <section className="flex flex-col gap-1.5">
+              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>PROFIT AND LOSS</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <Figure label="Net" value={pnl[chosen.id]?.net} />
+                <Figure label="Realized" value={pnl[chosen.id]?.realized} />
+                <Figure label="Unrealized" value={pnl[chosen.id]?.unrealized} />
+                <Figure label="Funding" value={pnl[chosen.id]?.funding} />
+                <Figure label="Fees" value={pnl[chosen.id]?.fees} />
+              </div>
+            </section>
+
+            {bindingsOf(chosen).length > 0 && (
+              <section className="flex flex-col gap-1.5">
+                <h3 className="text-xs" style={{ color: 'var(--muted)' }}>ACCOUNTS</h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {bindingsOf(chosen).map(b => (
+                    <span key={b} className="text-xs px-1.5 py-0.5 rounded font-mono"
+                      style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
+                      {b}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section className="flex flex-col gap-1.5">
+              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>PARAMETERS</h3>
+              <div className="flex flex-col gap-0.5">
+                {paramRows(chosen).map(([k, v]) => (
+                  <div key={k} className="flex gap-3 text-xs py-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
+                    <span className="font-mono shrink-0" style={{ color: 'var(--muted)', minWidth: '9rem' }}>{k}</span>
+                    <span className="font-mono min-w-0 break-all" style={{ color: 'var(--foreground)' }}>{v}</span>
+                  </div>
+                ))}
+                {paramRows(chosen).length === 0 && (
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>No parameters set.</span>
+                )}
+              </div>
+            </section>
+
+            <section className="flex flex-col gap-1.5">
+              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>IDENTITY</h3>
+              <div className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{chosen.id}</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>
+                created {new Date(chosen.createdAt).toLocaleString()}
+              </div>
+            </section>
+          </div>
+
+          <div className="shrink-0 flex items-center gap-2 px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              type="button"
+              onClick={() => (chosen.active ? onDeactivate : onActivate)(chosen.id)}
+              className={`${CTRL} px-3 flex-1`}
+              style={chosen.active
+                ? { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }
+                : { background: 'var(--accent)', color: '#fff' }}
+            >
+              {chosen.active ? '■ Stop' : '▶ Activate'}
+            </button>
+            <Link href={`/instances/${chosen.id}`} className={`${CTRL} px-3 gap-1.5`}
+              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
+              <span className="text-sm leading-none">↗</span>
+              Full page
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Small segmented control — the same shape as the layout switch beside it. */
+function Segmented({ value, onChange, options }: {
+  value: string
+  onChange: (id: string) => void
+  options: ReadonlyArray<{ id: string; label: string }>
+}) {
+  return (
+    <div className="flex rounded-md overflow-hidden shrink-0 h-8" style={{ border: '1px solid var(--border)' }}>
+      {options.map(o => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={value === o.id}
+          className="px-2.5 text-xs"
+          style={{
+            background: value === o.id ? 'var(--accent)' : 'transparent',
+            color: value === o.id ? '#fff' : 'var(--muted)',
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** One labelled money figure in the dossier. */
+function Figure({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <div className="rounded-md px-2 py-1.5" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+      <div className="text-xs" style={{ color: 'var(--muted)' }}>{label}</div>
+      <div className="text-sm font-mono" style={{ color: moneyColor(value) }}>
+        {value === null || value === undefined ? '—' : statMoney(value)}
+      </div>
+    </div>
+  )
+}
+
+const bindingsOf = (i: StrategyInstanceView): string[] =>
+  i.credentials
+    ? Object.entries(i.credentials).map(([slot, target]) => `${slot} → ${target}`)
+    : i.accounts ?? []
+
+/** Base and tunable params, flattened for a two-column read. */
+function paramRows(i: StrategyInstanceView): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  for (const group of ['base', 'tunable'] as const) {
+    const g = i.params?.[group] as Record<string, unknown> | undefined
+    if (!g) continue
+    for (const [k, v] of Object.entries(g)) {
+      if (v === '' || v === undefined || v === null) continue
+      out.push([k, typeof v === 'object' ? JSON.stringify(v) : String(v)])
+    }
+  }
+  return out
+}
+
+/** Which way the panel leans: profit green, loss red, no reading violet. */
+function tone(v: number | null | undefined): 'up' | 'down' | 'flat' {
+  if (v === null || v === undefined) return 'flat'
+  return v >= 0 ? 'up' : 'down'
+}
+
+/**
+ * A shape for the card's sparkline.
+ *
+ * Derived from the instance id, NOT from real history: the panel appears on
+ * hover and has no time to fetch a series, and a flat line would read as "this
+ * strategy did nothing". Deterministic per id so the same whale always draws
+ * the same curve rather than reshuffling every time you point at it.
+ *
+ * Decorative — the figure beside it is the real number.
+ */
+function sparkPoints(seed: string, up: boolean): string {
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) }
+  const rand = () => { h = Math.imul(h ^ (h >>> 15), 2246822507); return ((h >>> 0) % 1000) / 1000 }
+  const n = 26
+  const pts: string[] = []
+  let y = 34
+  for (let i = 0; i < n; i++) {
+    y += (rand() - (up ? 0.62 : 0.38)) * 6
+    y = Math.max(6, Math.min(50, y))
+    pts.push(`${(i / (n - 1)) * 220},${y.toFixed(1)}`)
+  }
+  return pts.join(' ')
 }
 
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */
@@ -1601,59 +1960,6 @@ const moneyColor = (v: number | null | undefined): string =>
  * unpicked the moment a third arrives. Adding one is adding a row here plus a
  * branch where the group renders.
  */
-const LAYOUTS = [
-  { id: 'grid', label: 'Grid', glyph: '▦', hint: 'Cards in a grid' },
-  { id: 'list', label: 'List', glyph: '☰', hint: 'One row per instance' },
-] as const
-
-type LayoutId = typeof LAYOUTS[number]['id']
-
-const LAYOUT_KEY = 'ow:instances-layout'
-
-/**
- * Which layout to draw, remembered across visits.
- *
- * localStorage rather than the server: this is one operator's viewing
- * preference, not a property of the instances. It also has to survive a reload
- * without a round trip, and the initial read is deliberately lazy — reading
- * storage during render would break SSR hydration.
- */
-function useLayout(): [LayoutId, (id: LayoutId) => void] {
-  const [layout, setLayout] = useState<LayoutId>('grid')
-  useEffect(() => {
-    const saved = window.localStorage.getItem(LAYOUT_KEY)
-    if (LAYOUTS.some(l => l.id === saved)) setLayout(saved as LayoutId)
-  }, [])
-  const choose = (id: LayoutId) => {
-    setLayout(id)
-    try { window.localStorage.setItem(LAYOUT_KEY, id) } catch { /* private mode — the choice just will not stick */ }
-  }
-  return [layout, choose]
-}
-
-/** Segmented control: one button per registered layout. */
-function LayoutSwitch({ value, onChange }: { value: LayoutId; onChange: (id: LayoutId) => void }) {
-  return (
-    <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-      {LAYOUTS.map(l => (
-        <button
-          key={l.id}
-          onClick={() => onChange(l.id)}
-          title={l.hint}
-          aria-pressed={value === l.id}
-          className="px-2 py-1 text-xs flex items-center gap-1.5"
-          style={{
-            background: value === l.id ? 'var(--accent)' : 'transparent',
-            color: value === l.id ? '#fff' : 'var(--muted)',
-          }}
-        >
-          <span aria-hidden>{l.glyph}</span>{l.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 /**
  * The drag handle — the only place a drag can start.
  *
@@ -1682,31 +1988,11 @@ function LayoutSwitch({ value, onChange }: { value: LayoutId; onChange: (id: Lay
  * `touchAction: none` sits on the grip alone: the page still scrolls under a
  * finger everywhere else on the card.
  */
-function DragHandle({ onPointerDown, title }: {
-  onPointerDown: (e: React.PointerEvent) => void
-  title: string
-}) {
-  return (
-    <span
-      onPointerDown={onPointerDown}
-      title={title}
-      className="drag-grip cursor-grab select-none inline-flex items-center justify-center"
-      style={{ width: 18, height: 20, color: 'var(--muted)', touchAction: 'none' }}
-    >
-      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden>
-        <circle cx="2" cy="3" r="1.35" /><circle cx="8" cy="3" r="1.35" />
-        <circle cx="2" cy="8" r="1.35" /><circle cx="8" cy="8" r="1.35" />
-        <circle cx="2" cy="13" r="1.35" /><circle cx="8" cy="13" r="1.35" />
-      </svg>
-    </span>
-  )
-}
-
 /** One labelled figure in the card's stat row. */
 function Stat({ label, value, color, title }: { label: string; value: string; color?: string; title?: string }) {
   return (
     <div className="min-w-0" title={title}>
-      <div className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{label}</div>
+      <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{label}</div>
       <div className="text-sm font-mono truncate" style={{ color: color ?? 'var(--foreground)' }}>{value}</div>
     </div>
   )
@@ -1727,87 +2013,38 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
   onDelete: () => void
   onSetFolder?: (name: string) => void
 }) {
-  const [open, setOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [draft, setDraft] = useState('')
-  const boxRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onClickAway(e: MouseEvent) {
-      if (!boxRef.current?.contains(e.target as Node)) { setOpen(false); setConfirmDelete(false) }
-    }
-    document.addEventListener('mousedown', onClickAway)
-    return () => document.removeEventListener('mousedown', onClickAway)
-  }, [open])
-
-  const item = 'w-full text-left px-3 py-1.5 text-xs'
 
   return (
-    <div ref={boxRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-6 h-6 rounded-md flex items-center justify-center leading-none"
-        style={{ color: 'var(--muted)' }}
-        title="More"
-        aria-label="More actions"
-      >
-        ⋯
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 z-[100] mt-1 rounded-md shadow-lg flex flex-col py-1"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: '12rem' }}
-        >
-          <Link href={onEdit} className={item} style={{ color: 'var(--foreground)' }}>Edit</Link>
-          <button type="button" className={item} style={{ color: 'var(--foreground)' }}
-            onClick={() => { onDuplicate(); setOpen(false) }}>
+    <KebabMenu>
+      {(close) => (
+        <>
+          <Link href={onEdit} className={MENU_ITEM} style={{ color: 'var(--foreground)' }}>Edit</Link>
+          <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
+            onClick={() => { onDuplicate(); close() }}>
             Duplicate
           </button>
 
           {onSetFolder && (
-            <>
-              <div className="px-3 pt-2 pb-1 text-[10px]" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>FOLDER</div>
-              {folders.map(f => (
-                <button key={f} type="button" className={`${item} flex items-center gap-2`} style={{ color: 'var(--foreground)' }}
-                  onClick={() => { onSetFolder(f); setOpen(false) }}>
-                  <span style={{ color: f === instance.folder ? 'var(--accent)' : 'var(--muted)' }}>{f === instance.folder ? '●' : '○'}</span>
-                  📁 {f}
-                </button>
-              ))}
-              {instance.folder && (
-                <button type="button" className={item} style={{ color: 'var(--muted)' }}
-                  onClick={() => { onSetFolder(''); setOpen(false) }}>
-                  Remove from folder
-                </button>
-              )}
-              <form className="flex gap-1 px-2 py-1"
-                onSubmit={(e) => { e.preventDefault(); if (draft.trim()) { onSetFolder(draft.trim()); setDraft(''); setOpen(false) } }}>
-                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="New folder…"
-                  className="flex-1 min-w-0 rounded px-2 py-1 text-xs"
-                  style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }} />
-                <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Add</button>
-              </form>
-            </>
+            <FolderSection current={instance.folder} folders={folders} onPick={onSetFolder} close={close} />
           )}
 
           {/* Two-step, and only reachable from in here — the old layout put a red
               Delete directly beside Activate, one slip apart from each other. */}
           <button
             type="button"
-            className={item}
+            className={MENU_ITEM}
             style={{ color: 'var(--danger)', borderTop: '1px solid var(--border)' }}
             onClick={() => {
               if (!confirmDelete) { setConfirmDelete(true); return }
-              onDelete(); setOpen(false); setConfirmDelete(false)
+              onDelete(); close(); setConfirmDelete(false)
             }}
           >
             {confirmDelete ? 'Delete for good?' : 'Delete'}
           </button>
-        </div>
+        </>
       )}
-    </div>
+    </KebabMenu>
   )
 }
 
@@ -1863,13 +2100,13 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
         <div className="min-w-0 flex-1">
           <div className="font-medium truncate" title={instance.name}>{instance.name}</div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono truncate"
+            <span className="text-xs px-1.5 py-0.5 rounded font-mono truncate"
               style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
               title={`${instance.strategyId} · ${instance.id}`}>
               {strategyShort}
             </span>
             {account && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded truncate"
+              <span className="text-xs px-1.5 py-0.5 rounded truncate"
                 style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
                 title={bindings.join(', ')}>
                 {account}
@@ -1923,7 +2160,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
       {/* Footer: what it trades, then the one action */}
       <div className="flex items-center gap-2 mt-auto pt-1">
         {paramChip && (
-          <span className="text-[10px] font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
+          <span className="text-xs font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
             title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
             {paramChip}
           </span>
@@ -1943,6 +2180,11 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
  * "the button that starts and stops live trading" is the last thing that should
  * be allowed to drift between two layouts.
  */
+/* One height for everything in the footer row. These used to be sized by their
+   own padding, so the 28px square link sat 2px shorter than its neighbours —
+   close enough to look like a mistake rather than a choice. */
+const CTRL = 'h-8 rounded-md flex items-center justify-center text-xs shrink-0'
+
 function RunControl({ instance, onActivate, onDeactivate }: {
   instance: StrategyInstanceView
   onActivate: () => void
@@ -1951,22 +2193,25 @@ function RunControl({ instance, onActivate, onDeactivate }: {
   const [confirmStop, setConfirmStop] = useState(false)
   return (
     <div className="flex items-center gap-1.5">
+      {/* The board is the most-wanted destination on the card, so it gets a
+          real target instead of a glyph in a 28px box. */}
       <Link
         href={`/instances/${instance.id}`}
-        className="w-7 h-7 rounded-md flex items-center justify-center text-xs"
-        style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+        className={`${CTRL} px-3 gap-1.5`}
+        style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
         title="Open the board"
       >
-        ↗
+        <span className="text-sm leading-none">↗</span>
+        Open
       </Link>
       {instance.active ? (
         confirmStop ? (
           <div className="flex items-center gap-1">
-            <button onClick={() => setConfirmStop(false)} className="px-2 py-1.5 rounded-md text-xs"
+            <button onClick={() => setConfirmStop(false)} className={`${CTRL} px-2.5`}
               style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
               Cancel
             </button>
-            <button onClick={() => { onDeactivate(); setConfirmStop(false) }} className="px-2 py-1.5 rounded-md text-xs"
+            <button onClick={() => { onDeactivate(); setConfirmStop(false) }} className={`${CTRL} px-2.5`}
               style={{ background: 'var(--danger)', color: '#fff' }}>
               Stop
             </button>
@@ -1974,7 +2219,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
         ) : (
           <button
             onClick={() => setConfirmStop(true)}
-            className="px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5"
+            className={`${CTRL} px-3 gap-1.5`}
             style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
             title="Running — click to stop it"
           >
@@ -1983,7 +2228,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
           </button>
         )
       ) : (
-        <button onClick={onActivate} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>
+        <button onClick={onActivate} className={`${CTRL} px-3`} style={{ background: 'var(--accent)', color: '#fff' }}>
           ▶ Activate
         </button>
       )}
@@ -2002,6 +2247,19 @@ function RunControl({ instance, onActivate, onDeactivate }: {
  * The columns are fixed rather than auto so figures line up down the page. A
  * list whose numbers do not form a column is just a cramped grid.
  */
+/**
+ * One template for every row, so the columns line up down the whole list.
+ *
+ * Every track is fixed or fr on purpose. Each row is its own grid, and an
+ * `auto` track is sized by THAT row's content — which is exactly why the
+ * numbers used to stagger: a longer strategy chip pushed its row's figures
+ * right while the row below kept its own. fr resolves against the container,
+ * which every row shares.
+ *
+ * icon · name · chips · pnl · unrealized · funding · params · actions
+ */
+const ROW_COLUMNS = '1.75rem minmax(0,1.5fr) minmax(0,1.3fr) 5.5rem 5.5rem 5.5rem minmax(0,1.4fr) 15.5rem'
+
 function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
@@ -2027,14 +2285,16 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
       className="rounded-md px-3 py-2 grid items-center gap-3"
       style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        gridTemplateColumns: 'auto minmax(9rem,1.4fr) minmax(7rem,auto) 5.5rem 5.5rem 5.5rem minmax(0,1fr) auto',
+        gridTemplateColumns: ROW_COLUMNS,
       }}
     >
-      {onSetIcon
-        ? <IconMenu current={iconFor(instance)} onPick={onSetIcon}>
-            <span className="text-lg leading-none">{iconFor(instance)}</span>
-          </IconMenu>
-        : <span className="text-lg leading-none">{iconFor(instance)}</span>}
+      <div className="flex items-center justify-center">
+        {onSetIcon
+          ? <IconMenu current={iconFor(instance)} onPick={onSetIcon}>
+              <span className="text-lg leading-none">{iconFor(instance)}</span>
+            </IconMenu>
+          : <span className="text-lg leading-none">{iconFor(instance)}</span>}
+      </div>
 
       <div className="min-w-0 flex items-center gap-2">
         <span
@@ -2046,13 +2306,13 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
       </div>
 
       <div className="min-w-0 flex items-center gap-1.5">
-        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono truncate"
+        <span className="text-xs px-1.5 py-0.5 rounded font-mono truncate"
           style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
           title={`${instance.strategyId} · ${instance.id}`}>
           {strategyShort}
         </span>
         {account && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded truncate"
+          <span className="text-xs px-1.5 py-0.5 rounded truncate"
             style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
             title={bindings.join(', ')}>
             {account}
@@ -2073,12 +2333,12 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
         {pnl ? statMoney(pnl.funding) : '—'}
       </div>
 
-      <div className="text-[10px] font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
+      <div className="text-xs font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
         title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
         {paramValues.slice(0, 3).join(' · ')}
       </div>
 
-      <div className="shrink-0 flex items-center gap-1">
+      <div className="flex items-center justify-end gap-1">
         <RunControl instance={instance} onActivate={onActivate} onDeactivate={onDeactivate} />
         <CardMenu
           instance={instance}
@@ -2377,7 +2637,7 @@ function EventRow({ event }: { event: LiveEvent }) {
           {!open && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(event.data).slice(0, 80)}</span>}
         </div>
         {open && (
-          <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-[11px] leading-snug"
+          <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
             {JSON.stringify(event.data, null, 2)}
           </pre>
@@ -2395,7 +2655,7 @@ function EventRow({ event }: { event: LiveEvent }) {
         <span style={{ color: 'var(--muted)' }}>{event.triggerId}</span>
       </div>
       {open && (
-        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-[11px] leading-snug"
+        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(event.instructions, null, 2)}
         </pre>
@@ -2433,7 +2693,7 @@ function ExecutionRow({ result }: { result: ExecutionResult }) {
         {!open && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(result.instruction.params).slice(0, 60)}</span>}
       </div>
       {open && (
-        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-96 overflow-y-auto text-[11px] leading-snug"
+        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-96 overflow-y-auto text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(result, null, 2)}
         </pre>
@@ -2487,7 +2747,7 @@ function RunStep({ step, startedAt }: { step: { ts: number; step: string; data?:
         {!open && hasData && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(step.data).slice(0, 90)}</span>}
       </div>
       {open && hasData && (
-        <pre className="ml-6 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-[11px] leading-snug"
+        <pre className="ml-6 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
              style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(step.data, null, 2)}
         </pre>
@@ -2510,7 +2770,7 @@ function LogRow({ row }: { row: { ts: number; level: string; module?: string; ms
         <span style={{ color: 'var(--foreground)' }}>{row.msg}</span>
       </div>
       {open && hasExtra && (
-        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-[11px] leading-snug"
+        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(row.extra, null, 2)}
         </pre>

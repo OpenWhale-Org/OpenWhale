@@ -411,7 +411,7 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
         ) : (
           // Drag-to-pan is invisible until tried, and shift-drag would never be
           // guessed at all — so the chart says so while it is fully zoomed out.
-          <span className="ml-auto text-[10px]" style={{ color: 'var(--border)' }}>
+          <span className="ml-auto text-xs" style={{ color: 'var(--border)' }}>
             scroll to zoom · drag to pan · shift-drag to select
           </span>
         )}
