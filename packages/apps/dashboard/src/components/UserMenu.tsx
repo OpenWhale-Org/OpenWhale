@@ -18,8 +18,6 @@ export function UserMenu({ username }: { username?: string }) {
   if (!username) return null
   return (
     <div className="aurora-user-menu">
-      <button className="aurora-icon-button" title="Search"><span>⌘ K</span></button>
-      <button className="aurora-icon-button" title="Notifications" aria-label="Notifications">♢</button>
       <span className="aurora-avatar">{username.slice(0, 2).toUpperCase()}</span>
       <button onClick={signOut} disabled={busy} className="aurora-signout" style={{ opacity: busy ? 0.5 : 1 }}>
         Sign out
