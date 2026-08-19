@@ -29,6 +29,7 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'anthropic',
     displayName: 'Anthropic',
+    category: 'AI Provider',
     logo: '/brands/claude.svg',
     icon: '🧠',
     description: 'Claude models, direct from Anthropic.',
@@ -41,6 +42,7 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'openai',
     displayName: 'OpenAI',
+    category: 'AI Provider',
     logo: '/brands/openai.svg',
     icon: '⚛️',
     description: 'GPT models, direct from OpenAI.',
@@ -53,6 +55,7 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'google',
     displayName: 'Google (Gemini)',
+    category: 'AI Provider',
     logo: '/brands/gemini.svg',
     icon: '♊',
     description: 'Gemini models via Google AI Studio.',
@@ -65,6 +68,7 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'anthropic-compatible',
     displayName: 'Anthropic-compatible (Kimi / GLM / proxy…)',
+    category: 'AI Provider',
     logo: '/brands/glm.png',
     icon: '🧩',
     description: 'Any endpoint that speaks the Anthropic protocol — Kimi, GLM, a proxy.',
@@ -82,6 +86,7 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
   {
     type: 'openai-compatible',
     displayName: 'OpenAI-compatible (DeepSeek / Ollama / proxy…)',
+    category: 'AI Provider',
     logo: '/brands/deepseek.svg',
     icon: '🔌',
     description: 'Any endpoint that speaks the OpenAI protocol — DeepSeek, Ollama, a proxy.',

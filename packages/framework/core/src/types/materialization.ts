@@ -114,6 +114,14 @@ export interface CredentialTypeDefinition {
   icon?: string
   /** One line on what this credential is for, shown under the name. */
   description?: string
+  /**
+   * Which group the picker files this under. Defaults to the registering
+   * plugin, which is the right answer for a venue — "binance" is both who
+   * registered it and what it is. It is the wrong answer for the LLM types:
+   * core registers them, but nobody looking for Anthropic thinks of it as
+   * core's. Set this when the package is not the category.
+   */
+  category?: string
   documentationUrl?: string
   /** Field schema (Zod + .meta()) — drives the dashboard credential form. */
   schema?: ZodObject<ZodRawShape>
@@ -142,6 +150,8 @@ export interface CredentialTypeDefinition {
 export interface CredentialTypeInfo {
   type: string
   displayName?: string
+  /** Picker group; absent means "use pluginName". */
+  category?: string
   /** Brand mark (URL or data: URI). Falls back to `icon`, then the first letter. */
   logo?: string
   /** Single glyph for the picker; absent means "derive one from the name". */

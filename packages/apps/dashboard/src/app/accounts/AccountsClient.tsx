@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { AccountView, AccountImplementationInfo, AccountSnapshotRecord, CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 import { EquityChart } from './EquityChart'
 import { AccountDetail } from './AccountDetail'
+import { CredentialMark } from '@/components/TypeMark'
 
 interface Props {
   initialAccounts: AccountView[]
@@ -34,7 +35,9 @@ const inputStyle = {
 export function AccountsClient({ initialAccounts, initialSnapshots, implementations, credentials, credentialTypes }: Props) {
   const [accounts, setAccounts] = useState(initialAccounts)
   const [snapshots, setSnapshots] = useState(initialSnapshots)
+  /** Which account the right pane is showing. */
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [showNew, setShowNew] = useState(false)
   const [name, setName] = useState('')
   const [implId, setImplId] = useState(implementations[0]?.id ?? '')
   const [credential, setCredential] = useState('')
@@ -75,6 +78,10 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         setError(((await res.json()) as { error?: string }).error ?? 'failed')
         return
       }
+      // Land on what was just created, with the form put away — otherwise the
+      // pane still shows the form and the new account is somewhere in the rail.
+      setExpanded(name)
+      setShowNew(false)
       setName(''); setCredential('')
       await refresh()
     } finally {
@@ -82,10 +89,21 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
     }
   }
 
+  /** After deleting, fall to whatever is left rather than an empty pane. */
+  function afterRemoved(gone: string) {
+    if (expanded !== gone) return
+    const next = accounts.find(a => a.name !== gone)
+    setExpanded(next?.name ?? null)
+  }
+
   async function remove(accountName: string) {
     setError('')
     const res = await fetch(`/api/accounts/${encodeURIComponent(accountName)}`, { method: 'DELETE' })
-    if (!res.ok) setError(((await res.json()) as { error?: string }).error ?? 'delete failed')
+    if (!res.ok) {
+      setError(((await res.json()) as { error?: string }).error ?? 'delete failed')
+      return
+    }
+    afterRemoved(accountName)
     await refresh()
   }
 
@@ -119,163 +137,213 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
     }
   }
 
+  const selected = accounts.find(a => a.name === (expanded ?? accounts[0]?.name))
+  const totalEquity = accounts.reduce((sum, a) => sum + (snapshots[a.name]?.equity ?? 0), 0)
+
+  const rebindableFor = (a: AccountView) => credentials.filter((c) => {
+    const ai = implementations.find(i => i.id === a.implementation)
+    if (!ai) return false
+    if (ai.type !== undefined) return c.type === ai.type
+    const typeInfo = credentialTypes.find(t => t.type === c.type)
+    return typeInfo?.kinds.includes(ai.kind) ?? false
+  })
+
+  const statusStyle = (status: AccountView['status']) => ({
+    background: status === 'ready' ? 'color-mix(in srgb, var(--success, #22c55e) 15%, transparent)'
+      : status === 'inactive' ? 'color-mix(in srgb, var(--warning, #eab308) 15%, transparent)'
+      : 'color-mix(in srgb, var(--danger, #ef4444) 15%, transparent)',
+    color: status === 'ready' ? 'var(--success, #22c55e)'
+      : status === 'inactive' ? 'var(--warning, #eab308)'
+      : 'var(--danger, #ef4444)',
+  })
+
+  /* Two panes, the shape a wallet uses: the roster on the left stays put while
+     the right pane changes. The table this replaced put a whole account's
+     equity curve, balances, positions and orders inside an expanded <tr>,
+     which meant reading one account pushed every other one off the screen. */
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       {error && (
         <div className="px-4 py-2 rounded-md text-sm" style={{ background: 'color-mix(in srgb, var(--danger) 12%, transparent)', color: 'var(--danger)' }}>
           {error}
         </div>
       )}
 
-      <div className="flex justify-end">
-        <button
-          onClick={() => void sampleNow()}
-          disabled={busy}
-          className="text-xs px-3 py-1.5 rounded-md"
-          style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: busy ? 0.6 : 1 }}
-          title="Take an equity snapshot of every account right now (normally sampled every 5 minutes)"
+      <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
+        {/* ── roster ─────────────────────────────────────────────────────── */}
+        <div
+          className="flex flex-col rounded-lg overflow-hidden shrink-0"
+          style={{ width: '20rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
-          {busy ? 'Sampling…' : '⟳ Sample now'}
-        </button>
-      </div>
+          <div className="px-3 py-2.5 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="text-xs" style={{ color: 'var(--muted)' }}>Total equity · {accounts.length} accounts</div>
+            <div className="text-xl font-mono mt-0.5">{formatUsd(totalEquity)}</div>
+          </div>
 
-      {/* Account list */}
-      <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ background: 'var(--surface)', color: 'var(--muted)' }}>
-              <th className="text-left px-4 py-2 font-medium">Name</th>
-              <th className="text-left px-4 py-2 font-medium">Implementation</th>
-              <th className="text-left px-4 py-2 font-medium">Kind / Venue</th>
-              <th className="text-left px-4 py-2 font-medium">Credential</th>
-              <th className="text-left px-4 py-2 font-medium">Equity</th>
-              <th className="text-left px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2" />
-            </tr>
-          </thead>
-          <tbody>
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
             {accounts.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center" style={{ color: 'var(--muted)' }}>
-                No accounts yet — create one below. Strategies read accounts; executors write them.
-              </td></tr>
+              <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
+                No accounts yet. Strategies read accounts; executors write them.
+              </p>
             )}
             {accounts.map((a) => {
-              const rebindable = credentials.filter((c) => {
-                const ai = implementations.find(i => i.id === a.implementation)
-                if (!ai) return false
-                if (ai.type !== undefined) return c.type === ai.type
-                const typeInfo = credentialTypes.find(t => t.type === c.type)
-                return typeInfo?.kinds.includes(ai.kind) ?? false
-              })
+              const active = selected?.name === a.name
               const latest = snapshots[a.name]
               return (
-                <>
-                <tr key={a.name} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td className="px-4 py-2 font-mono">
-                    <button
-                      onClick={() => setExpanded(expanded === a.name ? null : a.name)}
-                      className="flex items-center gap-1.5"
-                      title="Show equity curve"
-                    >
-                      <span className="text-xs" style={{ color: 'var(--muted)' }}>{expanded === a.name ? '▾' : '▸'}</span>
-                      {a.name}
-                    </button>
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">{a.implementation}</td>
-                  <td className="px-4 py-2 text-xs" style={{ color: 'var(--muted)' }}>
-                    {a.kind ?? '—'}{a.type ? ` · ${a.type}` : ''}
-                  </td>
-                  <td className="px-4 py-2">
-                    <select
-                      value={a.credential ?? ''}
-                      onChange={(e) => rebind(a, e.target.value)}
-                      className="rounded-md px-2 py-1 text-xs"
-                      style={inputStyle}
-                    >
-                      <option value="">— unbound —</option>
-                      {rebindable.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2 text-sm">
-                    {latest ? formatUsd(latest.equity) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                    {a.snapshotError && (
-                      <span
-                        className="ml-1.5 text-xs cursor-help"
-                        style={{ color: 'var(--danger, #ef4444)' }}
-                        title={`Last snapshot failed: ${a.snapshotError}`}
-                      >
-                        ⚠
-                      </span>
+                <button
+                  key={a.name}
+                  onClick={() => setExpanded(a.name)}
+                  className="w-full text-left px-3 py-2.5 flex items-center gap-2.5"
+                  style={{
+                    background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+                    borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                    borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
+                  }}
+                >
+                  <CredentialMark
+                    credential={a.credential}
+                    credentials={credentials}
+                    credentialTypes={credentialTypes}
+                    size={26}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm truncate" title={a.name}>{a.name}</div>
+                    <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+                      {a.kind ?? '—'}{a.type ? ` · ${a.type}` : ''}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-mono">
+                      {latest ? formatUsd(latest.equity) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                    </div>
+                    {a.status !== 'ready' && (
+                      <span className="text-xs px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>
                     )}
-                  </td>
-                  <td className="px-4 py-2">
-                    <span
-                      className="px-2 py-0.5 rounded-full text-xs"
-                      style={{
-                        background: a.status === 'ready' ? 'color-mix(in srgb, var(--success, #22c55e) 15%, transparent)'
-                          : a.status === 'inactive' ? 'color-mix(in srgb, var(--warning, #eab308) 15%, transparent)'
-                          : 'color-mix(in srgb, var(--danger, #ef4444) 15%, transparent)',
-                        color: a.status === 'ready' ? 'var(--success, #22c55e)' : a.status === 'inactive' ? 'var(--warning, #eab308)' : 'var(--danger, #ef4444)',
-                      }}
-                      title={a.problem}
-                    >
-                      {a.status}{a.problem ? ' ⓘ' : ''}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => remove(a.name)} className="text-xs px-2 py-1 rounded-md" style={{ color: 'var(--danger, #ef4444)', border: '1px solid var(--border)' }}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-                {expanded === a.name && (
-                  <tr key={`${a.name}-chart`} style={{ background: 'var(--surface)' }}>
-                    <td colSpan={7} className="px-4 py-4">
-                      <EquityChart account={a.name} />
-                      {a.status === 'ready' && <AccountDetail account={a.name} />}
-                    </td>
-                  </tr>
-                )}
-                </>
+                    {a.snapshotError && (
+                      <span className="text-xs ml-1 cursor-help" style={{ color: 'var(--danger, #ef4444)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>
+                    )}
+                  </div>
+                </button>
               )
             })}
-          </tbody>
-        </table>
-      </div>
+          </div>
 
-      {/* Create form */}
-      <form onSubmit={create} className="flex flex-col gap-3 p-4 rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <h2 className="text-sm font-semibold">New Account</h2>
-        <div className="flex flex-wrap gap-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            placeholder="Account name, e.g. BN-Main-Perp"
-            className="rounded-md px-3 py-2 text-sm flex-1 min-w-48"
-            style={inputStyle}
-          />
-          <select value={implId} onChange={(e) => { setImplId(e.target.value); setCredential('') }} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
-            {implementations.map(i => (
-              <option key={i.id} value={i.id}>
-                {i.displayName ?? i.id} — {i.kind}{i.type ? ` (${i.type})` : ' (any venue)'}
-              </option>
-            ))}
-          </select>
-          <select value={credential} onChange={(e) => setCredential(e.target.value)} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
-            <option value="">bind credential later (inactive)</option>
-            {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
-          </select>
-          <button type="submit" disabled={busy || !implId} className="px-4 py-2 rounded-md text-sm" style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.6 : 1 }}>
-            Create
-          </button>
+          <div className="shrink-0 flex gap-2 px-3 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              onClick={() => setShowNew(v => !v)}
+              className="flex-1 h-8 rounded-md text-xs flex items-center justify-center gap-1.5"
+              style={{ background: showNew ? 'var(--background)' : 'var(--accent)', color: showNew ? 'var(--foreground)' : '#fff', border: showNew ? '1px solid var(--border)' : 'none' }}
+            >
+              {showNew ? 'Cancel' : '＋ New account'}
+            </button>
+            <button
+              onClick={() => void sampleNow()}
+              disabled={busy}
+              className="h-8 px-2.5 rounded-md text-xs"
+              style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: busy ? 0.6 : 1 }}
+              title="Take an equity snapshot of every account right now (normally sampled every 5 minutes)"
+            >
+              {busy ? '…' : '⟳'}
+            </button>
+          </div>
         </div>
-        {impl && eligibleCredentials.length === 0 && (
-          <p className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
-            No eligible credential for {impl.type ?? impl.kind} — add one on the Credentials page, or create the account unbound.
-          </p>
-        )}
-      </form>
+
+        {/* ── detail ─────────────────────────────────────────────────────── */}
+        <div
+          className="flex-1 min-w-0 rounded-lg overflow-hidden flex flex-col"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          {showNew ? (
+            <form onSubmit={create} className="flex flex-col gap-3 p-4">
+              <h2 className="text-sm font-semibold">New Account</h2>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                placeholder="Account name, e.g. BN-Main-Perp"
+                className="rounded-md px-3 py-2 text-sm"
+                style={inputStyle}
+              />
+              <select value={implId} onChange={(e) => { setImplId(e.target.value); setCredential('') }} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
+                {implementations.map(i => (
+                  <option key={i.id} value={i.id}>
+                    {i.displayName ?? i.id} — {i.kind}{i.type ? ` (${i.type})` : ' (any venue)'}
+                  </option>
+                ))}
+              </select>
+              <select value={credential} onChange={(e) => setCredential(e.target.value)} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
+                <option value="">bind credential later (inactive)</option>
+                {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
+              </select>
+              {impl && eligibleCredentials.length === 0 && (
+                <p className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
+                  No eligible credential for {impl.type ?? impl.kind} — add one on the Credentials page, or create the account unbound.
+                </p>
+              )}
+              <button type="submit" disabled={busy || !implId} className="h-9 rounded-md text-sm self-start px-4" style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.6 : 1 }}>
+                Create
+              </button>
+            </form>
+          ) : !selected ? (
+            <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>
+              Pick an account.
+            </div>
+          ) : (
+            <>
+              <div className="px-4 py-3 shrink-0 flex items-start gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                <CredentialMark
+                  credential={selected.credential}
+                  credentials={credentials}
+                  credentialTypes={credentialTypes}
+                  size={34}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-medium truncate">{selected.name}</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs shrink-0" style={statusStyle(selected.status)} title={selected.problem}>
+                      {selected.status}{selected.problem ? ' ⓘ' : ''}
+                    </span>
+                  </div>
+                  <div className="text-xs font-mono mt-0.5 truncate" style={{ color: 'var(--muted)' }}>
+                    {selected.implementation} · {selected.kind ?? '—'}{selected.type ? ` · ${selected.type}` : ''}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-2xl font-mono">
+                    {snapshots[selected.name] ? formatUsd(snapshots[selected.name]!.equity) : '—'}
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>equity</div>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3 flex flex-col gap-4">
+                <EquityChart account={selected.name} />
+                {selected.status === 'ready' && <AccountDetail account={selected.name} />}
+              </div>
+
+              <div className="shrink-0 flex items-center gap-2 px-4 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
+                <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>Credential</span>
+                <select
+                  value={selected.credential ?? ''}
+                  onChange={(e) => rebind(selected, e.target.value)}
+                  className="rounded-md px-2 h-8 text-xs flex-1 min-w-0"
+                  style={inputStyle}
+                >
+                  <option value="">— unbound —</option>
+                  {rebindableFor(selected).map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
+                </select>
+                <button
+                  onClick={() => remove(selected.name)}
+                  className="h-8 px-3 rounded-md text-xs shrink-0"
+                  style={{ color: 'var(--danger, #ef4444)', border: '1px solid var(--border)' }}
+                >
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

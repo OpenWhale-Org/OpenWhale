@@ -1008,7 +1008,7 @@ export function InstancesClient({ initialInstances }: Props) {
       ) : (
         <div className="flex flex-col gap-3 mt-4">
           {(() => {
-            const groups = groupByFolder(visible)
+            const groups = groupByFolder(visible, sort !== 'manual')
             const folderNames = groups.map(g => g.folder).filter((f): f is string => f !== undefined)
 
             /**
@@ -1541,20 +1541,35 @@ function seriesPoints(points: PnlPoint[]): string {
 }
 
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */
-function groupByFolder(instances: StrategyInstanceView[]): Array<{ folder: string | undefined; items: StrategyInstanceView[] }> {
+function groupByFolder(
+  instances: StrategyInstanceView[],
+  /**
+   * Keep the order the instances arrive in, instead of re-sorting by
+   * sortOrder. Set whenever the caller has already sorted: this function used
+   * to sort unconditionally, which silently threw away the page's PnL/name/age
+   * ordering the moment folders existed — the dropdown appeared to do nothing.
+   */
+  preserveOrder = false,
+): Array<{ folder: string | undefined; items: StrategyInstanceView[] }> {
   const byKey = new Map<string | undefined, StrategyInstanceView[]>()
-  for (const inst of instances) {
+  const firstSeen = new Map<string | undefined, number>()
+  instances.forEach((inst, i) => {
     const key = inst.folder || undefined
-    if (!byKey.has(key)) byKey.set(key, [])
+    if (!byKey.has(key)) { byKey.set(key, []); firstSeen.set(key, i) }
     byKey.get(key)!.push(inst)
-  }
-  const sortItems = (xs: StrategyInstanceView[]) => [...xs].sort((a, b) =>
+  })
+  const sortItems = (xs: StrategyInstanceView[]) => preserveOrder ? xs : [...xs].sort((a, b) =>
     (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
     || a.createdAt.localeCompare(b.createdAt))
   const minOrder = (xs: StrategyInstanceView[]) =>
     Math.min(...xs.map(x => x.sortOrder ?? Number.MAX_SAFE_INTEGER))
   const folders = [...byKey.keys()].filter((k): k is string => k !== undefined)
-    .sort((a, b) => minOrder(byKey.get(a)!) - minOrder(byKey.get(b)!) || a.localeCompare(b))
+    // Under a sort, folder order follows the sort too — the folder holding the
+    // best instance comes first, which is what "PnL high→low" should mean when
+    // the answer spans folders.
+    .sort((a, b) => preserveOrder
+      ? firstSeen.get(a)! - firstSeen.get(b)!
+      : minOrder(byKey.get(a)!) - minOrder(byKey.get(b)!) || a.localeCompare(b))
   const out: Array<{ folder: string | undefined; items: StrategyInstanceView[] }> = []
   for (const f of folders) out.push({ folder: f, items: sortItems(byKey.get(f)!) })
   if (byKey.has(undefined)) out.push({ folder: undefined, items: sortItems(byKey.get(undefined)!) })

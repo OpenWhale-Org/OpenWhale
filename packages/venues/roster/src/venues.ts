@@ -57,6 +57,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'gate',
     displayName: 'Gate.io',
+    logo: '/brands/gate.png',
     icon: '🚪',
     description: 'Perps and spot on one key. Has a sandbox.',
     documentationUrl: 'https://www.gate.com/docs/developers/apiv4/',
@@ -89,6 +90,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'upbit',
     displayName: 'Upbit',
+    logo: '/brands/upbit.png',
     icon: '🔷',
     description: 'Korean spot venue.',
     documentationUrl: 'https://docs.upbit.com/kr/reference/',
@@ -99,6 +101,7 @@ export const VENUE_SPECS: CcxtVenueSpec[] = [
   {
     name: 'lighter',
     displayName: 'Lighter',
+    logo: '/brands/lighter.png',
     icon: '🪶',
     description: 'Perp DEX.',
     documentationUrl: 'https://apidocs.lighter.xyz/',

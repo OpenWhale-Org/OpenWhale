@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Modal } from '@/components/Modal'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
+import { TypeMark } from '@/components/TypeMark'
 import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 
 interface Props {
@@ -342,7 +343,9 @@ function TypePicker({
     ...credentialTypes.map((t) => ({
       id: t.type,
       label: t.displayName ?? t.type,
-      category: t.pluginName ?? 'core',
+      // The registering package is only the default answer; a type that says
+      // what it actually is wins.
+      category: t.category ?? t.pluginName ?? 'core',
       kinds: t.kinds,
       ...(t.logo !== undefined ? { logo: t.logo } : {}),
       ...(t.icon !== undefined ? { icon: t.icon } : {}),
@@ -426,59 +429,6 @@ interface TypeEntry {
   logo?: string
   icon?: string
   description?: string
-}
-
-/**
- * A type's mark: its logo, else its glyph, else the first letter of its name.
- *
- * The letter is drawn in a bordered chip so it reads as a mark rather than as
- * a stray character next to the name, and a logo that fails to load falls back
- * to the same chain — a broken image never leaves a hole in the row.
- */
-function TypeMark({ logo, icon, label, size = 22 }: {
-  logo?: string | undefined
-  icon?: string | undefined
-  label: string
-  size?: number
-}) {
-  const [broken, setBroken] = useState(false)
-  const showLogo = logo !== undefined && !broken
-
-  if (showLogo) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- logos come from
-      // plugins as URLs or data: URIs; next/image needs build-time known hosts.
-      <img
-        src={logo}
-        alt=""
-        onError={() => setBroken(true)}
-        className="shrink-0 object-cover"
-        /* Fully round, not rounded: most of these bitmaps ship on an opaque
-           square, and against a dark row the corners read as a white box. */
-        style={{ width: size, height: size, borderRadius: '50%' }}
-      />
-    )
-  }
-  if (icon !== undefined) {
-    return (
-      <span className="shrink-0 grid place-items-center" style={{ width: size, height: size, fontSize: Math.round(size * 0.73), lineHeight: 1 }} aria-hidden>
-        {icon}
-      </span>
-    )
-  }
-  return (
-    <span
-      className="shrink-0 grid place-items-center"
-      style={{
-        width: size, height: size, borderRadius: Math.round(size / 3.6),
-        fontSize: Math.round(size * 0.5), fontWeight: 600,
-        background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)',
-      }}
-      aria-hidden
-    >
-      {(Array.from(label)[0] ?? '?').toUpperCase()}
-    </span>
-  )
 }
 
 /** One row: mark, name, the kinds it can materialize into, and its blurb. */
@@ -674,8 +624,10 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
   }
 
   // Stored credentials grouped by their type's registering plugin
-  const categoryOf = (credType: string) =>
-    credentialTypes.find(t => t.type === credType)?.pluginName ?? 'custom'
+  const categoryOf = (credType: string) => {
+    const t = credentialTypes.find(x => x.type === credType)
+    return t?.category ?? t?.pluginName ?? 'custom'
+  }
   const listCategories = ['All', ...Array.from(new Set(credentials.map(c => categoryOf(c.type)))).sort()]
   const visibleCredentials = listCategory === 'All'
     ? credentials
