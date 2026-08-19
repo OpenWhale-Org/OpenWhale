@@ -36,6 +36,54 @@ const fmt = (v: number, digits = 2) => {
   return v > 0 ? `+${s}` : s
 }
 
+interface PnlPoint { ts: number; value: number }
+
+/**
+ * Cumulative realized PnL, drawn from the ledger rather than sampled.
+ *
+ * Every point is a fill or a funding event, so the line steps where the
+ * strategy acted and holds flat where it did not — which is the shape of what
+ * actually happened, and not what a time-bucketed average would show.
+ */
+function PnlCurve({ points, up, height = 132 }: {
+  points: PnlPoint[] | null | undefined
+  up: boolean
+  height?: number
+}) {
+  if (points === undefined) {
+    return <div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>loading…</div>
+  }
+  if (points === null || points.length === 0) {
+    return <div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>No fills or funding attributed to this instance yet.</div>
+  }
+  const colour = up ? 'var(--success, #4ade80)' : 'var(--danger)'
+  const W = 600, H = 140
+  let lo = Infinity, hi = -Infinity
+  for (const p of points) { if (p.value < lo) lo = p.value; if (p.value > hi) hi = p.value }
+  // Always include zero: a curve that never touches it hides whether the
+  // strategy has been in profit at all.
+  lo = Math.min(lo, 0); hi = Math.max(hi, 0)
+  const span = hi - lo || 1
+  const y = (v: number) => H - 10 - ((v - lo) / span) * (H - 20)
+  const x = (i: number) => points.length === 1 ? W / 2 : (i / (points.length - 1)) * W
+  const line = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ')
+  const area = `0,${y(lo)} ${line} ${W},${y(lo)}`
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', width: '100%', height }} role="img" aria-label="Realized PnL over time">
+      <defs>
+        <linearGradient id="pnl-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={colour} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={colour} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <line x1="0" y1={y(0)} x2={W} y2={y(0)} stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      <polygon points={area} fill="url(#pnl-fill)" />
+      <polyline points={line} fill="none" stroke={colour} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
 function pnlColor(v: number): string {
   if (v > 0.005) return 'var(--success)'
   if (v < -0.005) return 'var(--danger)'
@@ -97,20 +145,23 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
   const [summary, setSummary] = useState<PnlSummary | null>(null)
   const [fills, setFills] = useState<FillRow[]>([])
   const [positions, setPositions] = useState<PositionRow[]>([])
+  const [series, setSeries] = useState<PnlPoint[] | null | undefined>(undefined)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const [s, f, p] = await Promise.all([
+      const [s, f, p, c] = await Promise.all([
         fetch(`/api/instances/${instanceId}/pnl`),
         fetch(`/api/instances/${instanceId}/fills?n=100`),
         fetch(`/api/instances/${instanceId}/positions`),
+        fetch(`/api/instances/${instanceId}/pnl/series?n=240`),
       ])
       if (!s.ok) throw new Error((await s.json() as { error?: string }).error ?? `HTTP ${s.status}`)
       setSummary(await s.json() as PnlSummary)
       if (f.ok) setFills(await f.json() as FillRow[])
       if (p.ok) setPositions(await p.json() as PositionRow[])
+      setSeries(c.ok ? (await c.json()) as PnlPoint[] : null)
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -176,6 +227,22 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                     <div className="text-lg font-mono" style={{ color: pnlColor(value) }}>{fmt(value)}</div>
                   </div>
                 ))}
+              </div>
+
+              {/* The curve behind the tiles. Realized only — nothing records
+                  what an open position was worth an hour ago, so this and Net
+                  diverge by exactly the unrealized tile while one is open. */}
+              <div className="rounded-md p-3 mb-3" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                <div className="flex items-baseline justify-between mb-1">
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>Realized PnL over time</span>
+                  {series && series.length > 0 && (
+                    <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
+                      {new Date(series[0]!.ts).toLocaleDateString()} → {new Date(series[series.length - 1]!.ts).toLocaleDateString()}
+                      {' · '}{series.length} events
+                    </span>
+                  )}
+                </div>
+                <PnlCurve points={series} up={summary.net >= 0} />
               </div>
 
               <div className="flex gap-2 mb-2">

@@ -49,6 +49,12 @@ export interface PnlSessionLike {
   fetchPositions?(symbols?: string[]): Promise<Array<{ symbol: string; markPrice: number }>>
 }
 
+/** One point on the realized-PnL curve: a timestamp and the running total. */
+export interface PnlSeriesPoint {
+  ts: number
+  value: number
+}
+
 export interface PnlSummary {
   instanceId: string
   realized: number
@@ -303,6 +309,44 @@ export class PnlService {
       firstTs: span.first, lastTs: span.last,
       bySymbol: [...rows.values()].sort((a, b) => a.net - b.net),
     }
+  }
+
+  /**
+   * Realized PnL over time for one instance — the curve behind the number.
+   *
+   * Built from the two ledgers that carry a timestamp, fills and funding, so
+   * every point is evidence from the venue rather than a sampled snapshot of
+   * some running total. It is CUMULATIVE and it is REALIZED: unrealized has no
+   * history here, because nothing records what an open position was worth an
+   * hour ago. That is why the series and the headline `net` can disagree while
+   * a position is open — the caller should say which it is showing.
+   *
+   * Downsampled by taking every nth event rather than by bucketing time: the
+   * events are what happened, and a strategy that traded twice should draw two
+   * steps, not a smooth line through empty hours.
+   */
+  async instanceSeries(instanceId: string, maxPoints = 120): Promise<PnlSeriesPoint[]> {
+    const rows = await this.db.all<{ ts: number; delta: number }>(
+      `SELECT ts, (COALESCE(realized_pnl, 0) - COALESCE(fee, 0)) AS delta FROM pnl_fills WHERE instance_id = ?
+       UNION ALL
+       SELECT ts, amount AS delta FROM pnl_funding WHERE instance_id = ?
+       ORDER BY ts`,
+      // COALESCE, not `realized_pnl - fee`: both columns are nullable, and in
+      // SQL a NULL on either side makes the whole expression NULL — which
+      // would silently drop a real fill's PnL because its fee was missing.
+      [instanceId, instanceId])
+    if (rows.length === 0) return []
+
+    const out: PnlSeriesPoint[] = []
+    let acc = 0
+    // Keep the last point whatever the stride, or the curve stops short of the
+    // total it is meant to explain.
+    const stride = Math.max(1, Math.ceil(rows.length / maxPoints))
+    for (let i = 0; i < rows.length; i++) {
+      acc += rows[i]!.delta ?? 0
+      if (i % stride === 0 || i === rows.length - 1) out.push({ ts: rows[i]!.ts, value: acc })
+    }
+    return out
   }
 
   /** One-shot totals for EVERY instance — the list page badge, not the drill-down. */

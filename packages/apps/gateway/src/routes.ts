@@ -435,6 +435,16 @@ export function buildRouter(): Router {
     }
   }))
 
+  router.get('/api/instances/:id/pnl/series', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const n = Math.min(600, Math.max(8, Number(req.query['n']) || 120))
+    try {
+      res.json(await runtime.instancePnlSeries(req.params['id']!, n))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   router.get('/api/instances/:id/fills', h(async (req, res) => {
     const runtime = await ensureStarted()
     const limit = Math.min(1000, Math.max(1, Number(req.query['n']) || 200))

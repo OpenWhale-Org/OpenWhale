@@ -1171,6 +1171,9 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
   const hovered = hover ? byId.get(hover.id) : undefined
   const chosen = selected ? byId.get(selected) : undefined
   const field = useRef<WhaleFieldHandle | null>(null)
+  const [series, wantSeries] = usePnlSeries()
+  useEffect(() => { if (hover) wantSeries(hover.id) }, [hover?.id, wantSeries, hover])
+  useEffect(() => { if (selected) wantSeries(selected) }, [selected, wantSeries])
 
   /* Which (monitor, key) pairs the selected instance actually consumes. The
      emit stream is the whole system's firehose; without this every whale would
@@ -1261,10 +1264,19 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
             </span>
             <span className="unit">net PnL</span>
           </div>
-          <svg viewBox="0 0 220 56" preserveAspectRatio="none" aria-hidden>
-            <polyline points={sparkPoints(hovered.id, (pnl[hovered.id]?.net ?? 0) >= 0)} />
-          </svg>
-          <div className="foot">{hovered.strategyId.split('/').pop()} · {hovered.active ? 'LIVE' : 'STOPPED'}</div>
+          {(() => {
+            const pts = series.get(hovered.id)
+            if (pts === undefined) return <div className="spark-wait">loading curve…</div>
+            if (pts === null || pts.length === 0) return <div className="spark-wait">no fills yet</div>
+            return (
+              <svg viewBox="0 0 220 56" preserveAspectRatio="none" aria-hidden>
+                <polyline points={seriesPoints(pts)} />
+              </svg>
+            )
+          })()}
+          <div className="foot">
+            realized · {hovered.strategyId.split('/').pop()} · {hovered.active ? 'LIVE' : 'STOPPED'}
+          </div>
         </div>
       )}
 
@@ -1305,6 +1317,10 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
           <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3 flex flex-col gap-4">
             <section className="flex flex-col gap-1.5">
               <h3 className="text-xs" style={{ color: 'var(--muted)' }}>PROFIT AND LOSS</h3>
+              {/* Realized only — nothing records what an open position was
+                  worth an hour ago, so the curve and Net can differ while one
+                  is open. The label says which. */}
+              <PnlSpark points={series.get(chosen.id)} up={(pnl[chosen.id]?.net ?? 0) >= 0} />
               <div className="grid grid-cols-2 gap-2">
                 <Figure label="Net" value={pnl[chosen.id]?.net} />
                 <Figure label="Realized" value={pnl[chosen.id]?.realized} />
@@ -1407,6 +1423,40 @@ function Segmented({ value, onChange, options }: {
   )
 }
 
+/** The realized-PnL curve, at panel size. */
+export function PnlSpark({ points, up, height = 64 }: {
+  points: PnlPoint[] | null | undefined
+  up: boolean
+  height?: number
+}) {
+  const colour = up ? 'var(--success, #4ade80)' : 'var(--danger)'
+  const frame = (child: React.ReactNode) => (
+    <div className="rounded-md px-2 py-2" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+      {child}
+    </div>
+  )
+  if (points === undefined) return frame(<div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>loading curve…</div>)
+  if (points === null || points.length === 0) return frame(<div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>no fills yet</div>)
+  return frame(
+    <>
+      <svg viewBox="0 0 220 56" preserveAspectRatio="none" style={{ display: 'block', width: '100%', height, overflow: 'visible' }} aria-hidden>
+        <polyline
+          points={seriesPoints(points)}
+          fill="none"
+          stroke={colour}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      <div className="text-xs mt-1 flex justify-between" style={{ color: 'var(--muted)' }}>
+        <span>realized · {points.length} events</span>
+        <span>{new Date(points[points.length - 1]!.ts).toLocaleDateString()}</span>
+      </div>
+    </>,
+  )
+}
+
 /** One labelled money figure in the dossier. */
 function Figure({ label, value }: { label: string; value: number | null | undefined }) {
   return (
@@ -1445,28 +1495,49 @@ function tone(v: number | null | undefined): 'up' | 'down' | 'flat' {
 }
 
 /**
- * A shape for the card's sparkline.
+ * Cumulative realized PnL for one instance, fetched once and kept.
  *
- * Derived from the instance id, NOT from real history: the panel appears on
- * hover and has no time to fetch a series, and a flat line would read as "this
- * strategy did nothing". Deterministic per id so the same whale always draws
- * the same curve rather than reshuffling every time you point at it.
+ * The hover card used to draw a shape derived from the instance id — it looked
+ * like a curve and meant nothing. This is the real ledger: every fill and every
+ * funding event, running total, straight from /pnl/series.
  *
- * Decorative — the figure beside it is the real number.
+ * Cached per id because hovering the same whale twice should not re-fetch, and
+ * a pointer crossing the pod would otherwise fire a request per whale it
+ * passes. `null` means "asked, nothing there"; absent means "not asked yet".
  */
-function sparkPoints(seed: string, up: boolean): string {
-  let h = 2166136261
-  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) }
-  const rand = () => { h = Math.imul(h ^ (h >>> 15), 2246822507); return ((h >>> 0) % 1000) / 1000 }
-  const n = 26
-  const pts: string[] = []
-  let y = 34
-  for (let i = 0; i < n; i++) {
-    y += (rand() - (up ? 0.62 : 0.38)) * 6
-    y = Math.max(6, Math.min(50, y))
-    pts.push(`${(i / (n - 1)) * 220},${y.toFixed(1)}`)
-  }
-  return pts.join(' ')
+function usePnlSeries(): [Map<string, PnlPoint[] | null>, (id: string) => void] {
+  const [series, setSeries] = useState<Map<string, PnlPoint[] | null>>(new Map())
+  const asked = useRef(new Set<string>())
+  const want = useCallback((id: string) => {
+    if (asked.current.has(id)) return
+    asked.current.add(id)
+    void fetch(`/api/instances/${id}/pnl/series?n=90`)
+      .then(async (r) => {
+        const points = r.ok ? (await r.json()) as PnlPoint[] : null
+        setSeries(prev => new Map(prev).set(id, points))
+      })
+      .catch(() => setSeries(prev => new Map(prev).set(id, null)))
+  }, [])
+  return [series, want]
+}
+
+interface PnlPoint { ts: number; value: number }
+
+/**
+ * Points for a 220x56 sparkline, scaled to the series' own range.
+ *
+ * A single point draws a flat line across the middle rather than nothing: one
+ * fill IS the whole history, and an empty box reads as a failure to load.
+ */
+function seriesPoints(points: PnlPoint[]): string {
+  if (points.length === 0) return ''
+  if (points.length === 1) return '0,28 220,28'
+  let lo = Infinity, hi = -Infinity
+  for (const p of points) { if (p.value < lo) lo = p.value; if (p.value > hi) hi = p.value }
+  const span = hi - lo || 1
+  return points
+    .map((p, i) => `${((i / (points.length - 1)) * 220).toFixed(1)},${(50 - ((p.value - lo) / span) * 44).toFixed(1)}`)
+    .join(' ')
 }
 
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */

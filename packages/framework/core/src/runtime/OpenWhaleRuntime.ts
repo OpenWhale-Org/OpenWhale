@@ -30,7 +30,7 @@ import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
 import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
 import { PnlService } from '../pnl/PnlService.js'
-import type { PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow } from '../pnl/PnlService.js'
+import type { PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow, PnlSeriesPoint } from '../pnl/PnlService.js'
 import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
@@ -651,6 +651,12 @@ export class OpenWhaleRuntime implements IRuntime {
   async allInstancePnl(): Promise<Record<string, { realized: number; fees: number; funding: number; net: number; unrealized: number | null }>> {
     if (!this.pnlService) return {}
     return this.pnlService.allInstanceTotals()
+  }
+
+  /** The realized-PnL curve behind an instance's number. */
+  async instancePnlSeries(instanceId: string, maxPoints = 120): Promise<PnlSeriesPoint[]> {
+    if (!this.pnlService) throw new Error('PnL attribution requires a database-backed runtime')
+    return this.pnlService.instanceSeries(instanceId, maxPoints)
   }
 
   async instanceFills(instanceId: string, limit = 200): Promise<PnlFillRow[]> {
