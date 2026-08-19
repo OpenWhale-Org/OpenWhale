@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { MonitorInstanceView, CredentialInfo, ParamFieldDef } from '@openwhaleorg/core'
+import { Modal } from '@/components/Modal'
 
 export interface ImplementationInfo {
   id: string
@@ -100,6 +101,7 @@ interface Props {
  */
 export function MonitorInstancesPanel({ contract, instances, implementations, pendingKeys, credentials, onChanged, embedded = false }: Props & { embedded?: boolean }) {
   const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
   const [implId, setImplId] = useState('')
   const [credential, setCredential] = useState('')
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
@@ -167,12 +169,23 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
   async function create() {
     if (!impl) return
     const params = buildParams(impl.paramsFields ?? [], paramValues)
+    /*
+     * Activate on creation ONLY when this would be the contract's first
+     * instance. Each implementation is its own dispatch domain with one active
+     * instance, so auto-activating the second one silently takes over from the
+     * first — a creation form is not where you decide to cut a running
+     * collector over. With nothing running yet there is no such ambiguity, and
+     * making the operator press Start on the only possible answer is friction.
+     */
+    const solo = mine.length === 0
     const ok = await post('/api/monitor-instances', {
       implementation: impl.id,
+      ...(name.trim() ? { name: name.trim() } : {}),
       ...(credential ? { credential } : {}),
       ...(Object.keys(params).length > 0 ? { params } : {}),
+      activate: solo,
     })
-    if (ok) { setParamValues({}); setCredential(''); setCreating(false); await onChanged() }
+    if (ok) { setParamValues({}); setCredential(''); setName(''); setCreating(false); await onChanged() }
   }
 
   return (
@@ -186,11 +199,11 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
         )}
         {impls.length > 0 && (
           <button
-            onClick={() => { setCreating(v => !v); setImplId(impls[0]!.id) }}
-            className="ml-auto text-xs px-2 py-1 rounded-md"
-            style={{ border: '1px solid var(--border)', color: creating ? 'var(--accent)' : 'var(--muted)' }}
+            onClick={() => { setCreating(true); setImplId(impls[0]!.id) }}
+            className="hoverable hoverable-flat ml-auto text-xs px-2.5 h-8 rounded-md"
+            style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
           >
-            {creating ? 'Cancel' : '+ New'}
+            ＋ New instance
           </button>
         )}
       </div>
@@ -217,8 +230,12 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
             // Params are editable while running too — saving rebuilds the runner
             const editable = (inst.paramsFields?.length ?? 0) > 0
             return (
-              <div key={inst.id} className="flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
-                <div className="flex items-center gap-2 py-2 flex-wrap">
+              <div
+                key={inst.id}
+                className="hoverable hoverable-flat flex flex-col rounded-md px-3 py-2 mt-1.5"
+                style={{ background: 'var(--background)', border: '1px solid var(--border)' }}
+              >
+                <div className="flex items-center gap-2 flex-wrap">
                   {/* Radio, not a toggle: the runtime allows one active per implementation */}
                   <button
                     onClick={() => void choose(inst)}
@@ -230,9 +247,17 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                     <span style={{ color: inst.active ? 'var(--success, #22c55e)' : 'var(--muted)' }}>
                       {inst.active ? '◉' : '○'}
                     </span>
-                    <span className="font-mono truncate" title={inst.id}>
-                      {inst.implementationDisplayName ?? inst.implementation}
+                    {/* The operator's label leads; the implementation it runs
+                        becomes the subtitle. With no label the implementation
+                        is the name, which is the common single-instance case. */}
+                    <span className="text-sm truncate" title={inst.id}>
+                      {inst.name ?? inst.implementationDisplayName ?? inst.implementation}
                     </span>
+                    {inst.name && (
+                      <span className="font-mono text-xs truncate" style={{ color: 'var(--muted)' }}>
+                        {inst.implementationDisplayName ?? inst.implementation}
+                      </span>
+                    )}
                   </button>
                   {inst.credential && (
                     <span className="text-xs px-1.5 py-0.5 rounded font-mono" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
@@ -312,57 +337,100 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
       )}
 
       {creating && impls.length > 0 && (
-        <div className="flex flex-col gap-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-          <div className="flex flex-wrap items-center gap-2">
+        <Modal onClose={() => setCreating(false)} maxWidth="38rem" height="min(80vh, 40rem)">
+          <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            <h2 className="font-semibold text-base flex-1 min-w-0 truncate">New instance · {contract}</h2>
+            <button type="button" onClick={() => setCreating(false)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-5 py-4 flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>Name</span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={impl?.displayName ?? impl?.id ?? ''}
+                className="rounded-md px-3 h-9 text-sm"
+                style={inputStyle}
+              />
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                Optional — the implementation&apos;s own name is used when blank. Worth setting once a
+                contract runs more than one.
+              </span>
+            </label>
+
             {impls.length > 1 && (
-              <select
-                value={impl?.id ?? ''}
-                onChange={(e) => { setImplId(e.target.value); setCredential(''); setParamValues({}) }}
-                className="rounded-md px-2 py-1.5 text-xs"
-                style={inputStyle}
-              >
-                {impls.map(i => (
-                  <option key={i.id} value={i.id}>
-                    {i.displayName ?? i.id}{i.credential ? ` — needs ${i.credential.type} (${i.credential.level})` : ''}
-                  </option>
-                ))}
-              </select>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>Implementation</span>
+                <select
+                  value={impl?.id ?? ''}
+                  onChange={(e) => { setImplId(e.target.value); setCredential(''); setParamValues({}) }}
+                  className="rounded-md px-2 h-9 text-sm"
+                  style={inputStyle}
+                >
+                  {impls.map(i => (
+                    <option key={i.id} value={i.id}>
+                      {i.displayName ?? i.id}{i.credential ? ` — needs ${i.credential.type} (${i.credential.level})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
+
             {impl?.credential && (
-              <select
-                value={credential}
-                onChange={(e) => setCredential(e.target.value)}
-                required={impl.credential.level === 'required'}
-                className="rounded-md px-2 py-1.5 text-xs"
-                style={inputStyle}
-              >
-                <option value="">{impl.credential.level === 'required' ? `choose ${impl.credential.type} credential…` : 'no credential (optional)'}</option>
-                {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                  Credential {impl.credential.level === 'required' ? '(required)' : '(optional)'}
+                </span>
+                <select
+                  value={credential}
+                  onChange={(e) => setCredential(e.target.value)}
+                  required={impl.credential.level === 'required'}
+                  className="rounded-md px-2 h-9 text-sm"
+                  style={inputStyle}
+                >
+                  <option value="">{impl.credential.level === 'required' ? `choose ${impl.credential.type} credential…` : 'no credential'}</option>
+                  {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </label>
             )}
+
+            {(impl?.paramsFields?.length ?? 0) > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>Parameters</span>
+                <ParamsFields
+                  fields={impl!.paramsFields!}
+                  values={paramValues}
+                  onChange={(name, value) => setParamValues((prev) => ({ ...prev, [name]: value }))}
+                />
+              </div>
+            )}
+
+            {impl?.credential?.level === 'required' && eligibleCredentials.length === 0 && (
+              <span className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
+                No {impl.credential.type} credential stored — add one on the Credentials page first.
+              </span>
+            )}
+          </div>
+
+          <div className="shrink-0 flex items-center gap-2 px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <span className="text-xs flex-1 min-w-0" style={{ color: 'var(--muted)' }}>
+              {mine.length === 0
+                ? 'Starts collecting straight away — nothing else serves this contract yet.'
+                : `Created stopped. ${mine.length} instance${mine.length > 1 ? 's' : ''} already here, and one implementation serves at a time.`}
+            </span>
             <button
               onClick={() => void create()}
               disabled={busy || (impl?.credential?.level === 'required' && !credential)}
-              className="px-3 py-1.5 rounded-md text-xs"
+              className="px-4 h-9 rounded-md text-sm shrink-0"
               style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}
             >
-              Create &amp; Activate
+              {busy ? 'Creating…' : mine.length === 0 ? 'Create & start' : 'Create'}
             </button>
           </div>
-          {(impl?.paramsFields?.length ?? 0) > 0 && (
-            <ParamsFields
-              fields={impl!.paramsFields!}
-              values={paramValues}
-              onChange={(name, value) => setParamValues((prev) => ({ ...prev, [name]: value }))}
-            />
-          )}
-          {impl?.credential?.level === 'required' && eligibleCredentials.length === 0 && (
-            <span className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
-              No {impl.credential.type} credential stored — add one on the Credentials page first.
-            </span>
-          )}
-        </div>
+        </Modal>
       )}
+
     </section>
   )
 }
