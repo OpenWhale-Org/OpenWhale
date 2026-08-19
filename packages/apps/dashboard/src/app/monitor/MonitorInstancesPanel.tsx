@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import type { MonitorInstanceView, CredentialInfo, ParamFieldDef } from '@openwhaleorg/core'
-import { Modal } from '@/components/Modal'
 
 export interface ImplementationInfo {
   id: string
@@ -15,22 +14,33 @@ export interface ImplementationInfo {
 }
 
 /** Schema-derived tuning fields (numbers/booleans/strings). Values as strings; empty = use default. */
+const FIELD_CLASS = 'rounded-md px-2 h-8 text-xs'
+const FIELD_STYLE = {
+  background: 'transparent',
+  color: 'var(--foreground)',
+  border: '1px solid color-mix(in srgb, var(--border) 70%, transparent)',
+} as const
+
 function ParamsFields({ fields, values, onChange }: {
   fields: ParamFieldDef[]
   values: Record<string, string>
   onChange: (name: string, value: string) => void
 }) {
+  /* Quiet inputs on purpose. Each field used to be a filled box with a full
+     border sitting inside another filled box with a full border, and a row of
+     those reads as moulded plastic rather than as a form. One border, no fill,
+     and the surface underneath shows through. */
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-x-4 gap-y-2">
       {fields.map((f) => (
-        <label key={f.name} className="flex flex-col gap-0.5 text-xs" style={{ color: 'var(--muted)' }} title={f.description}>
-          {f.displayName}
+        <label key={f.name} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }} title={f.description}>
+          <span className="opacity-80">{f.displayName}</span>
           {f.type === 'boolean' ? (
             <select
               value={values[f.name] ?? ''}
               onChange={(e) => onChange(f.name, e.target.value)}
-              className="rounded-md px-2 py-1.5"
-              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+              className={FIELD_CLASS}
+              style={FIELD_STYLE}
             >
               <option value="">default{f.default !== undefined ? ` (${String(f.default)})` : ''}</option>
               <option value="true">true</option>
@@ -41,8 +51,8 @@ function ParamsFields({ fields, values, onChange }: {
               value={values[f.name] ?? ''}
               onChange={(e) => onChange(f.name, e.target.value)}
               placeholder={f.default !== undefined ? String(f.default) : ''}
-              className="rounded-md px-2 py-1.5 w-36"
-              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+              className={`${FIELD_CLASS} w-36`}
+              style={FIELD_STYLE}
             />
           )}
         </label>
@@ -62,12 +72,6 @@ function buildParams(fields: ParamFieldDef[], values: Record<string, string>): R
   return out
 }
 
-/** One-line params summary for a collapsed row; '—' when the instance runs on defaults. */
-function summarizeParams(params?: Record<string, unknown>): string {
-  const entries = Object.entries(params ?? {})
-  if (entries.length === 0) return '—'
-  return entries.map(([k, v]) => `${k}=${String(v)}`).join(' ')
-}
 
 const inputStyle = {
   background: 'var(--background)',
@@ -232,8 +236,10 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
             return (
               <div
                 key={inst.id}
-                className="hoverable hoverable-flat flex flex-col rounded-md px-3 py-2 mt-1.5"
-                style={{ background: 'var(--background)', border: '1px solid var(--border)' }}
+                /* No inner border. A bordered block inside a bordered section
+                   inside a bordered tab is three frames around one thing. */
+                className="hoverable hoverable-flat flex flex-col rounded-md px-3 py-2.5 mt-1.5 gap-2"
+                style={{ background: 'color-mix(in srgb, var(--background) 60%, transparent)' }}
               >
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Radio, not a toggle: the runtime allows one active per implementation */}
@@ -264,9 +270,6 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                       {inst.credential}
                     </span>
                   )}
-                  <span className="text-xs font-mono truncate" style={{ color: 'var(--muted)' }} title={summarizeParams(inst.params)}>
-                    {summarizeParams(inst.params)}
-                  </span>
                   {inst.servingKeys?.length ? (
                     <span className="text-xs font-mono truncate" style={{ color: 'var(--muted)' }} title={inst.servingKeys.join(', ')}>
                       serving {inst.servingKeys.length}
@@ -276,21 +279,6 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                     <span className="text-xs" style={{ color: 'var(--danger)' }} title={inst.problem}>⚠ {inst.problem}</span>
                   )}
                   <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                    {editable && (
-                      <button
-                        onClick={() => setEditing(editing?.id === inst.id ? null : {
-                          id: inst.id,
-                          values: Object.fromEntries(Object.entries(inst.params ?? {}).map(([k, v]) => [k, String(v)])),
-                        })}
-                        className="text-xs px-2 py-1 rounded-md"
-                        style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-                        title={inst.active
-                          ? 'Edit params — saving rebuilds the runner (its keys come back, its in-memory state does not)'
-                          : 'Edit params'}
-                      >
-                        Params
-                      </button>
-                    )}
                     {inst.active && (
                       <button
                         onClick={() => void stop(inst)}
@@ -312,123 +300,139 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                     </button>
                   </div>
                 </div>
-                {editing?.id === inst.id && (
-                  <div className="flex flex-wrap items-end gap-3 pb-3">
-                    <ParamsFields
-                      fields={inst.paramsFields ?? []}
-                      values={editing.values}
-                      onChange={(name, value) => setEditing((prev) => prev && { ...prev, values: { ...prev.values, [name]: value } })}
-                    />
-                    <button
-                      onClick={() => void saveParams(inst)}
-                      disabled={busy}
-                      className="text-xs px-3 py-1.5 rounded-md"
-                      style={{ background: 'var(--accent)', color: '#fff' }}
-                      title={inst.active ? 'Saves, then rebuilds the running instance from the new params' : undefined}
-                    >
-                      {inst.active ? 'Save & Restart' : 'Save Params'}
-                    </button>
-                  </div>
-                )}
+                {/* Params are always here, not behind a button. They ARE the
+                    instance — a runner with no visible configuration is a row
+                    you have to click to understand. Save only appears once a
+                    value differs from what is stored, so an untouched row shows
+                    no action at all. */}
+                {editable && (() => {
+                  const stored = Object.fromEntries(
+                    Object.entries(inst.params ?? {}).map(([k, v]) => [k, String(v)]))
+                  const values = editing?.id === inst.id ? editing.values : stored
+                  const dirty = (inst.paramsFields ?? []).some(f => (values[f.name] ?? '') !== (stored[f.name] ?? ''))
+                  return (
+                    <div className="flex flex-wrap items-end gap-3">
+                      <ParamsFields
+                        fields={inst.paramsFields ?? []}
+                        values={values}
+                        onChange={(name, value) => setEditing({
+                          id: inst.id,
+                          values: { ...(editing?.id === inst.id ? editing.values : stored), [name]: value },
+                        })}
+                      />
+                      {dirty && (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => void saveParams(inst)}
+                            disabled={busy}
+                            className="text-xs px-3 h-8 rounded-md"
+                            style={{ background: 'var(--accent)', color: '#fff' }}
+                            title={inst.active ? 'Saves, then rebuilds the running instance from the new params' : undefined}
+                          >
+                            {inst.active ? 'Save & restart' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => setEditing(null)}
+                            className="text-xs px-2.5 h-8 rounded-md"
+                            style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+                          >
+                            Revert
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}
         </div>
       )}
 
+      {/* A new instance appears as one more row, not a dialog.
+          It is the same shape as the rows above it — name, credential, the
+          same parameter fields — so what you are filling in is visibly the
+          thing you will end up with. A dialog hid the list you were adding to. */}
       {creating && impls.length > 0 && (
-        <Modal onClose={() => setCreating(false)} maxWidth="38rem" height="min(80vh, 40rem)">
-          <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-            <h2 className="font-semibold text-base flex-1 min-w-0 truncate">New instance · {contract}</h2>
-            <button type="button" onClick={() => setCreating(false)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-5 py-4 flex flex-col gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>Name</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={impl?.displayName ?? impl?.id ?? ''}
-                className="rounded-md px-3 h-9 text-sm"
-                style={inputStyle}
-              />
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                Optional — the implementation&apos;s own name is used when blank. Worth setting once a
-                contract runs more than one.
-              </span>
-            </label>
-
+        <div
+          className="flex flex-col gap-2 rounded-md px-3 py-2.5 mt-1.5"
+          style={{
+            background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
+            border: '1px dashed color-mix(in srgb, var(--accent) 45%, transparent)',
+          }}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span style={{ color: 'var(--muted)' }}>○</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={impl?.displayName ?? impl?.id ?? 'Name'}
+              className={`${FIELD_CLASS} min-w-48 flex-1`}
+              style={FIELD_STYLE}
+              autoFocus
+            />
             {impls.length > 1 && (
-              <label className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>Implementation</span>
-                <select
-                  value={impl?.id ?? ''}
-                  onChange={(e) => { setImplId(e.target.value); setCredential(''); setParamValues({}) }}
-                  className="rounded-md px-2 h-9 text-sm"
-                  style={inputStyle}
-                >
-                  {impls.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.displayName ?? i.id}{i.credential ? ` — needs ${i.credential.type} (${i.credential.level})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <select
+                value={impl?.id ?? ''}
+                onChange={(e) => { setImplId(e.target.value); setCredential(''); setParamValues({}) }}
+                className={FIELD_CLASS}
+                style={FIELD_STYLE}
+              >
+                {impls.map(i => (
+                  <option key={i.id} value={i.id}>
+                    {i.displayName ?? i.id}{i.credential ? ` — needs ${i.credential.type}` : ''}
+                  </option>
+                ))}
+              </select>
             )}
-
             {impl?.credential && (
-              <label className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                  Credential {impl.credential.level === 'required' ? '(required)' : '(optional)'}
-                </span>
-                <select
-                  value={credential}
-                  onChange={(e) => setCredential(e.target.value)}
-                  required={impl.credential.level === 'required'}
-                  className="rounded-md px-2 h-9 text-sm"
-                  style={inputStyle}
-                >
-                  <option value="">{impl.credential.level === 'required' ? `choose ${impl.credential.type} credential…` : 'no credential'}</option>
-                  {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              </label>
+              <select
+                value={credential}
+                onChange={(e) => setCredential(e.target.value)}
+                required={impl.credential.level === 'required'}
+                className={FIELD_CLASS}
+                style={FIELD_STYLE}
+              >
+                <option value="">{impl.credential.level === 'required' ? `${impl.credential.type} credential…` : 'no credential'}</option>
+                {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
             )}
-
-            {(impl?.paramsFields?.length ?? 0) > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>Parameters</span>
-                <ParamsFields
-                  fields={impl!.paramsFields!}
-                  values={paramValues}
-                  onChange={(name, value) => setParamValues((prev) => ({ ...prev, [name]: value }))}
-                />
-              </div>
-            )}
-
-            {impl?.credential?.level === 'required' && eligibleCredentials.length === 0 && (
-              <span className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
-                No {impl.credential.type} credential stored — add one on the Credentials page first.
-              </span>
-            )}
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => void create()}
+                disabled={busy || (impl?.credential?.level === 'required' && !credential)}
+                className="text-xs px-3 h-8 rounded-md"
+                style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}
+                title={mine.length === 0
+                  ? 'Nothing serves this contract yet, so it starts collecting straight away'
+                  : 'Created stopped — one implementation serves at a time, and something is already running'}
+              >
+                {busy ? 'Creating…' : mine.length === 0 ? 'Create & start' : 'Create'}
+              </button>
+              <button
+                onClick={() => { setCreating(false); setName(''); setCredential(''); setParamValues({}) }}
+                className="text-xs px-2.5 h-8 rounded-md"
+                style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
 
-          <div className="shrink-0 flex items-center gap-2 px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
-            <span className="text-xs flex-1 min-w-0" style={{ color: 'var(--muted)' }}>
-              {mine.length === 0
-                ? 'Starts collecting straight away — nothing else serves this contract yet.'
-                : `Created stopped. ${mine.length} instance${mine.length > 1 ? 's' : ''} already here, and one implementation serves at a time.`}
+          {(impl?.paramsFields?.length ?? 0) > 0 && (
+            <ParamsFields
+              fields={impl!.paramsFields!}
+              values={paramValues}
+              onChange={(n, value) => setParamValues((prev) => ({ ...prev, [n]: value }))}
+            />
+          )}
+
+          {impl?.credential?.level === 'required' && eligibleCredentials.length === 0 && (
+            <span className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
+              No {impl.credential.type} credential stored — add one on the Credentials page first.
             </span>
-            <button
-              onClick={() => void create()}
-              disabled={busy || (impl?.credential?.level === 'required' && !credential)}
-              className="px-4 h-9 rounded-md text-sm shrink-0"
-              style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}
-            >
-              {busy ? 'Creating…' : mine.length === 0 ? 'Create & start' : 'Create'}
-            </button>
-          </div>
-        </Modal>
+          )}
+        </div>
       )}
 
     </section>

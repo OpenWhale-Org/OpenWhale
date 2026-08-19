@@ -230,6 +230,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
 
           <div className="shrink-0 flex gap-2 px-3 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
             <button
+              data-tour="new-account"
               onClick={() => setShowNew(v => !v)}
               className="flex-1 h-8 rounded-md text-xs flex items-center justify-center gap-1.5"
               style={{ background: showNew ? 'var(--background)' : 'var(--accent)', color: showNew ? 'var(--foreground)' : '#fff', border: showNew ? '1px solid var(--border)' : 'none' }}
@@ -254,7 +255,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           {showNew ? (
-            <form onSubmit={create} className="flex flex-col gap-3 p-4">
+            <form data-tour="account-form" onSubmit={create} className="flex flex-col gap-3 p-4">
               <h2 className="text-sm font-semibold">New Account</h2>
               <input
                 value={name}

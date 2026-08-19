@@ -22,6 +22,7 @@ function formatTime(ts?: number): string {
 export function ExplorerClient() {
   const [contracts, setContracts] = useState<ContractEntry[]>([])
   const [dataDir, setDataDir] = useState('')
+  const [disk, setDisk] = useState<{ freeBytes: number; totalBytes: number } | null>(null)
   const [monitor, setMonitor] = useState<string | null>(null)
   const [keys, setKeys] = useState<KeyEntry[]>([])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -33,9 +34,10 @@ export function ExplorerClient() {
   const loadContracts = useCallback(async () => {
     const res = await fetch('/api/monitor-data')
     if (res.ok) {
-      const data = await res.json() as { dataDir: string; contracts: ContractEntry[] }
+      const data = await res.json() as { dataDir: string; contracts: ContractEntry[]; disk?: { freeBytes: number; totalBytes: number } }
       setContracts(data.contracts.sort((a, b) => a.monitor.localeCompare(b.monitor)))
       setDataDir(data.dataDir)
+      setDisk(data.disk ?? null)
     }
   }, [])
 
@@ -72,6 +74,32 @@ export function ExplorerClient() {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-mono truncate" style={{ color: 'var(--muted)' }} title={dataDir}>{dataDir}</span>
+        {/* These files only grow, so the totals above are half a question —
+            what is left is the other half. The bar turns amber under 15% and
+            red under 5%: by the time a collector cannot write, the data it
+            missed is gone for good. */}
+        {disk && (() => {
+          const collected = contracts.reduce((n, c) => n + c.bytes, 0)
+          const usedFrac = 1 - disk.freeBytes / disk.totalBytes
+          const tight = disk.freeBytes / disk.totalBytes
+          const tone = tight < 0.05 ? 'var(--danger)' : tight < 0.15 ? 'var(--warning, #eab308)' : 'var(--accent)'
+          return (
+            <div
+              className="flex items-center gap-2.5 shrink-0 text-xs"
+              title={`Monitors hold ${formatBytes(collected)}. Disk: ${formatBytes(disk.freeBytes)} free of ${formatBytes(disk.totalBytes)}.`}
+            >
+              <span style={{ color: 'var(--muted)' }}>
+                monitors <span style={{ color: 'var(--foreground)' }}>{formatBytes(collected)}</span>
+              </span>
+              <div className="rounded-full overflow-hidden" style={{ width: 88, height: 6, background: 'var(--background)', border: '1px solid var(--border)' }}>
+                <div style={{ width: `${Math.min(100, usedFrac * 100).toFixed(1)}%`, height: '100%', background: tone }} />
+              </div>
+              <span style={{ color: tight < 0.15 ? tone : 'var(--muted)' }}>
+                {formatBytes(disk.freeBytes)} free
+              </span>
+            </div>
+          )
+        })()}
         <button
           onClick={() => void openFolder()}
           className="text-xs px-3 py-1.5 rounded-md shrink-0"

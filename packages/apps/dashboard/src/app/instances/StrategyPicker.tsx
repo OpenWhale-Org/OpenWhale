@@ -118,7 +118,7 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
         </div>
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div data-tour="strategy-picker" className="flex flex-1 min-h-0">
           {/* ── Left: search + grouped list ── */}
           <div className="flex flex-col w-64 shrink-0" style={{ borderRight: '1px solid var(--border)' }}>
             <div className="p-2" style={{ borderBottom: '1px solid var(--border)' }}>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { startTour, tourWasSeen } from '@/components/Tour'
 import type { AccountSnapshotRecord, AccountView, StrategyInstanceView } from '@openwhaleorg/core'
 import { PortfolioEquityChart, PortfolioEquitySparkline, usePortfolioEquity } from './PortfolioEquityChart'
 
@@ -15,7 +16,26 @@ function usd(value: number): string {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: value >= 100_000 ? 0 : 2 })
 }
 
+/**
+ * First run: send someone with nothing configured to the tour, once.
+ *
+ * Gated on the world being empty AND the tour never having been opened, so it
+ * cannot ambush an operator whose accounts happen to be between states. It
+ * redirects rather than overlaying: a tour you have to dismiss before you can
+ * look around is a worse first impression than a page you can walk out of, and
+ * the sidebar keeps a way back either way.
+ */
+function useFirstRunRedirect(empty: boolean) {
+  useEffect(() => {
+    if (!empty) return
+    // Straight into the tour, not to a page about the tour. Someone with an
+    // empty install has nothing to read a checklist against.
+    if (!tourWasSeen()) startTour()
+  }, [empty])
+}
+
 export function AuroraOverview({ instances, accounts, snapshots }: { instances: StrategyInstanceView[]; accounts: AccountView[]; snapshots: Record<string, AccountSnapshotRecord> }) {
+  useFirstRunRedirect(instances.length === 0 && accounts.length === 0)
   const [stats, setStats] = useState<Stats | null>(null)
   const [pointer, setPointer] = useState({ x: 68, y: 28 })
   const portfolioEquity = usePortfolioEquity()

@@ -929,6 +929,63 @@ export function buildRouter(): Router {
 
   // ── monitor data explorer ───────────────────────────────────────────────────
 
+  /*
+   * Hyperliquid's public leaderboard, reduced to a handful of copyable
+   * traders. Two things make this a server route rather than a fetch from the
+   * page: the source is a 34 MB JSON document, and it changes slowly enough
+   * that pulling it per visitor would be absurd.
+   *
+   * Ranked by month PnL over CURRENT EQUITY, not by the `roi` the feed
+   * supplies. That field is measured against starting capital, so an account
+   * that began near zero shows 28,000% for a 1.5% gain — the top of the
+   * leaderboard by roi is a list of rounding errors. Floors on equity and
+   * volume keep out the account that turned $200 into $2,000 once.
+   */
+  const TOP_TRADERS_TTL = 6 * 3600_000
+  let topTraders: { at: number; rows: unknown[] } | null = null
+
+  router.get('/api/hyperliquid/top-traders', h(async (_req, res) => {
+    if (topTraders && Date.now() - topTraders.at < TOP_TRADERS_TTL) {
+      res.json(topTraders.rows)
+      return
+    }
+    try {
+      const r = await fetch('https://stats-data.hyperliquid.xyz/Mainnet/leaderboard')
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const body = await r.json() as {
+        leaderboardRows: Array<{
+          ethAddress: string
+          accountValue: string
+          displayName: string | null
+          windowPerformances: Array<[string, { pnl: string; roi: string; vlm: string }]>
+        }>
+      }
+      const rows = body.leaderboardRows
+        .flatMap((row) => {
+          const month = row.windowPerformances.find(([w]) => w === 'month')?.[1]
+          if (!month) return []
+          const equity = Number(row.accountValue)
+          const pnl = Number(month.pnl)
+          const volume = Number(month.vlm)
+          if (!(equity >= 100_000) || !(volume >= 1_000_000)) return []
+          return [{
+            address: row.ethAddress,
+            ...(row.displayName ? { name: row.displayName } : {}),
+            equity, pnl, volume,
+            /** Month PnL over current equity. See the note above on `roi`. */
+            returnPct: (pnl / equity) * 100,
+          }]
+        })
+        .sort((a, b) => b.returnPct - a.returnPct)
+        .slice(0, 12)
+      topTraders = { at: Date.now(), rows }
+      res.json(rows)
+    } catch (err) {
+      // Advisory: the field it feeds still takes a typed address.
+      res.status(502).json({ error: errText(err) })
+    }
+  }))
+
   router.get('/api/monitor-data', h(async (req, res) => {
     const runtime = await ensureStarted()
     const monitorsDir = path.join(runtime.dataDirPath, 'monitors')
@@ -943,7 +1000,19 @@ export function buildRouter(): Router {
         const files = walkJsonl(dir)
         contracts.push({ monitor: entry, keys: files.length, bytes: files.reduce((s, f) => s + f.bytes, 0) })
       }
-      res.json({ dataDir: monitorsDir, contracts })
+      /*
+       * Free space alongside the totals, because the two are the same question.
+       * These files only ever grow — a monitor that has been collecting for a
+       * month is a monitor quietly filling a disk, and "1155.7 MB" means
+       * nothing without knowing what is left. statfs is cheap and advisory:
+       * if it is unavailable the listing still renders.
+       */
+      let disk: { freeBytes: number; totalBytes: number } | undefined
+      try {
+        const st = await fs.promises.statfs(monitorsDir)
+        disk = { freeBytes: st.bsize * st.bavail, totalBytes: st.bsize * st.blocks }
+      } catch { /* advisory */ }
+      res.json({ dataDir: monitorsDir, contracts, ...(disk ? { disk } : {}) })
       return
     }
 

@@ -377,7 +377,7 @@ function TypePicker({
     /* Fills the dialog body: the list is the step, so it should end where the
        dialog does rather than at some fixed pixel height with dead space under
        it. Both columns scroll inside themselves, without a visible track. */
-    <div className="flex-1 min-h-0 flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+    <div data-tour="credential-type-list" className="flex-1 min-h-0 flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       {/* Category sidebar */}
       <div className="flex flex-col w-40 shrink-0 py-2 overflow-y-auto scroll-hidden" style={{ background: 'var(--background)', borderRight: '1px solid var(--border)' }}>
         {categories.map((c) => {
@@ -558,7 +558,7 @@ function AddCredentialForm({
       </div>
 
       {step === 'type' ? (
-        <div className="flex-1 min-h-0 flex flex-col gap-3 px-5 py-4">
+        <div data-tour="credential-dialog" className="flex-1 min-h-0 flex flex-col gap-3 px-5 py-4">
           <p className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
             Pick what this credential is for. The next step is its form.
           </p>
@@ -571,7 +571,7 @@ function AddCredentialForm({
       ) : (
         /* No scrolling here — the form inside owns it, so its action bar can
            stay pinned to the bottom of the dialog. */
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div data-tour="credential-form" className="flex-1 min-h-0 flex flex-col">
           <div className="flex items-center gap-2.5 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
             <TypeMark
               logo={selected?.logo}
@@ -661,6 +661,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
         </div>
         <div className="flex items-center gap-2">
           <button
+            data-tour="add-credential"
             onClick={() => setShowForm(true)}
             className="px-4 py-2 rounded-md text-sm"
             style={{ background: 'var(--accent)', color: '#fff' }}

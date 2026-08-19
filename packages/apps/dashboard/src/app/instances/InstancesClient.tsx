@@ -446,11 +446,14 @@ export function ParamFieldsForm({
   function renderField(field: ParamFieldDef) {
     if (!isFieldVisible(field, values)) return null
     const value = values[field.name] ?? ''
+    // Per-field hook: the tour spotlights ONE input at a time rather than the
+    // whole dialog. Spotlighting a 40-field form tells nobody what to type.
+    const tour = `field-${field.name}`
 
     if (field.type === 'boolean') {
       const checked = value === 'true'
       return (
-        <div key={field.name} className="flex flex-col gap-1">
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
           <div className="flex items-baseline gap-1">
             <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
               {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -482,7 +485,7 @@ export function ParamFieldsForm({
         set(field.name, next.join(','))
       }
       return (
-        <div key={field.name} className="flex flex-col gap-1">
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
           <div className="flex items-baseline gap-1">
             <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
               {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -525,7 +528,7 @@ export function ParamFieldsForm({
 
     if (field.type === 'list') {
       return (
-        <div key={field.name} className="flex flex-col gap-1">
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
           <div className="flex items-baseline gap-1">
             <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
               {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -541,7 +544,7 @@ export function ParamFieldsForm({
     // A bounded number can be dragged instead of typed.
     if (field.type === 'number' && field.slider) {
       return (
-        <div key={field.name} className="flex flex-col gap-1">
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
           <div className="flex items-baseline gap-1">
             <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
               {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -562,7 +565,7 @@ export function ParamFieldsForm({
 
     if (field.type === 'options' && field.options) {
       return (
-        <div key={field.name} className="flex flex-col gap-1">
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
           <div className="flex items-baseline gap-1">
             <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
               {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -586,7 +589,7 @@ export function ParamFieldsForm({
 
     if (field.catalogue) {
       return (
-        <div key={field.name} className="flex flex-col gap-1">
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
           <div className="flex items-baseline gap-1">
             <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
               {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -611,13 +614,20 @@ export function ParamFieldsForm({
 
     // string / number
     return (
-      <div key={field.name} className="flex flex-col gap-1">
+      <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
         <div className="flex items-baseline gap-1">
           <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
             {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
           </span>
           {field.hint && <span className="text-xs" style={{ color: 'var(--muted)' }}>— {field.hint}</span>}
         </div>
+        {/* Copy-trading's whole first decision is WHO. An empty 0x… box asks a
+            newcomer for the one thing they cannot possibly know yet, so the
+            leaderboard's top month is offered right there. Still a plain text
+            field: the suggestions are a shortcut, not a whitelist. */}
+        {field.name === 'targetAddress' && (
+          <TopTraders onPick={(addr) => set(field.name, addr)} current={value} />
+        )}
         <div className="flex items-center gap-2">
           <input
             type={field.type === 'number' ? 'number' : 'text'}
@@ -883,7 +893,7 @@ export function InstancesClient({ initialInstances }: Props) {
           </button>
           {/* The dialog covers the page, so this never needs to read "Cancel" —
               cancelling belongs to the dialog that has focus. */}
-          <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn btn-primary">
+          <button data-tour="new-instance" onClick={() => { setEditing(null); setShowForm(true) }} className="btn btn-primary">
             + New Instance
           </button>
         </div>
@@ -1540,6 +1550,89 @@ function seriesPoints(points: PnlPoint[]): string {
     .join(' ')
 }
 
+interface TopTrader {
+  address: string
+  name?: string
+  equity: number
+  pnl: number
+  volume: number
+  returnPct: number
+}
+
+/**
+ * Hyperliquid's public leaderboard, as a shortlist you can click.
+ *
+ * Ranked by last month's PnL over current equity — see the gateway route for
+ * why not the feed's own `roi`. Loaded lazily and only ever a suggestion: the
+ * field underneath stays a plain address box, because the whole point of copy
+ * trading is following someone in particular.
+ */
+function TopTraders({ onPick, current }: { onPick: (address: string) => void; current: string }) {
+  const [rows, setRows] = useState<TopTrader[] | null | 'error'>(null)
+  const [open, setOpen] = useState(false)
+
+  const load = () => {
+    setOpen(o => !o)
+    if (rows !== null) return
+    void fetch('/api/hyperliquid/top-traders')
+      .then(async r => { if (!r.ok) throw new Error(); setRows(await r.json() as TopTrader[]) })
+      .catch(() => setRows('error'))
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        onClick={load}
+        className="hoverable hoverable-flat self-start h-7 px-2.5 rounded-md text-xs flex items-center gap-1.5"
+        style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+      >
+        {open ? '▾' : '▸'} Suggest a trader
+        <span style={{ opacity: 0.7 }}>· top of the Hyperliquid leaderboard, last 30 days</span>
+      </button>
+
+      {open && (
+        <div className="rounded-md overflow-hidden" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+          {rows === null && <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>Loading the leaderboard…</p>}
+          {rows === 'error' && (
+            <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>
+              Could not reach the leaderboard. Paste an address instead.
+            </p>
+          )}
+          {Array.isArray(rows) && rows.map((t) => {
+            const chosen = current.toLowerCase() === t.address.toLowerCase()
+            return (
+              <button
+                key={t.address}
+                type="button"
+                onClick={() => onPick(t.address)}
+                className="hoverable hoverable-flat w-full flex items-center gap-3 px-3 py-2 text-left"
+                style={{ background: chosen ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent' }}
+              >
+                <span className="font-mono text-xs truncate flex-1" title={t.address}>
+                  {t.name ?? `${t.address.slice(0, 8)}…${t.address.slice(-6)}`}
+                </span>
+                <span className="text-xs font-mono shrink-0" style={{ color: 'var(--success, #4ade80)' }}>
+                  +{t.returnPct.toFixed(0)}%
+                </span>
+                <span className="text-xs font-mono shrink-0" style={{ color: 'var(--muted)' }}>
+                  ${(t.equity / 1000).toFixed(0)}k equity
+                </span>
+              </button>
+            )
+          })}
+          {Array.isArray(rows) && (
+            <p className="text-xs px-3 py-2" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+              Last 30 days, over current equity. A good month is not a good trader — this is a
+              starting point, not a recommendation.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then age. */
 function groupByFolder(
   instances: StrategyInstanceView[],
@@ -1805,7 +1898,7 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
           cancelLabel={selectedStrategy ? '← Back' : 'Cancel'}
         />
       ) : (
-      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+      <form data-tour="instance-form" onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
         {/* Which strategy this configures stays pinned above the scroll — in a
             forty-parameter form it is the one fact you must not lose track of. */}
         <div className="flex items-start gap-3 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>

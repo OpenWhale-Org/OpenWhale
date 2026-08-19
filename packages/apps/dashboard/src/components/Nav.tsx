@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
-type IconName = 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users'
+type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users'
 
 const links: Array<{ href: string; label: string; auroraLabel?: string; group?: string; icon: IconName }> = [
   { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
@@ -26,6 +26,7 @@ const auroraGroups = ['TRADE', 'OBSERVE', 'AUTOMATE', 'DEVELOP', 'SETTINGS']
 function Icon({ name }: { name: IconName }) {
   const common = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   switch (name) {
+    case 'start': return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="m10 8 6 4-6 4Z" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2" /></svg>
     case 'overview': return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></svg>
     case 'strategies': return <svg {...common}><path d="M4 18 9 12l4 3 7-9" /><path d="M15 6h5v5" /></svg>
     case 'accounts': return <svg {...common}><path d="M3 7h18v12H3z" /><path d="M16 12h5v3h-5a1.5 1.5 0 0 1 0-3Z" /><path d="M6 7V5h12v2" /></svg>
@@ -44,7 +45,9 @@ function Icon({ name }: { name: IconName }) {
 
 function NavLink({ href, label, icon, active }: { href: string; label: string; icon: IconName; active: boolean }) {
   return (
-    <Link href={href} className={`aurora-nav-link${active ? ' is-active' : ''}`}>
+    // The tour spotlights these by name; the hook lives on the control so it
+    // moves with it. See components/Tour.
+    <Link href={href} data-tour={`nav-${href.replace('/', '')}`} className={`aurora-nav-link${active ? ' is-active' : ''}`}>
       <Icon name={icon} />
       <span>{label}</span>
     </Link>
@@ -75,6 +78,10 @@ export function Nav() {
         })}
       </nav>
       <div className="aurora-sidebar-footer">
+        {/* Kept where it can always be found. The tour is skippable and most
+            people skip it, which is exactly why it needs a way back — a
+            first-run overlay you dismissed once is otherwise gone for good. */}
+        <NavLink href="/start" label="Getting started" icon="start" active={isActive('/start')} />
         <NavLink href="/assistant" label="Assistant" icon="assistant" active={isActive('/assistant')} />
       </div>
     </aside>

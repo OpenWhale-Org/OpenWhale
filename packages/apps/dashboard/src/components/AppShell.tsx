@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation'
 import { Nav } from './Nav'
 import { UserMenu } from './UserMenu'
+import { Tour } from './Tour'
 
 /**
  * The application shell.
@@ -54,6 +55,7 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
           <UserMenu {...(username ? { username } : {})} />
         </header>
         <main className="aurora-main">{children}</main>
+        <Tour />
       </div>
     </div>
   )

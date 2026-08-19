@@ -386,6 +386,53 @@ body {
   .aurora-motion-follow,.aurora-market-whale,.aurora-particles { transform: none!important; }
 }
 
+/* ── Guided tour ──────────────────────────────────────────────────────────
+   The dimming is a huge spread shadow on a transparent box, so the hole is
+   the box itself and tracks its element exactly — no SVG mask, no second
+   element to keep in sync. Nothing here takes pointer events except the card:
+   the whole point is that you press the REAL control underneath. */
+.ow-tour { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+.ow-tour-dim { position: absolute; inset: 0; background: rgba(4, 6, 14, .62); }
+.ow-tour-hole {
+  position: absolute; border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(4, 6, 14, .62), 0 0 0 2px var(--accent), 0 0 24px -2px var(--accent);
+  transition: left 160ms ease, top 160ms ease, width 160ms ease, height 160ms ease;
+}
+.ow-tour-hole::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: ow-tour-pulse 1.8s ease-in-out infinite;
+}
+@keyframes ow-tour-pulse {
+  0%, 100% { opacity: .25; transform: scale(1) }
+  50%      { opacity: .8;  transform: scale(1.03) }
+}
+.ow-tour-block { position: absolute; pointer-events: auto; }
+.ow-tour-card {
+  position: absolute; pointer-events: auto; width: 340px;
+  border-radius: 14px; padding: 1rem 1.1rem;
+  background: linear-gradient(160deg, rgba(24,18,52,.97), rgba(11,8,28,.97));
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 20px 50px rgba(2,2,10,.6), 0 0 22px -6px var(--accent);
+  backdrop-filter: blur(14px);
+  transition: left 160ms ease, top 160ms ease;
+}
+.ow-tour-step { font-size: .6rem; letter-spacing: .18em; color: var(--accent); }
+.ow-tour-card h3 { margin: .35rem 0 .4rem; font-size: .95rem; font-weight: 620; color: #ece8fa; }
+.ow-tour-card p { font-size: .78rem; line-height: 1.55; color: rgba(226,220,250,.8); }
+.ow-tour-waiting {
+  margin-top: .5rem; font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: .66rem !important; color: var(--accent) !important;
+}
+.ow-tour-actions { display: flex; align-items: center; gap: .4rem; margin-top: .8rem; }
+.ow-tour-spacer { flex: 1 }
+.ow-tour-actions button {
+  height: 28px; padding: 0 .7rem; border-radius: 7px; font-size: .72rem;
+  border: 1px solid var(--border); color: rgba(226,220,250,.72);
+}
+.ow-tour-actions button:hover { color: #fff; border-color: color-mix(in srgb, var(--accent) 60%, transparent) }
+.ow-tour-actions .ow-tour-primary { background: var(--accent); color: #fff; border-color: transparent }
+
 /* ── Hover: the surface rises a little out of the water ───────────────────
    One class for every card and row, so a list, a grid and a dialog all answer
    the pointer the same way.
