@@ -193,7 +193,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                 <button
                   key={a.name}
                   onClick={() => setExpanded(a.name)}
-                  className="w-full text-left px-3 py-2.5 flex items-center gap-2.5"
+                  className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2.5"
                   style={{
                     background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
                     borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,

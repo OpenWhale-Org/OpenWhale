@@ -7,6 +7,7 @@ import { subscribeLiveEvents } from '@/lib/live-events'
 import { MonitorBoards } from './MonitorBoards'
 import { MonitorInstancesPanel, type ImplementationInfo } from './MonitorInstancesPanel'
 import { LogsPanel } from '@/components/LogsPanel'
+import { Modal } from '@/components/Modal'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
 import { SymbolPicker } from '@/components/SymbolPicker'
 
@@ -209,6 +210,36 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
 }) {
   const [historyKey, setHistoryKey] = useState<string | null>(null)
   const [showLogs, setShowLogs] = useState(false)
+  const [tab, setTab] = useState<'board' | 'manage'>('board')
+  const [watching, setWatching] = useState(false)
+  const mine = instances.filter(i => i.contract === status.id)
+
+  /* key -> the strategy instances that subscribe it.
+     The monitor itself only keeps a refcount — `subscribe(key)` carries no
+     identity — so this is derived the other way round, from each strategy's
+     own declared scope. Fetched once per selected monitor, and only used to
+     label; nothing depends on it being complete. */
+  const [subscribers, setSubscribers] = useState<Record<string, string[]>>({})
+  useEffect(() => {
+    let gone = false
+    void fetch('/api/instances')
+      .then(r => r.ok ? r.json() as Promise<Array<{ id: string; name: string }>> : [])
+      .then(async (list) => {
+        const out: Record<string, string[]> = {}
+        await Promise.all(list.map(async (inst) => {
+          const r = await fetch(`/api/instances/${inst.id}/scope`).catch(() => null)
+          if (!r?.ok) return
+          const scope = (await r.json()) as { monitors: Array<{ monitor: string; key: string }> }
+          for (const m of scope.monitors) {
+            if (m.monitor !== status.id) continue
+            ;(out[m.key] ??= []).push(inst.name)
+          }
+        }))
+        if (!gone) setSubscribers(out)
+      })
+      .catch(() => { /* labels only */ })
+    return () => { gone = true }
+  }, [status.id])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -261,118 +292,243 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
 
       {showLogs && <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />}
 
-      {/* Instances — the runners behind this contract. Above ADD WATCH because
-          watching a key does nothing until something is active to serve it. */}
-      <MonitorInstancesPanel
-        contract={status.id}
-        instances={instances}
-        implementations={implementations}
-        pendingKeys={pendingKeys}
-        credentials={credentials}
-        onChanged={onChanged}
-      />
+      {/* Two tabs, not a stack of boxes.
+          Board is what you open this page FOR: the charts, what is being
+          collected, and what just arrived. Manage is the plumbing behind it —
+          runners and subscriptions — which you set up once and then leave
+          alone. Giving them equal billing on one screen is what made this page
+          hard to read; the charts were a band in the middle of five forms. */}
+      <div className="flex items-center gap-1.5">
+        <TabButton active={tab === 'board'} onClick={() => setTab('board')} label="Board" />
+        <TabButton active={tab === 'manage'} onClick={() => setTab('manage')} label="Manage" note={`${mine.length} inst · ${status.activeKeys.length} watched`} />
+      </div>
 
-      {/* Add a watch */}
-      <section className="rounded-lg p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>ADD WATCH</span>
-        <WatchForm status={status} onChanged={onChanged} />
-      </section>
+      {tab === 'board' ? (
+        <div className="flex flex-col gap-3">
+          {/* What is being collected, and when it last spoke. */}
+          <KeyStrip
+            status={status}
+            events={events}
+            connected={connected}
+            subscribers={subscribers}
+          />
 
-      {/* Boards — panels declared by the monitor's plots() convention */}
-      <MonitorBoards
-        monitorId={status.id}
-        keys={Array.from(new Set([...status.activeKeys.map(k => k.key), ...status.manualKeys, ...status.dataKeys]))}
-        emitCount={events.length}
-      />
+          <MonitorBoards
+            monitorId={status.id}
+            keys={Array.from(new Set([...status.activeKeys.map(k => k.key), ...status.manualKeys, ...status.dataKeys]))}
+            emitCount={events.length}
+          />
 
-      {/* Running keys */}
-      <section className="rounded-lg p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>RUNNING ({status.activeKeys.length})</span>
-        {status.backfillingKeys && status.backfillingKeys.length > 0 && (
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>
-            Backfilling history for {status.backfillingKeys.join(', ')} — live collection starts when it lands.
-          </p>
-        )}
-        {status.activeKeys.length === 0 ? (
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>Nothing running — add a watch above or activate a strategy instance.</p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {status.activeKeys.map(({ key: k, refCount }) => {
-              const manual = status.manualKeys.includes(k)
-              // A blank key means a subscription's structured keyParams never got
-              // composed into a key, so it is subscribed to nothing and collects
-              // nothing — silently. Hiding these rows was how that bug survived a
-              // day of live cycles; the blank chip is the only visible symptom, so
-              // it is called out rather than filtered away.
-              const unresolved = k.trim().length === 0
-              return (
-                <span
-                  key={k}
-                  className="text-xs px-2 py-1 rounded-md font-mono flex items-center gap-1.5"
-                  title={unresolved ? 'Subscribed with an empty key — its keyParams were never resolved, so it receives nothing' : undefined}
-                  style={{
-                    background: 'var(--background)',
-                    border: `1px solid ${unresolved ? 'var(--danger)' : manual ? 'var(--accent)' : 'var(--border)'}`,
-                    ...(unresolved ? { color: 'var(--danger)' } : {}),
-                  }}
-                >
-                  {unresolved ? '⚠ unresolved key' : k} <span style={{ color: 'var(--muted)' }}>×{refCount}</span>
-                  {manual && (
-                    <button onClick={() => void unwatch(k)} disabled={busy} title="Stop manual watch" style={{ color: 'var(--danger)' }}>✕</button>
-                  )}
-                </span>
-              )
-            })}
-          </div>
-        )}
-        {error && <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
-      </section>
-
-      {/* History: every key that ever stored data */}
-      <section className="rounded-lg p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>HISTORY</span>
-        {status.dataKeys.length === 0 ? (
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>No recorded data yet.</p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {status.dataKeys.map((k) => (
-              <button
-                key={k}
-                onClick={() => setHistoryKey(historyKey === k ? null : k)}
-                className="text-xs px-2 py-1 rounded-md font-mono"
-                style={{
-                  background: historyKey === k ? 'var(--accent)' : 'var(--background)',
-                  color: historyKey === k ? '#fff' : 'var(--foreground)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-        )}
-        {historyKey && <HistoryPanel monitorId={status.id} dataKey={historyKey} />}
-      </section>
-
-      {/* Live feed for this monitor */}
-      <section className="rounded-lg overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div className="px-4 py-2 flex items-center gap-2 text-xs" style={{ background: 'var(--background)', color: 'var(--muted)' }}>
-          LIVE
-          <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} />
-          {connected ? 'connected' : 'disconnected'}
-        </div>
-        <div className="max-h-80 overflow-y-auto font-mono text-xs">
-          {events.length === 0 ? (
-            <p className="p-4" style={{ color: 'var(--muted)' }}>Waiting for emits…</p>
-          ) : events.map((event, i) => (
-            <div key={`${event.ts}-${i}`} className="px-4 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-              <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(event.ts).toLocaleTimeString()}</span>
-              <span className="shrink-0" style={{ color: 'var(--warning)' }}>{event.key}</span>
-              <DataView data={event.data} />
+          <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} />
+              Live feed · {events.length} emits
+            </summary>
+            <div className="max-h-80 overflow-y-auto scroll-hidden font-mono text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+              {events.length === 0 ? (
+                <p className="p-4" style={{ color: 'var(--muted)' }}>Waiting for emits…</p>
+              ) : events.map((event, i) => (
+                <div key={`${event.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                  <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(event.ts).toLocaleTimeString()}</span>
+                  <span className="shrink-0" style={{ color: 'var(--warning)' }}>{event.key}</span>
+                  <DataView data={event.data} />
+                </div>
+              ))}
             </div>
-          ))}
+          </details>
         </div>
-      </section>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <MonitorInstancesPanel
+            contract={status.id}
+            instances={instances}
+            implementations={implementations}
+            pendingKeys={pendingKeys}
+            credentials={credentials}
+            onChanged={onChanged}
+          />
+
+          <section className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+                SUBSCRIPTIONS ({status.activeKeys.length})
+              </span>
+              <button
+                onClick={() => setWatching(true)}
+                className="hoverable hoverable-flat ml-auto h-8 px-2.5 rounded-md text-xs"
+                style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+              >
+                ＋ Watch a key
+              </button>
+            </div>
+
+            {status.backfillingKeys && status.backfillingKeys.length > 0 && (
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                Backfilling {status.backfillingKeys.join(', ')} — live collection starts when it lands.
+              </p>
+            )}
+
+            {status.activeKeys.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                Nothing subscribed. A strategy instance subscribes what it needs when it activates;
+                use Watch to collect a key without one.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {status.activeKeys.map(({ key: k, refCount }) => {
+                  const manual = status.manualKeys.includes(k)
+                  /* A blank key means a subscription's structured keyParams never
+                     got composed into a key, so it is subscribed to nothing and
+                     collects nothing — silently. Hiding these rows was how that
+                     bug survived a day of live cycles; the blank chip is the only
+                     visible symptom, so it is called out rather than filtered. */
+                  const unresolved = k.trim().length === 0
+                  const by = subscribers[k] ?? []
+                  return (
+                    <div
+                      key={k}
+                      className="hoverable hoverable-flat rounded-md px-3 py-2 flex items-center gap-3"
+                      style={{ background: 'var(--background)', border: `1px solid ${unresolved ? 'var(--danger)' : 'var(--border)'}` }}
+                    >
+                      <span className="font-mono text-xs min-w-0 flex-1 truncate" style={unresolved ? { color: 'var(--danger)' } : undefined}>
+                        {unresolved ? '⚠ unresolved key' : k}
+                      </span>
+                      <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
+                        {by.length > 0 ? by.join(' · ') : manual ? 'manual watch' : `×${refCount}`}
+                      </span>
+                      {manual && (
+                        <button
+                          onClick={() => void unwatch(k)}
+                          disabled={busy}
+                          className="text-xs shrink-0 h-6 px-2 rounded-md"
+                          style={{ color: 'var(--danger)', border: '1px solid var(--border)' }}
+                          title="Stop this manual watch"
+                        >
+                          Unwatch
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {error && <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
+          </section>
+
+          <section className="rounded-lg p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+              STORED ({status.dataKeys.length})
+            </span>
+            {status.dataKeys.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>No recorded data yet.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {status.dataKeys.map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setHistoryKey(historyKey === k ? null : k)}
+                    className="hoverable hoverable-flat text-xs px-2 py-1 rounded-md font-mono"
+                    style={{
+                      background: historyKey === k ? 'var(--accent)' : 'var(--background)',
+                      color: historyKey === k ? '#fff' : 'var(--foreground)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+            )}
+            {historyKey && <HistoryPanel monitorId={status.id} dataKey={historyKey} />}
+          </section>
+        </div>
+      )}
+
+      {watching && (
+        <Modal onClose={() => setWatching(false)} maxWidth="34rem">
+          <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            <h2 className="font-semibold text-base flex-1">Watch a key</h2>
+            <button type="button" onClick={() => setWatching(false)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+          </div>
+          <div className="px-5 py-4 flex flex-col gap-3">
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>
+              Collects this key without a strategy asking for it. An instance of {status.id} has to
+              be running to serve it.
+            </p>
+            <WatchForm status={status} onChanged={() => { setWatching(false); onChanged() }} />
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+/** One of the two top-level tabs. */
+function TabButton({ active, onClick, label, note }: {
+  active: boolean
+  onClick: () => void
+  label: string
+  note?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="hoverable hoverable-flat rounded-md px-3 h-8 flex items-center gap-2 text-sm"
+      style={{
+        background: active ? 'var(--accent)' : 'transparent',
+        color: active ? '#fff' : 'var(--muted)',
+        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+      }}
+    >
+      {label}
+      {note && <span className="text-xs" style={{ opacity: 0.75 }}>{note}</span>}
+    </button>
+  )
+}
+
+/**
+ * What is being collected, and when each key last spoke.
+ *
+ * The "last seen" comes from the live feed, so it fills in as emits arrive
+ * rather than claiming a freshness it has not observed. Each key links into
+ * the Explorer, which is where you go when the chart looks wrong and you want
+ * the raw records.
+ */
+function KeyStrip({ status, events, connected, subscribers }: {
+  status: MonitorStatus
+  events: SseEvent[]
+  connected: boolean
+  subscribers: Record<string, string[]>
+}) {
+  const lastSeen = new Map<string, number>()
+  for (const e of events) if (!lastSeen.has(e.key)) lastSeen.set(e.key, e.ts)
+
+  const keys = Array.from(new Set([...status.activeKeys.map(k => k.key), ...status.dataKeys])).filter(k => k.trim())
+  if (keys.length === 0) return null
+
+  return (
+    <div className="rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} title={connected ? 'Live stream connected' : 'Live stream disconnected'} />
+      {keys.map((k) => {
+        const running = status.activeKeys.some(a => a.key === k)
+        const seen = lastSeen.get(k)
+        const by = subscribers[k] ?? []
+        return (
+          <a
+            key={k}
+            href={`/monitor-data?monitor=${encodeURIComponent(status.id)}&key=${encodeURIComponent(k)}`}
+            className="hoverable hoverable-flat rounded-md px-2 py-1 flex items-center gap-2 text-xs"
+            style={{ background: 'var(--background)', border: `1px solid ${running ? 'var(--accent)' : 'var(--border)'}` }}
+            title={by.length > 0 ? `Subscribed by ${by.join(', ')} — open in Explorer` : 'Open in Explorer'}
+          >
+            <span className="font-mono">{k}</span>
+            {by.length > 0 && <span style={{ color: 'var(--muted)' }}>{by.length === 1 ? by[0] : `${by.length} strategies`}</span>}
+            <span style={{ color: 'var(--muted)' }}>
+              {seen ? new Date(seen).toLocaleTimeString() : running ? 'waiting' : 'stored'}
+            </span>
+          </a>
+        )
+      })}
     </div>
   )
 }

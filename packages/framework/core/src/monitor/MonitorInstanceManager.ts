@@ -292,7 +292,7 @@ export class MonitorInstanceManager {
 
   // ── Instance lifecycle ────────────────────────────────────────────────────
 
-  async createInstance(input: { implementation: string; credential?: string; params?: Record<string, unknown> }): Promise<MonitorInstanceEntity> {
+  async createInstance(input: { implementation: string; name?: string; credential?: string; params?: Record<string, unknown> }): Promise<MonitorInstanceEntity> {
     const contractId = this.implToContract.get(input.implementation)
     if (!contractId) throw new Error(`Unknown monitor implementation "${input.implementation}"`)
     const rec = this.contracts.get(contractId)!.impls.get(input.implementation)!
@@ -325,6 +325,7 @@ export class MonitorInstanceManager {
       id: generateId('moni'),
       implementation: input.implementation,
       contract: contractId,
+      ...(input.name !== undefined && input.name !== '' ? { name: input.name } : {}),
       ...(input.credential !== undefined ? { credential: input.credential } : {}),
       ...(input.params !== undefined ? { params: input.params } : {}),
       active: false,

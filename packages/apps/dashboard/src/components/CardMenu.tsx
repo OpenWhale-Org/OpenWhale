@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react'
  * look.
  */
 
-export const MENU_ITEM = 'w-full text-left px-3 py-1.5 text-xs'
+export const MENU_ITEM = 'menu-item w-full text-left px-3 py-1.5 text-xs'
 
 /** ⋯ trigger plus the popover it opens. Closes on click-away. */
 export function KebabMenu({ children, title = 'More' }: {

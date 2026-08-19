@@ -113,7 +113,7 @@ export function ExplorerClient() {
             <button
               key={c.monitor}
               onClick={() => setMonitor(c.monitor)}
-              className="w-full text-left px-3 py-2 text-sm"
+              className="hoverable hoverable-flat w-full text-left px-3 py-2 text-sm"
               style={{
                 background: monitor === c.monitor ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
                 borderLeft: `2px solid ${monitor === c.monitor ? 'var(--accent)' : 'transparent'}`,
@@ -142,7 +142,7 @@ export function ExplorerClient() {
             <button
               key={k.key}
               onClick={() => setSelectedKey(k.key)}
-              className="w-full text-left px-3 py-2"
+              className="hoverable hoverable-flat w-full text-left px-3 py-2"
               style={{
                 background: selectedKey === k.key ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
                 borderLeft: `2px solid ${selectedKey === k.key ? 'var(--accent)' : 'transparent'}`,

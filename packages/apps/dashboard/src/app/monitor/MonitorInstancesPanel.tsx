@@ -98,7 +98,7 @@ interface Props {
  * they cover different key spaces, so collapsing them into one radio would
  * silently stop collecting for a venue.
  */
-export function MonitorInstancesPanel({ contract, instances, implementations, pendingKeys, credentials, onChanged }: Props) {
+export function MonitorInstancesPanel({ contract, instances, implementations, pendingKeys, credentials, onChanged, embedded = false }: Props & { embedded?: boolean }) {
   const [creating, setCreating] = useState(false)
   const [implId, setImplId] = useState('')
   const [credential, setCredential] = useState('')

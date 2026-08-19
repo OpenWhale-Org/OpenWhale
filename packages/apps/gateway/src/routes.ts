@@ -880,10 +880,11 @@ export function buildRouter(): Router {
 
   router.post('/api/monitor-instances', h(async (req, res) => {
     const runtime = await ensureStarted()
-    const body = req.body as { implementation: string; credential?: string; params?: Record<string, unknown>; activate?: boolean }
+    const body = req.body as { implementation: string; name?: string; credential?: string; params?: Record<string, unknown>; activate?: boolean }
     try {
       const entity = await runtime.createMonitorInstance({
         implementation: body.implementation,
+        ...(body.name !== undefined && body.name !== '' ? { name: body.name } : {}),
         ...(body.credential !== undefined && body.credential !== '' ? { credential: body.credential } : {}),
         ...(body.params !== undefined ? { params: body.params } : {}),
       })

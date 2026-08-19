@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountSnapshotRecord } from '@openwhaleorg/core'
 
 const RANGES = [
@@ -35,21 +35,37 @@ export function EquityChart({ account }: { account: string }) {
   const [series, setSeries] = useState<AccountSnapshotRecord[] | null>(null)
   const [hover, setHover] = useState<number | null>(null)   // index into series
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  // viewBox width follows the CONTAINER so coordinates render 1:1 — a fixed
-  // 640-wide viewBox scaled to a full-width panel stretched the whole chart
-  // (fonts, strokes, spacing) ~2.6× tall.
+  // Width follows the CONTAINER so coordinates render 1:1 — a fixed 640-wide
+  // viewBox scaled to a full-width panel stretched the whole chart (fonts,
+  // strokes, spacing) ~2.6x tall.
   const [W, setW] = useState(640)
-  useEffect(() => {
-    const el = wrapRef.current
+  const roRef = useRef<ResizeObserver | null>(null)
+  /*
+   * A CALLBACK ref, not useRef + an effect.
+   *
+   * The wrapper only renders once the series has loaded, so on mount — which
+   * is when a `[]`-dep effect runs — there was no node to observe, the effect
+   * returned early, and the observer was never attached. W stayed at its 640
+   * initial value forever and the chart drew at a fixed 640px inside a pane
+   * three times that wide. A callback ref fires when the node actually
+   * appears, and again with null when it goes.
+   */
+  const wrapRef = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect()
+    roRef.current = null
     if (!el) return
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width
       if (w && w > 120) setW(Math.round(w))
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    roRef.current = ro
+    // The observer's first callback can lag a frame; take the width now so the
+    // first paint is already right rather than 640 then correct.
+    const w = el.getBoundingClientRect().width
+    if (w > 120) setW(Math.round(w))
   }, [])
+  useEffect(() => () => roRef.current?.disconnect(), [])
 
   useEffect(() => {
     let cancelled = false

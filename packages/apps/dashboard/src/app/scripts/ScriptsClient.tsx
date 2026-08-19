@@ -562,7 +562,7 @@ function ScriptCard({ script, folder, folders, dragHandle, onSetFolder, onUnmoun
   }
 
   return (
-    <div className="rounded-lg p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+    <div className="hoverable rounded-lg p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       {/* Same header shape as an instance card: identity left, then the one
           action, the ⋯ menu, and the grip LAST. Filing and minimizing used to
           be two loose controls sitting where another page puts its menu. */}

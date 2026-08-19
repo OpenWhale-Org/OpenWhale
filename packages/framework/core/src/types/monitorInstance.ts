@@ -73,6 +73,13 @@ export interface MonitorInstanceEntity {
   implementation: string
   /** Qualified contract id (denormalized for listing). */
   contract: string
+  /**
+   * What the operator calls this one. Optional: with a single instance per
+   * implementation the display name says everything, and forcing a label on
+   * the common case is friction. It earns its keep once a contract runs
+   * several — "HL settlement" and "BN settlement" beat two identical rows.
+   */
+  name?: string
   /** Bound credential name. */
   credential?: string
   /** Instance tuning params (raw user input; validated at activation). */

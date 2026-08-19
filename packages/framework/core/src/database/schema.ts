@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS monitor_instances (
   id             TEXT PRIMARY KEY,
   implementation TEXT NOT NULL,   -- implementation id, e.g. 'exchange/funding-rates'
   contract       TEXT NOT NULL,   -- contract id (monitorName) the implementation serves
+  name           TEXT,            -- operator's label; the implementation's display name when unset
   credential     TEXT,            -- bound credential name, per the implementation's declaration
   params         TEXT,            -- JSON instance tuning params; editable while inactive, frozen once active
   active         INTEGER NOT NULL DEFAULT 0,
@@ -280,6 +281,7 @@ CREATE TABLE IF NOT EXISTS pnl_watermarks (
 export const MIGRATION_SQL: string[] = [
   // 2026-07-25: per-instance monitor tuning params (editable until activation)
   `ALTER TABLE monitor_instances ADD COLUMN params TEXT`,
+  `ALTER TABLE monitor_instances ADD COLUMN name TEXT`,
   // 2026-07-27: named slot bindings were silently dropped on save — instances
   // restored after a restart lost their accounts and failed to activate
   `ALTER TABLE strategy_instances ADD COLUMN credentials TEXT`,

@@ -386,6 +386,51 @@ body {
   .aurora-motion-follow,.aurora-market-whale,.aurora-particles { transform: none!important; }
 }
 
+/* ── Hover: the surface rises a little out of the water ───────────────────
+   One class for every card and row, so a list, a grid and a dialog all answer
+   the pointer the same way.
+
+   The wash is a pseudo-element rather than a `:hover { background }` rule
+   because these surfaces set their background and border INLINE, and inline
+   wins over any stylesheet rule short of !important. box-shadow and transform
+   are not set inline, so those come straight off the hover state. */
+.hoverable {
+  position: relative;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.hoverable::before {
+  content: '';
+  position: absolute; inset: 0; z-index: 0;
+  border-radius: inherit; pointer-events: none;
+  background: linear-gradient(160deg,
+    color-mix(in srgb, var(--accent) 9%, transparent),
+    color-mix(in srgb, var(--accent) 3%, transparent));
+  opacity: 0; transition: opacity 140ms ease;
+}
+.hoverable:hover::before { opacity: 1; }
+.hoverable:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent),
+    0 8px 22px -6px rgba(0, 0, 0, .55);
+}
+/* Content sits above the wash. `position` only — NO z-index.
+   Giving these a z-index made each one a stacking context, which trapped any
+   popover inside it: a menu's `z-index: 100` could no longer escape past the
+   NEXT row's own stacking context, so rows painted over the open menu and it
+   looked half-transparent. Positioned children already paint after the
+   ::before in the same layer, which is all this needs. */
+.hoverable > * { position: relative; }
+/* A row inside a list should lift without nudging its neighbours. */
+.hoverable-flat:hover { transform: none; }
+
+/* Menu items: a wash, no lift — a popover that moves under the cursor is a
+   popover you fight. */
+.menu-item { transition: background-color 120ms ease, color 120ms ease; }
+.menu-item:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 /* ── The pod view's hover panel ────────────────────────────────────────────
    A pane of glass sunk in the water: bubbles rise along it, the border and
    glow take their colour from profit and loss via currentColor, and it drifts

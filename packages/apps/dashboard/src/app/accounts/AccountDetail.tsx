@@ -69,7 +69,12 @@ export function AccountDetail({ account }: { account: string }) {
             {detail.errors['positions'] && <p className="text-xs" style={{ color: 'var(--danger, #ef4444)' }}>{detail.errors['positions']}</p>}
             {positions?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>No open positions.</p>}
             {positions && positions.length > 0 && (
-              <table className="w-full text-xs">
+              /* A 280px track cannot hold four columns and a symbol like
+                 SKHYNIX/USDT:USDT. Without a scroller the overflow is simply
+                 clipped by the neighbouring card, and the uPnL column — the
+                 one worth reading — is what disappears. */
+              <div className="overflow-x-auto scroll-hidden">
+              <table className="w-full text-xs" style={{ minWidth: '17rem' }}>
                 <thead>
                   <tr style={{ color: 'var(--muted)' }}>
                     <th className="text-left py-1 font-medium">Symbol</th>
@@ -81,7 +86,7 @@ export function AccountDetail({ account }: { account: string }) {
                 <tbody>
                   {positions.map(p => (
                     <tr key={`${p.id}-${p.side}`} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td className="py-1 font-mono">{p.id}</td>
+                      <td className="py-1 font-mono max-w-0 truncate" title={p.id}>{p.id}</td>
                       <td className="py-1">
                         <span style={{ color: p.side === 'long' ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>{p.side}</span>
                       </td>
@@ -93,6 +98,7 @@ export function AccountDetail({ account }: { account: string }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -107,7 +113,8 @@ export function AccountDetail({ account }: { account: string }) {
                 <span>Total <span className="font-mono">{usd(balance.usd.total)}</span></span>
                 <span style={{ color: 'var(--muted)' }}>Available <span className="font-mono">{usd(balance.usd.available)}</span></span>
               </div>
-              <table className="w-full text-xs">
+              <div className="overflow-x-auto scroll-hidden">
+              <table className="w-full text-xs" style={{ minWidth: '15rem' }}>
                 <thead>
                   <tr style={{ color: 'var(--muted)' }}>
                     <th className="text-left py-1 font-medium">Token</th>
@@ -127,6 +134,7 @@ export function AccountDetail({ account }: { account: string }) {
                   ))}
                 </tbody>
               </table>
+            </div>
             </>
           )}
         </div>
@@ -139,7 +147,8 @@ export function AccountDetail({ account }: { account: string }) {
           {detail.errors['orders'] && <p className="text-xs" style={{ color: 'var(--danger, #ef4444)' }}>{detail.errors['orders']}</p>}
           {orders?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>No open orders.</p>}
           {orders && orders.length > 0 && (
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto scroll-hidden">
+            <table className="w-full text-xs" style={{ minWidth: '16rem' }}>
               <thead>
                 <tr style={{ color: 'var(--muted)' }}>
                   <th className="text-left py-1 font-medium">Order</th>
@@ -159,6 +168,7 @@ export function AccountDetail({ account }: { account: string }) {
                 ))}
               </tbody>
             </table>
+          </div>
           )}
         </div>
       </div>

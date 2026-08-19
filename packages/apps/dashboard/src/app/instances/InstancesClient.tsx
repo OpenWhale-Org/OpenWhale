@@ -2256,7 +2256,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
 
   return (
     <div
-      className="rounded-lg p-4 flex flex-col gap-3 h-full"
+      className="hoverable rounded-lg p-4 flex flex-col gap-3 h-full"
       style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
     >
       {/* Identity */}
@@ -2451,7 +2451,7 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
 
   return (
     <div
-      className="rounded-md px-3 py-2 grid items-center gap-3"
+      className="hoverable hoverable-flat rounded-md px-3 py-2 grid items-center gap-3"
       style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
         gridTemplateColumns: ROW_COLUMNS,

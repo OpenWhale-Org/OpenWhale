@@ -319,7 +319,7 @@ export class OpenWhaleRuntime implements IRuntime {
     })
   }
 
-  createMonitorInstance(input: { implementation: string; credential?: string; params?: Record<string, unknown> }): Promise<MonitorInstanceEntity> {
+  createMonitorInstance(input: { implementation: string; name?: string; credential?: string; params?: Record<string, unknown> }): Promise<MonitorInstanceEntity> {
     return this.monitorInstances.createInstance(input)
   }
 

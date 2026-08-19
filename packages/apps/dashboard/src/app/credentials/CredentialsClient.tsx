@@ -85,16 +85,21 @@ function SchemaCredentialForm({
   onSubmit,
   loading,
   submitError,
+  initialName,
+  initialValues,
 }: {
   typeInfo: CredentialTypeInfo
   onSubmit: (name: string, data: Record<string, unknown>) => Promise<void>
   loading: boolean
+  /** Seeds for a duplicate. Secrets are never among them — see the menu item. */
+  initialName?: string
+  initialValues?: Record<string, string>
   /** Raised by the caller's POST. Shown in the footer, beside the button it belongs to. */
   submitError?: string
 }) {
   const fields = typeInfo.jsonSchema ? fieldsFromJsonSchema(typeInfo.jsonSchema) : []
-  const [name, setName] = useState('')
-  const [values, setValues] = useState<Record<string, string>>({})
+  const [name, setName] = useState(initialName ?? '')
+  const [values, setValues] = useState<Record<string, string>>(initialValues ?? {})
   const [error, setError] = useState('')
   const [testState, setTestState] = useState<'idle' | 'running' | 'ok' | 'failed'>('idle')
   const [testMessage, setTestMessage] = useState('')
@@ -440,7 +445,7 @@ function TypeRow({ entry, active, onSelect }: { entry: TypeEntry; active: boolea
       <button
         type="button"
         onClick={onSelect}
-        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm"
+        className="hoverable hoverable-flat w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm"
         style={{
           background: active ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
           color: 'var(--foreground)',
@@ -611,6 +616,7 @@ function AddCredentialForm({
 export function CredentialsClient({ initialCredentials, credentialTypes }: Props) {
   const [credentials, setCredentials] = useState(initialCredentials)
   const [showForm, setShowForm] = useState(false)
+  const [duplicating, setDuplicating] = useState<CredentialWithPublic | null>(null)
   const [listCategory, setListCategory] = useState('All')
 
   async function refresh() {
@@ -664,6 +670,15 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
         </div>
       </div>
 
+      {duplicating && (
+        <DuplicateCredentialForm
+          source={duplicating}
+          credentialTypes={credentialTypes}
+          onSuccess={() => { setDuplicating(null); void refresh() }}
+          onCancel={() => setDuplicating(null)}
+        />
+      )}
+
       {showForm && (
         <AddCredentialForm
           credentialTypes={credentialTypes}
@@ -689,6 +704,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
               key={cred.id}
               credential={cred}
               credentialTypes={credentialTypes}
+              onDuplicate={() => setDuplicating(cred)}
               onDelete={() => deleteCredential(cred.id)}
               onChanged={() => void refresh()}
             />
@@ -704,15 +720,103 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
   )
 }
 
+/**
+ * Duplicate: a new credential of the same type, public fields carried across.
+ *
+ * The secrets are NOT carried, and cannot be — they are stored encrypted and
+ * the browser has only ever seen `publicData`. So this is a create form with
+ * the boring parts filled in, not a clone; the point is "same venue, another
+ * key" without retyping a base URL or a wallet address.
+ */
+function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel }: {
+  source: CredentialWithPublic
+  credentialTypes: CredentialTypeInfo[]
+  onSuccess: () => void
+  onCancel: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const typeInfo = credentialTypes.find(t => t.type === source.type)
+  const seeded: Record<string, string> = {}
+  for (const [k, v] of Object.entries(source.publicData ?? {})) seeded[k] = String(v)
+
+  async function submit(name: string, data: Record<string, unknown>, typeOverride?: string) {
+    setLoading(true)
+    setSubmitError('')
+    try {
+      const res = await fetch('/api/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type: typeOverride || source.type, data }),
+      })
+      if (res.ok) onSuccess()
+      else setSubmitError(await res.text() || `Failed to save credential (HTTP ${res.status})`)
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Modal onClose={onCancel} maxWidth="46rem" height="min(82vh, 46rem)">
+      <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+        <TypeMark
+          logo={typeInfo?.logo}
+          icon={typeInfo?.icon}
+          label={typeInfo?.displayName ?? source.type}
+          size={26}
+        />
+        <h2 className="font-semibold text-base flex-1 min-w-0 truncate">Duplicate {source.name}</h2>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="w-7 h-7 rounded-md flex items-center justify-center leading-none shrink-0"
+          style={{ color: 'var(--muted)' }}
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="px-5 pt-3 shrink-0">
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>
+          Same type and the same public fields. Secrets are stored encrypted and were
+          never sent to this page, so they have to be entered again.
+        </p>
+      </div>
+
+      {typeInfo?.jsonSchema ? (
+        <SchemaCredentialForm
+          typeInfo={typeInfo}
+          onSubmit={submit}
+          loading={loading}
+          submitError={submitError}
+          initialName={`${source.name} copy`}
+          initialValues={seeded}
+        />
+      ) : (
+        <GenericCredentialForm
+          fixedType={source.type}
+          onSubmit={(n, d, t) => submit(n, d, t)}
+          loading={loading}
+          submitError={submitError}
+        />
+      )}
+    </Modal>
+  )
+}
+
 // ── Credential card ───────────────────────────────────────────────────────────
 
 interface CredentialWithPublic extends CredentialInfo {
   publicData?: Record<string, unknown>
 }
 
-function CredentialCard({ credential, credentialTypes, onDelete, onChanged }: {
+function CredentialCard({ credential, credentialTypes, onDuplicate, onDelete, onChanged }: {
   credential: CredentialWithPublic
   credentialTypes: CredentialTypeInfo[]
+  onDuplicate: () => void
   onDelete: () => void
   onChanged: () => void
 }) {
@@ -727,12 +831,21 @@ function CredentialCard({ credential, credentialTypes, onDelete, onChanged }: {
     <CredentialMenu
       canEdit={Boolean(typeInfo?.jsonSchema) && !editing}
       onEdit={() => setEditing(true)}
+      onDuplicate={onDuplicate}
       onDelete={onDelete}
     />
   )
 
   const identity = (
     <div className="flex items-center gap-2 min-w-0">
+      {/* Same mark the picker shows for this type, so a row is recognisable
+          by its brand rather than by reading the chip beside the name. */}
+      <TypeMark
+        logo={typeInfo?.logo}
+        icon={typeInfo?.icon}
+        label={typeInfo?.displayName ?? credential.type}
+        size={22}
+      />
       <span className="font-medium truncate" title={credential.name}>{credential.name}</span>
       <span
         className="text-xs px-1.5 py-0.5 rounded shrink-0"
@@ -767,7 +880,7 @@ function CredentialCard({ credential, credentialTypes, onDelete, onChanged }: {
 
   return (
     <div
-      className="rounded-md px-3 py-2"
+      className="hoverable hoverable-flat rounded-md px-3 py-2"
       style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
     >
       {/* Deterministic tracks, as on the strategies list: an `auto` track is
@@ -786,9 +899,10 @@ function CredentialCard({ credential, credentialTypes, onDelete, onChanged }: {
 }
 
 /** Edit and a two-step Delete, behind the same ⋯ every other card uses. */
-function CredentialMenu({ canEdit, onEdit, onDelete }: {
+function CredentialMenu({ canEdit, onEdit, onDuplicate, onDelete }: {
   canEdit: boolean
   onEdit: () => void
+  onDuplicate: () => void
   onDelete: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
@@ -802,6 +916,14 @@ function CredentialMenu({ canEdit, onEdit, onDelete }: {
               Edit
             </button>
           )}
+          {/* Copies the type and every public field; the secrets stay behind,
+              because they are stored encrypted and the browser has never had
+              them. "Same venue, another key" is the case this serves. */}
+          <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
+            onClick={() => { onDuplicate(); close() }}
+            title="New credential of the same type, public fields carried over — secrets must be re-entered">
+            Duplicate
+          </button>
           <button
             type="button"
             className={MENU_ITEM}

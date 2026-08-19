@@ -4,6 +4,7 @@ import type { DatabaseAdapter, Row } from '../database/DatabaseAdapter.js'
 interface InstanceRow extends Row {
   id: string
   implementation: string
+  name: string | null
   contract: string
   credential: string | null
   params: string | null
@@ -17,6 +18,7 @@ function rowToEntity(row: InstanceRow): MonitorInstanceEntity {
     id: row.id,
     implementation: row.implementation,
     contract: row.contract,
+    ...(row.name !== null ? { name: row.name } : {}),
     ...(row.credential !== null ? { credential: row.credential } : {}),
     ...(row.params !== null ? { params: JSON.parse(row.params) as Record<string, unknown> } : {}),
     active: row.active === 1,
@@ -31,16 +33,17 @@ export class DBMonitorInstanceStore implements MonitorInstanceStore {
 
   async save(entity: MonitorInstanceEntity): Promise<void> {
     await this.db.run(
-      `INSERT INTO monitor_instances (id, implementation, contract, credential, params, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO monitor_instances (id, implementation, contract, name, credential, params, active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          implementation = excluded.implementation,
          contract       = excluded.contract,
+         name           = excluded.name,
          credential     = excluded.credential,
          params         = excluded.params,
          active         = excluded.active,
          updated_at     = excluded.updated_at`,
-      [entity.id, entity.implementation, entity.contract, entity.credential ?? null, entity.params !== undefined ? JSON.stringify(entity.params) : null, entity.active ? 1 : 0, entity.createdAt, entity.updatedAt]
+      [entity.id, entity.implementation, entity.contract, entity.name ?? null, entity.credential ?? null, entity.params !== undefined ? JSON.stringify(entity.params) : null, entity.active ? 1 : 0, entity.createdAt, entity.updatedAt]
     )
   }
 
