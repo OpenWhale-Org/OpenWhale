@@ -95,11 +95,36 @@ function parsePackageSpec(spec: string): { packageName: string } {
   return { packageName }
 }
 
-/** An absolute directory path or file: spec pointing at a local package. */
-function asLocalPath(spec: string): string | undefined {
+/**
+ * An absolute directory path or file: spec pointing at a local package.
+ * Absolute forms of every platform count — POSIX (`/abs/pkg`), Windows drive
+ * (`D:\pkg`, `D:/pkg`) and UNC (`\\server\share\pkg`) — classified
+ * identically on every OS via the per-platform stdlib parsers. Relative and
+ * drive-relative paths (`../pkg`, `D:pkg`) stay rejected.
+ */
+export function asLocalPath(spec: string): string | undefined {
   const raw = spec.startsWith('file:') ? spec.slice(5) : spec
-  if (!raw.startsWith('/') && !raw.startsWith('~')) return undefined
+  const isAbsolute = path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw)
+  if (!isAbsolute && !raw.startsWith('~')) return undefined
   return raw.startsWith('~') ? path.join(os.homedir(), raw.slice(1)) : raw
+}
+
+/**
+ * npm's spawn form for execFile. On Windows `npm` is a .cmd shim, which
+ * execFile cannot run — CreateProcess does no PATHEXT resolution, and newer
+ * Node rejects .cmd without a shell outright (spawn EINVAL) — so npm's CLI
+ * entry is invoked with the current Node binary instead.
+ */
+export function npmSpawn(): { file: string; args: string[] } {
+  if (process.platform !== 'win32') return { file: 'npm', args: [] }
+  const cli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  if (!fs.existsSync(cli)) {
+    throw new Error(
+      `npm CLI not found at "${cli}" — npm ships with Node, so it is expected ` +
+        `next to the running binary (${process.execPath})`,
+    )
+  }
+  return { file: process.execPath, args: [cli] }
 }
 
 /** Read the package name from a local package dir; validates it looks like a package. */
@@ -163,7 +188,8 @@ export async function installFromNpm(
   }
 
   log().info({ spec, local: Boolean(localPath) }, 'Installing plugin')
-  await execFileAsync('npm', ['install', localPath ?? spec, '--prefix', pluginsDir, '--no-audit', '--no-fund', '--loglevel=error'], {
+  const npm = npmSpawn()
+  await execFileAsync(npm.file, [...npm.args, 'install', localPath ?? spec, '--prefix', pluginsDir, '--no-audit', '--no-fund', '--loglevel=error'], {
     timeout: 300_000,
   })
 
@@ -247,7 +273,8 @@ export async function uninstallPlugin(runtime: OpenWhaleRuntime, name: string): 
   if (entry.source.kind === 'npm' || entry.source.kind === 'local') {
     const packageName = entry.source.kind === 'local' ? entry.source.packageName : parsePackageSpec(entry.source.package).packageName
     try {
-      await execFileAsync('npm', ['uninstall', packageName, '--prefix', getPluginsDir(), '--loglevel=error'], { timeout: 120_000 })
+      const npm = npmSpawn()
+      await execFileAsync(npm.file, [...npm.args, 'uninstall', packageName, '--prefix', getPluginsDir(), '--loglevel=error'], { timeout: 120_000 })
     } catch (err) {
       log().warn({ name, err }, 'npm uninstall failed — manifest entry removed anyway')
     }
