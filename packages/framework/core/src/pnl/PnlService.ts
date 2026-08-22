@@ -97,6 +97,13 @@ export interface PnlServiceOptions {
 }
 
 const KICK_DEBOUNCE_MS = 30_000
+/**
+ * How far back a fills query may reach. Binance serves 7 days of userTrades;
+ * six leaves a day of slack for a collector that was down overnight.
+ */
+const MAX_FILL_LOOKBACK_MS = 6 * 24 * 3600_000
+/** Overlap kept when advancing past an empty window, for fills that land late. */
+const FILL_RECHECK_MS = 10 * 60_000
 const EPS = 1e-9
 
 export class PnlService {
@@ -180,7 +187,32 @@ export class PnlService {
       `SELECT DISTINCT symbol FROM pnl_order_claims WHERE account = ?`, [account])
 
     for (const { symbol } of symbols) {
-      const since = (await this.watermark(account, `fills:${symbol}`)) ?? Date.now() - this.backfillMs
+      /*
+       * A watermark that falls outside the venue's serving window is a trap
+       * that closes behind you.
+       *
+       * Binance answers fetchMyTrades for the last 7 days only. Once a
+       * symbol's watermark is older than that, every query starts outside the
+       * range, comes back empty, and — because the watermark only advanced on
+       * a non-empty result — stays exactly where it was. The symbol then falls
+       * further behind for ever, silently: the error is not an error, it is an
+       * empty list.
+       *
+       * COTI on this install sat at 2026-08-14 while its executor kept
+       * claiming order ids every hour. Ten days of fills never reached the
+       * ledger, so every report read funding with no trades against it and
+       * called a losing week a profit.
+       */
+      const stale = (await this.watermark(account, `fills:${symbol}`)) ?? Date.now() - this.backfillMs
+      const floor = Date.now() - MAX_FILL_LOOKBACK_MS
+      const since = Math.max(stale, floor)
+      if (stale < floor) {
+        log.warn({
+          account, symbol,
+          watermark: new Date(stale).toISOString(),
+          skippedMs: floor - stale,
+        }, 'Fill watermark older than the venue serves — advancing past the gap; those fills are unrecoverable')
+      }
       let fills
       try {
         fills = await session.fetchFills(symbol, since + 1, 1000)
@@ -188,7 +220,19 @@ export class PnlService {
         log.warn({ err, account, symbol }, 'fetchFills failed — symbol skipped this cycle')
         continue
       }
-      if (fills.length === 0) continue
+      if (fills.length === 0) {
+        /*
+         * Advance on empty too, or a symbol that simply had a quiet week walks
+         * into the same trap: its watermark stays put until it is older than
+         * the window, and from then on it can never come back.
+         *
+         * Only to now − RECHECK, never to now: a fill can reach the venue's
+         * trade endpoint slightly after it happened, and jumping the watermark
+         * to the present would step over it.
+         */
+        await this.setWatermark(account, `fills:${symbol}`, Math.max(since, Date.now() - FILL_RECHECK_MS))
+        continue
+      }
       for (const f of fills) {
         const claim = await this.db.get<{ instance_id: string }>(
           `SELECT instance_id FROM pnl_order_claims WHERE account = ? AND order_id = ?`,
