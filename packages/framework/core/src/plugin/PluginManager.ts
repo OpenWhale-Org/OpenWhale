@@ -15,6 +15,10 @@ export interface OpenWhalePlugin {
   version: string
   /** Markdown README shown on the dashboard's Plugins page. */
   readme?: string
+  /** Brand mark for the plugin list (https URL or data: URI). */
+  logo?: string
+  /** Single-glyph fallback mark. */
+  icon?: string
   /** @deprecated Legacy singleton registrations — new code uses `monitorImplementations` (or definePlugin's class arrays). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   monitors?: Array<{ definition: MonitorDefinition; instance: BaseMonitor<string, any> }>

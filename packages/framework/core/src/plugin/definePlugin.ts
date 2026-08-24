@@ -28,6 +28,10 @@ export interface PluginManifest {
   version: string
   /** Markdown README shown on the dashboard's Plugins page. */
   readme?: string
+  /** Brand mark for the plugin list (https URL or data: URI). */
+  logo?: string
+  /** Single-glyph fallback mark. */
+  icon?: string
   credentialTypes?: CredentialTypeDefinition[]
   adapters?: AdapterRegistration[]
   /** @OwAccount classes or plain registrations. */
@@ -145,6 +149,8 @@ export function definePlugin(manifest: PluginManifest): PluginFactory<Record<str
       name: manifest.name,
       version: manifest.version,
       ...(manifest.readme !== undefined ? { readme: manifest.readme } : {}),
+      ...(manifest.logo !== undefined ? { logo: manifest.logo } : {}),
+      ...(manifest.icon !== undefined ? { icon: manifest.icon } : {}),
       ...(manifest.credentialTypes ? { credentialTypes: manifest.credentialTypes } : {}),
       ...(manifest.scripts ? { scripts: manifest.scripts } : {}),
       ...(manifest.adapters ? { adapters: manifest.adapters } : {}),

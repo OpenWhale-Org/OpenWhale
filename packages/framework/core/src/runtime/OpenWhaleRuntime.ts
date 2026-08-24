@@ -989,6 +989,8 @@ export class OpenWhaleRuntime implements IRuntime {
       name: ns,
       version: plugin.version,
       ...(plugin.readme !== undefined ? { readme: plugin.readme } : {}),
+      ...(plugin.logo !== undefined ? { logo: plugin.logo } : {}),
+      ...(plugin.icon !== undefined ? { icon: plugin.icon } : {}),
       monitors: [
         ...(plugin.monitors ?? []).map(({ instance }) => p(instance.monitorName)),
         ...Array.from(new Set(monitorImpls.map(impl => impl.contract.includes('/') ? impl.contract : p(impl.contract)))),

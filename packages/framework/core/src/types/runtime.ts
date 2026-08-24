@@ -36,6 +36,9 @@ export interface LoadedPluginInfo {
   version: string
   /** Markdown shipped by the plugin (manifest `readme`) — the Plugins page's detail pane. */
   readme?: string
+  /** Brand mark (https URL or data: URI); the dashboard falls back to a credential type's mark, then a letter chip. */
+  logo?: string
+  icon?: string
   /** Monitor ids: legacy singleton registrations + implementation contract ids. */
   monitors: string[]
   executors: string[]

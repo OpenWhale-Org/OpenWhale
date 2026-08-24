@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo } from '@openwhaleorg/core'
 import type { InstalledPluginView } from '@/lib/data'
 import { Markdown } from '@/components/Markdown'
+import { TypeMark } from '@/components/TypeMark'
 
 /**
  * Plugins + Registry, merged: a JetBrains-style manager. Left rail lists
@@ -32,6 +33,17 @@ interface Props {
 }
 
 const COMPILED_ID = '__compiled__'
+
+/** A plugin's mark: its own logo/icon, else the first branded credential type it registers, else a letter chip. */
+function pluginMark(plugin: InstalledPluginView, credentialTypes: CredentialTypeInfo[]): { logo?: string; icon?: string } {
+  if (plugin.logo !== undefined || plugin.icon !== undefined) {
+    return { ...(plugin.logo !== undefined ? { logo: plugin.logo } : {}), ...(plugin.icon !== undefined ? { icon: plugin.icon } : {}) }
+  }
+  const branded = plugin.credentialTypes
+    .map(type => credentialTypes.find(t => t.type === type))
+    .find(t => t !== undefined && (t.logo !== undefined || t.icon !== undefined))
+  return branded ? { ...(branded.logo !== undefined ? { logo: branded.logo } : {}), ...(branded.icon !== undefined ? { icon: branded.icon } : {}) } : {}
+}
 
 /** One hue per element category — the borders that tell the grids apart. */
 const CATEGORY_COLORS = {
@@ -109,7 +121,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
 
           <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
             {rail.map(p => (
-              <PluginRailRow key={p.name} plugin={p} active={selected === p.name && !installing} onClick={() => pick(tab, p.name)} />
+              <PluginRailRow key={p.name} plugin={p} credentialTypes={credentialTypes} active={selected === p.name && !installing} onClick={() => pick(tab, p.name)} />
             ))}
             {tab === 'external' && compiledCount > 0 && (
               <button
@@ -167,19 +179,21 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
   )
 }
 
-function PluginRailRow({ plugin, active, onClick }: { plugin: InstalledPluginView; active: boolean; onClick: () => void }) {
+function PluginRailRow({ plugin, credentialTypes, active, onClick }: { plugin: InstalledPluginView; credentialTypes: CredentialTypeInfo[]; active: boolean; onClick: () => void }) {
   const count = plugin.strategies.length + plugin.monitors.length + plugin.executors.length
     + plugin.accounts.length + plugin.credentialTypes.length + plugin.scripts.length + plugin.cells.length
+  const mark = pluginMark(plugin, credentialTypes)
   return (
     <button
       onClick={onClick}
-      className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2"
+      className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2.5"
       style={{
         background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
         borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
         borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
       }}
     >
+      <TypeMark logo={mark.logo} icon={mark.icon} label={plugin.name} size={26} />
       <div className="min-w-0 flex-1">
         <div className="text-sm truncate">
           {plugin.name}
@@ -233,6 +247,7 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
     <>
       <div className="px-4 py-3 shrink-0 flex items-start justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <TypeMark logo={pluginMark(plugin, credentialTypes).logo} icon={pluginMark(plugin, credentialTypes).icon} label={plugin.name} size={26} />
           <span className="text-base font-medium">{plugin.name}</span>
           <span className="badge badge-neutral">v{plugin.version}</span>
           <span className="badge badge-neutral truncate max-w-[24rem]" title={sourceBadge}>{sourceBadge}</span>
@@ -296,7 +311,7 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
           title="Credential Types"
           color={CATEGORY_COLORS.credentials}
           href={() => '/credentials'}
-          items={myCredTypes.map(t => ({ id: t.type, name: t.displayName ?? t.type, description: t.description }))}
+          items={myCredTypes.map(t => ({ id: t.type, name: t.displayName ?? t.type, description: t.description, logo: t.logo, icon: t.icon }))}
         />
         <ElementGrid
           title="Adapter Cells"
@@ -318,8 +333,8 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
 function ElementGrid({ title, color, items, href, compact }: {
   title: string
   color: string
-  items: Array<{ id: string; name: string; description?: string | undefined }>
-  /** Where a card navigates; absent = inert cards (e.g. adapter cells). */
+  items: Array<{ id: string; name: string; description?: string | undefined; logo?: string | undefined; icon?: string | undefined }>
+  /** Where an item's corner jump button navigates; absent = no button (e.g. adapter cells). */
   href?: (id: string) => string
   compact?: boolean
 }) {
@@ -333,40 +348,51 @@ function ElementGrid({ title, color, items, href, compact }: {
         <span className="opacity-60 font-normal">({items.length})</span>
       </div>
       <div className={`grid gap-2 ${compact ? 'grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(17rem,1fr))]'}`}>
-        {items.map(item => {
-          const style = {
-            background: `color-mix(in srgb, ${color} 6%, transparent)`,
-            border: `1px solid color-mix(in srgb, ${color} 30%, var(--border))`,
-            borderLeft: `3px solid ${color}`,
-          }
-          const body = (
-            <>
-              <div className="text-sm truncate" title={item.name}>{item.name}</div>
-              {item.id !== item.name && (
-                <div className="text-[11px] font-mono truncate" style={{ color: 'var(--muted)' }} title={item.id}>{item.id}</div>
+        {items.map(item => (
+          <div
+            key={item.id}
+            className="relative rounded-md px-3 py-2 min-w-0"
+            style={{
+              background: `color-mix(in srgb, ${color} 6%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${color} 30%, var(--border))`,
+              borderLeft: `3px solid ${color}`,
+            }}
+          >
+            {/* Deliberately a corner button, not a clickable card — a card this
+                dense gets clicked while reading, and a mis-tap navigates away. */}
+            {href && (
+              <button
+                onClick={() => router.push(href(item.id))}
+                title={`Open in ${title}`}
+                aria-label={`Open ${item.name}`}
+                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-md"
+                style={{ color: 'var(--muted)', border: '1px solid transparent' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = color; e.currentTarget.style.borderColor = `color-mix(in srgb, ${color} 45%, transparent)` }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'transparent' }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 17L17 7M9 7h8v8" />
+                </svg>
+              </button>
+            )}
+            <div className="flex items-start gap-2 min-w-0" style={href ? { paddingRight: '1.5rem' } : undefined}>
+              {(item.logo !== undefined || item.icon !== undefined) && (
+                <TypeMark logo={item.logo} icon={item.icon} label={item.name} size={22} />
               )}
-              {item.description && (
-                <div className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--muted)' }} title={item.description}>
-                  {item.description}
-                </div>
-              )}
-            </>
-          )
-          return href ? (
-            <button
-              key={item.id}
-              onClick={() => router.push(href(item.id))}
-              className="hoverable text-left rounded-md px-3 py-2 min-w-0"
-              style={style}
-            >
-              {body}
-            </button>
-          ) : (
-            <div key={item.id} className="rounded-md px-3 py-2 min-w-0" style={style}>
-              {body}
+              <div className="min-w-0 flex-1">
+                <div className="text-sm truncate" title={item.name}>{item.name}</div>
+                {item.id !== item.name && (
+                  <div className="text-[11px] font-mono truncate" style={{ color: 'var(--muted)' }} title={item.id}>{item.id}</div>
+                )}
+                {item.description && (
+                  <div className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--muted)' }} title={item.description}>
+                    {item.description}
+                  </div>
+                )}
+              </div>
             </div>
-          )
-        })}
+          </div>
+        ))}
       </div>
     </div>
   )
