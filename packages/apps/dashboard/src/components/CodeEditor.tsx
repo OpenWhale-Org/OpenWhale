@@ -79,7 +79,8 @@ export function CodeEditor({ path, value, onChange, readOnly, height }: {
         readOnly: readOnly ?? false,
         automaticLayout: true,
         padding: { top: 10, bottom: 10 },
-        scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6, useShadows: false },
+        // Wheel/trackpad still scroll; the bars themselves stay out of sight
+        scrollbar: { vertical: 'hidden', horizontal: 'hidden', useShadows: false, alwaysConsumeMouseWheel: false },
         renderLineHighlight: 'none',
         overviewRulerLanes: 0,
         hideCursorInOverviewRuler: true,

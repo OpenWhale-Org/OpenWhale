@@ -22,7 +22,7 @@ const STATUS_LABEL: Record<string, string> = {
   validating: 'Validating…',
   draft: 'Draft ready',
   failed: 'Failed',
-  approved: 'Approved & registered',
+  approved: 'Registered',
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -545,7 +545,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
                     ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key))
                     : { ...prev, [key]: code })
                 }}
-                readOnly={job.status === 'approved' || ACTIVE_STATUSES.has(job.status)}
+                readOnly={ACTIVE_STATUSES.has(job.status)}
               />
             </div>
           </div>
@@ -565,7 +565,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
                   ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key))
                   : { ...prev, [key]: code })
               }}
-              readOnly={job.status === 'approved' || ACTIVE_STATUSES.has(job.status)}
+              readOnly={ACTIVE_STATUSES.has(job.status)}
             />
           </div>
         )}
@@ -680,9 +680,10 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
 
   const creating = job === null
   const confirming = !!job && (job.status === 'awaiting_confirmation' || (job.status === 'failed' && job.versions.length === 0))
-  const iterating = !!job && (job.status === 'draft' || (job.status === 'failed' && job.versions.length > 0))
-  // Settled or busy sessions have nothing to say back — no box at all; the
-  // rail's "+ New" is where the next conversation starts.
+  // A registered strategy is not a finished conversation — feedback keeps
+  // flowing; the next version lands as a draft to approve again.
+  const iterating = !!job && (job.status === 'draft' || job.status === 'approved' || (job.status === 'failed' && job.versions.length > 0))
+  // Only a session the agent is still working on has nothing to say back.
   if (!creating && !confirming && !iterating) return error ? <ErrorLine text={error} /> : null
 
   function send() {
@@ -705,7 +706,9 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
     ? 'Describe a strategy in natural language…'
     : confirming
       ? 'Anything the analysis got wrong? Send empty to confirm as-is.'
-      : 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
+      : job.status === 'approved'
+        ? 'Registered — keep iterating; the next version becomes a draft to approve again'
+        : 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
   const canSend = !busy && (confirming || text.trim().length > 0)
   const rows = Math.min(5, Math.max(creating ? 2 : 1, text.split('\n').length))
 
