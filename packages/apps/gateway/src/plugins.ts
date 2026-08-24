@@ -321,7 +321,7 @@ export async function listInstalledPlugins(runtime: OpenWhaleRuntime): Promise<I
     views.push({
       name: entry.name,
       version: '—',
-      monitors: [], executors: [], strategies: [], kinds: [], credentialTypes: [],
+      monitors: [], executors: [], strategies: [], accounts: [], scripts: [], kinds: [], credentialTypes: [], cells: [],
       source: entry.source,
       installedAt: entry.installedAt,
       loadError: loadErrors.get(entry.name) ?? 'Not loaded',

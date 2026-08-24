@@ -13,6 +13,7 @@ import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AdapterResolver, CredentialTypeDefinition, CredentialTypeInfo, NamespacedKind, PublicSessionAccessor } from '../types/materialization.js'
 import type { AccountEntity, AccountImplementation, AccountImplementationInfo, AccountSnapshotRecord, AccountSnapshotSample, AccountSnapshotStore, AccountStore, AccountView } from '../types/account.js'
 import { implementationVenue } from '../types/account.js'
+import { cellVenue } from '../types/materialization.js'
 import { AdapterRegistry } from './AdapterRegistry.js'
 import { DBAccountStore, MemoryAccountStore } from '../account/AccountStore.js'
 import { DBAccountSnapshotStore, MemoryAccountSnapshotStore } from '../account/AccountSnapshotStore.js'
@@ -987,11 +988,18 @@ export class OpenWhaleRuntime implements IRuntime {
     this.loadedPlugins.set(ns, {
       name: ns,
       version: plugin.version,
-      monitors: (plugin.monitors ?? []).map(({ instance }) => p(instance.monitorName)),
+      ...(plugin.readme !== undefined ? { readme: plugin.readme } : {}),
+      monitors: [
+        ...(plugin.monitors ?? []).map(({ instance }) => p(instance.monitorName)),
+        ...Array.from(new Set(monitorImpls.map(impl => impl.contract.includes('/') ? impl.contract : p(impl.contract)))),
+      ],
       executors: (plugin.executors ?? []).map(({ instance }) => p(instance.executorName)),
       strategies: (plugin.strategies ?? []).map(({ definition }) => p(definition.id)),
+      accounts: accountImpls.map(impl => impl.id.includes('/') ? impl.id : p(impl.id)),
+      scripts: (plugin.scripts ?? []).map(script => p(script.id)),
       kinds: Array.from(new Set([...(plugin.adapters ?? []).map(a => a.kind), ...accountImpls.map(a => a.kind)])),
       credentialTypes: (plugin.credentialTypes ?? []).map(c => c.type),
+      cells: (plugin.adapters ?? []).map(cell => ({ kind: cell.kind as string, venue: cellVenue(cell) ?? '?' })),
     })
     return ns
   }

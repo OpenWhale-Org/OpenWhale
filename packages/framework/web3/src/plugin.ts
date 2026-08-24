@@ -25,6 +25,18 @@ export const web3Plugin: PluginFactory = (ctx) => {
   return {
     name: 'web3',
     version: '0.1.0',
+    readme: [
+      '# web3',
+      '',
+      'Chain access as infrastructure — the `web3/chain` kind carries only what a single RPC endpoint can do: balances, contract reads, signing, sending, receipts.',
+      '',
+      '## Credentials',
+      '- **EVM Wallet** (`web3/evm`) — one private key for every EVM chain. The chain is a call parameter, and this is the ONLY copy of the key in the store.',
+      '- **EVM RPC Endpoints** (`web3/rpc`) — a shared chain-id → URL map (provider keys embed in URLs, so it lives encrypted). Without it, viem\'s public endpoints serve; keyless sessions stay read-only.',
+      '',
+      '## Accounts',
+      '**EVM Wallet** aggregates a configured chain list (`chains` param, comma-separated ids). Stables value 1:1 USD; nothing else is priced — this kind has no price feed.',
+    ].join('\n'),
     monitors: [],
     executors: [],
     strategies: [],

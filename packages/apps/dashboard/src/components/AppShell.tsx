@@ -19,7 +19,6 @@ const routeLabels: Record<string, string> = {
   '/instances': 'Strategies',
   '/accounts': 'Accounts',
   '/credentials': 'Credentials',
-  '/registry': 'Registry',
   '/monitor': 'Monitor',
   '/monitor-data': 'Explorer',
   '/executors': 'Executors',

@@ -10,7 +10,6 @@ const links: Array<{ href: string; label: string; auroraLabel?: string; group?: 
   { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
   { href: '/accounts', label: 'Accounts', group: 'TRADE', icon: 'accounts' },
   { href: '/credentials', label: 'Credentials', group: 'SETTINGS', icon: 'credentials' },
-  { href: '/registry', label: 'Registry', group: 'DEVELOP', icon: 'registry' },
   { href: '/monitor', label: 'Monitor', group: 'OBSERVE', icon: 'monitor' },
   { href: '/monitor-data', label: 'Explorer', group: 'OBSERVE', icon: 'explorer' },
   { href: '/executors', label: 'Executors', group: 'AUTOMATE', icon: 'executors' },

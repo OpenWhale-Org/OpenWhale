@@ -109,6 +109,10 @@ export function fetchExecutorStatus(): Promise<ExecutorStatusView[]> {
   return gw('/api/executor/status', [])
 }
 
+export function fetchScripts(): Promise<import('@openwhaleorg/core').ScriptInfo[]> {
+  return gw('/api/scripts', [])
+}
+
 export function fetchInstalledPlugins(): Promise<InstalledPluginView[]> {
   return gw('/api/plugins', [])
 }

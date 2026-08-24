@@ -26,6 +26,8 @@ import {
 export interface PluginManifest {
   name: string
   version: string
+  /** Markdown README shown on the dashboard's Plugins page. */
+  readme?: string
   credentialTypes?: CredentialTypeDefinition[]
   adapters?: AdapterRegistration[]
   /** @OwAccount classes or plain registrations. */
@@ -142,6 +144,7 @@ export function definePlugin(manifest: PluginManifest): PluginFactory<Record<str
     return {
       name: manifest.name,
       version: manifest.version,
+      ...(manifest.readme !== undefined ? { readme: manifest.readme } : {}),
       ...(manifest.credentialTypes ? { credentialTypes: manifest.credentialTypes } : {}),
       ...(manifest.scripts ? { scripts: manifest.scripts } : {}),
       ...(manifest.adapters ? { adapters: manifest.adapters } : {}),

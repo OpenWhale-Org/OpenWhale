@@ -13,6 +13,8 @@ import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '
 export interface OpenWhalePlugin {
   name: string
   version: string
+  /** Markdown README shown on the dashboard's Plugins page. */
+  readme?: string
   /** @deprecated Legacy singleton registrations — new code uses `monitorImplementations` (or definePlugin's class arrays). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   monitors?: Array<{ definition: MonitorDefinition; instance: BaseMonitor<string, any> }>

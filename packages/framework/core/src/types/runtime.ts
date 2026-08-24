@@ -34,11 +34,20 @@ export interface RuntimeOptions {
 export interface LoadedPluginInfo {
   name: string
   version: string
+  /** Markdown shipped by the plugin (manifest `readme`) — the Plugins page's detail pane. */
+  readme?: string
+  /** Monitor ids: legacy singleton registrations + implementation contract ids. */
   monitors: string[]
   executors: string[]
   strategies: string[]
+  /** Account implementation ids ('<plugin>/<id>'). */
+  accounts: string[]
+  /** Script ids ('<plugin>/<id>'). */
+  scripts: string[]
   kinds: string[]
   credentialTypes: string[]
+  /** Adapter cells this plugin contributed to the matrix. */
+  cells: Array<{ kind: string; venue: string }>
 }
 
 export interface IRuntime {
