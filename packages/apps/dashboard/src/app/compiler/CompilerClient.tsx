@@ -569,7 +569,7 @@ function AnalysisCard({ analysis }: { analysis: NonNullable<CompileJob['analysis
 
 // ── Input box: one place to talk — create, confirm, iterate, approve ─────────
 
-function InputZone({ job, busy, error, onAct, onCreate, onNew }: {
+function InputZone({ job, busy, error, onAct, onCreate }: {
   job: CompileJob | null
   busy: boolean
   error: string
@@ -585,7 +585,9 @@ function InputZone({ job, busy, error, onAct, onCreate, onNew }: {
   const creating = job === null
   const confirming = !!job && (job.status === 'awaiting_confirmation' || (job.status === 'failed' && job.versions.length === 0))
   const iterating = !!job && (job.status === 'draft' || (job.status === 'failed' && job.versions.length > 0))
-  const settled = !!job && !confirming && !iterating
+  // Settled or busy sessions have nothing to say back — no box at all; the
+  // rail's "+ New" is where the next conversation starts.
+  if (!creating && !confirming && !iterating) return error ? <ErrorLine text={error} /> : null
 
   function send() {
     const t = text.trim()
@@ -603,82 +605,60 @@ function InputZone({ job, busy, error, onAct, onCreate, onNew }: {
   }
 
   const placeholder = creating
-    ? 'Describe a strategy in natural language…'
+    ? 'Describe a strategy in natural language — Enter to compile, Shift+Enter for a new line'
     : confirming
       ? 'Corrections to the analysis (optional) — then Confirm & Generate'
-      : iterating
-        ? 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
-        : job && ACTIVE_STATUSES.has(job.status) ? 'The agent is working…' : 'This session is settled — start a new one'
+      : 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
+
+  const primary = (label: string, onClick: () => void, disabled: boolean) => (
+    <button onClick={onClick} disabled={disabled} className="px-3.5 py-1.5 rounded-md text-sm" style={{ background: 'var(--accent)', color: '#fff', opacity: disabled ? 0.5 : 1 }}>
+      {label}
+    </button>
+  )
+  const secondary = (label: string, onClick: () => void, disabled: boolean, accent = false, title?: string) => (
+    <button onClick={onClick} disabled={disabled} title={title} className="px-3 py-1.5 rounded-md text-sm" style={{ border: `1px solid ${accent ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--foreground)', opacity: disabled ? 0.5 : 1 }}>
+      {label}
+    </button>
+  )
 
   return (
-    <div className="shrink-0 rounded-lg p-2.5 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      {error && <p className="text-xs px-2 py-1.5 rounded-md whitespace-pre-wrap" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{error}</p>}
-      {iterating && hasExecutor && job.status === 'draft' && (
-        <label className="flex items-start gap-2 text-xs px-2.5 py-1.5 rounded-md cursor-pointer" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
-          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
-          This draft contains a generated EXECUTOR — write-capable code. I have reviewed it line by line.
-        </label>
-      )}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-        rows={creating ? 2 : 1}
-        disabled={settled}
-        placeholder={placeholder}
-        className="rounded-md px-3 py-2 text-sm resize-none"
-        style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', opacity: settled ? 0.6 : 1 }}
-      />
-      <div className="flex items-center gap-2">
-        {creating && (
-          <span className="text-[11px]" style={{ color: 'var(--muted)' }}>Enter to compile · Shift+Enter for a new line · the AI decides strategy / monitor / executor from the description</span>
+    <div className="shrink-0 flex flex-col gap-2">
+      {error && <ErrorLine text={error} />}
+      <div
+        className="relative rounded-lg flex flex-col"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', minHeight: creating ? '7.5rem' : '5.5rem' }}
+      >
+        {iterating && hasExecutor && job.status === 'draft' && (
+          <label className="flex items-start gap-2 text-xs px-3 py-2 cursor-pointer" style={{ color: 'var(--danger)', borderBottom: '1px solid var(--border)' }}>
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
+            This draft contains a generated EXECUTOR — write-capable code. I have reviewed it line by line.
+          </label>
         )}
-        <div className="ml-auto flex gap-2">
-          {creating && (
-            <button onClick={send} disabled={busy || !text.trim()} className="px-4 py-1.5 rounded-md text-sm" style={{ background: 'var(--accent)', color: '#fff', opacity: busy || !text.trim() ? 0.5 : 1 }}>
-              {busy ? 'Starting…' : 'Compile'}
-            </button>
-          )}
-          {confirming && (
-            <button onClick={send} disabled={busy} className="px-4 py-1.5 rounded-md text-sm" style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}>
-              {job.status === 'failed' ? 'Retry Generate' : 'Confirm & Generate'}
-            </button>
-          )}
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          placeholder={placeholder}
+          className="flex-1 w-full bg-transparent px-3 pt-2.5 text-sm resize-none outline-none"
+          style={{ color: 'var(--foreground)', paddingBottom: '2.75rem' }}
+        />
+        {/* actions live INSIDE the box, bottom-right */}
+        <div className="absolute right-2 bottom-2 flex gap-2">
+          {creating && primary(busy ? 'Starting…' : 'Compile', send, busy || !text.trim())}
+          {confirming && primary(job.status === 'failed' ? 'Retry Generate' : 'Confirm & Generate', send, busy)}
           {iterating && (
             <>
-              <button onClick={send} disabled={busy || !text.trim()} className="px-3 py-1.5 rounded-md text-sm" style={{ border: '1px solid var(--border)', color: 'var(--foreground)', opacity: busy || !text.trim() ? 0.5 : 1 }}>
-                Send
-              </button>
-              {job.status === 'failed' && version && (
-                <button
-                  onClick={() => void onAct({ action: 'code', files: version.files })}
-                  disabled={busy}
-                  title="Re-run the validation ladder on the current code without calling the LLM"
-                  className="px-3 py-1.5 rounded-md text-sm"
-                  style={{ border: '1px solid var(--accent)', color: 'var(--foreground)' }}
-                >
-                  Re-validate
-                </button>
-              )}
-              {job.status === 'draft' && (
-                <button
-                  onClick={() => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) })}
-                  disabled={busy || (hasExecutor && !ack)}
-                  className="px-4 py-1.5 rounded-md text-sm"
-                  style={{ background: 'var(--accent)', color: '#fff', opacity: busy || (hasExecutor && !ack) ? 0.5 : 1 }}
-                >
-                  Approve & Register
-                </button>
-              )}
+              {job.status === 'failed' && version && secondary('Re-validate', () => void onAct({ action: 'code', files: version.files }), busy, true, 'Re-run the validation ladder without calling the LLM')}
+              {secondary('Send', send, busy || !text.trim())}
+              {job.status === 'draft' && primary('Approve & Register', () => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) }), busy || (hasExecutor && !ack))}
             </>
-          )}
-          {settled && (
-            <button onClick={onNew} className="px-3 py-1.5 rounded-md text-sm" style={{ border: '1px solid var(--accent)', color: 'var(--foreground)' }}>
-              + New session
-            </button>
           )}
         </div>
       </div>
     </div>
   )
+}
+
+function ErrorLine({ text }: { text: string }) {
+  return <p className="shrink-0 text-xs px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{text}</p>
 }
