@@ -1050,6 +1050,11 @@ export class OpenWhaleRuntime implements IRuntime {
     for (const [id, entry] of this.accountImpls) {
       if (entry.owner === name) this.accountImpls.delete(id)
     }
+    // Scripts too — a reinstall of the same plugin otherwise dies on
+    // "already registered" for its first script and leaves nothing loaded.
+    for (const [id, entry] of this.scriptRegistry) {
+      if (entry.owner === name) this.scriptRegistry.delete(id)
+    }
     void this.monitorInstances.unregisterOwner(name)
     void this.adapterRegistry.unregisterOwner(name)
     this.loadedPlugins.delete(name)
