@@ -345,7 +345,9 @@ function TypePicker({
   const [query, setQuery] = useState('')
 
   const entries: TypeEntry[] = [
-    ...credentialTypes.map((t) => ({
+    // Managed types (created by a script/flow, e.g. a venue's agent key) are
+    // not offered for hand entry — the flow that makes them is the entry point.
+    ...credentialTypes.filter((t) => !t.managed).map((t) => ({
       id: t.type,
       label: t.displayName ?? t.type,
       // The registering package is only the default answer; a type that says

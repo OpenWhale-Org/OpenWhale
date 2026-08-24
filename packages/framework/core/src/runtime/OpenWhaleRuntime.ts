@@ -911,6 +911,7 @@ export class OpenWhaleRuntime implements IRuntime {
       ...(def.documentationUrl !== undefined ? { documentationUrl: def.documentationUrl } : {}),
       kinds,
       ...(def.raw !== undefined ? { raw: def.raw } : {}),
+      ...(def.managed !== undefined ? { managed: def.managed } : {}),
       hasTest: typeof def.test === 'function',
       // JSON round-trip: z.toJSONSchema emits null-prototype nodes, which are
       // not "plain objects" to consumers like Next.js RSC serialization.

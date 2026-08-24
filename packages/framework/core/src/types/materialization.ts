@@ -137,6 +137,12 @@ export interface CredentialTypeDefinition {
   readers?: { [K in KnownKind]?: (session: SessionOf<K>, credentialName: string) => ReaderOf<K> }
   /** Allow raw materialization (decrypted data handed to executors that opt in). */
   raw?: boolean
+  /**
+   * Created by a script/flow rather than by hand (e.g. a venue's delegated
+   * agent key). The "add credential" picker hides it; existing entries still
+   * list and edit normally.
+   */
+  managed?: boolean
   /** Optional verification (dashboard "Test" button) — throw on failure. */
   test?: (data: RawCredentialData) => Promise<void>
 }
@@ -163,6 +169,8 @@ export interface CredentialTypeInfo {
   /** Kinds this type can materialize into (factory keys). */
   kinds: NamespacedKind[]
   raw?: boolean
+  /** Hidden from the add-credential picker (created by a script/flow). */
+  managed?: boolean
   /** True when the definition ships a test() connectivity probe. */
   hasTest: boolean
   /** JSON Schema (draft 2020-12) derived from the Zod field schema. */
