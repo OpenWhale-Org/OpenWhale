@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { ParamsFields, buildParams } from '../../components/ParamsFields'
 import type { AccountView, AccountImplementationInfo, AccountSnapshotRecord, CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 import { EquityChart } from './EquityChart'
 import { AccountDetail } from './AccountDetail'
@@ -41,6 +42,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
   const [name, setName] = useState('')
   const [implId, setImplId] = useState(implementations[0]?.id ?? '')
   const [credential, setCredential] = useState('')
+  const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -50,7 +52,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
   // any type whose adapter cells cover the implementation's kind.
   const eligibleCredentials = credentials.filter((c) => {
     if (!impl) return false
-    if (impl.type !== undefined) return c.type === impl.type
+    if (impl.type !== undefined) return (impl.credentialTypes ?? [impl.type]).includes(c.type)
     const typeInfo = credentialTypes.find(t => t.type === c.type)
     return typeInfo?.kinds.includes(impl.kind) ?? false
   })
@@ -72,7 +74,12 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, implementation: implId, ...(credential ? { credential } : {}) }),
+        body: JSON.stringify({
+          name,
+          implementation: implId,
+          ...(credential ? { credential } : {}),
+          ...(impl?.paramsFields?.length ? { params: buildParams(impl.paramsFields, paramValues) } : {}),
+        }),
       })
       if (!res.ok) {
         setError(((await res.json()) as { error?: string }).error ?? 'failed')
@@ -82,7 +89,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
       // pane still shows the form and the new account is somewhere in the rail.
       setExpanded(name)
       setShowNew(false)
-      setName(''); setCredential('')
+      setName(''); setCredential(''); setParamValues({})
       await refresh()
     } finally {
       setBusy(false)
@@ -112,7 +119,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
     const res = await fetch('/api/accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: account.name, implementation: account.implementation, ...(credentialName ? { credential: credentialName } : {}) }),
+      body: JSON.stringify({ name: account.name, implementation: account.implementation, ...(credentialName ? { credential: credentialName } : {}), ...(account.params !== undefined ? { params: account.params } : {}) }),
     })
     if (!res.ok) setError(((await res.json()) as { error?: string }).error ?? 'rebind failed')
     await refresh()
@@ -143,7 +150,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
   const rebindableFor = (a: AccountView) => credentials.filter((c) => {
     const ai = implementations.find(i => i.id === a.implementation)
     if (!ai) return false
-    if (ai.type !== undefined) return c.type === ai.type
+    if (ai.type !== undefined) return (ai.credentialTypes ?? [ai.type]).includes(c.type)
     const typeInfo = credentialTypes.find(t => t.type === c.type)
     return typeInfo?.kinds.includes(ai.kind) ?? false
   })
@@ -265,7 +272,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                 className="rounded-md px-3 py-2 text-sm"
                 style={inputStyle}
               />
-              <select value={implId} onChange={(e) => { setImplId(e.target.value); setCredential('') }} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
+              <select value={implId} onChange={(e) => { setImplId(e.target.value); setCredential(''); setParamValues({}) }} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
                 {implementations.map(i => (
                   <option key={i.id} value={i.id}>
                     {i.displayName ?? i.id} — {i.kind}{i.type ? ` (${i.type})` : ' (any venue)'}
@@ -276,6 +283,13 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                 <option value="">bind credential later (inactive)</option>
                 {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
               </select>
+              {(impl?.paramsFields?.length ?? 0) > 0 && (
+                <ParamsFields
+                  fields={impl!.paramsFields!}
+                  values={paramValues}
+                  onChange={(n, v) => setParamValues(prev => ({ ...prev, [n]: v }))}
+                />
+              )}
               {impl && eligibleCredentials.length === 0 && (
                 <p className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
                   No eligible credential for {impl.type ?? impl.kind} — add one on the Credentials page, or create the account unbound.

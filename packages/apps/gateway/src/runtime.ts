@@ -3,6 +3,7 @@
  */
 import { OpenWhaleRuntime, SQLiteAdapter, DBCredentialStore, getLogger, importLlmKeysFromEnv } from '@openwhaleorg/core'
 import { exchangePlugin } from '@openwhaleorg/exchange'
+import { web3Plugin } from '@openwhaleorg/web3'
 import { hyperliquidPlugin } from '@openwhaleorg/hyperliquid'
 import { examplesPlugin } from '@openwhaleorg/examples'
 import { binancePlugin } from '@openwhaleorg/binance'
@@ -47,6 +48,7 @@ function createRuntime(): OpenWhaleRuntime {
   // The exchange domain plugin must load first: it registers kind
   // 'exchange/perp' and the shared executor the venue plugins build on.
   runtime.loadPlugin(exchangePlugin, {})
+  runtime.loadPlugin(web3Plugin, {})
   // testnet is a per-credential field, not a deployment flag — see the venue
   // plugins' (deliberately empty) config interfaces.
   runtime.loadPlugin(hyperliquidPlugin, {})

@@ -443,15 +443,18 @@ export class OpenWhaleRuntime implements IRuntime {
       })
       .map(({ impl, owner }) => {
         const venue = implementationVenue(impl)
+        const accepted = venue !== undefined ? this.adapterRegistry.acceptedCredentialTypes(impl.kind, venue) : undefined
+        const paramsFields = impl.paramsSchema
+          ? BaseStrategyClass.deriveParamFields(impl.paramsSchema, z.object({}))
+          : undefined
         return {
           id: impl.id,
           ...(impl.displayName !== undefined ? { displayName: impl.displayName } : {}),
           kind: impl.kind,
           ...(venue !== undefined ? { type: venue } : {}),
+          ...(accepted !== undefined ? { credentialTypes: accepted } : {}),
           pluginName: owner,
-          ...(impl.paramsSchema
-            ? { paramsJsonSchema: JSON.parse(JSON.stringify(z.toJSONSchema(impl.paramsSchema))) as Record<string, unknown> }
-            : {}),
+          ...(paramsFields !== undefined ? { paramsFields } : {}),
         }
       })
   }

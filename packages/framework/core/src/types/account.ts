@@ -78,9 +78,11 @@ export interface AccountImplementationInfo {
   kind: NamespacedKind
   /** Venue pin (legacy field name kept for the dashboard wire format). */
   type?: string
+  /** Credential types the pinned (kind, venue) cell accepts — the form's eligibility list. */
+  credentialTypes?: string[]
   pluginName: string
-  /** JSON Schema (draft 2020-12) of paramsSchema — drives the account form. */
-  paramsJsonSchema?: Record<string, unknown>
+  /** Schema-derived form fields (same shape monitor-instance params use). */
+  paramsFields?: import('./definition.js').ParamFieldDef[]
 }
 
 /** Serializable account view with derived facts (dashboard Accounts page). */
