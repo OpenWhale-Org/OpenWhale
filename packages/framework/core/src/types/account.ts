@@ -1,3 +1,4 @@
+import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from './materialization.js'
 
 /**
@@ -8,8 +9,9 @@ import type { NamespacedKind } from './materialization.js'
  * opens one. An account binds exactly ONE credential; one credential may back
  * any number of accounts.
  *
- * kind/type are derived — implementation registration supplies the kind (and
- * optionally pins the type), the bound credential supplies the concrete type.
+ * kind/venue are derived — implementation registration supplies the kind (and
+ * optionally pins the venue), the bound credential supplies the concrete
+ * credential type.
  */
 export interface AccountEntity {
   /** User-chosen unique name, e.g. 'BN-Main-Perp'. */
@@ -18,6 +20,13 @@ export interface AccountEntity {
   implementation: string
   /** Bound credential name. Absent = the account exists but is inactive. */
   credential?: string
+  /**
+   * Implementation-declared configuration (validated against the
+   * implementation's paramsSchema). "How to view this key" — e.g. which
+   * chains a wallet account aggregates. Editable in place: accounts have no
+   * activation lifecycle, a change simply rebuilds the read view.
+   */
+  params?: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -35,14 +44,31 @@ export interface AccountImplementation {
   displayName?: string
   /** The kind this implementation's accounts expose. */
   kind: NamespacedKind
-  /** Venue specialization: restrict bindable credentials to this type. */
+  /**
+   * Venue specialization: pin this implementation to one (kind, venue) cell.
+   * Bindable credentials are whatever that cell accepts (its credentialTypes,
+   * default the venue itself). Unset = kind-generic (any venue of the kind,
+   * cell chosen by the bound credential's type).
+   */
+  venue?: string
+  /** @deprecated Legacy name for {@link venue}. */
   type?: string
+  /**
+   * Declared configuration schema (Zod object). Drives the account form on
+   * the dashboard; values are validated on save and handed to createReader.
+   */
+  paramsSchema?: ZodObject<ZodRawShape>
   /**
    * Build the structurally read-only view handed to strategies. The returned
    * object must expose NO write methods — that absence, not validation, is the
    * framework's safety guarantee.
    */
-  createReader(session: unknown, accountName: string): unknown
+  createReader(session: unknown, accountName: string, params?: Record<string, unknown>): unknown
+}
+
+/** Resolve an implementation's venue pin, tolerating the legacy `type` spelling. */
+export function implementationVenue(impl: Pick<AccountImplementation, 'venue' | 'type'>): string | undefined {
+  return impl.venue ?? impl.type
 }
 
 /** Serializable implementation view (dashboard implementation picker). */
@@ -50,8 +76,11 @@ export interface AccountImplementationInfo {
   id: string
   displayName?: string
   kind: NamespacedKind
+  /** Venue pin (legacy field name kept for the dashboard wire format). */
   type?: string
   pluginName: string
+  /** JSON Schema (draft 2020-12) of paramsSchema — drives the account form. */
+  paramsJsonSchema?: Record<string, unknown>
 }
 
 /** Serializable account view with derived facts (dashboard Accounts page). */

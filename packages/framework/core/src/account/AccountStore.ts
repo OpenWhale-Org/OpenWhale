@@ -5,6 +5,7 @@ interface AccountRow extends Row {
   name: string
   implementation: string
   credential: string | null
+  params: string | null
   created_at: string
   updated_at: string
 }
@@ -14,6 +15,7 @@ function rowToEntity(row: AccountRow): AccountEntity {
     name: row.name,
     implementation: row.implementation,
     ...(row.credential !== null ? { credential: row.credential } : {}),
+    ...(row.params !== null ? { params: JSON.parse(row.params) as Record<string, unknown> } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -25,13 +27,14 @@ export class DBAccountStore implements AccountStore {
 
   async save(entity: AccountEntity): Promise<void> {
     await this.db.run(
-      `INSERT INTO accounts (name, implementation, credential, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO accounts (name, implementation, credential, params, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
          implementation = excluded.implementation,
          credential     = excluded.credential,
+         params         = excluded.params,
          updated_at     = excluded.updated_at`,
-      [entity.name, entity.implementation, entity.credential ?? null, entity.createdAt, entity.updatedAt]
+      [entity.name, entity.implementation, entity.credential ?? null, entity.params !== undefined ? JSON.stringify(entity.params) : null, entity.createdAt, entity.updatedAt]
     )
   }
 

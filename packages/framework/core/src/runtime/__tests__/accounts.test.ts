@@ -200,7 +200,7 @@ describe('account entities', () => {
   it('rejects saving an account whose credential type mismatches the specialization', async () => {
     const runtime = setupRuntime()
     await expect(runtime.saveAccount({ name: 'Wrong', implementation: 'fakes/special-account', credential: 'A Key' }))
-      .rejects.toThrow(/requires a "venue-b" credential/)
+      .rejects.toThrow(/pinned to venue "venue-b" which accepts "venue-b" credentials/)
   })
 
   it('samples equity through the read view snapshot() convention', async () => {
@@ -249,5 +249,50 @@ describe('account entities', () => {
     await expect(runtime.deleteAccount('Held')).rejects.toThrow(/active instance/)
     await runtime.deactivate('holder')
     await expect(runtime.deleteAccount('Held')).resolves.toBeUndefined()
+  })
+
+  it('a shared-key-family cell: venue-pinned impl accepts the family credential, rejects others', async () => {
+    const runtime = setupRuntime()
+    // A wallet-style key family + an on-chain venue whose cell accepts it
+    runtime.registerCredentialType({ type: 'test/key-family' })
+    credentials['Wallet'] = { type: 'test/key-family' }
+    sessionsByVenue['dexy'] = []
+    runtime.loadPlugin(() => ({
+      name: 'onchain', version: '0.0.0', monitors: [], executors: [], strategies: [],
+      adapters: [
+        { kind: 'test/fake', venue: 'dexy', credentialTypes: ['test/key-family'], create: makeCreate('dexy') },
+      ],
+      accounts: [
+        { id: 'dexy-account', kind: 'test/fake', venue: 'dexy', createReader: (s, n) => new FakeReader(n, s as FakeSession) },
+      ],
+    }), {})
+
+    await runtime.saveAccount({ name: 'Dex', implementation: 'onchain/dexy-account', credential: 'Wallet' })
+    // Resolution lands on the (test/fake, dexy) cell, not a cell named after the credential type
+    await runtime.accountDetail('Dex')
+    expect(sessionsByVenue['dexy']!.length).toBe(1)
+
+    await expect(runtime.saveAccount({ name: 'DexBad', implementation: 'onchain/dexy-account', credential: 'A Key' }))
+      .rejects.toThrow(/accepts "test\/key-family"/)
+  })
+
+  it('validates, persists, and hands account params to the read view', async () => {
+    const runtime = setupRuntime()
+    runtime.registerAccountImplementation('test', {
+      id: 'param-account', kind: 'test/fake', venue: 'venue-a',
+      paramsSchema: z.object({ chains: z.string().default('1') }),
+      createReader: (session, _name, params) => ({
+        venue: () => (session as FakeSession).venue,
+        balance: async () => ({ chains: params?.['chains'] }),
+      }),
+    })
+    await expect(runtime.saveAccount({ name: 'P1', implementation: 'test/param-account', credential: 'A Key', params: { chains: 42 } }))
+      .rejects.toThrow(/invalid params/)
+
+    await runtime.saveAccount({ name: 'P1', implementation: 'test/param-account', credential: 'A Key', params: { chains: '42161,8453' } })
+    expect((await runtime.getAccount('P1'))?.params).toEqual({ chains: '42161,8453' })
+
+    const detail = await runtime.accountDetail('P1')
+    expect(detail.sections['balance']).toEqual({ chains: '42161,8453' })
   })
 })

@@ -154,7 +154,7 @@ export function buildRouter(): Router {
   router.post('/api/accounts', h(async (req, res) => {
     const runtime = await ensureStarted()
     try {
-      res.status(201).json(await runtime.saveAccount(req.body as { name: string; implementation: string; credential?: string }))
+      res.status(201).json(await runtime.saveAccount(req.body as { name: string; implementation: string; credential?: string; params?: Record<string, unknown> }))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }

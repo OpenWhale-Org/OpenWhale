@@ -12,6 +12,7 @@ import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AdapterResolver, CredentialTypeDefinition, CredentialTypeInfo, NamespacedKind, PublicSessionAccessor } from '../types/materialization.js'
 import type { AccountEntity, AccountImplementation, AccountImplementationInfo, AccountSnapshotRecord, AccountSnapshotSample, AccountSnapshotStore, AccountStore, AccountView } from '../types/account.js'
+import { implementationVenue } from '../types/account.js'
 import { AdapterRegistry } from './AdapterRegistry.js'
 import { DBAccountStore, MemoryAccountStore } from '../account/AccountStore.js'
 import { DBAccountSnapshotStore, MemoryAccountSnapshotStore } from '../account/AccountSnapshotStore.js'
@@ -95,8 +96,8 @@ function buildLabelToKeyMap(declarations: readonly MonitorDeclaration[], ns: str
   return new Map(declarations.map(d => [declarationLabel(d), resolveComponentName(declarationName(d), ns)]))
 }
 
-function sessionKey(credentialName: string, kind: string): string {
-  return `${credentialName}::${kind}`
+function sessionKey(credentialName: string, kind: string, venue?: string): string {
+  return venue !== undefined ? `${credentialName}::${kind}::${venue}` : `${credentialName}::${kind}`
 }
 
 function assertNamespacedKind(kind: string): void {
@@ -434,41 +435,64 @@ export class OpenWhaleRuntime implements IRuntime {
     return Array.from(this.accountImpls.values())
       .filter(({ impl }) => {
         if (filter?.kind !== undefined && impl.kind !== filter.kind) return false
-        // A kind-generic impl (no type) is compatible with every type; a
+        // A kind-generic impl (no venue) is compatible with every venue; a
         // specialized impl only with its own.
-        if (filter?.type !== undefined && impl.type !== undefined && impl.type !== filter.type) return false
+        const venue = implementationVenue(impl)
+        if (filter?.type !== undefined && venue !== undefined && venue !== filter.type) return false
         return true
       })
-      .map(({ impl, owner }) => ({
-        id: impl.id,
-        ...(impl.displayName !== undefined ? { displayName: impl.displayName } : {}),
-        kind: impl.kind,
-        ...(impl.type !== undefined ? { type: impl.type } : {}),
-        pluginName: owner,
-      }))
+      .map(({ impl, owner }) => {
+        const venue = implementationVenue(impl)
+        return {
+          id: impl.id,
+          ...(impl.displayName !== undefined ? { displayName: impl.displayName } : {}),
+          kind: impl.kind,
+          ...(venue !== undefined ? { type: venue } : {}),
+          pluginName: owner,
+          ...(impl.paramsSchema
+            ? { paramsJsonSchema: JSON.parse(JSON.stringify(z.toJSONSchema(impl.paramsSchema))) as Record<string, unknown> }
+            : {}),
+        }
+      })
   }
 
   /** Create (or update the binding of) an account entity, validating impl/credential compatibility. */
-  async saveAccount(input: { name: string; implementation: string; credential?: string }): Promise<AccountEntity> {
+  async saveAccount(input: { name: string; implementation: string; credential?: string; params?: Record<string, unknown> }): Promise<AccountEntity> {
     const impl = this.accountImpls.get(input.implementation)?.impl
     if (!impl) {
       throw new Error(`Unknown account implementation "${input.implementation}" — is its plugin loaded?`)
     }
+    const venue = implementationVenue(impl)
     if (input.credential !== undefined) {
       const { type } = await this.readCredential(input.credential)
-      if (impl.type !== undefined && impl.type !== type) {
-        throw new Error(
-          `Account "${input.name}": implementation "${impl.id}" requires a "${impl.type}" credential, ` +
-          `but "${input.credential}" has type "${type}"`
-        )
+      if (venue !== undefined) {
+        // Venue-pinned impl: the (kind, venue) cell decides which credential
+        // types open it; a cell-less pin falls back to venue === type (legacy
+        // per-credential-type factories).
+        const ok = this.adapterRegistry.acceptedCredentialTypes(impl.kind, venue) ?? [venue]
+        if (!ok.includes(type)) {
+          throw new Error(
+            `Account "${input.name}": implementation "${impl.id}" is pinned to venue "${venue}" ` +
+            `which accepts ${ok.map(t => `"${t}"`).join('/')} credentials, but "${input.credential}" has type "${type}"`
+          )
+        }
+      } else {
+        // Kind-generic impls need the credential's venue to actually open this kind
+        const legacyFactories = this.credentialTypes.get(type)?.factories as Record<string, unknown> | undefined
+        if (!this.adapterRegistry.has(impl.kind, type) && !legacyFactories?.[impl.kind]) {
+          throw new Error(
+            `Account "${input.name}": credential type "${type}" has no adapter for kind "${impl.kind}"`
+          )
+        }
       }
-      // Kind-generic impls need the credential's venue to actually open this kind
-      const legacyFactories = this.credentialTypes.get(type)?.factories as Record<string, unknown> | undefined
-      if (impl.type === undefined && !this.adapterRegistry.has(impl.kind, type) && !legacyFactories?.[impl.kind]) {
-        throw new Error(
-          `Account "${input.name}": credential type "${type}" has no adapter for kind "${impl.kind}"`
-        )
+    }
+    let params: Record<string, unknown> | undefined
+    if (impl.paramsSchema) {
+      const parsed = impl.paramsSchema.safeParse(input.params ?? {})
+      if (!parsed.success) {
+        throw new Error(`Account "${input.name}": invalid params — ${parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
       }
+      params = parsed.data as Record<string, unknown>
     }
     const existing = await this.accountStore.get(input.name)
     const now = new Date().toISOString()
@@ -476,6 +500,7 @@ export class OpenWhaleRuntime implements IRuntime {
       name: input.name,
       implementation: impl.id,
       ...(input.credential !== undefined ? { credential: input.credential } : {}),
+      ...(params !== undefined ? { params } : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     }
@@ -494,7 +519,8 @@ export class OpenWhaleRuntime implements IRuntime {
         continue
       }
       if (!entity.credential) {
-        views.push({ ...entity, kind: impl.kind, ...(impl.type !== undefined ? { type: impl.type } : {}), status: 'inactive' })
+        const implVenue = implementationVenue(impl)
+        views.push({ ...entity, kind: impl.kind, ...(implVenue !== undefined ? { type: implVenue } : {}), status: 'inactive' })
         continue
       }
       try {
@@ -536,8 +562,9 @@ export class OpenWhaleRuntime implements IRuntime {
     if (!impl) throw new Error(`Account "${name}" uses unregistered implementation "${entity.implementation}"`)
 
     const { type } = await this.readCredential(entity.credential)
-    const session = await this.adapterRegistry.resolve(impl.kind, type, entity.credential)
-    const reader = impl.createReader(session, entity.name) as Record<string, unknown>
+    const venue = implementationVenue(impl) ?? type
+    const session = await this.adapterRegistry.resolve(impl.kind, venue, entity.credential)
+    const reader = impl.createReader(session, entity.name, entity.params) as Record<string, unknown>
 
     const sections: Record<string, unknown> = {}
     const errors: Record<string, string> = {}
@@ -572,8 +599,9 @@ export class OpenWhaleRuntime implements IRuntime {
       if (!impl) continue
       try {
         const { type } = await this.readCredential(entity.credential)
-        const session = await this.adapterRegistry.resolve(impl.kind, type, entity.credential)
-        const reader = impl.createReader(session, entity.name) as { snapshot?: () => Promise<AccountSnapshotSample> }
+        const venue = implementationVenue(impl) ?? type
+        const session = await this.adapterRegistry.resolve(impl.kind, venue, entity.credential)
+        const reader = impl.createReader(session, entity.name, entity.params) as { snapshot?: () => Promise<AccountSnapshotSample> }
         if (typeof reader.snapshot !== 'function') continue
         const sample = await reader.snapshot()
         await this.accountSnapshots.append({ account: entity.name, ts: now, ...sample })
@@ -765,10 +793,10 @@ export class OpenWhaleRuntime implements IRuntime {
     let generic: AccountImplementation | undefined
     for (const { impl } of this.accountImpls.values()) {
       if (impl.kind !== kind) continue
-      if (credentialType !== undefined && impl.type === credentialType) {
+      if (credentialType !== undefined && implementationVenue(impl) === credentialType) {
         return (session, name) => impl.createReader(session, name)
       }
-      if (impl.type === undefined) generic = generic ?? impl
+      if (implementationVenue(impl) === undefined) generic = generic ?? impl
     }
     return generic ? (session, name) => generic!.createReader(session, name) : undefined
   }
@@ -828,8 +856,13 @@ export class OpenWhaleRuntime implements IRuntime {
             if (!this.credentialTypes.get(type)?.raw) throw new Error(`Credential type "${type}" does not allow raw materialization`)
             slots.push({ label: decl.label, credentialName: name, raw: data })
           } else {
-            if (decl.type !== undefined && decl.type !== type) throw new Error(`Slot '${decl.label}' requires a "${decl.type}" credential, but "${name}" is "${type}"`)
-            const session = await this.ensureSession(manualId, name, type, decl.kind, data)
+            // decl.type pins a venue; the cell decides which credential types open it
+            const declVenue = decl.type
+            if (declVenue !== undefined) {
+              const ok = this.adapterRegistry.acceptedCredentialTypes(decl.kind, declVenue) ?? [declVenue]
+              if (!ok.includes(type)) throw new Error(`Slot '${decl.label}' requires a "${declVenue}" venue (accepts ${ok.join('/')}), but "${name}" is "${type}"`)
+            }
+            const session = await this.ensureSession(manualId, name, type, decl.kind, data, declVenue)
             slots.push({ label: decl.label, credentialName: name, session })
           }
         }
@@ -1516,7 +1549,7 @@ export class OpenWhaleRuntime implements IRuntime {
   private async resolveAccountBinding(
     bindingName: string,
     opts: { kind: NamespacedKind; venueType?: string; context: string },
-  ): Promise<{ credentialName: string; type: string; data: RawCredentialData; impl?: AccountImplementation }> {
+  ): Promise<{ credentialName: string; type: string; venue: string; data: RawCredentialData; impl?: AccountImplementation; params?: Record<string, unknown> }> {
     const entity = await this.accountStore.get(bindingName)
     if (entity) {
       const impl = this.accountImpls.get(entity.implementation)?.impl
@@ -1534,28 +1567,31 @@ export class OpenWhaleRuntime implements IRuntime {
         )
       }
       const { type, data } = await this.readCredential(entity.credential)
-      if (impl.type !== undefined && impl.type !== type) {
+      // The account's venue: the impl's pin, or (kind-generic) the credential's type.
+      const venue = implementationVenue(impl) ?? type
+      const ok = this.adapterRegistry.acceptedCredentialTypes(impl.kind, venue) ?? [venue]
+      if (!ok.includes(type)) {
         throw new Error(
-          `${opts.context}: account "${bindingName}" implementation requires a "${impl.type}" credential, ` +
-          `but "${entity.credential}" has type "${type}"`
+          `${opts.context}: account "${bindingName}" is on venue "${venue}" which accepts ` +
+          `${ok.map(t => `"${t}"`).join('/')} credentials, but "${entity.credential}" has type "${type}"`
         )
       }
-      if (opts.venueType !== undefined && opts.venueType !== type) {
+      if (opts.venueType !== undefined && opts.venueType !== venue) {
         throw new Error(
-          `${opts.context}: slot requires a "${opts.venueType}" venue, but account "${bindingName}" is "${type}"`
+          `${opts.context}: slot requires a "${opts.venueType}" venue, but account "${bindingName}" is "${venue}"`
         )
       }
-      return { credentialName: entity.credential, type, data, impl }
+      return { credentialName: entity.credential, type, venue, data, impl, ...(entity.params !== undefined ? { params: entity.params } : {}) }
     }
 
-    // Legacy: the binding is a credential name
+    // Legacy: the binding is a credential name (venue = the credential's type)
     const { type, data } = await this.readCredential(bindingName)
     if (opts.venueType !== undefined && opts.venueType !== type) {
       throw new Error(
         `${opts.context}: slot requires a "${opts.venueType}" credential, but "${bindingName}" has type "${type}"`
       )
     }
-    return { credentialName: bindingName, type, data }
+    return { credentialName: bindingName, type, venue: type, data }
   }
 
   /** Materialize the strategy's account slots into Readers (+ per-slot account facts). */
@@ -1588,13 +1624,13 @@ export class OpenWhaleRuntime implements IRuntime {
         context: `Account slot '${slot.label}' of instance "${instance.id}"`,
       })
 
-      const session = await this.ensureSession(instance.id, resolved.credentialName, resolved.type, kind, resolved.data)
+      const session = await this.ensureSession(instance.id, resolved.credentialName, resolved.type, kind, resolved.data, resolved.venue)
       // Account entity → its implementation builds the read view; legacy bare-
       // credential binding → venue reader override, then the kind-GENERIC
       // account implementation (the canonical read view of the kind).
       let reader: unknown
       if (resolved.impl) {
-        reader = resolved.impl.createReader(session, name)
+        reader = resolved.impl.createReader(session, name, resolved.params)
       } else {
         const readerOverrides = this.credentialTypes.get(resolved.type)?.readers as
           Record<string, (session: unknown, credentialName: string) => unknown> | undefined
@@ -1607,9 +1643,9 @@ export class OpenWhaleRuntime implements IRuntime {
       }
       readers.push(reader)
       credentialNames.push(resolved.credentialName)
-      // The venue is the bound credential's type — strategies derive it from
-      // here instead of asking the user for a venue the binding already implies
-      accountMetas.push({ label: slot.label, accountName: name, venue: resolved.type, kind })
+      // The venue is derived from the binding (impl pin, else the credential's
+      // type) — strategies never ask the user for a venue the binding implies
+      accountMetas.push({ label: slot.label, accountName: name, venue: resolved.venue, kind })
     }
 
     return { readers, credentialNames, accountMetas }
@@ -1665,7 +1701,7 @@ export class OpenWhaleRuntime implements IRuntime {
             ...(decl.type !== undefined ? { venueType: decl.type } : {}),
             context: `Executor slot '${slotPath}' of instance "${instance.id}"`,
           })
-          const session = await this.ensureSession(instance.id, resolved.credentialName, resolved.type, decl.kind, resolved.data)
+          const session = await this.ensureSession(instance.id, resolved.credentialName, resolved.type, decl.kind, resolved.data, resolved.venue)
           slots.push({ label: decl.label, credentialName: resolved.credentialName, session })
         }
       }
@@ -1678,10 +1714,15 @@ export class OpenWhaleRuntime implements IRuntime {
       const extraByName: MaterializedSlot[] = []
       for (const bindingName of this.instanceSessionsByName(instance)) {
         // Bindings may be account names — the session cache is keyed by the
-        // underlying credential, but instruction routing speaks binding names.
-        const credentialName = (await this.accountStore.get(bindingName))?.credential ?? bindingName
+        // underlying credential (venue-suffixed for pinned impls), but
+        // instruction routing speaks binding names.
+        const entity = await this.accountStore.get(bindingName)
+        const credentialName = entity?.credential ?? bindingName
+        const entityImpl = entity ? this.accountImpls.get(entity.implementation)?.impl : undefined
+        const pinnedVenue = entityImpl ? implementationVenue(entityImpl) : undefined
         for (const kind of sessionKinds) {
-          const cached = this.sessions.get(sessionKey(credentialName, kind))
+          const cached = this.sessions.get(sessionKey(credentialName, kind, pinnedVenue))
+            ?? (pinnedVenue !== undefined ? this.sessions.get(sessionKey(credentialName, kind)) : undefined)
           if (cached && !slots.some(s => s.credentialName === credentialName && s.session === cached.session)) {
             extraByName.push({ label: `@${bindingName}`, credentialName, session: cached.session })
           }
@@ -1715,7 +1756,16 @@ export class OpenWhaleRuntime implements IRuntime {
       } catch {
         continue
       }
-      if (decl.type !== undefined && decl.type !== type) continue
+      if (decl.type !== undefined) {
+        const accepted = decl.kind !== undefined
+          ? this.adapterRegistry.acceptedCredentialTypes(decl.kind, decl.type)
+          : undefined
+        if (accepted) {
+          if (!accepted.includes(type)) continue
+          return name
+        }
+        if (decl.type !== type) continue
+      }
       const factories = this.credentialTypes.get(type)?.factories as Record<string, unknown> | undefined
       if (decl.kind !== undefined && !this.adapterRegistry.has(decl.kind, type) && !factories?.[decl.kind]) continue
       return name
@@ -1737,22 +1787,24 @@ export class OpenWhaleRuntime implements IRuntime {
     type: string,
     kind: NamespacedKind,
     data: RawCredentialData,
+    venue?: string,
   ): Promise<unknown> {
-    const key = sessionKey(name, kind)
+    const cellVenue = venue ?? type
+    const key = sessionKey(name, kind, cellVenue !== type ? cellVenue : undefined)
     let entry = this.sessions.get(key)
     if (!entry) {
-      // Adapter cell first (the type × kind matrix), legacy per-credential-type
+      // Adapter cell first (the venue × kind matrix), legacy per-credential-type
       // factories as fallback until every venue plugin migrates to `adapters`.
       const legacyFactories = this.credentialTypes.get(type)?.factories as
         Record<string, (data: RawCredentialData) => unknown> | undefined
-      const factory = this.adapterRegistry.factoryFor(kind, type) ?? legacyFactories?.[kind]
+      const factory = this.adapterRegistry.factoryFor(kind, cellVenue) ?? legacyFactories?.[kind]
       if (!factory) {
         const available = [
           ...this.adapterRegistry.kindsForType(type),
           ...Object.keys(legacyFactories ?? {}),
         ]
         throw new Error(
-          `Credential type "${type}" has no adapter for kind "${kind}" ` +
+          `Credential type "${type}" has no adapter for kind "${kind}" venue "${cellVenue}" ` +
           `(credential: "${name}") — available kinds: ${available.join(', ') || 'none'}`,
         )
       }

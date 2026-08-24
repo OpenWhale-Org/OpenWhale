@@ -62,12 +62,14 @@ export function lowerAccountEntry(entry: AccountClass | AccountImplementation, p
   if (!isClass(entry)) return entry
   const meta = owAccountMeta(entry)
   if (!meta) throw new Error(`Plugin "${pluginName}": account class ${entry.name} has no @OwAccount metadata`)
+  const venue = meta.venue ?? meta.type
   return {
     id: meta.id ?? kebab(entry.name),
     kind: meta.kind,
-    ...(meta.type !== undefined ? { type: meta.type } : {}),
+    ...(venue !== undefined ? { venue } : {}),
     ...(meta.displayName !== undefined ? { displayName: meta.displayName } : {}),
-    createReader: (session, accountName) => new entry(accountName, session as never),
+    ...(meta.paramsSchema !== undefined ? { paramsSchema: meta.paramsSchema } : {}),
+    createReader: (session, accountName, params) => new entry(accountName, session as never, params),
   }
 }
 

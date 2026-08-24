@@ -183,9 +183,30 @@ export interface CredentialTypeInfo {
  */
 export interface AdapterRegistration {
   kind: NamespacedKind
-  /** Credential type this cell belongs to (venue), e.g. 'binance'. */
-  type: string
+  /**
+   * Cell identity — the venue this cell trades/reads on, e.g. 'binance',
+   * 'uniswap', 'evm'. Exactly one of `venue`/`type` must be set; `venue` wins.
+   */
+  venue?: string
+  /** @deprecated Legacy name for {@link venue}. Kept so existing cells load unchanged. */
+  type?: string
+  /**
+   * Credential types this cell accepts. Defaults to `[venue]` — the CEX case,
+   * where the venue issues its own key. On-chain venues list a shared key
+   * family instead (e.g. `['web3/evm']`): one wallet key opens many venues.
+   */
+  credentialTypes?: string[]
   create: (data?: RawCredentialData) => unknown
+}
+
+/** A cell after load-time normalization: `venue` resolved, legacy `type` folded in. */
+export interface NormalizedAdapterRegistration extends AdapterRegistration {
+  venue: string
+}
+
+/** Resolve a registration's cell identity (venue), tolerating the legacy `type` spelling. */
+export function cellVenue(reg: Pick<AdapterRegistration, 'venue' | 'type'>): string | undefined {
+  return reg.venue ?? reg.type
 }
 
 /**
@@ -194,16 +215,17 @@ export interface AdapterRegistration {
  * plugin unload. Consumers never construct adapters themselves.
  */
 export interface AdapterResolver {
-  /** Credential types (venues) that registered a cell for this kind. */
+  /** Venues that registered a cell for this kind. */
   types(kind: NamespacedKind): string[]
-  /** Whether a cell exists for (kind, type). */
-  has(kind: NamespacedKind, type: string): boolean
+  /** Whether a cell exists for (kind, venue). */
+  has(kind: NamespacedKind, venue: string): boolean
   /**
    * Resolve the shared adapter instance for a cell. With `credentialName`,
-   * the credential is read, its type checked against `type`, and its data
+   * the credential is read, its type checked for membership in the cell's
+   * accepted `credentialTypes` (default: the venue itself), and its data
    * passed to the factory; without it, the keyless form is built.
    */
-  resolve<T = unknown>(kind: NamespacedKind, type: string, credentialName?: string): Promise<T>
+  resolve<T = unknown>(kind: NamespacedKind, venue: string, credentialName?: string): Promise<T>
 }
 
 /**

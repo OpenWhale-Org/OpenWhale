@@ -65,9 +65,13 @@ export interface OwAccountMeta {
   /** Implementation id. Defaults to a kebab-cased class name at lowering. */
   id?: string
   kind: NamespacedKind
-  /** Venue specialization — restricts bindable credentials to this type. */
+  /** Venue specialization — pins this implementation to one (kind, venue) cell. */
+  venue?: string
+  /** @deprecated Legacy name for {@link venue}. */
   type?: string
   displayName?: string
+  /** Declared configuration schema — see AccountImplementation.paramsSchema. */
+  paramsSchema?: ZodObject<ZodRawShape>
 }
 
 const accountMeta = new WeakMap<object, OwAccountMeta>()
@@ -82,7 +86,8 @@ export function OwAccount(meta: OwAccountMeta): ClassDecorator {
     accountMeta.set(value, meta)
     const statics = value as { kind?: NamespacedKind; venueType?: string }
     statics.kind = meta.kind
-    if (meta.type !== undefined) statics.venueType = meta.type
+    const venue = meta.venue ?? meta.type
+    if (venue !== undefined) statics.venueType = venue
   }
 }
 
@@ -90,7 +95,7 @@ export function owAccountMeta(ctor: object): OwAccountMeta | undefined {
   return accountMeta.get(ctor)
 }
 
-export type AccountClass = new (accountName: string, session: never) => unknown
+export type AccountClass = new (accountName: string, session: never, params?: Record<string, unknown>) => unknown
 
 // ── @OwExecutor ───────────────────────────────────────────────────────────────
 

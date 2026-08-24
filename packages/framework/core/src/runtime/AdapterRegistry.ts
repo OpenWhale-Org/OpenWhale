@@ -1,4 +1,5 @@
-import type { AdapterRegistration, AdapterResolver, NamespacedKind } from '../types/materialization.js'
+import type { AdapterRegistration, AdapterResolver, NamespacedKind, NormalizedAdapterRegistration } from '../types/materialization.js'
+import { cellVenue } from '../types/materialization.js'
 import type { CredentialStore } from '../types/credential.js'
 import { createLogger } from '../utils/logger.js'
 
@@ -6,8 +7,13 @@ const log = createLogger('AdapterRegistry')
 
 const KEYLESS = '∅'
 
-function cellKey(kind: NamespacedKind, type: string): string {
-  return `${kind}::${type}`
+function cellKey(kind: NamespacedKind, venue: string): string {
+  return `${kind}::${venue}`
+}
+
+/** Credential types a cell accepts — its own venue unless it names a shared key family. */
+function accepted(reg: NormalizedAdapterRegistration): string[] {
+  return reg.credentialTypes ?? [reg.venue]
 }
 
 /**
@@ -20,21 +26,25 @@ function cellKey(kind: NamespacedKind, type: string): string {
  * it is read, handed to the factory, and dropped.
  */
 export class AdapterRegistry implements AdapterResolver {
-  private readonly cells = new Map<string, { registration: AdapterRegistration; owner: string }>()
+  private readonly cells = new Map<string, { registration: NormalizedAdapterRegistration; owner: string }>()
   /** Live instances keyed `${kind}::${type}::${credName | ∅}`. */
   private readonly cache = new Map<string, unknown>()
 
   constructor(private readonly credentials?: CredentialStore) {}
 
   register(owner: string, registration: AdapterRegistration): void {
-    const key = cellKey(registration.kind, registration.type)
+    const venue = cellVenue(registration)
+    if (!venue) {
+      throw new Error(`Plugin "${owner}": adapter cell for kind "${registration.kind}" declares neither venue nor (legacy) type`)
+    }
+    const key = cellKey(registration.kind, venue)
     const existing = this.cells.get(key)
     if (existing) {
       throw new Error(
-        `Adapter cell (${registration.kind}, ${registration.type}) is already registered by plugin "${existing.owner}"`
+        `Adapter cell (${registration.kind}, ${venue}) is already registered by plugin "${existing.owner}"`
       )
     }
-    this.cells.set(key, { registration, owner })
+    this.cells.set(key, { registration: { ...registration, venue }, owner })
   }
 
   /** Remove a plugin's cells and close their cached instances. */
@@ -50,10 +60,11 @@ export class AdapterRegistry implements AdapterResolver {
     }
   }
 
+  /** Venues that registered a cell for this kind. */
   types(kind: NamespacedKind): string[] {
     return Array.from(this.cells.values())
       .filter(({ registration }) => registration.kind === kind)
-      .map(({ registration }) => registration.type)
+      .map(({ registration }) => registration.venue)
   }
 
   /** Every kind any cell claims — half of the derived kind vocabulary. */
@@ -61,31 +72,40 @@ export class AdapterRegistry implements AdapterResolver {
     return Array.from(new Set(Array.from(this.cells.values()).map(({ registration }) => registration.kind)))
   }
 
-  /** Kinds this credential type has cells for (its column set in the matrix). */
+  /** Kinds this credential type can open (cells accepting it — its column set in the matrix). */
   kindsForType(type: string): NamespacedKind[] {
     return Array.from(this.cells.values())
-      .filter(({ registration }) => registration.type === type)
+      .filter(({ registration }) => accepted(registration).includes(type))
       .map(({ registration }) => registration.kind)
   }
 
+  /**
+   * Credential types the (kind, venue) cell accepts; undefined when no such
+   * cell exists. The account-save and slot-binding validations key off this.
+   */
+  acceptedCredentialTypes(kind: NamespacedKind, venue: string): string[] | undefined {
+    const cell = this.cells.get(cellKey(kind, venue))
+    return cell ? accepted(cell.registration) : undefined
+  }
+
   /** The raw factory of a cell, for credentialed session construction outside the shared cache. */
-  factoryFor(kind: NamespacedKind, type: string): AdapterRegistration['create'] | undefined {
-    return this.cells.get(cellKey(kind, type))?.registration.create
+  factoryFor(kind: NamespacedKind, venue: string): AdapterRegistration['create'] | undefined {
+    return this.cells.get(cellKey(kind, venue))?.registration.create
   }
 
-  has(kind: NamespacedKind, type: string): boolean {
-    return this.cells.has(cellKey(kind, type))
+  has(kind: NamespacedKind, venue: string): boolean {
+    return this.cells.has(cellKey(kind, venue))
   }
 
-  async resolve<T = unknown>(kind: NamespacedKind, type: string, credentialName?: string): Promise<T> {
-    const key = `${cellKey(kind, type)}::${credentialName ?? KEYLESS}`
+  async resolve<T = unknown>(kind: NamespacedKind, venue: string, credentialName?: string): Promise<T> {
+    const key = `${cellKey(kind, venue)}::${credentialName ?? KEYLESS}`
     const cached = this.cache.get(key)
     if (cached !== undefined) return cached as T
 
-    const cell = this.cells.get(cellKey(kind, type))
+    const cell = this.cells.get(cellKey(kind, venue))
     if (!cell) {
       throw new Error(
-        `No adapter registered for kind "${kind}" type "${type}" — is the venue plugin loaded?`
+        `No adapter registered for kind "${kind}" venue "${venue}" — is the venue plugin loaded?`
       )
     }
 
@@ -97,9 +117,10 @@ export class AdapterRegistry implements AdapterResolver {
         throw new Error(`AdapterResolver has no CredentialStore — cannot resolve credential "${credentialName}"`)
       }
       const { type: credType, data } = await this.credentials.getByName(credentialName)
-      if (credType !== type) {
+      const ok = accepted(cell.registration)
+      if (!ok.includes(credType)) {
         throw new Error(
-          `Credential "${credentialName}" has type "${credType}" but the adapter cell is (${kind}, ${type})`
+          `Credential "${credentialName}" has type "${credType}" but the (${kind}, ${venue}) cell accepts: ${ok.join(', ')}`
         )
       }
       instance = cell.registration.create(data)

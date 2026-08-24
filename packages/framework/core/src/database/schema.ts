@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   name           TEXT PRIMARY KEY,
   implementation TEXT NOT NULL,   -- registered implementation id, e.g. 'exchange/perp-account'
   credential     TEXT,            -- bound credential name; NULL = created but inactive
+  params         TEXT,            -- JSON, validated against the implementation's paramsSchema
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL
 );
@@ -289,4 +290,7 @@ export const MIGRATION_SQL: string[] = [
   `ALTER TABLE strategy_instances ADD COLUMN icon TEXT`,
   `ALTER TABLE strategy_instances ADD COLUMN folder TEXT`,
   `ALTER TABLE strategy_instances ADD COLUMN sort_order INTEGER`,
+  // 2026-08-24: implementation-declared account configuration (e.g. a wallet
+  // account's chain list) — see AccountImplementation.paramsSchema
+  `ALTER TABLE accounts ADD COLUMN params TEXT`,
 ]
