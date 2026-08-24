@@ -656,6 +656,15 @@ function AnalysisCard({ analysis }: { analysis: NonNullable<CompileJob['analysis
 
 // ── Input box: one place to talk — create, confirm, iterate, approve ─────────
 
+/** Starter prompts for an empty session — a chip fills the box, Enter sends. */
+const EXAMPLES: Array<{ label: string; prompt: string }> = [
+  { label: 'Ladder the dip', prompt: 'Every 5 minutes check BTC perp. Place a ladder of 5 limit buys below the current price, each 2% apart, 0.01 BTC per level. When a level fills, place a take-profit sell 1.5% above its entry. Cancel every open order if price falls 15% below the lowest level.' },
+  { label: 'Chase the funding', prompt: 'Watch Binance funding rates every minute. When a perp\'s funding is above 0.05% per 8h and settlement is within 30 minutes, open a short 2 minutes before settlement and close it 1 minute after, sized to 5% of equity.' },
+  { label: 'Trailing exit', prompt: 'Check my ETH perp position every minute. Track the highest price since entry; market-close the whole position if price drops 3% from that high, or if unrealized PnL is below -2%.' },
+  { label: 'Webhook signals', prompt: 'Build a monitor that receives TradingView-style webhook alerts with {symbol, side, size}, and a strategy that turns each alert into a market order on my Hyperliquid account, ignoring duplicates within 60 seconds.' },
+  { label: 'Ask the model', prompt: 'Every hour summarize the last 24h of BTC klines and funding with the LLM; if it judges the trend as strongly bullish with high confidence, open a small long (1% of equity) with a 2% stop.' },
+]
+
 function InputZone({ job, busy, error, onAct, onCreate }: {
   job: CompileJob | null
   busy: boolean
@@ -691,56 +700,76 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
     }
   }
 
+  const label = creating ? 'Your request' : confirming ? (job.status === 'failed' ? 'Retry — corrections (optional)' : 'Corrections (optional) — send to confirm & generate') : 'Feedback'
   const placeholder = creating
-    ? 'Describe a strategy in natural language — Enter to compile, Shift+Enter for a new line'
+    ? 'Describe a strategy in natural language…'
     : confirming
-      ? 'Corrections to the analysis (optional) — then Confirm & Generate'
+      ? 'Anything the analysis got wrong? Send empty to confirm as-is.'
       : 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
+  const canSend = !busy && (confirming || text.trim().length > 0)
+  const rows = Math.min(5, Math.max(creating ? 2 : 1, text.split('\n').length))
 
-  const primary = (label: string, onClick: () => void, disabled: boolean) => (
-    <button onClick={onClick} disabled={disabled} className="px-3.5 py-1.5 rounded-md text-sm" style={{ background: 'var(--accent)', color: '#fff', opacity: disabled ? 0.5 : 1 }}>
-      {label}
-    </button>
-  )
-  const secondary = (label: string, onClick: () => void, disabled: boolean, accent = false, title?: string) => (
-    <button onClick={onClick} disabled={disabled} title={title} className="px-3 py-1.5 rounded-md text-sm" style={{ border: `1px solid ${accent ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--foreground)', opacity: disabled ? 0.5 : 1 }}>
-      {label}
+  const chip = (labelText: string, onClick: () => void, opts: { active?: boolean; danger?: boolean; disabled?: boolean; title?: string } = {}) => (
+    <button
+      key={labelText}
+      onClick={onClick}
+      disabled={opts.disabled}
+      title={opts.title}
+      className="hoverable px-3 py-1 rounded-full text-xs whitespace-nowrap"
+      style={{
+        border: `1px solid ${opts.active ? 'var(--accent)' : opts.danger ? 'color-mix(in srgb, var(--danger) 50%, transparent)' : 'var(--border)'}`,
+        background: opts.active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : opts.danger ? 'var(--danger-soft)' : 'transparent',
+        color: opts.danger ? 'var(--danger)' : opts.active ? 'var(--foreground)' : 'var(--muted)',
+        opacity: opts.disabled ? 0.45 : 1,
+      }}
+    >
+      {labelText}
     </button>
   )
 
   return (
     <div className="shrink-0 flex flex-col gap-2">
       {error && <ErrorLine text={error} />}
-      <div
-        className="relative rounded-lg flex flex-col"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)', minHeight: creating ? '7.5rem' : '5.5rem' }}
-      >
-        {iterating && hasExecutor && job.status === 'draft' && (
-          <label className="flex items-start gap-2 text-xs px-3 py-2 cursor-pointer" style={{ color: 'var(--danger)', borderBottom: '1px solid var(--border)' }}>
-            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
-            This draft contains a generated EXECUTOR — write-capable code. I have reviewed it line by line.
-          </label>
-        )}
+      <div className="relative rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <div className="px-3.5 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--muted)' }}>{label}</div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          rows={rows}
           placeholder={placeholder}
-          className="flex-1 w-full bg-transparent px-3 pt-2.5 text-sm resize-none outline-none"
-          style={{ color: 'var(--foreground)', paddingBottom: '2.75rem' }}
+          className="scroll-hidden w-full bg-transparent px-3.5 pt-1 pb-3 text-sm resize-none outline-none leading-relaxed"
+          style={{ color: 'var(--foreground)', paddingRight: '3.75rem' }}
         />
-        {/* actions live INSIDE the box, bottom-right */}
-        <div className="absolute right-2 bottom-2 flex gap-2">
-          {creating && primary(busy ? 'Starting…' : 'Compile', send, busy || !text.trim())}
-          {confirming && primary(job.status === 'failed' ? 'Retry Generate' : 'Confirm & Generate', send, busy)}
-          {iterating && (
-            <>
-              {job.status === 'failed' && version && secondary('Re-validate', () => void onAct({ action: 'code', files: version.files }), busy, true, 'Re-run the validation ladder without calling the LLM')}
-              {secondary('Send', send, busy || !text.trim())}
-              {job.status === 'draft' && primary('Approve & Register', () => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) }), busy || (hasExecutor && !ack))}
-            </>
-          )}
-        </div>
+        {/* the send control: one round button, vertically centered inside the box */}
+        <button
+          onClick={send}
+          disabled={!canSend}
+          title={creating ? 'Compile (Enter)' : confirming ? 'Confirm & Generate (Enter)' : 'Send (Enter)'}
+          aria-label="Send"
+          className="absolute right-3 top-1/2 -translate-y-1/2 grid place-items-center rounded-full"
+          style={{
+            width: 32, height: 32,
+            background: canSend ? 'var(--accent)' : 'transparent',
+            color: canSend ? '#fff' : 'var(--muted)',
+            border: `1px solid ${canSend ? 'var(--accent)' : 'var(--border)'}`,
+          }}
+        >
+          {busy
+            ? <span className="animate-pulse text-xs">…</span>
+            : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5 px-0.5">
+        {creating && EXAMPLES.map(ex => chip(ex.label, () => setText(ex.prompt), { active: text === ex.prompt }))}
+        {iterating && (
+          <>
+            {job.status === 'failed' && version && chip('Re-validate', () => void onAct({ action: 'code', files: version.files }), { disabled: busy, title: 'Re-run the validation ladder without calling the LLM' })}
+            {job.status === 'draft' && hasExecutor && chip(ack ? '✓ Executor reviewed line by line' : 'I have reviewed the EXECUTOR line by line', () => setAck(v => !v), { danger: !ack, active: ack })}
+            {job.status === 'draft' && chip('Approve & Register', () => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) }), { active: true, disabled: busy || (hasExecutor && !ack) })}
+          </>
+        )}
       </div>
     </div>
   )
