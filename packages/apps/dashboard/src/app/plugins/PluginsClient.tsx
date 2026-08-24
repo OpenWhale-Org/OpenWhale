@@ -330,15 +330,18 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
   )
 }
 
-function ElementGrid({ title, color, items, href, compact }: {
+function ElementGrid({ title, color, items, href, compact, onDelete }: {
   title: string
   color: string
   items: Array<{ id: string; name: string; description?: string | undefined; logo?: string | undefined; icon?: string | undefined }>
   /** Where an item's corner jump button navigates; absent = no button (e.g. adapter cells). */
   href?: (id: string) => string
   compact?: boolean
+  /** Two-step delete on each card (compiled components only). */
+  onDelete?: (id: string) => Promise<void>
 }) {
   const router = useRouter()
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   if (items.length === 0) return null
   return (
     <div className="flex flex-col gap-2">
@@ -358,8 +361,33 @@ function ElementGrid({ title, color, items, href, compact }: {
               borderLeft: `3px solid ${color}`,
             }}
           >
-            {/* Deliberately a corner button, not a clickable card — a card this
+            {/* Deliberately corner buttons, not a clickable card — a card this
                 dense gets clicked while reading, and a mis-tap navigates away. */}
+            {onDelete && (
+              <button
+                onClick={() => {
+                  if (pendingDelete !== item.id) { setPendingDelete(item.id); return }
+                  setPendingDelete(null)
+                  void onDelete(item.id)
+                }}
+                onMouseLeave={() => { if (pendingDelete === item.id) setPendingDelete(null) }}
+                title={pendingDelete === item.id ? 'Click again to delete permanently' : 'Delete compiled component'}
+                aria-label={`Delete ${item.name}`}
+                className="absolute top-1.5 grid place-items-center w-6 h-6 rounded-md text-[11px]"
+                style={{
+                  right: href ? '2rem' : '0.375rem',
+                  color: pendingDelete === item.id ? '#fff' : 'var(--muted)',
+                  background: pendingDelete === item.id ? 'var(--danger)' : 'transparent',
+                  border: '1px solid transparent',
+                }}
+              >
+                {pendingDelete === item.id ? '✓' : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" />
+                  </svg>
+                )}
+              </button>
+            )}
             {href && (
               <button
                 onClick={() => router.push(href(item.id))}
@@ -375,7 +403,7 @@ function ElementGrid({ title, color, items, href, compact }: {
                 </svg>
               </button>
             )}
-            <div className="flex items-start gap-2 min-w-0" style={href ? { paddingRight: '1.5rem' } : undefined}>
+            <div className="flex items-start gap-2 min-w-0" style={href || onDelete ? { paddingRight: href && onDelete ? '3.25rem' : '1.5rem' } : undefined}>
               {(item.logo !== undefined || item.icon !== undefined) && (
                 <TypeMark logo={item.logo} icon={item.icon} label={item.name} size={22} />
               )}
@@ -405,6 +433,14 @@ function CompiledPane({ compiled, onChanged }: {
   onChanged: () => void
 }) {
   const [importing, setImporting] = useState(false)
+  const [error, setError] = useState('')
+
+  const deleteComponent = (type: 'strategies' | 'monitors' | 'executors') => async (id: string) => {
+    setError('')
+    const res = await fetch(`/api/registry/${type}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!res.ok) setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Delete failed (HTTP ${res.status})`)
+    else onChanged()
+  }
   return (
     <>
       <div className="px-4 py-3 shrink-0 flex items-center justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -420,10 +456,11 @@ function CompiledPane({ compiled, onChanged }: {
         <p className="text-xs" style={{ color: 'var(--muted)' }}>
           Components registered outside any plugin — the AI compiler&apos;s approved output, and manual compiled imports.
         </p>
+        {error && <p className="alert alert-danger text-xs">{error}</p>}
         {importing && <ImportForm onSuccess={() => { setImporting(false); onChanged() }} />}
-        <ElementGrid title="Strategies" color={CATEGORY_COLORS.strategies} href={() => '/instances'} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-        <ElementGrid title="Monitors" color={CATEGORY_COLORS.monitors} href={(id) => `/monitor?sel=${encodeURIComponent(id)}`} items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-        <ElementGrid title="Executors" color={CATEGORY_COLORS.executors} href={() => '/executors'} items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title="Strategies" color={CATEGORY_COLORS.strategies} href={() => '/instances'} onDelete={deleteComponent('strategies')} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title="Monitors" color={CATEGORY_COLORS.monitors} href={(id) => `/monitor?sel=${encodeURIComponent(id)}`} onDelete={deleteComponent('monitors')} items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title="Executors" color={CATEGORY_COLORS.executors} href={() => '/executors'} onDelete={deleteComponent('executors')} items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
       </div>
     </>
   )

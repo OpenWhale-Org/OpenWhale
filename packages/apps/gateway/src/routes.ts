@@ -670,6 +670,24 @@ export function buildRouter(): Router {
     res.status(201).json({ ok: true, id, type })
   }))
 
+  router.delete('/api/registry/:type/:id', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const type = req.params['type'] as CompiledType
+    const id = req.params['id']!
+    if (!['monitors', 'executors', 'strategies'].includes(type)) {
+      res.status(400).json({ error: 'Invalid type' }); return
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loader = (runtime as any).compiledLoader as CompiledLoader
+    try {
+      const active = runtime.listInstances().filter(i => i.enabled).map(i => i.strategyId)
+      await loader.remove(id, type, active)
+      res.json({ ok: true })
+    } catch (err) {
+      res.status(409).json({ error: errText(err) })
+    }
+  }))
+
   // ── catalogues (picker data sources) ───────────────────────────────────────
 
   /**

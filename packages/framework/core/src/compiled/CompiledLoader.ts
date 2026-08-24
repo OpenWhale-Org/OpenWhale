@@ -68,6 +68,23 @@ export class CompiledLoader {
     ])
   }
 
+  /**
+   * Unregister a compiled component and delete its files (source, build,
+   * legacy registry JSON). Strategies refuse while an ACTIVE instance uses
+   * them — the caller passes the live instance list; monitors/executors are
+   * unregistered directly (a strategy referencing them fails loudly at its
+   * next activation, same as any missing dependency).
+   */
+  async remove(id: string, type: CompiledType, activeStrategyIds: string[] = []): Promise<void> {
+    if (type === 'strategies' && activeStrategyIds.includes(id)) {
+      throw new Error(`Compiled strategy "${id}" is used by an active instance — deactivate it first`)
+    }
+    const registry = type === 'monitors' ? this.monitorRegistry : type === 'executors' ? this.executorRegistry : this.strategyRegistry
+    if (registry.get(id)) registry.unregister(id)
+    await fs.promises.rm(path.dirname(getCompiledOutputPath(this.dataDir, type, id)), { recursive: true, force: true })
+    await fs.promises.rm(getRegistryPath(this.dataDir, type, id), { force: true })
+  }
+
   async recompile(id: string, type: CompiledType): Promise<void> {
     const sourcePath = getCompiledSourcePath(this.dataDir, type, id)
     const outputPath = getCompiledOutputPath(this.dataDir, type, id)
