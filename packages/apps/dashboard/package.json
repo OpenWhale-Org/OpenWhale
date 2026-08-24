@@ -11,6 +11,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@openwhaleorg/compiler": "workspace:*",
     "@openwhaleorg/core": "workspace:*",
     "next": "15.3.2",

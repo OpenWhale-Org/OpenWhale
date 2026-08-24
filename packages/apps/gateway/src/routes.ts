@@ -10,6 +10,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
+import { createRequire } from 'module'
 import { z } from 'zod'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
@@ -1187,6 +1188,55 @@ export function buildRouter(): Router {
     const target = ['auto', 'strategy', 'monitor', 'executor', 'suite'].includes(body.target ?? '') ? body.target : 'auto'
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     res.status(201).json(await compiler.createJob(body.description.trim(), target as any))
+  }))
+
+  /**
+   * The framework's type surface for the in-browser editor: every .d.ts (and
+   * package.json, for "types" resolution) of the packages compiled strategies
+   * may import. Monaco registers each under file:///node_modules/<path>, which
+   * is what turns highlighting into real framework-aware completions.
+   * Heavy (~1.3MB) but immutable per build — cached hard.
+   */
+  router.get('/api/compiler/typedefs', h(async (_req, res) => {
+    const require2 = createRequire(import.meta.url)
+    const files: Record<string, string> = {}
+    // exports maps rarely expose ./package.json — resolve the entry, then
+    // climb to the directory whose package.json carries the package's name.
+    const packageRoot = (pkg: string): string | undefined => {
+      let dir: string
+      try {
+        dir = path.dirname(require2.resolve(pkg))
+      } catch {
+        return undefined
+      }
+      for (let i = 0; i < 6; i++) {
+        const candidate = path.join(dir, 'package.json')
+        try {
+          if ((JSON.parse(fs.readFileSync(candidate, 'utf8')) as { name?: string }).name === pkg) return dir
+        } catch { /* keep climbing */ }
+        dir = path.dirname(dir)
+      }
+      return undefined
+    }
+    for (const pkg of ['@openwhaleorg/core', '@openwhaleorg/exchange', 'zod']) {
+      const root = packageRoot(pkg)
+      if (!root) continue
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name)
+          if (entry.isSymbolicLink()) continue
+          if (entry.isDirectory()) {
+            if (entry.name === 'node_modules' || entry.name === 'src') continue
+            walk(full)
+          } else if (entry.name.endsWith('.d.ts') || (entry.name === 'package.json' && dir === root)) {
+            files[`${pkg}/${path.relative(root, full)}`] = fs.readFileSync(full, 'utf8')
+          }
+        }
+      }
+      walk(root)
+    }
+    res.setHeader('Cache-Control', 'public, max-age=3600')
+    res.json(files)
   }))
 
   router.get('/api/compiler/settings', h(async (_req, res) => {
