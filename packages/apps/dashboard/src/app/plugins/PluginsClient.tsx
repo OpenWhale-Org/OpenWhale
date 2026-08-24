@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo } from '@openwhaleorg/core'
 import type { InstalledPluginView } from '@/lib/data'
 import { Markdown } from '@/components/Markdown'
@@ -8,8 +9,8 @@ import { Markdown } from '@/components/Markdown'
 /**
  * Plugins + Registry, merged: a JetBrains-style manager. Left rail lists
  * plugins under Built-in / External tabs; the right pane shows the selected
- * plugin's README and everything it declares (strategies, monitors,
- * executors, accounts, credential types, adapter cells, scripts).
+ * plugin's README and everything it declares, grouped into color-coded card
+ * grids that link to the page where each element lives.
  *
  * Compiled components (AI compiler output, manual imports) have no plugin —
  * they appear as one pseudo-entry under External, which also hosts the
@@ -31,6 +32,17 @@ interface Props {
 }
 
 const COMPILED_ID = '__compiled__'
+
+/** One hue per element category — the borders that tell the grids apart. */
+const CATEGORY_COLORS = {
+  strategies: 'var(--accent)',
+  monitors: 'var(--success)',
+  executors: 'var(--warning)',
+  accounts: '#4d89ff',
+  credentials: '#ee86dc',
+  scripts: '#ff9f6f',
+  cells: '#8b8fa3',
+} as const
 
 export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes, scripts, accountImpls }: Props) {
   const [plugins, setPlugins] = useState(initialPlugins)
@@ -61,79 +73,95 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
   }
 
   const rail = tab === 'builtin' ? builtins : externals
+  const externalEmpty = externals.length === 0 && compiledCount === 0
   const selectedPlugin = plugins.find(p => p.name === selected)
 
   return (
-    <div className="flex gap-4 items-start">
-      {/* ── Left rail ── */}
-      <div className="w-72 shrink-0 card overflow-hidden">
-        <div className="flex" style={{ borderBottom: '1px solid var(--border)' }}>
-          {([['builtin', `Built-in (${builtins.length})`], ['external', `External (${externals.length + (compiledCount > 0 ? 1 : 0)})`]] as const).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => pick(key, key === 'builtin' ? builtins[0]?.name ?? null : externals[0]?.name ?? (compiledCount > 0 ? COMPILED_ID : null))}
-              className="flex-1 px-3 py-2 text-xs font-medium"
-              style={{
-                color: tab === key ? 'var(--foreground)' : 'var(--muted)',
-                borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
-                marginBottom: '-1px',
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-col max-h-[70vh] overflow-y-auto">
-          {rail.map(p => (
-            <PluginRailRow key={p.name} plugin={p} active={selected === p.name && !installing} onClick={() => pick(tab, p.name)} />
-          ))}
-          {tab === 'external' && compiledCount > 0 && (
-            <button
-              onClick={() => pick('external', COMPILED_ID)}
-              className="text-left px-3 py-2.5 flex items-center gap-2"
-              style={{ background: selected === COMPILED_ID ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent' }}
-            >
-              <span className="text-sm font-medium truncate">AI Compiled</span>
-              <span className="badge badge-neutral ml-auto shrink-0">{compiledCount}</span>
-            </button>
-          )}
-          {tab === 'external' && externals.length === 0 && compiledCount === 0 && (
-            <div className="p-6 text-center flex flex-col items-center gap-3">
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>No external plugins yet.</p>
-              <button onClick={() => setInstalling(true)} className="btn btn-primary btn-sm">+ Install Plugin</button>
-              <p className="text-[11px] opacity-60" style={{ color: 'var(--muted)' }}>Plugin marketplace — coming soon</p>
-            </div>
-          )}
-        </div>
-
-        {(tab === 'builtin' || externals.length > 0 || compiledCount > 0) && (
-          <div className="p-2" style={{ borderTop: '1px solid var(--border)' }}>
-            <button onClick={() => setInstalling(v => !v)} className={`btn btn-sm w-full ${installing ? 'btn-secondary' : 'btn-primary'}`}>
-              {installing ? 'Cancel' : '+ Install Plugin'}
-            </button>
-          </div>
-        )}
+    <div className="flex flex-col gap-3">
+      <div className="flex justify-end">
+        <button onClick={() => setInstalling(v => !v)} className={`btn ${installing ? 'btn-secondary' : 'btn-primary'}`}>
+          {installing ? 'Cancel' : '+ Install Plugin'}
+        </button>
       </div>
 
-      {/* ── Right pane ── */}
-      <div className="flex-1 min-w-0">
-        {installing ? (
-          <InstallForm onSuccess={() => { setInstalling(false); setTab('external'); void refresh() }} />
-        ) : selected === COMPILED_ID ? (
-          <CompiledPane compiled={compiled} onChanged={() => void refresh()} />
-        ) : selectedPlugin ? (
-          <PluginDetail
-            plugin={selectedPlugin}
-            registry={registry}
-            credentialTypes={credentialTypes}
-            scripts={scripts}
-            accountImpls={accountImpls}
-            onUninstalled={() => { setSelected(externals.find(p => p.name !== selectedPlugin.name)?.name ?? null); void refresh() }}
-          />
-        ) : (
-          <div className="card p-10 text-center text-sm" style={{ color: 'var(--muted)' }}>Pick a plugin.</div>
-        )}
+      <div className="flex gap-3" style={{ height: 'calc(100vh - 16rem)', minHeight: 460 }}>
+        {/* ── rail ─────────────────────────────────────────────────────────── */}
+        <div
+          className="flex flex-col rounded-lg overflow-hidden shrink-0"
+          style={{ width: '18rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div className="flex shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            {([['builtin', `Built-in (${builtins.length})`], ['external', `External (${externals.length + (compiledCount > 0 ? 1 : 0)})`]] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => pick(key, key === 'builtin' ? builtins[0]?.name ?? null : externals[0]?.name ?? (compiledCount > 0 ? COMPILED_ID : null))}
+                className="flex-1 px-3 py-2.5 text-xs font-medium"
+                style={{
+                  color: tab === key ? 'var(--foreground)' : 'var(--muted)',
+                  borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
+                  marginBottom: '-1px',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
+            {rail.map(p => (
+              <PluginRailRow key={p.name} plugin={p} active={selected === p.name && !installing} onClick={() => pick(tab, p.name)} />
+            ))}
+            {tab === 'external' && compiledCount > 0 && (
+              <button
+                onClick={() => pick('external', COMPILED_ID)}
+                className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2"
+                style={{
+                  background: selected === COMPILED_ID ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+                  borderLeft: `2px solid ${selected === COMPILED_ID ? 'var(--accent)' : 'transparent'}`,
+                  borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
+                }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm truncate">AI Compiled</div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>compiled components</div>
+                </div>
+                <span className="text-xs font-mono shrink-0" style={{ color: 'var(--muted)' }}>{compiledCount}</span>
+              </button>
+            )}
+            {tab === 'external' && externalEmpty && (
+              <div className="px-4 py-10 text-center flex flex-col items-center gap-3">
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>No external plugins yet.</p>
+                <button onClick={() => setInstalling(true)} className="btn btn-primary btn-sm">+ Install Plugin</button>
+                <p className="text-[11px] opacity-60" style={{ color: 'var(--muted)' }}>Plugin marketplace — coming soon</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── detail ───────────────────────────────────────────────────────── */}
+        <div
+          className="flex-1 min-w-0 flex flex-col rounded-lg overflow-hidden"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          {installing ? (
+            <div className="overflow-y-auto scroll-hidden p-5">
+              <InstallForm onSuccess={() => { setInstalling(false); setTab('external'); void refresh() }} />
+            </div>
+          ) : selected === COMPILED_ID ? (
+            <CompiledPane compiled={compiled} onChanged={() => void refresh()} />
+          ) : selectedPlugin ? (
+            <PluginDetail
+              plugin={selectedPlugin}
+              registry={registry}
+              credentialTypes={credentialTypes}
+              scripts={scripts}
+              accountImpls={accountImpls}
+              onUninstalled={() => { setSelected(externals.find(p => p.name !== selectedPlugin.name)?.name ?? null); void refresh() }}
+            />
+          ) : (
+            <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>Pick a plugin.</div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -145,17 +173,21 @@ function PluginRailRow({ plugin, active, onClick }: { plugin: InstalledPluginVie
   return (
     <button
       onClick={onClick}
-      className="text-left px-3 py-2.5 flex items-center gap-2"
-      style={{ background: active ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent' }}
+      className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2"
+      style={{
+        background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+        borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
+      }}
     >
-      <div className="min-w-0">
-        <div className="text-sm font-medium truncate">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm truncate">
           {plugin.name}
-          {plugin.loadError && <span className="ml-1.5 badge badge-danger">!</span>}
+          {plugin.loadError && <span className="ml-1.5 text-xs" style={{ color: 'var(--danger)' }} title={plugin.loadError}>⚠</span>}
         </div>
-        <div className="text-[11px]" style={{ color: 'var(--muted)' }}>v{plugin.version}</div>
+        <div className="text-xs" style={{ color: 'var(--muted)' }}>v{plugin.version}</div>
       </div>
-      <span className="badge badge-neutral ml-auto shrink-0">{count}</span>
+      <span className="text-xs font-mono shrink-0" style={{ color: 'var(--muted)' }}>{count}</span>
     </button>
   )
 }
@@ -198,12 +230,12 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
     : `file: ${plugin.source.originalName}`
 
   return (
-    <div className="card p-5 flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-lg font-semibold">{plugin.name}</span>
+    <>
+      <div className="px-4 py-3 shrink-0 flex items-start justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <span className="text-base font-medium">{plugin.name}</span>
           <span className="badge badge-neutral">v{plugin.version}</span>
-          <span className="badge badge-neutral">{sourceBadge}</span>
+          <span className="badge badge-neutral truncate max-w-[24rem]" title={sourceBadge}>{sourceBadge}</span>
           {plugin.installedAt && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>installed {new Date(plugin.installedAt).toLocaleString()}</span>}
         </div>
         {plugin.source && (
@@ -220,62 +252,122 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
         )}
       </div>
 
-      {plugin.loadError && <p className="alert alert-danger text-xs">{plugin.loadError}</p>}
-      {error && <p className="alert alert-danger text-xs">{error}</p>}
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden p-4 flex flex-col gap-5">
+        {plugin.loadError && <p className="alert alert-danger text-xs">{plugin.loadError}</p>}
+        {error && <p className="alert alert-danger text-xs">{error}</p>}
 
-      {plugin.readme ? (
-        <div className="rounded-md p-4" style={{ border: '1px solid var(--border)' }}>
-          <Markdown source={plugin.readme} />
-        </div>
-      ) : (
-        <p className="text-xs" style={{ color: 'var(--muted)' }}>This plugin ships no README.</p>
-      )}
+        {plugin.readme ? (
+          <div className="rounded-md p-4" style={{ border: '1px solid var(--border)', background: 'color-mix(in srgb, var(--border) 12%, transparent)' }}>
+            <Markdown source={plugin.readme} />
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>This plugin ships no README.</p>
+        )}
 
-      <Section title="Strategies" items={strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-      <Section title="Monitors" items={monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-      <Section title="Executors" items={executors.map(d => ({ id: d.id, name: d.name, description: d.description, hint: d.supportedActions?.join(' · ') }))} />
-      <Section title="Accounts" items={myAccounts.map(a => ({ id: a.id, name: a.displayName ?? a.id, description: `${a.kind}${a.type ? ` · venue ${a.type}` : ' · any venue'}${a.credentialTypes ? ` · keys: ${a.credentialTypes.join(', ')}` : ''}` }))} />
-      <Section title="Credential Types" items={myCredTypes.map(t => ({ id: t.type, name: t.displayName ?? t.type, description: t.description }))} />
-      <Section
-        title="Adapter Cells"
-        items={plugin.cells.map(c => ({ id: `${c.kind}×${c.venue}`, name: `${c.kind} × ${c.venue}` }))}
-        chips
-      />
-      <Section title="Scripts" items={myScripts.map(s => ({ id: s.id, name: s.name, description: s.description }))} />
-    </div>
+        <ElementGrid
+          title="Strategies"
+          color={CATEGORY_COLORS.strategies}
+          href={() => '/instances'}
+          items={strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))}
+        />
+        <ElementGrid
+          title="Monitors"
+          color={CATEGORY_COLORS.monitors}
+          href={(id) => `/monitor?sel=${encodeURIComponent(id)}`}
+          items={monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))}
+        />
+        <ElementGrid
+          title="Executors"
+          color={CATEGORY_COLORS.executors}
+          href={() => '/executors'}
+          items={executors.map(d => ({ id: d.id, name: d.name, description: d.description ?? d.supportedActions?.join(' · ') }))}
+        />
+        <ElementGrid
+          title="Accounts"
+          color={CATEGORY_COLORS.accounts}
+          href={() => '/accounts'}
+          items={myAccounts.map(a => ({
+            id: a.id,
+            name: a.displayName ?? a.id,
+            description: `${a.kind}${a.type ? ` · venue ${a.type}` : ' · any venue'}${a.credentialTypes ? ` · keys: ${a.credentialTypes.join(', ')}` : ''}`,
+          }))}
+        />
+        <ElementGrid
+          title="Credential Types"
+          color={CATEGORY_COLORS.credentials}
+          href={() => '/credentials'}
+          items={myCredTypes.map(t => ({ id: t.type, name: t.displayName ?? t.type, description: t.description }))}
+        />
+        <ElementGrid
+          title="Adapter Cells"
+          color={CATEGORY_COLORS.cells}
+          items={plugin.cells.map(c => ({ id: `${c.kind} × ${c.venue}`, name: `${c.kind} × ${c.venue}` }))}
+          compact
+        />
+        <ElementGrid
+          title="Scripts"
+          color={CATEGORY_COLORS.scripts}
+          href={() => '/scripts'}
+          items={myScripts.map(s => ({ id: s.id, name: s.name, description: s.description }))}
+        />
+      </div>
+    </>
   )
 }
 
-function Section({ title, items, chips }: {
+function ElementGrid({ title, color, items, href, compact }: {
   title: string
-  items: Array<{ id: string; name: string; description?: string; hint?: string }>
-  chips?: boolean
+  color: string
+  items: Array<{ id: string; name: string; description?: string | undefined }>
+  /** Where a card navigates; absent = inert cards (e.g. adapter cells). */
+  href?: (id: string) => string
+  compact?: boolean
 }) {
+  const router = useRouter()
   if (items.length === 0) return null
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
-        {title} <span className="opacity-60">({items.length})</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
+        <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
+        {title}
+        <span className="opacity-60 font-normal">({items.length})</span>
       </div>
-      {chips ? (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map(item => <span key={item.id} className="badge badge-neutral font-mono">{item.name}</span>)}
-        </div>
-      ) : (
-        <div className="flex flex-col rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-          {items.map((item, i) => (
-            <div key={item.id} className="px-3 py-2 flex items-baseline gap-3" style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
-              <span className="text-sm shrink-0">{item.name}</span>
-              <span className="text-[11px] font-mono shrink-0" style={{ color: 'var(--muted)' }}>{item.id}</span>
-              {(item.description || item.hint) && (
-                <span className="text-xs truncate ml-auto text-right" style={{ color: 'var(--muted)' }} title={item.description}>
-                  {item.description ?? item.hint}
-                </span>
+      <div className={`grid gap-2 ${compact ? 'grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(17rem,1fr))]'}`}>
+        {items.map(item => {
+          const style = {
+            background: `color-mix(in srgb, ${color} 6%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${color} 30%, var(--border))`,
+            borderLeft: `3px solid ${color}`,
+          }
+          const body = (
+            <>
+              <div className="text-sm truncate" title={item.name}>{item.name}</div>
+              {item.id !== item.name && (
+                <div className="text-[11px] font-mono truncate" style={{ color: 'var(--muted)' }} title={item.id}>{item.id}</div>
               )}
+              {item.description && (
+                <div className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--muted)' }} title={item.description}>
+                  {item.description}
+                </div>
+              )}
+            </>
+          )
+          return href ? (
+            <button
+              key={item.id}
+              onClick={() => router.push(href(item.id))}
+              className="hoverable text-left rounded-md px-3 py-2 min-w-0"
+              style={style}
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={item.id} className="rounded-md px-3 py-2 min-w-0" style={style}>
+              {body}
             </div>
-          ))}
-        </div>
-      )}
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -288,24 +380,26 @@ function CompiledPane({ compiled, onChanged }: {
 }) {
   const [importing, setImporting] = useState(false)
   return (
-    <div className="card p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
+    <>
+      <div className="px-4 py-3 shrink-0 flex items-center justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold">AI Compiled</span>
+          <span className="text-base font-medium">AI Compiled</span>
           <span className="badge badge-neutral">compiled components</span>
         </div>
         <button onClick={() => setImporting(v => !v)} className={`btn btn-sm ${importing ? 'btn-secondary' : 'btn-primary'}`}>
           {importing ? 'Cancel' : '+ Import Component'}
         </button>
       </div>
-      <p className="text-xs" style={{ color: 'var(--muted)' }}>
-        Components registered outside any plugin — the AI compiler's approved output, and manual compiled imports.
-      </p>
-      {importing && <ImportForm onSuccess={() => { setImporting(false); onChanged() }} />}
-      <Section title="Strategies" items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-      <Section title="Monitors" items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-      <Section title="Executors" items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-    </div>
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden p-4 flex flex-col gap-5">
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>
+          Components registered outside any plugin — the AI compiler&apos;s approved output, and manual compiled imports.
+        </p>
+        {importing && <ImportForm onSuccess={() => { setImporting(false); onChanged() }} />}
+        <ElementGrid title="Strategies" color={CATEGORY_COLORS.strategies} href={() => '/instances'} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title="Monitors" color={CATEGORY_COLORS.monitors} href={(id) => `/monitor?sel=${encodeURIComponent(id)}`} items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title="Executors" color={CATEGORY_COLORS.executors} href={() => '/executors'} items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+      </div>
+    </>
   )
 }
 
@@ -315,7 +409,6 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -347,7 +440,7 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
         placeholder="component id, e.g. btc-price-monitor"
         className="input font-mono"
       />
-      <input ref={fileRef} type="file" accept=".ts,.js,.mjs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm text-muted" />
+      <input type="file" accept=".ts,.js,.mjs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm text-muted" />
       {error && <p className="alert alert-danger text-xs">{error}</p>}
       <button type="submit" disabled={submitting || !file || !id.trim()} className="btn btn-primary btn-sm self-end">
         {submitting ? 'Importing…' : 'Import'}
@@ -402,7 +495,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="card p-5 flex flex-col gap-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <h2 className="font-semibold text-base">Install Plugin</h2>
       <div className="flex gap-2">
         {(['file', 'npm'] as const).map((m) => (
