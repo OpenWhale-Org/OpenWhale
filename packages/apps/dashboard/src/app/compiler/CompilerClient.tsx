@@ -71,6 +71,8 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
   }
 
   const selected = jobs.find(j => j.id === selectedId) ?? null
+  const [llm, setLlm] = useLlmSettings()
+  const configured = llmConfigured(llm)
 
   async function act(body: Record<string, unknown>) {
     if (!selected) return
@@ -107,6 +109,9 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
             + New
           </button>
         </div>
+        {llm && !configured ? (
+          <SettingsPanel state={llm} onChange={setLlm} centered />
+        ) : (
         <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
           {jobs.length === 0 && (
             <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
@@ -132,7 +137,8 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
             </button>
           ))}
         </div>
-        <SettingsPanel />
+        )}
+        {llm && configured && <SettingsPanel state={llm} onChange={setLlm} />}
       </div>
 
       {/* ── main column ───────────────────────────────────────────────────── */}
@@ -160,63 +166,144 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
   )
 }
 
-// ── LLM settings (rail footer) ────────────────────────────────────────────────
+// ── LLM settings (rail footer, or the whole rail until configured) ───────────
 
-function SettingsPanel() {
-  const [model, setModel] = useState('')
-  const [credentialName, setCredentialName] = useState('')
-  const [credentials, setCredentials] = useState<Array<{ name: string; type: string }>>([])
-  const [status, setStatus] = useState('')
-  const [open, setOpen] = useState(false)
+/** Model suggestions per provider — a datalist, so anything else still types. */
+const MODEL_SUGGESTIONS: Record<string, string[]> = {
+  anthropic: ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
+  'anthropic-compatible': ['claude-sonnet-5', 'claude-haiku-4-5-20251001', 'kimi-k2-thinking'],
+  openai: ['gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o', 'o3'],
+  'openai-compatible': ['deepseek-chat', 'deepseek-reasoner', 'qwen-plus', 'qwen3-coder-plus', 'moonshot-v1-32k', 'glm-4.5'],
+  google: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+}
 
+interface LlmSettingsState {
+  model: string
+  credentialName: string
+  /** What the server holds — "configured" is judged on this, not on what is being typed. */
+  saved: { model: string; credentialName: string }
+  credentials: Array<{ name: string; type: string }>
+  llmTypes: string[]
+}
+
+function useLlmSettings() {
+  const [state, setState] = useState<LlmSettingsState | null>(null)
   useEffect(() => {
-    void fetch('/api/compiler/settings').then(async (res) => {
-      if (!res.ok) return
-      const s = await res.json() as { model: string; credentialName?: string }
-      setModel(s.model)
-      setCredentialName(s.credentialName ?? '')
-    })
-    void fetch('/api/credentials').then(async (res) => {
-      if (res.ok) setCredentials(await res.json() as Array<{ name: string; type: string }>)
-    })
+    void (async () => {
+      const [settingsRes, credsRes, typesRes] = await Promise.all([
+        fetch('/api/compiler/settings'), fetch('/api/credentials'), fetch('/api/credential-types'),
+      ])
+      const settings = settingsRes.ok ? await settingsRes.json() as { model: string; credentialName?: string } : { model: '' }
+      const credentials = credsRes.ok ? await credsRes.json() as Array<{ name: string; type: string }> : []
+      const types = typesRes.ok ? await typesRes.json() as Array<{ type: string; category?: string }> : []
+      setState({
+        model: settings.model ?? '',
+        credentialName: settings.credentialName ?? '',
+        saved: { model: settings.model ?? '', credentialName: settings.credentialName ?? '' },
+        credentials,
+        llmTypes: types.filter(t => t.category === 'AI Provider').map(t => t.type),
+      })
+    })()
   }, [])
+  return [state, setState] as const
+}
 
-  const provider = model.split(':')[0] ?? ''
-  const matching = credentials.filter(c => c.type === provider)
+/** Configured = a model is set AND some credential of its provider exists. */
+function llmConfigured(state: LlmSettingsState | null): boolean {
+  if (!state || !state.saved.model) return false
+  const provider = state.saved.model.split(':')[0] ?? ''
+  const modelName = state.saved.model.slice(provider.length + 1)
+  if (!modelName) return false
+  return state.credentials.some(c => c.type === provider && (!state.saved.credentialName || c.name === state.saved.credentialName))
+}
+
+function SettingsPanel({ state, onChange, centered }: {
+  state: LlmSettingsState
+  onChange: (next: LlmSettingsState) => void
+  centered?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [status, setStatus] = useState('')
+  const llmCredentials = state.credentials.filter(c => state.llmTypes.includes(c.type))
+  const chosen = llmCredentials.find(c => c.name === state.credentialName)
+  // Provider follows the chosen credential; the model field is just the model name
+  const provider = chosen?.type ?? (state.model.split(':')[0] || '')
+  const modelName = state.model.includes(':') ? state.model.slice(state.model.indexOf(':') + 1) : state.model
+  const suggestions = MODEL_SUGGESTIONS[provider] ?? []
+
+  function setCredential(name: string) {
+    const cred = llmCredentials.find(c => c.name === name)
+    const nextProvider = cred?.type ?? provider
+    onChange({ ...state, credentialName: name, model: nextProvider ? `${nextProvider}:${modelName}` : modelName })
+  }
+  function setModelName(value: string) {
+    onChange({ ...state, model: provider ? `${provider}:${value}` : value })
+  }
 
   async function save() {
     setStatus('')
     const res = await fetch('/api/compiler/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, ...(credentialName ? { credentialName } : {}) }),
+      body: JSON.stringify({ model: state.model, ...(state.credentialName ? { credentialName: state.credentialName } : {}) }),
     })
     setStatus(res.ok ? '✓ saved' : await res.text())
+    if (res.ok) onChange({ ...state, saved: { model: state.model, credentialName: state.credentialName } })
+  }
+
+  const fields = (
+    <div className="flex flex-col gap-2 text-sm">
+      <select
+        value={state.credentialName}
+        onChange={(e) => setCredential(e.target.value)}
+        className="rounded-md px-2 py-1.5 text-xs w-full"
+        style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+      >
+        <option value="">{llmCredentials.length === 0 ? 'No LLM credential — add one on Credentials' : 'Choose an LLM credential…'}</option>
+        {llmCredentials.map(c => <option key={c.name} value={c.name}>{c.name} · {c.type}</option>)}
+      </select>
+      <div className="flex gap-2">
+        <input
+          value={modelName}
+          onChange={(e) => setModelName(e.target.value)}
+          list="ow-llm-models"
+          disabled={!provider}
+          placeholder={provider ? `model for ${provider}` : 'pick a credential first'}
+          className="rounded-md px-2.5 py-1.5 font-mono text-xs flex-1 min-w-0"
+          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', opacity: provider ? 1 : 0.6 }}
+        />
+        <datalist id="ow-llm-models">
+          {suggestions.map(m => <option key={m} value={m} />)}
+        </datalist>
+        <button onClick={() => void save()} disabled={!provider || !modelName} className="px-3 py-1.5 rounded-md text-xs shrink-0" style={{ background: 'var(--accent)', color: '#fff', opacity: !provider || !modelName ? 0.5 : 1 }}>
+          Save
+        </button>
+      </div>
+      {status && <span className="text-xs truncate" style={{ color: status.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{status}</span>}
+    </div>
+  )
+
+  if (centered) {
+    return (
+      <div className="flex-1 min-h-0 grid place-items-center p-4">
+        <div className="w-full flex flex-col gap-3">
+          <div className="text-center">
+            <div className="text-sm font-medium">Set up the compiler LLM</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Pick a credential, then the model it should drive.</div>
+          </div>
+          {fields}
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
       <button onClick={() => setOpen(v => !v)} className="w-full text-left px-3 py-2.5 text-xs flex justify-between items-center" style={{ color: 'var(--muted)' }}>
-        <span className="truncate font-semibold">LLM · {model || '…'}</span>
+        <span className="truncate font-semibold">LLM · {state.model || '…'}</span>
         <span>{open ? '▾' : '▸'}</span>
       </button>
-      {open && (
-        <div className="px-3 pb-3 flex flex-col gap-2 text-sm">
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="anthropic:claude-sonnet-5"
-            className="rounded-md px-2.5 py-1.5 font-mono text-xs"
-            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }} />
-          <select value={credentialName} onChange={(e) => setCredentialName(e.target.value)}
-            className="rounded-md px-2 py-1.5 text-xs"
-            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
-            <option value="">{matching.length === 1 ? `auto (${matching[0]!.name})` : matching.length === 0 ? `no "${provider}" credential` : 'choose credential…'}</option>
-            {matching.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </select>
-          <div className="flex items-center gap-2">
-            <button onClick={() => void save()} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>Save</button>
-            {status && <span className="text-xs truncate" style={{ color: status.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{status}</span>}
-          </div>
-        </div>
-      )}
+      {open && <div className="px-3 pb-3">{fields}</div>}
     </div>
   )
 }
