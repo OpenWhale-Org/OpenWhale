@@ -710,7 +710,6 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
         ? 'Registered — keep iterating; the next version becomes a draft to approve again'
         : 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
   const canSend = !busy && (confirming || text.trim().length > 0)
-  const rows = Math.min(5, Math.max(creating ? 2 : 1, text.split('\n').length))
 
   const chip = (labelText: string, onClick: () => void, opts: { active?: boolean; danger?: boolean; disabled?: boolean; title?: string } = {}) => (
     <button
@@ -733,37 +732,38 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
   return (
     <div className="shrink-0 flex flex-col gap-2">
       {error && <ErrorLine text={error} />}
-      <div className="relative rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div className="px-3.5 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--muted)' }}>{label}</div>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-          rows={rows}
-          placeholder={placeholder}
-          className="scroll-hidden w-full bg-transparent px-3.5 pt-1 pb-3 text-sm resize-none outline-none leading-relaxed"
-          style={{ color: 'var(--foreground)', paddingRight: '3.75rem' }}
-        />
-        {/* the send control: one round button, vertically centered inside the box */}
-        <button
-          onClick={send}
-          disabled={!canSend}
-          title={creating ? 'Compile (Enter)' : confirming ? 'Confirm & Generate (Enter)' : 'Send (Enter)'}
-          aria-label="Send"
-          className="absolute right-3 top-1/2 -translate-y-1/2 grid place-items-center rounded-full"
-          style={{
-            width: 32, height: 32,
-            background: canSend ? 'var(--accent)' : 'transparent',
-            color: canSend ? '#fff' : 'var(--muted)',
-            border: `1px solid ${canSend ? 'var(--accent)' : 'var(--border)'}`,
-          }}
-        >
-          {busy
-            ? <span className="animate-pulse text-xs">…</span>
-            : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>}
-        </button>
-      </div>
-
+      <div className="rounded-xl p-3 flex flex-col gap-2.5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--muted)' }}>{label}</div>
+        {/* the input proper: its own bordered field, three rows, the send
+            button sitting inside it on the right */}
+        <div className="relative">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+            rows={3}
+            placeholder={placeholder}
+            className="scroll-hidden w-full rounded-lg px-3.5 py-2.5 text-sm resize-none outline-none leading-relaxed"
+            style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', paddingRight: '3.75rem' }}
+          />
+          <button
+            onClick={send}
+            disabled={!canSend}
+            title={creating ? 'Compile (Enter)' : confirming ? 'Confirm & Generate (Enter)' : 'Send (Enter)'}
+            aria-label="Send"
+            className="absolute right-3 top-1/2 -translate-y-1/2 grid place-items-center rounded-full"
+            style={{
+              width: 32, height: 32,
+              background: canSend ? 'var(--accent)' : 'transparent',
+              color: canSend ? '#fff' : 'var(--muted)',
+              border: `1px solid ${canSend ? 'var(--accent)' : 'var(--border)'}`,
+            }}
+          >
+            {busy
+              ? <span className="animate-pulse text-xs">…</span>
+              : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>}
+          </button>
+        </div>
       <div className="flex flex-wrap gap-1.5 px-0.5">
         {creating && EXAMPLES.map(ex => chip(ex.label, () => setText(ex.prompt), { active: text === ex.prompt }))}
         {iterating && (
@@ -773,6 +773,7 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
             {job.status === 'draft' && chip('Approve & Register', () => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) }), { active: true, disabled: busy || (hasExecutor && !ack) })}
           </>
         )}
+        </div>
       </div>
     </div>
   )
