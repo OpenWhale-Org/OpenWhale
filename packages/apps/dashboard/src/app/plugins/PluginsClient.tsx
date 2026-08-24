@@ -282,7 +282,7 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
         <ElementGrid
           title="Strategies"
           color={CATEGORY_COLORS.strategies}
-          href={() => '/instances'}
+          href={(id) => `/instances?new=${encodeURIComponent(id)}`}
           items={strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))}
         />
         <ElementGrid
@@ -458,7 +458,7 @@ function CompiledPane({ compiled, onChanged }: {
         </p>
         {error && <p className="alert alert-danger text-xs">{error}</p>}
         {importing && <ImportForm onSuccess={() => { setImporting(false); onChanged() }} />}
-        <ElementGrid title="Strategies" color={CATEGORY_COLORS.strategies} href={() => '/instances'} onDelete={deleteComponent('strategies')} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title="Strategies" color={CATEGORY_COLORS.strategies} href={(id) => `/instances?new=${encodeURIComponent(id)}`} onDelete={deleteComponent('strategies')} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
         <ElementGrid title="Monitors" color={CATEGORY_COLORS.monitors} href={(id) => `/monitor?sel=${encodeURIComponent(id)}`} onDelete={deleteComponent('monitors')} items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
         <ElementGrid title="Executors" color={CATEGORY_COLORS.executors} href={() => '/executors'} onDelete={deleteComponent('executors')} items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
       </div>

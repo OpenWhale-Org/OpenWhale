@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useSortable, DragHandle } from '../../components/Sortable'
 import { useLayout, LayoutSwitch, LAYOUTS } from '../../components/LayoutSwitch'
 import dynamic from 'next/dynamic'
@@ -778,8 +779,17 @@ function defaultFieldValues(fields: ParamFieldDef[]): Record<string, string> {
 export interface PnlTotals { realized: number; fees: number; funding: number; net: number; unrealized: number | null }
 
 export function InstancesClient({ initialInstances }: Props) {
+  const router = useRouter()
+  // ?new=<strategyId> (the Plugins page's jump link) opens the form on that
+  // strategy; the param is consumed so a refresh doesn't reopen it.
+  const preselect = useSearchParams().get('new')
   const [instances, setInstances] = useState(initialInstances)
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(preselect !== null)
+  const [preselectStrategy, setPreselectStrategy] = useState<string | undefined>(preselect ?? undefined)
+  useEffect(() => {
+    if (preselect !== null) router.replace('/instances')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [editing, setEditing] = useState<StrategyInstanceView | null>(null)
   const [loading, setLoading] = useState(false)
   const [actionError, setActionError] = useState('')
@@ -949,8 +959,9 @@ export function InstancesClient({ initialInstances }: Props) {
 
       {showForm && (
         <InstanceForm
-          onSuccess={() => { setShowForm(false); void refresh() }}
-          onCancel={() => setShowForm(false)}
+          {...(preselectStrategy !== undefined ? { preselectStrategyId: preselectStrategy } : {})}
+          onSuccess={() => { setShowForm(false); setPreselectStrategy(undefined); void refresh() }}
+          onCancel={() => { setShowForm(false); setPreselectStrategy(undefined) }}
         />
       )}
       {editing && (
@@ -1698,8 +1709,10 @@ export function fieldValuesFromParams(fields: ParamFieldDef[], params: StrategyI
   return out
 }
 
-function InstanceForm({ initial, onSuccess, onCancel }: {
+function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   initial?: StrategyInstance
+  /** Skip the picker and land on this strategy (deep link from the Plugins page). */
+  preselectStrategyId?: string
   onSuccess: () => void
   onCancel: () => void
 }) {
@@ -1724,8 +1737,9 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
   const [tunableError, setTunableError] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  // A new instance starts at the choice that determines everything else.
-  const [pickerOpen, setPickerOpen] = useState(!initial)
+  // A new instance starts at the choice that determines everything else —
+  // unless a deep link already made it.
+  const [pickerOpen, setPickerOpen] = useState(!initial && !preselectStrategyId)
 
   useEffect(() => {
     void Promise.all([
@@ -1746,6 +1760,16 @@ function InstanceForm({ initial, onSuccess, onCancel }: {
       // No auto-select for a new instance: the picker opens on top and the
       // choice is explicit. Silently pre-selecting whichever strategy sorted
       // first is how you create an instance of something you never read.
+      // A deep link is an explicit choice, though — honor it if it exists.
+      if (!initial && preselectStrategyId) {
+        const strat = s.find((x) => x.id === preselectStrategyId)
+        if (strat) {
+          setSelectedStrategy(strat.id)
+          setFieldValues(strat.paramsFields ? defaultFieldValues(strat.paramsFields) : {})
+        } else {
+          setPickerOpen(true)
+        }
+      }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?.id])
