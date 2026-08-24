@@ -156,9 +156,13 @@ export class CompilerService extends EventEmitter {
     void this.guard(jobId, () => this.generate(jobId, note))
   }
 
-  /** Conversational refinement of the current draft. */
+  /**
+   * Conversational refinement of the current draft. Registration is not an
+   * end state — an approved job keeps taking feedback; the new version lands
+   * as a draft that must be approved (re-registered) again.
+   */
   async sendMessage(jobId: string, feedback: string): Promise<void> {
-    const job = await this.mustGet(jobId, ['draft', 'failed'])
+    const job = await this.mustGet(jobId, ['draft', 'failed', 'approved'])
     job.messages.push({ role: 'user', content: feedback, ts: new Date().toISOString() })
     await this.transition(job, 'generating')
     void this.guard(jobId, () => this.refine(jobId, feedback))
@@ -167,7 +171,7 @@ export class CompilerService extends EventEmitter {
   /** User edited draft code directly → re-validate as a new version. */
   async updateCode(jobId: string, files: DraftFile[]): Promise<void> {
     for (const f of files) draftFileSchema.parse(f)
-    const job = await this.mustGet(jobId, ['draft', 'failed'])
+    const job = await this.mustGet(jobId, ['draft', 'failed', 'approved'])
     await this.transition(job, 'validating')
     void this.guard(jobId, () => this.validateAndRecord(jobId, { files, explanation: 'Manual edit by user.' }, 'manual-edit', false))
   }
