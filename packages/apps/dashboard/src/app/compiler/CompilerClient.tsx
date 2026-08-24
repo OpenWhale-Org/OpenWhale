@@ -87,7 +87,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
   }
 
   return (
-    <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 520 }}>
+    <div className="flex-1 min-h-0 flex gap-3">
       {/* ── sessions rail ─────────────────────────────────────────────────── */}
       <div
         className="flex flex-col rounded-lg overflow-hidden shrink-0"
@@ -241,6 +241,14 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
     try { return Number(localStorage.getItem('ow.compiler.split')) || 58 } catch { return 58 }
   })
   const areaRef = useRef<HTMLDivElement>(null)
+  const [maximized, setMaximized] = useState(false)
+
+  useEffect(() => {
+    if (!maximized) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMaximized(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maximized])
 
   const files = version?.files ?? []
   const file = files[Math.min(activeFile, Math.max(files.length - 1, 0))]
@@ -354,6 +362,16 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
               ))}
             </div>
           )}
+          {version && (
+            <button
+              onClick={() => setMaximized(true)}
+              title="Maximize the editor (Esc to return)"
+              className="text-xs px-2 py-1 rounded-md"
+              style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
+            >
+              ⤢
+            </button>
+          )}
           <button
             onClick={() => void fetch(`/api/compiler/jobs/${job.id}`, { method: 'DELETE' }).then(onChanged)}
             className="text-xs px-2 py-1 rounded-md"
@@ -363,6 +381,89 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
           </button>
         </div>
       </div>
+
+      {/* maximized editor: file tree + the same models, full viewport */}
+      {maximized && file && (
+        <div className="fixed inset-0 z-50 flex" style={{ background: 'var(--background)' }}>
+          <aside className="w-60 shrink-0 flex flex-col" style={{ borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
+            <div className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+              {job.description.length > 28 ? `${job.description.slice(0, 28)}…` : job.description}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden py-2">
+              {KIND_ORDER.filter(kind => files.some(f => f.kind === kind)).map(kind => (
+                <div key={kind} className="mb-2">
+                  <div className="px-3 py-1 text-[11px] font-mono flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
+                    <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: KIND_COLOR[kind] }} />
+                    {kind}/
+                  </div>
+                  {files.map((f, i) => ({ f, i })).filter(({ f }) => f.kind === kind).map(({ f, i }) => (
+                    <button
+                      key={`${f.kind}/${f.id}`}
+                      onClick={() => setActiveFile(i)}
+                      className="hoverable hoverable-flat w-full text-left pl-7 pr-3 py-1 text-xs font-mono truncate"
+                      style={{
+                        color: i === activeFile ? 'var(--foreground)' : 'var(--muted)',
+                        background: i === activeFile ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+                      }}
+                    >
+                      {f.id}.ts{editing[`${f.kind}/${f.id}`] !== undefined ? ' •' : ''}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+              Edits are type-checked live; Re-validate runs L1–L4.
+            </div>
+          </aside>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="flex items-center gap-2 px-3 shrink-0" style={{ height: 40, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: KIND_COLOR[file.kind] }} />
+              <span className="text-xs font-mono">{file.kind}/{file.id}.ts</span>
+              {file.kind === 'executors' && <span className="text-xs" style={{ color: 'var(--danger)' }}>⚠ write-capable</span>}
+              <div className="ml-auto flex items-center gap-2">
+                {validation && (
+                  <span
+                    className="text-[11px] px-2 py-0.5 rounded-full"
+                    style={validation.passed
+                      ? { background: 'var(--success-soft)', color: 'var(--success)' }
+                      : { background: 'var(--danger-soft)', color: 'var(--danger)' }}
+                    title={validation.passed ? 'L1–L4 validation passed' : validation.issues.map(i => `[${i.level}] ${i.message}`).join('\n')}
+                  >
+                    {validation.passed ? '✓ L1–L4' : `✗ ${validation.issues.length} issue${validation.issues.length === 1 ? '' : 's'}`}
+                  </span>
+                )}
+                {dirty && (
+                  <button onClick={revalidateEdits} disabled={busy} className="text-xs px-2.5 py-1 rounded-md" style={{ border: '1px solid var(--accent)', color: 'var(--foreground)' }}>
+                    Re-validate edits
+                  </button>
+                )}
+                <button
+                  onClick={() => setMaximized(false)}
+                  title="Return to the workbench (Esc)"
+                  className="text-xs px-2 py-1 rounded-md"
+                  style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
+                >
+                  ⤡ Esc
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0">
+              <CodeEditor
+                path={`${job.id}/${file.kind}/${file.id}.ts`}
+                value={editing[`${file.kind}/${file.id}`] ?? file.code}
+                onChange={(code) => {
+                  const key = `${file.kind}/${file.id}`
+                  setEditing(prev => code === file.code
+                    ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key))
+                    : { ...prev, [key]: code })
+                }}
+                readOnly={job.status === 'approved' || ACTIVE_STATUSES.has(job.status)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* code | divider | chat */}
       <div ref={areaRef} className="flex-1 min-h-0 flex">
