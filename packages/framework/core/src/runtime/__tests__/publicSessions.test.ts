@@ -54,7 +54,7 @@ describe('public session registry', () => {
     await expect(runtime.publicSessions.get('nope', 'test/data')).rejects.toThrow(/No adapter registered/)
 
     // Unload closes that venue's cached sessions and removes its factories
-    runtime.unloadPlugin('venue-a')
+    await runtime.unloadPlugin('venue-a')
     expect(createdA[0]?.closed).toBe(true)
     expect(runtime.publicSessions.venues('test/data')).toEqual(['venue-b'])
     await expect(runtime.publicSessions.get('venue-a', 'test/data')).rejects.toThrow(/No adapter registered/)

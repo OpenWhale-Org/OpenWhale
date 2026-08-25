@@ -98,11 +98,11 @@ describe('runtime plugin loading', () => {
 
   it('unloads a plugin and removes its registrations', async () => {
     await runtime.loadPluginFromPath(pluginPath, {})
-    runtime.unloadPlugin('testplug')
+    await runtime.unloadPlugin('testplug')
 
     expect(runtime.listLoadedPlugins()).toHaveLength(0)
     expect(runtime.listMonitors().map(m => m.id)).not.toContain('testplug/ticker')
     expect(runtime.listExecutors().map(e => e.id)).not.toContain('testplug/trade')
-    expect(() => runtime.unloadPlugin('testplug')).toThrow(/not loaded/)
+    await expect(runtime.unloadPlugin('testplug')).rejects.toThrow(/not loaded/)
   })
 })

@@ -61,16 +61,28 @@ export class AdapterRegistry implements AdapterResolver {
   }
 
   /** Remove a plugin's cells and close their cached instances. */
-  async unregisterOwner(owner: string): Promise<void> {
+  unregisterOwner(owner: string): Promise<void> {
+    /* Every cell leaves the table BEFORE anything is awaited.
+     *
+     * Closing a live session is I/O and takes as long as it takes; which cells
+     * exist is bookkeeping and must be true the instant this returns. Awaiting
+     * inside the loop mixed the two: the first cell's session close suspended
+     * the function with later cells still registered, so a replace — unload,
+     * then immediately re-register — collided with the tail of the plugin it
+     * had just unloaded, and reported the second cell as taken by the plugin
+     * that was on its way out.
+     */
+    const closing: Array<Promise<void>> = []
     for (const [key, cell] of this.cells) {
       if (cell.owner !== owner) continue
       this.cells.delete(key)
       for (const [cacheKey, instance] of this.cache) {
         if (!cacheKey.startsWith(`${key}::`)) continue
         this.cache.delete(cacheKey)
-        await this.closeSafe(cacheKey, instance)
+        closing.push(this.closeSafe(cacheKey, instance))
       }
     }
+    return Promise.all(closing).then(() => undefined)
   }
 
   /** Venues that registered a cell for this kind. */

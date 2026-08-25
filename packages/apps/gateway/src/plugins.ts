@@ -839,7 +839,7 @@ export async function uninstallPlugin(runtime: OpenWhaleRuntime, name: string): 
     if (deps.monitorInstances.length > 0) {
       log().info({ plugin: name, instances: deps.monitorInstances }, 'Deleted the plugin\'s monitor instances')
     }
-    runtime.unloadPlugin(name)
+    await runtime.unloadPlugin(name)
   }
 
   const entries = await readManifest()

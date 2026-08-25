@@ -1207,7 +1207,7 @@ export class OpenWhaleRuntime implements IRuntime {
       const live = Array.from(this.instances.values()).filter(i => strategies.has(i.strategyId)).map(i => i.id)
       for (const id of live) await this.releaseInstance(id)
       // Nothing of the plugin's is live now, so the ordinary guard is satisfied
-      this.unloadPlugin(ns)
+      await this.unloadPlugin(ns)
     }
     this.registerPlugin(plugin, ns)
 
@@ -1247,7 +1247,7 @@ export class OpenWhaleRuntime implements IRuntime {
    * Unregister a loaded plugin's components. Refuses when any active instance
    * still uses one of the plugin's strategies — deactivate those first.
    */
-  unloadPlugin(name: string): void {
+  async unloadPlugin(name: string): Promise<void> {
     const plugin = this.loadedPlugins.get(name)
     if (!plugin) throw new Error(`Plugin not loaded: "${name}"`)
 
@@ -1281,8 +1281,13 @@ export class OpenWhaleRuntime implements IRuntime {
     for (const [id, entry] of this.scriptRegistry) {
       if (entry.owner === name) this.scriptRegistry.delete(id)
     }
-    void this.monitorInstances.unregisterOwner(name)
-    void this.adapterRegistry.unregisterOwner(name)
+    /* Awaited, not fired and forgotten. Both teardowns reach live objects —
+       monitor runners to stop, sessions to close — and a replace re-registers
+       the moment this returns. Letting either finish afterwards means
+       registering against a registry the previous plugin has not finished
+       leaving. */
+    await this.monitorInstances.unregisterOwner(name)
+    await this.adapterRegistry.unregisterOwner(name)
     this.loadedPlugins.delete(name)
     log.info({ plugin: name }, 'Plugin unloaded')
   }

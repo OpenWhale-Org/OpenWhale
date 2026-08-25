@@ -160,7 +160,7 @@ export interface IRuntime {
   listCredentialTypes(): CredentialTypeDefinition[]
   loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): string
   loadPluginFromPath(filePath: string, config: unknown): Promise<string>
-  unloadPlugin(name: string): void
+  unloadPlugin(name: string): Promise<void>
   listLoadedPlugins(): LoadedPluginInfo[]
   addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void
   removeStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void

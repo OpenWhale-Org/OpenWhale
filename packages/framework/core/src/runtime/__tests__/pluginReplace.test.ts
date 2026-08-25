@@ -190,18 +190,18 @@ describe('replacing a plugin in place', () => {
     expect(loaded.find(p => p.name === 'swappable')?.declaredName).toBeUndefined()
 
     // Removing one leaves the other whole — separate namespaces, separate ids
-    runtime.unloadPlugin('alice-swappable')
+    await runtime.unloadPlugin('alice-swappable')
     expect(runtime.listStrategies().map(s => s.id).sort()).toEqual(['swappable/alpha', 'swappable/beta'])
   })
 
-  it('rejects a namespace that would not survive being half of an id', () => {
+  it('rejects a namespace that would not survive being half of an id', async () => {
     const dir = fs.mkdtempSync(path.join(tmpDir, 'run-'))
     const runtime = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
     // A '/' would split into a second segment and make `a/b/alpha` ambiguous.
     // An EMPTY alias is not an error — it means "use the declared name".
     for (const bad of ['alice/swappable', '-leading', 'has space', 'a/b']) {
       expect(() => runtime.loadPlugin(BOTH, {}, { as: bad }), `alias: ${bad}`).toThrow()
-      runtime.listLoadedPlugins().forEach(p => runtime.unloadPlugin(p.name))
+      for (const p of runtime.listLoadedPlugins()) await runtime.unloadPlugin(p.name)
     }
   })
 
