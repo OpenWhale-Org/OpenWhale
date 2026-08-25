@@ -47,7 +47,7 @@ function readOrder(): string[] {
 /* ── Sparkline ────────────────────────────────────────────────────────────
    The last day of equity as a thumbnail in the roster row, so the list already
    says which accounts moved before any of them is opened. */
-function Sparkline({ account, tick }: { account: string; tick: number }) {
+function Sparkline({ account, tick, width, height }: { account: string; tick: number; width: number; height: number }) {
   const [series, setSeries] = useState<AccountSnapshotRecord[] | null>(null)
   useEffect(() => {
     let alive = true
@@ -57,18 +57,28 @@ function Sparkline({ account, tick }: { account: string; tick: number }) {
       .catch(() => { if (alive) setSeries([]) })
     return () => { alive = false }
   }, [account, tick])
-  const W = 72, H = 20
-  if (!series || series.length < 2) return <span style={{ display: 'inline-block', width: W, height: H }} />
+  const W = width, H = height
+  if (!series || series.length < 2) return null
   const ys = series.map(s => s.equity)
   const min = Math.min(...ys), max = Math.max(...ys)
   const span = max - min || 1
   const t0 = series[0]!.ts, t1 = series[series.length - 1]!.ts, dt = t1 - t0 || 1
-  const pts = series.map(s => `${((s.ts - t0) / dt) * W},${H - 2 - ((s.equity - min) / span) * (H - 4)}`).join(' ')
+  const xy = series.map(s => [((s.ts - t0) / dt) * W, H - 3 - ((s.equity - min) / span) * (H - 8)] as const)
+  const line = xy.map(([x, y]) => `${x},${y}`).join(' ')
+  const area = `M0,${H} L${line.replace(/ /g, ' L')} L${W},${H} Z`
   const up = ys[ys.length - 1]! >= ys[0]!
   const color = up ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'
+  const gid = `spark-${account.replace(/[^a-z0-9]/gi, '_')}`
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden style={{ display: 'block' }}>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden className="absolute inset-y-0 right-0 pointer-events-none" style={{ opacity: 0.45 }}>
+      <defs>
+        <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor={color} stopOpacity="0.35" />
+          <stop offset="1" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${gid})`} />
+      <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   )
 }
@@ -298,13 +308,14 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                     title={a.name}
                     subtitle={`${a.kind ?? '—'}${a.type ? ` · ${a.type}` : ''}`}
                     right={
-                      <span className="flex items-center gap-2">
-                        <Sparkline account={a.name} tick={sparkTick} />
-                        <span className="flex flex-col items-end gap-0.5">
-                          <span className="text-sm font-mono" style={{ color: latest ? 'var(--foreground)' : 'var(--muted)' }}>{latest ? formatUsd(latest.equity) : '—'}</span>
-                          {a.status !== 'ready' && <span className="text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>}
-                          {a.snapshotError && <span className="cursor-help" style={{ color: 'var(--danger)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>}
-                        </span>
+                      /* The last day of equity sits behind the figure, faded:
+                         a wash of colour that says "moved up / moved down"
+                         without competing with the number on top of it. */
+                      <span className="relative flex flex-col items-end justify-center gap-0.5" style={{ minWidth: 120, minHeight: 34 }}>
+                        <Sparkline account={a.name} tick={sparkTick} width={120} height={34} />
+                        <span className="relative text-sm font-mono" style={{ color: latest ? 'var(--foreground)' : 'var(--muted)' }}>{latest ? formatUsd(latest.equity) : '—'}</span>
+                        {a.status !== 'ready' && <span className="relative text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>}
+                        {a.snapshotError && <span className="relative cursor-help" style={{ color: 'var(--danger)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>}
                       </span>
                     }
                   />
