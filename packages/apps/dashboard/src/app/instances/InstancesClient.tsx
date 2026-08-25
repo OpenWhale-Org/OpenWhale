@@ -2685,7 +2685,7 @@ function FolderMenu({ current, folders, onPick }: {
           className="absolute right-0 z-[100] mt-1 rounded-md shadow-lg flex flex-col"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: '11rem', maxHeight: '16rem' }}
         >
-          <div className="overflow-y-auto">
+          <div className="overflow-y-auto scroll-hidden">
             {folders.map(f => (
               <button
                 key={f}
@@ -2829,7 +2829,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
       </div>
 
       <div
-        className="p-3 overflow-y-auto font-mono text-xs flex flex-col gap-1.5"
+        className="p-3 overflow-y-auto scroll-hidden font-mono text-xs flex flex-col gap-1.5"
         style={{ background: 'var(--background)', maxHeight: tall ? '72vh' : '18rem' }}
       >
         {activeTab === 'events' ? (
@@ -2931,7 +2931,7 @@ function EventRow({ event }: { event: LiveEvent }) {
           {!open && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(event.data).slice(0, 80)}</span>}
         </div>
         {open && (
-          <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
+          <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden text-xs leading-snug"
                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
             {JSON.stringify(event.data, null, 2)}
           </pre>
@@ -2949,7 +2949,7 @@ function EventRow({ event }: { event: LiveEvent }) {
         <span style={{ color: 'var(--muted)' }}>{event.triggerId}</span>
       </div>
       {open && (
-        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
+        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(event.instructions, null, 2)}
         </pre>
@@ -2987,7 +2987,7 @@ function ExecutionRow({ result }: { result: ExecutionResult }) {
         {!open && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(result.instruction.params).slice(0, 60)}</span>}
       </div>
       {open && (
-        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-96 overflow-y-auto text-xs leading-snug"
+        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-96 overflow-y-auto scroll-hidden text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(result, null, 2)}
         </pre>
@@ -3041,7 +3041,7 @@ function RunStep({ step, startedAt }: { step: { ts: number; step: string; data?:
         {!open && hasData && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(step.data).slice(0, 90)}</span>}
       </div>
       {open && hasData && (
-        <pre className="ml-6 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
+        <pre className="ml-6 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden text-xs leading-snug"
              style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(step.data, null, 2)}
         </pre>
@@ -3064,7 +3064,7 @@ function LogRow({ row }: { row: { ts: number; level: string; module?: string; ms
         <span style={{ color: 'var(--foreground)' }}>{row.msg}</span>
       </div>
       {open && hasExtra && (
-        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto text-xs leading-snug"
+        <pre className="ml-4 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(row.extra, null, 2)}
         </pre>
