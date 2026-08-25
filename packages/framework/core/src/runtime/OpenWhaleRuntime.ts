@@ -1764,9 +1764,11 @@ export class OpenWhaleRuntime implements IRuntime {
     for (const name of names) {
       // Bindings may be account names; fall through to the credential itself
       const entity = await this.accountStore.get(name)
+      let pinnedVenue: string | undefined
       if (entity && decl.kind !== undefined) {
-        const implKind = this.accountImpls.get(entity.implementation)?.impl.kind
-        if (implKind !== decl.kind || !entity.credential) continue
+        const impl = this.accountImpls.get(entity.implementation)?.impl
+        if (impl?.kind !== decl.kind || !entity.credential) continue
+        pinnedVenue = implementationVenue(impl)
       }
       const credentialName = entity?.credential ?? name
       let type: string
@@ -1774,6 +1776,12 @@ export class OpenWhaleRuntime implements IRuntime {
         ({ type } = await this.readCredential(credentialName))
       } catch {
         continue
+      }
+      // A venue-pinned account satisfies the slot through its cell, whatever
+      // key family opens it — the credential type is not the venue on-chain.
+      if (pinnedVenue !== undefined && decl.kind !== undefined) {
+        const accepted = this.adapterRegistry.acceptedCredentialTypes(decl.kind, pinnedVenue)
+        if (accepted?.includes(type) && (decl.type === undefined || decl.type === pinnedVenue)) return name
       }
       if (decl.type !== undefined) {
         const accepted = decl.kind !== undefined
