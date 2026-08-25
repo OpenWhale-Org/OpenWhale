@@ -280,7 +280,9 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           </div>
           {status.description && <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{status.description}</p>}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+      </div>
+
+      <div className="flex items-center gap-2">
         <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
           {([['board', 'Board'], ['split', 'Split'], ['manage', 'Manage']] as const).map(([key, label]) => (
             <button
@@ -297,7 +299,6 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           ))}
         </div>
         <span className="text-xs" style={{ color: 'var(--muted)' }}>{mine.length} inst · {status.activeKeys.length} watched</span>
-        </div>
       </div>
 
       {/* Two tabs, not a stack of boxes.

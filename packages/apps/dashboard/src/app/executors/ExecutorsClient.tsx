@@ -194,21 +194,22 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           </div>
           {executor.description && <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{executor.description}</p>}
         </div>
-        <div className="flex rounded-md overflow-hidden shrink-0" style={{ border: '1px solid var(--border)' }}>
-          {([['fire', 'Manual fire'], ['split', 'Split'], ['records', 'Records & logs']] as const).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => pickView(key)}
-              className="text-[11px] px-2.5 py-1"
-              style={{
-                background: view === key ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
-                color: view === key ? 'var(--foreground)' : 'var(--muted)',
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      </div>
+
+      <div className="flex rounded-md overflow-hidden self-start shrink-0" style={{ border: '1px solid var(--border)' }}>
+        {([['fire', 'Manual fire'], ['split', 'Split'], ['records', 'Records & logs']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => pickView(key)}
+            className="text-[11px] px-2.5 py-1"
+            style={{
+              background: view === key ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+              color: view === key ? 'var(--foreground)' : 'var(--muted)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {recordModal && (
