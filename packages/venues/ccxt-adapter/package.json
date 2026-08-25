@@ -29,7 +29,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "ccxt": "^4.4.87"
@@ -41,6 +42,7 @@
   "devDependencies": {
     "@openwhaleorg/core": "workspace:*",
     "@types/node": "^20.0.0",
-    "@openwhaleorg/exchange": "workspace:*"
+    "@openwhaleorg/exchange": "workspace:*",
+    "vitest": "^3.0.0"
   }
 }
