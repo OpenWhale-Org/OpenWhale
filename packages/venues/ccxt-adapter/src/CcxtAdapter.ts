@@ -58,7 +58,72 @@ export interface CcxtAdapterOptions {
   rateLimitMs?: number
   /** Additional raw ccxt constructor options. */
   ccxtOptions?: Record<string, unknown>
+  /**
+   * Send this venue's traffic through an outbound proxy — REST **and**
+   * WebSocket. `http://host:port`, or `socks5://…`.
+   *
+   * Needed wherever venue endpoints are unreachable directly (mainland China
+   * being the case that raised it: DNS for the exchange domains simply fails).
+   * The usual escapes do not work here, and the reason is worth writing down
+   * because it costs an afternoon to rediscover: ccxt does not read HTTPS_PROXY,
+   * and Node 24's `NODE_USE_ENV_PROXY` only wires undici's *global* fetch —
+   * while ccxt calls its own bundled node-fetch, which never touches the global
+   * dispatcher. A plain `fetch()` in the same process succeeds, which makes the
+   * failure look like anything but a proxy problem.
+   *
+   * Falls back to the environment, per venue first and then globally:
+   *
+   *   OPENWHALE_HTTPS_PROXY_BINANCEUSDM=http://127.0.0.1:7897   // one venue
+   *   OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897               // everything else
+   *   OPENWHALE_HTTPS_PROXY_HYPERLIQUID=off                     // …except this one
+   *
+   * The per-venue layer is not symmetry for its own sake. Two things need it:
+   * this system races settlements by the millisecond, so a venue that IS
+   * reachable directly should not be paying proxy hops for a variable aimed at
+   * the ones that are not; and exchanges bind API keys to IPs, so different
+   * venues can require different exits. `off` (or `none` / `direct`) is what
+   * makes "all of them except that one" expressible at all.
+   *
+   * The suffix is the **ccxt exchange id**, upper-cased — which is not always
+   * the venue's name: Binance perp is `binanceusdm` and Binance spot is
+   * `binance`, and they take separate variables.
+   *
+   * Deliberately NOT the standard `HTTPS_PROXY`: plenty of machines carry that
+   * for unrelated reasons, and silently routing **order traffic** through
+   * whatever it points at is not a default anyone should get by accident.
+   */
+  proxy?: string
 }
+
+/** `off` / `none` / `direct` — a venue opting out of the global proxy. */
+const PROXY_OFF = new Set(['off', 'none', 'direct', 'false', '0'])
+
+/**
+ * Which proxy this adapter should use: explicit option, then the venue's own
+ * environment variable, then the global one.
+ *
+ * The per-venue variable wins even when it says "off", which is the whole
+ * point of it — otherwise "everything through the proxy except the venue I can
+ * reach directly" has no way to be said.
+ */
+function resolveProxy(options: CcxtAdapterOptions): string {
+  if (options.proxy !== undefined) return options.proxy.trim()
+  const suffix = options.exchangeId.toUpperCase().replace(/[^A-Z0-9]/g, '_')
+  const perVenue = process.env[`OPENWHALE_HTTPS_PROXY_${suffix}`]?.trim()
+  const chosen = perVenue !== undefined && perVenue !== ''
+    ? perVenue
+    : (process.env['OPENWHALE_HTTPS_PROXY'] ?? '').trim()
+  return PROXY_OFF.has(chosen.toLowerCase()) ? '' : chosen
+}
+
+/* ccxt validates REST and WebSocket proxies separately, but allows exactly one
+   within each group — a second one throws InvalidProxySettings. So the fallback
+   below has to stand down whenever the caller already set one. */
+const REST_PROXY_KEYS = [
+  'httpProxy', 'httpsProxy', 'socksProxy',
+  'httpProxyCallback', 'httpsProxyCallback', 'socksProxyCallback', 'proxyUrl',
+] as const
+const WS_PROXY_KEYS = ['wsProxy', 'wssProxy', 'wsSocksProxy'] as const
 
 const MARKET_TYPES: MarketInfo['type'][] = ['spot', 'swap', 'future', 'option']
 
@@ -94,6 +159,34 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     if (options.password) opts.password = options.password
     if (options.walletAddress) opts.walletAddress = options.walletAddress
     if (options.privateKey) opts.privateKey = options.privateKey
+
+    /* Outbound proxy. Applied HERE rather than at any venue's own factory
+       because this constructor is the one thing every venue passes through —
+       the roster builds through defineCcxtVenue, but Binance, Aster and
+       Hyperliquid each call `new CcxtAdapter(...)` themselves, and the
+       credential-less public adapters do too. Wiring it a level up covers some
+       venues and not others, and "credentials connect but market data does not"
+       is a worse failure than none at all. */
+    const proxy = resolveProxy(options)
+    if (proxy) {
+      // http-proxy-agent / https-proxy-agent ship inside ccxt; SOCKS does not,
+      // and ccxt import()s `socks-proxy-agent` from the host app at first use.
+      const socks = /^socks/i.test(proxy)
+      const restKey = socks ? 'socksProxy' : 'httpsProxy'
+      const wsKey = socks ? 'wsSocksProxy' : 'wssProxy'
+      const restTaken = REST_PROXY_KEYS.find(k => opts[k] !== undefined)
+      const wsTaken = WS_PROXY_KEYS.find(k => opts[k] !== undefined)
+      if (!restTaken) opts[restKey] = proxy
+      if (!wsTaken) opts[wsKey] = proxy
+      /* Say it out loud, once per adapter. An operator who forgot the variable
+         was exported deserves to find out from a startup line, not from
+         wondering why their venue traffic leaves the box by a route they did
+         not choose. */
+      createLogger('CcxtAdapter').info(
+        { venue: options.exchangeId, proxy, rest: restTaken ?? restKey, ws: wsTaken ?? wsKey },
+        'Venue traffic goes through a proxy',
+      )
+    }
 
     this.exchange = new Ctor(opts)
     if (options.testnet) this.exchange.setSandboxMode(true)

@@ -212,6 +212,29 @@ them from the environment.
 
 Open `http://localhost:3000` to manage strategy instances, accounts, monitors, credentials, scripts, and the AI compiler. The dashboard's only setting is `OPENWHALE_GATEWAY_URL` (defaults to `http://localhost:3001`).
 
+### Behind a proxy
+
+Where the exchanges are unreachable directly, point venue traffic at a proxy:
+
+```bash
+OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket, every venue
+OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # …except this one
+```
+
+The per-venue suffix is the **ccxt exchange id**, upper-cased — Binance perp is
+`BINANCEUSDM`, Binance spot is `BINANCE`. `off` keeps a venue direct, which
+matters more than it looks: settlements are raced by the millisecond, so a venue
+you *can* reach directly should not be paying proxy hops for a setting aimed at
+the ones you cannot.
+
+Two things are worth knowing before debugging this yourself. The standard
+`HTTPS_PROXY` does nothing — ccxt does not read it. Neither does Node 24's
+`NODE_USE_ENV_PROXY`, which only wires undici's *global* fetch while ccxt calls
+its own bundled one; a plain `fetch()` in the same process will succeed and make
+the failure look like anything but a proxy problem. And the variable is
+deliberately not named `HTTPS_PROXY`: plenty of machines carry that for
+unrelated reasons, and order traffic should never change route by accident.
+
 ### Authentication
 
 Auth is enforced by the **gateway**, not the dashboard: that process holds the
