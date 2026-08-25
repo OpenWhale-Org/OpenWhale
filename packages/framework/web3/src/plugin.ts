@@ -1,4 +1,5 @@
 import type { PluginFactory } from '@openwhaleorg/core'
+import { WEB3_LOGO } from './brand.js'
 import { evmCredentialType, evmRpcCredentialType } from './credentialTypes.js'
 import { EvmChainSessionImpl } from './session.js'
 import { ChainAccount } from './ChainAccount.js'
@@ -24,6 +25,7 @@ export const web3Plugin: PluginFactory = (ctx) => {
 
   return {
     name: 'web3',
+    logo: WEB3_LOGO,
     version: '0.1.0',
     readme: [
       '# web3',

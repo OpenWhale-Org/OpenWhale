@@ -12,7 +12,7 @@ export { ChainAccount } from './ChainAccount.js'
 export { evmCredentialType, evmRpcCredentialType } from './credentialTypes.js'
 export { STABLECOINS, chainById, parseRpcEndpoints } from './chains.js'
 export { web3Plugin } from './plugin.js'
-export { ETH_LOGO } from './brand.js'
+export { ETH_LOGO, WEB3_LOGO } from './brand.js'
 
 // Kind contract — merged into core's kind table
 import type { EvmChainSession } from './types.js'
