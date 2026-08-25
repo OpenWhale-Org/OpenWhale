@@ -132,9 +132,6 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
   }
   const [recordModal, setRecordModal] = useState<ExecutionRecord | null>(null)
 
-  // Records are the other half of the page now, not a toggle — load them with the executor
-  useEffect(() => { void loadRecords() }, [executor.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
   const schema = executor.actionSchemas?.[action]
   const properties = (schema?.['properties'] ?? {}) as Record<string, Record<string, unknown>>
   const required = new Set((schema?.['required'] ?? []) as string[])
@@ -143,6 +140,9 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
     const res = await fetch(`/api/executor/${encodeURIComponent(executor.id)}/records?n=30`)
     if (res.ok) setRecords((await res.json() as ExecutionRecord[]).reverse())
   }, [executor.id])
+
+  // Records are the other half of the page now, not a toggle — load them with the executor
+  useEffect(() => { void loadRecords() }, [executor.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fire() {
     setBusy(true)
