@@ -295,11 +295,6 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
             const latest = snapshots[a.name]
             return (
               <div key={a.name} data-folder-id={a.name} style={folderStyle(a.name)} className="flex items-stretch">
-                {sort === 'manual' && (
-                  <span className="flex items-center pl-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
-                    <DragHandle title="Drag to reorder" onPointerDown={(e) => beginDrag('folder', a.name, e)} />
-                  </span>
-                )}
                 <div className="flex-1 min-w-0">
                   <RailItem
                     active={selected?.name === a.name}
@@ -320,6 +315,11 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                     }
                   />
                 </div>
+                {sort === 'manual' && (
+                  <span className="flex items-center pr-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
+                    <DragHandle title="Drag to reorder" onPointerDown={(e) => beginDrag('folder', a.name, e)} />
+                  </span>
+                )}
               </div>
             )
           })}
