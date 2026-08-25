@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { ScriptInfo, ParamFieldDef } from '@openwhaleorg/core'
 import { TypeMark } from '../../components/TypeMark'
 
@@ -94,74 +95,45 @@ export function ScriptsClient() {
       {header}
       <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
         {/* ── rail: scripts by package ─────────────────────────────────── */}
-        <div
-          className="flex flex-col rounded-lg overflow-hidden shrink-0"
-          style={{ width: '18rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
+        <Rail
+          width="18rem"
+          search={{ value: query, onChange: setQuery, placeholder: 'Search scripts…' }}
+          footer={
+            <div className="px-3 py-2 text-[11px] flex items-center gap-2" style={{ color: 'var(--muted)' }}>
+              <span>{scripts.length} scripts · {groups.length} packages · {open.length} open</span>
+              {openIds.length > 0 && (
+                <button onClick={clearSelection} className="ml-auto px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>Clear</button>
+              )}
+            </div>
+          }
         >
-          <div className="p-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search scripts…"
-              className="w-full rounded-md px-2.5 py-1.5 text-xs"
-              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-            />
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
-            {groups.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Nothing matches.</p>}
-            {groups.map(({ pkg, items }) => {
-              const isCollapsed = collapsed.has(pkg) && !query
-              return (
-                <div key={pkg}>
-                  <button
-                    onClick={() => setCollapsed(prev => { const next = new Set(prev); if (!next.delete(pkg)) next.add(pkg); return next })}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
-                    style={{ color: 'var(--muted)', borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)', background: 'color-mix(in srgb, var(--border) 18%, transparent)' }}
-                  >
-                    <span className="w-3 text-center">{isCollapsed ? '▸' : '▾'}</span>
-                    <TypeMark label={pkg} size={16} />
-                    <span className="truncate">{pkg}</span>
-                    <span className="ml-auto font-normal opacity-70">{items.length}</span>
-                  </button>
-                  {!isCollapsed && items.map(s => {
-                    const active = open.some(o => o.id === s.id)
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => toggle(s.id)}
-                        title={active ? 'Click to close' : 'Click to open alongside'}
-                        className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-start gap-2.5"
-                        style={{
-                          background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
-                          borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-                          borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          className="mt-1 shrink-0 grid place-items-center rounded"
-                          style={{ width: 14, height: 14, border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'transparent', color: '#fff', fontSize: 10, lineHeight: 1 }}
-                        >
-                          {active ? '✓' : ''}
-                        </span>
-                        <div className="min-w-0">
-                          <div className="text-sm truncate">{s.name}</div>
-                          {s.description && <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{s.description}</div>}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              )
-            })}
-          </div>
-          <div className="px-3 py-2 text-[11px] shrink-0 flex items-center gap-2" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
-            <span>{scripts.length} scripts · {groups.length} packages · {open.length} open</span>
-            {openIds.length > 0 && (
-              <button onClick={clearSelection} className="ml-auto px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>Clear</button>
-            )}
-          </div>
-        </div>
+          {groups.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Nothing matches.</p>}
+          {groups.map(({ pkg, items }) => (
+            <RailGroup
+              key={pkg}
+              label={pkg}
+              count={items.length}
+              mark={<TypeMark label={pkg} size={16} />}
+              collapsed={collapsed.has(pkg) && !query}
+              onToggle={() => setCollapsed(prev => { const next = new Set(prev); if (!next.delete(pkg)) next.add(pkg); return next })}
+            >
+              {items.map(s => {
+                const active = open.some(o => o.id === s.id)
+                return (
+                  <RailItem
+                    key={s.id}
+                    checkbox
+                    active={active}
+                    onClick={() => toggle(s.id)}
+                    title_={active ? 'Click to close' : 'Click to open alongside'}
+                    title={s.name}
+                    subtitle={s.description}
+                  />
+                )
+              })}
+            </RailGroup>
+          ))}
+        </Rail>
 
         {/* ── detail: the selected script ──────────────────────────────── */}
         <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3">

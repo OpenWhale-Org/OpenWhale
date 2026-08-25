@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Rail, RailItem } from '../../components/Rail'
 import { ParamsFields, buildParams } from '../../components/ParamsFields'
 import type { AccountView, AccountImplementationInfo, AccountSnapshotRecord, CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 import { EquityChart } from './EquityChart'
@@ -178,83 +179,62 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
 
       <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
         {/* ── roster ─────────────────────────────────────────────────────── */}
-        <div
-          className="flex flex-col rounded-lg overflow-hidden shrink-0"
-          style={{ width: '20rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
+        <Rail
+          width="20rem"
+          header={
+            <div className="px-3 py-2.5">
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>Total equity · {accounts.length} accounts</div>
+              <div className="text-xl font-mono mt-0.5">{formatUsd(totalEquity)}</div>
+            </div>
+          }
+          footer={
+            <div className="flex gap-2 px-3 py-2.5">
+              <button
+                data-tour="new-account"
+                onClick={() => setShowNew(v => !v)}
+                className="flex-1 h-8 rounded-md text-xs flex items-center justify-center gap-1.5"
+                style={{ background: showNew ? 'var(--background)' : 'var(--accent)', color: showNew ? 'var(--foreground)' : '#fff', border: showNew ? '1px solid var(--border)' : 'none' }}
+              >
+                {showNew ? 'Cancel' : '＋ New account'}
+              </button>
+              <button
+                onClick={() => void sampleNow()}
+                disabled={busy}
+                className="h-8 px-2.5 rounded-md text-xs"
+                style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: busy ? 0.6 : 1 }}
+                title="Take an equity snapshot of every account right now (normally sampled every 5 minutes)"
+              >
+                {busy ? '…' : '⟳'}
+              </button>
+            </div>
+          }
         >
-          <div className="px-3 py-2.5 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-            <div className="text-xs" style={{ color: 'var(--muted)' }}>Total equity · {accounts.length} accounts</div>
-            <div className="text-xl font-mono mt-0.5">{formatUsd(totalEquity)}</div>
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
-            {accounts.length === 0 && (
-              <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
-                No accounts yet. Strategies read accounts; executors write them.
-              </p>
-            )}
-            {accounts.map((a) => {
-              const active = selected?.name === a.name
-              const latest = snapshots[a.name]
-              return (
-                <button
-                  key={a.name}
-                  onClick={() => setExpanded(a.name)}
-                  className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2.5"
-                  style={{
-                    background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
-                    borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-                    borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
-                  }}
-                >
-                  <CredentialMark
-                    credential={a.credential}
-                    credentials={credentials}
-                    credentialTypes={credentialTypes}
-                    size={26}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm truncate" title={a.name}>{a.name}</div>
-                    <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-                      {a.kind ?? '—'}{a.type ? ` · ${a.type}` : ''}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-mono">
-                      {latest ? formatUsd(latest.equity) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                    </div>
-                    {a.status !== 'ready' && (
-                      <span className="text-xs px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>
-                    )}
-                    {a.snapshotError && (
-                      <span className="text-xs ml-1 cursor-help" style={{ color: 'var(--danger, #ef4444)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>
-                    )}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-
-          <div className="shrink-0 flex gap-2 px-3 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
-            <button
-              data-tour="new-account"
-              onClick={() => setShowNew(v => !v)}
-              className="flex-1 h-8 rounded-md text-xs flex items-center justify-center gap-1.5"
-              style={{ background: showNew ? 'var(--background)' : 'var(--accent)', color: showNew ? 'var(--foreground)' : '#fff', border: showNew ? '1px solid var(--border)' : 'none' }}
-            >
-              {showNew ? 'Cancel' : '＋ New account'}
-            </button>
-            <button
-              onClick={() => void sampleNow()}
-              disabled={busy}
-              className="h-8 px-2.5 rounded-md text-xs"
-              style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: busy ? 0.6 : 1 }}
-              title="Take an equity snapshot of every account right now (normally sampled every 5 minutes)"
-            >
-              {busy ? '…' : '⟳'}
-            </button>
-          </div>
-        </div>
+          {accounts.length === 0 && (
+            <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
+              No accounts yet. Strategies read accounts; executors write them.
+            </p>
+          )}
+          {accounts.map((a) => {
+            const latest = snapshots[a.name]
+            return (
+              <RailItem
+                key={a.name}
+                active={selected?.name === a.name}
+                onClick={() => setExpanded(a.name)}
+                mark={<CredentialMark credential={a.credential} credentials={credentials} credentialTypes={credentialTypes} size={26} />}
+                title={a.name}
+                subtitle={`${a.kind ?? '—'}${a.type ? ` · ${a.type}` : ''}`}
+                right={
+                  <span className="flex flex-col items-end gap-0.5">
+                    <span className="text-sm font-mono" style={{ color: latest ? 'var(--foreground)' : 'var(--muted)' }}>{latest ? formatUsd(latest.equity) : '—'}</span>
+                    {a.status !== 'ready' && <span className="text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>}
+                    {a.snapshotError && <span className="cursor-help" style={{ color: 'var(--danger)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>}
+                  </span>
+                }
+              />
+            )
+          })}
+        </Rail>
 
         {/* ── detail ─────────────────────────────────────────────────────── */}
         <div

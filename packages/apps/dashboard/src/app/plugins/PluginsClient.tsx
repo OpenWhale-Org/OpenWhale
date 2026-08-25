@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { Rail, RailItem } from '@/components/Rail'
 import { useRouter } from 'next/navigation'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo } from '@openwhaleorg/core'
 import type { InstalledPluginView } from '@/lib/data'
@@ -98,57 +99,60 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
 
       <div className="flex gap-3" style={{ height: 'calc(100vh - 16rem)', minHeight: 460 }}>
         {/* ── rail ─────────────────────────────────────────────────────────── */}
-        <div
-          className="flex flex-col rounded-lg overflow-hidden shrink-0"
-          style={{ width: '18rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
+        <Rail
+          width="18rem"
+          header={
+            <div className="flex">
+              {([['builtin', `Built-in (${builtins.length})`], ['external', `External (${externals.length + (compiledCount > 0 ? 1 : 0)})`]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => pick(key, key === 'builtin' ? builtins[0]?.name ?? null : externals[0]?.name ?? (compiledCount > 0 ? COMPILED_ID : null))}
+                  className="flex-1 px-3 py-2.5 text-xs font-medium"
+                  style={{
+                    color: tab === key ? 'var(--foreground)' : 'var(--muted)',
+                    borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
+                    marginBottom: '-1px',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          }
         >
-          <div className="flex shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-            {([['builtin', `Built-in (${builtins.length})`], ['external', `External (${externals.length + (compiledCount > 0 ? 1 : 0)})`]] as const).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => pick(key, key === 'builtin' ? builtins[0]?.name ?? null : externals[0]?.name ?? (compiledCount > 0 ? COMPILED_ID : null))}
-                className="flex-1 px-3 py-2.5 text-xs font-medium"
-                style={{
-                  color: tab === key ? 'var(--foreground)' : 'var(--muted)',
-                  borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: '-1px',
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
-            {rail.map(p => (
-              <PluginRailRow key={p.name} plugin={p} credentialTypes={credentialTypes} active={selected === p.name && !installing} onClick={() => pick(tab, p.name)} />
-            ))}
-            {tab === 'external' && compiledCount > 0 && (
-              <button
-                onClick={() => pick('external', COMPILED_ID)}
-                className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2"
-                style={{
-                  background: selected === COMPILED_ID ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
-                  borderLeft: `2px solid ${selected === COMPILED_ID ? 'var(--accent)' : 'transparent'}`,
-                  borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
-                }}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm truncate">AI Compiled</div>
-                  <div className="text-xs" style={{ color: 'var(--muted)' }}>compiled components</div>
-                </div>
-                <span className="text-xs font-mono shrink-0" style={{ color: 'var(--muted)' }}>{compiledCount}</span>
-              </button>
-            )}
-            {tab === 'external' && externalEmpty && (
-              <div className="px-4 py-10 text-center flex flex-col items-center gap-3">
-                <p className="text-xs" style={{ color: 'var(--muted)' }}>No external plugins yet.</p>
-                <button onClick={() => setInstalling(true)} className="btn btn-primary btn-sm">+ Install Plugin</button>
-                <p className="text-[11px] opacity-60" style={{ color: 'var(--muted)' }}>Plugin marketplace — coming soon</p>
-              </div>
-            )}
-          </div>
-        </div>
+          {rail.map(p => {
+            const count = p.strategies.length + p.monitors.length + p.executors.length + p.accounts.length + p.credentialTypes.length + p.scripts.length + p.cells.length
+            const mark = pluginMark(p, credentialTypes)
+            return (
+              <RailItem
+                key={p.name}
+                active={selected === p.name && !installing}
+                onClick={() => pick(tab, p.name)}
+                mark={<TypeMark logo={mark.logo} icon={mark.icon} label={p.name} size={26} />}
+                title={<>{p.name}{p.loadError && <span className="ml-1.5 text-xs" style={{ color: 'var(--danger)' }} title={p.loadError}>⚠</span>}</>}
+                subtitle={`v${p.version}`}
+                right={<span className="font-mono">{count}</span>}
+              />
+            )
+          })}
+          {tab === 'external' && compiledCount > 0 && (
+            <RailItem
+              active={selected === COMPILED_ID}
+              onClick={() => pick('external', COMPILED_ID)}
+              mark={<TypeMark icon="✦" label="AI Compiled" size={26} />}
+              title="AI Compiled"
+              subtitle="compiled components"
+              right={<span className="font-mono">{compiledCount}</span>}
+            />
+          )}
+          {tab === 'external' && externalEmpty && (
+            <div className="px-4 py-10 text-center flex flex-col items-center gap-3">
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>No external plugins yet.</p>
+              <button onClick={() => setInstalling(true)} className="btn btn-primary btn-sm">+ Install Plugin</button>
+              <p className="text-[11px] opacity-60" style={{ color: 'var(--muted)' }}>Plugin marketplace — coming soon</p>
+            </div>
+          )}
+        </Rail>
 
         {/* ── detail ───────────────────────────────────────────────────────── */}
         <div
@@ -176,33 +180,6 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
         </div>
       </div>
     </div>
-  )
-}
-
-function PluginRailRow({ plugin, credentialTypes, active, onClick }: { plugin: InstalledPluginView; credentialTypes: CredentialTypeInfo[]; active: boolean; onClick: () => void }) {
-  const count = plugin.strategies.length + plugin.monitors.length + plugin.executors.length
-    + plugin.accounts.length + plugin.credentialTypes.length + plugin.scripts.length + plugin.cells.length
-  const mark = pluginMark(plugin, credentialTypes)
-  return (
-    <button
-      onClick={onClick}
-      className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2.5"
-      style={{
-        background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
-        borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-        borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
-      }}
-    >
-      <TypeMark logo={mark.logo} icon={mark.icon} label={plugin.name} size={26} />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm truncate">
-          {plugin.name}
-          {plugin.loadError && <span className="ml-1.5 text-xs" style={{ color: 'var(--danger)' }} title={plugin.loadError}>⚠</span>}
-        </div>
-        <div className="text-xs" style={{ color: 'var(--muted)' }}>v{plugin.version}</div>
-      </div>
-      <span className="text-xs font-mono shrink-0" style={{ color: 'var(--muted)' }}>{count}</span>
-    </button>
   )
 }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Rail, RailItem } from '../../components/Rail'
 import { Modal } from '@/components/Modal'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
 import { TypeMark } from '@/components/TypeMark'
@@ -381,28 +382,20 @@ function TypePicker({
        it. Both columns scroll inside themselves, without a visible track. */
     <div data-tour="credential-type-list" className="flex-1 min-h-0 flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       {/* Category sidebar */}
-      <div className="flex flex-col w-40 shrink-0 py-2 overflow-y-auto scroll-hidden" style={{ background: 'var(--background)', borderRight: '1px solid var(--border)' }}>
+      <Rail bare width="10rem">
         {categories.map((c) => {
           const count = c === 'All' ? entries.length : entries.filter(e => e.category === c).length
-          const active = category === c
           return (
-            <button
+            <RailItem
               key={c}
-              type="button"
+              active={category === c}
               onClick={() => setCategory(c)}
-              className="flex items-center justify-between px-3 py-1.5 text-sm text-left shrink-0"
-              style={{
-                background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
-                color: active ? 'var(--foreground)' : 'var(--muted)',
-                borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-              }}
-            >
-              {c}
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>{count}</span>
-            </button>
+              title={c}
+              right={count}
+            />
           )
         })}
-      </div>
+      </Rail>
 
       {/* Search + type list */}
       <div className="flex-1 min-w-0 flex flex-col">

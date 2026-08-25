@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { Rail, RailGroup, RailItem, StatusDot } from '../../components/Rail'
 import type { MonitorDefinition, ParamFieldCatalogue, MonitorInstanceView, CredentialInfo } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { MonitorBoards } from './MonitorBoards'
@@ -113,66 +114,39 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
   return (
     <div className="flex gap-4 items-start">
       {/* ── Left: monitors grouped by package ── */}
-      <aside className="w-72 shrink-0 flex flex-col gap-4">
+      <Rail width="18rem" className="self-stretch">
         {statuses.length === 0 && monitors.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>No monitors registered.</p>
+          <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No monitors registered.</p>
         )}
         {[...groups.entries()].map(([pkg, items]) => (
-          <div key={pkg} className="flex flex-col gap-1">
-            <span className="text-xs font-semibold uppercase px-1" style={{ color: 'var(--muted)' }}>{pkg}</span>
+          <RailGroup key={pkg} label={pkg} count={items.length}>
             {items.map((m) => {
-              /* Two independent facts, deliberately shown as two marks:
-                 RUNNING = an instance of this contract is activated (something
-                 is capable of collecting); SUBSCRIBED = keys are actually being
-                 watched. A monitor can run with nothing subscribed, and can
-                 have subscriptions nothing is serving — that second case is the
-                 silent failure this marker exists to expose. */
+              /* Two independent facts as two marks: RUNNING = an instance of
+                 this contract is activated; SUBSCRIBED = keys are being
+                 watched. A monitor can run with nothing subscribed, or have
+                 subscriptions nothing serves — that second case is the silent
+                 failure the dot/badge pair exposes. */
               const mine = instances.filter(i => i.contract === m.id)
               const running = mine.filter(i => i.active).length
               return (
-              <button
-                key={m.id}
-                onClick={() => setSelectedId(m.id)}
-                className="rounded-md px-3 py-2 text-left"
-                style={{
-                  background: m.id === selectedId ? 'var(--surface)' : 'transparent',
-                  border: `1px solid ${m.id === selectedId ? 'var(--accent)' : 'var(--border)'}`,
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  {mine.length > 0 && (
-                    <span
-                      className="text-xs shrink-0"
-                      style={{ color: running > 0 ? 'var(--success, #22c55e)' : 'var(--muted)' }}
-                      title={running > 0
-                        ? `${running} of ${mine.length} instance${mine.length > 1 ? 's' : ''} running`
-                        : `${mine.length} instance${mine.length > 1 ? 's' : ''}, none running`}
-                    >
-                      {running > 0 ? '◉' : '○'}{mine.length > 1 ? ` ${running}/${mine.length}` : ''}
-                    </span>
-                  )}
-                  <span className="text-sm font-medium truncate">{splitId(m.id).short}</span>
-                  {m.activeKeys.length > 0 && (
-                    <span
-                      className="text-xs px-1.5 rounded-full shrink-0"
-                      style={{ background: 'var(--accent)', color: '#fff' }}
-                      title={`${m.activeKeys.length} key${m.activeKeys.length > 1 ? 's' : ''} subscribed`}
-                    >
-                      {m.activeKeys.length}
-                    </span>
-                  )}
-                </div>
-                {m.description && (
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {m.description}
-                  </p>
-                )}
-              </button>
+                <RailItem
+                  key={m.id}
+                  active={m.id === selectedId}
+                  onClick={() => setSelectedId(m.id)}
+                  mark={mine.length > 0
+                    ? <StatusDot color={running > 0 ? 'var(--success)' : 'var(--muted)'} title={running > 0 ? `${running} of ${mine.length} instance${mine.length > 1 ? 's' : ''} running` : `${mine.length} instance${mine.length > 1 ? 's' : ''}, none running`} />
+                    : <StatusDot color="transparent" />}
+                  title={splitId(m.id).short}
+                  subtitle={m.description}
+                  right={m.activeKeys.length > 0
+                    ? <span className="px-1.5 rounded-full text-[11px]" style={{ background: 'var(--accent)', color: '#fff' }} title={`${m.activeKeys.length} key${m.activeKeys.length > 1 ? 's' : ''} subscribed`}>{m.activeKeys.length}</span>
+                    : undefined}
+                />
               )
             })}
-          </div>
+          </RailGroup>
         ))}
-      </aside>
+      </Rail>
 
       {/* ── Right: selected monitor detail ── */}
       <main className="flex-1 min-w-0">

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { StrategyDefinition } from '@openwhaleorg/core'
 import { ModalMaximizeButton } from '@/components/Modal'
 
@@ -120,48 +121,25 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
 
       <div data-tour="strategy-picker" className="flex flex-1 min-h-0">
           {/* ── Left: search + grouped list ── */}
-          <div className="flex flex-col w-64 shrink-0" style={{ borderRight: '1px solid var(--border)' }}>
-            <div className="p-2" style={{ borderBottom: '1px solid var(--border)' }}>
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search strategies…"
-                className="input w-full text-sm"
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              {groups.length === 0 && (
-                <div className="text-xs px-2 py-3" style={{ color: 'var(--muted)' }}>
-                  Nothing matches “{query}”.
-                </div>
-              )}
-              {groups.map(g => (
-                <div key={g.name} className="mb-3">
-                  <div className="text-xs px-2 pb-1 font-medium" style={{ color: 'var(--muted)' }}>
-                    {g.name}
-                  </div>
-                  {g.items.map(s => {
-                    const active = s.id === selected
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => setSelected(s.id)}
-                        onDoubleClick={() => onPick(s.id)}
-                        className="w-full text-left px-2 py-1.5 rounded-md text-sm truncate transition-colors"
-                        style={{
-                          background: active ? 'var(--accent-soft)' : 'transparent',
-                          color: active ? '#a78bfa' : 'var(--foreground)',
-                        }}
-                      >
-                        {s.name || s.id}
-                      </button>
-                    )
-                  })}
-                </div>
-              ))}
-            </div>
-          </div>
+          <Rail bare width="16rem" search={{ value: query, onChange: setQuery, placeholder: 'Search strategies…', autoFocus: true }}>
+            {groups.length === 0 && (
+              <div className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>Nothing matches “{query}”.</div>
+            )}
+            {groups.map(g => (
+              <RailGroup key={g.name} label={g.name} count={g.items.length}>
+                {g.items.map(s => (
+                  <RailItem
+                    key={s.id}
+                    active={s.id === selected}
+                    onClick={() => setSelected(s.id)}
+                    onDoubleClick={() => onPick(s.id)}
+                    title={s.name || s.id}
+                    subtitle={s.name ? s.id : undefined}
+                  />
+                ))}
+              </RailGroup>
+            ))}
+          </Rail>
 
           {/* ── Right: what this strategy is and what it will ask for ── */}
           <div className="flex-1 min-w-0 flex flex-col">

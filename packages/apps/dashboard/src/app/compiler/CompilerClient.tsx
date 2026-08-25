@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Rail, RailItem } from '@/components/Rail'
 import type { CompileJob, DraftFile } from '@openwhaleorg/compiler'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { CodeEditor } from '@/components/CodeEditor'
@@ -91,55 +92,52 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
   return (
     <div className="flex-1 min-h-0 flex gap-3">
       {/* ── sessions rail ─────────────────────────────────────────────────── */}
-      <div
-        className="flex flex-col rounded-lg overflow-hidden shrink-0"
-        style={{ width: '17rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
+      <Rail
+        width="17rem"
+        header={
+          <div className="px-3 py-2 text-xs font-semibold flex items-center justify-between" style={{ color: 'var(--muted)' }}>
+            <span>SESSIONS</span>
+            <button
+              onClick={() => { setSelectedId(null); setError('') }}
+              className="px-2 py-0.5 rounded-md text-xs"
+              style={{
+                color: selectedId === null ? 'var(--foreground)' : 'var(--muted)',
+                border: `1px solid ${selectedId === null ? 'var(--accent)' : 'var(--border)'}`,
+                background: selectedId === null ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+              }}
+            >
+              + New
+            </button>
+          </div>
+        }
+        footer={llm && configured ? <SettingsPanel state={llm} onChange={setLlm} /> : undefined}
       >
-        <div className="px-3 py-2 text-xs font-semibold shrink-0 flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-          <span>SESSIONS</span>
-          <button
-            onClick={() => { setSelectedId(null); setError('') }}
-            className="px-2 py-0.5 rounded-md text-xs"
-            style={{
-              color: selectedId === null ? 'var(--foreground)' : 'var(--muted)',
-              border: `1px solid ${selectedId === null ? 'var(--accent)' : 'var(--border)'}`,
-              background: selectedId === null ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
-            }}
-          >
-            + New
-          </button>
-        </div>
         {llm && !configured ? (
           <SettingsPanel state={llm} onChange={setLlm} centered />
         ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
-          {jobs.length === 0 && (
-            <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
-              No compile sessions yet — describe a strategy below.
-            </p>
-          )}
-          {jobs.map(job => (
-            <button
-              key={job.id}
-              onClick={() => { setSelectedId(job.id); setError('') }}
-              className="hoverable hoverable-flat w-full text-left px-3 py-2.5"
-              style={{
-                background: job.id === selectedId ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
-                borderLeft: `2px solid ${job.id === selectedId ? 'var(--accent)' : 'transparent'}`,
-                borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
-              }}
-            >
-              <div className="text-sm truncate">{job.description}</div>
-              <div className="text-xs mt-0.5 flex items-center gap-1" style={{ color: STATUS_COLOR[job.status] ?? 'var(--muted)' }}>
-                {ACTIVE_STATUSES.has(job.status) && <span className="animate-pulse">●</span>}
-                {STATUS_LABEL[job.status] ?? job.status}
-              </div>
-            </button>
-          ))}
-        </div>
+          <>
+            {jobs.length === 0 && (
+              <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
+                No compile sessions yet — describe a strategy below.
+              </p>
+            )}
+            {jobs.map(job => (
+              <RailItem
+                key={job.id}
+                active={job.id === selectedId}
+                onClick={() => { setSelectedId(job.id); setError('') }}
+                title={job.description}
+                subtitle={
+                  <span style={{ color: STATUS_COLOR[job.status] ?? 'var(--muted)' }}>
+                    {ACTIVE_STATUSES.has(job.status) && <span className="animate-pulse">● </span>}
+                    {STATUS_LABEL[job.status] ?? job.status}
+                  </span>
+                }
+              />
+            ))}
+          </>
         )}
-        {llm && configured && <SettingsPanel state={llm} onChange={setLlm} />}
-      </div>
+      </Rail>
 
       {/* ── main column ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">

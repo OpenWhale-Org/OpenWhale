@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 import { LogsPanel } from '@/components/LogsPanel'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
@@ -47,39 +48,27 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
   return (
     <div className="flex gap-4 items-start">
       {/* ── Left: executors grouped by package ── */}
-      <aside className="w-72 shrink-0 flex flex-col gap-4">
+      <Rail width="18rem" className="self-stretch">
         {initialExecutors.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>No executors registered.</p>
+          <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No executors registered.</p>
         )}
         {[...groups.entries()].map(([pkg, items]) => (
-          <div key={pkg} className="flex flex-col gap-1">
-            <span className="text-xs font-semibold uppercase px-1" style={{ color: 'var(--muted)' }}>{pkg}</span>
+          <RailGroup key={pkg} label={pkg} count={items.length}>
             {items.map((e) => (
-              <button
+              <RailItem
                 key={e.id}
+                active={e.id === selectedId}
                 onClick={() => setSelectedId(e.id)}
-                className="rounded-md px-3 py-2 text-left"
-                style={{
-                  background: e.id === selectedId ? 'var(--surface)' : 'transparent',
-                  border: `1px solid ${e.id === selectedId ? 'var(--accent)' : 'var(--border)'}`,
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{splitId(e.id).short}</span>
-                  {e.credentialSlots.length > 0 && (
-                    <span className="text-xs px-1 rounded" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>write</span>
-                  )}
-                </div>
-                {e.description && (
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {e.description}
-                  </p>
-                )}
-              </button>
+                title={splitId(e.id).short}
+                subtitle={e.description}
+                right={e.credentialSlots.length > 0
+                  ? <span className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }} title="Holds write-capable sessions">write</span>
+                  : undefined}
+              />
             ))}
-          </div>
+          </RailGroup>
         ))}
-      </aside>
+      </Rail>
 
       {/* ── Right: selected executor detail ── */}
       <main className="flex-1 min-w-0">
