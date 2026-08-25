@@ -3,12 +3,12 @@
  *
  * Layering: core's runtime owns the loading MECHANISM (loadPluginFromPath /
  * unloadPlugin / namespacing). This module owns ACQUISITION and PERSISTENCE —
- * where plugin code comes from (npm / uploaded file), the install manifest,
- * and restoring installed plugins on boot. The runtime never learns what a
- * package manager is.
+ * where plugin code comes from (npm / GitHub / uploaded file), the install
+ * manifest, and restoring installed plugins on boot. The runtime never learns
+ * what a package manager is.
  *
  * Layout under {dataDir}/plugins/:
- *   package.json + node_modules/   npm-installed plugins
+ *   package.json + node_modules/   npm- and GitHub-installed plugins
  *   local/                         uploaded single-file plugin bundles
  *   plugins.json                   install manifest (source, entry, config)
  */
@@ -25,6 +25,9 @@ const log = () => getLogger().child({ module: 'PluginService' })
 
 export type PluginSource =
   | { kind: 'npm'; package: string }
+  /** `repo` is always `owner/name`; `packageName` is what package.json calls
+      itself, which is NOT derivable from the repo name and so must be kept. */
+  | { kind: 'github'; repo: string; ref?: string; packageName: string }
   | { kind: 'local'; path: string; packageName: string }
   | { kind: 'file'; originalName: string }
 
@@ -90,6 +93,10 @@ function parsePackageSpec(spec: string): { packageName: string } {
   const at = spec.lastIndexOf('@')
   const packageName = at > 0 ? spec.slice(0, at) : spec
   if (!/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i.test(packageName)) {
+    // A repo URL in the npm field is a mistake worth naming, not a bad package name
+    if (/github\.com|^github:|^git[@+]/i.test(spec)) {
+      throw new Error(`"${spec}" is a Git repository, not an npm package — install it from the GitHub tab instead`)
+    }
     throw new Error(`Invalid npm package name: "${packageName}"`)
   }
   return { packageName }
@@ -127,6 +134,34 @@ export function npmSpawn(): { file: string; args: string[] } {
   return { file: process.execPath, args: [cli] }
 }
 
+/**
+ * Make sure the managed plugins dir exists and owns a package.json.
+ *
+ * The stub is what stops npm walking up the tree — without it, installing
+ * into a dir under a checkout makes npm treat that checkout's workspace as
+ * the install root and rewrite its lockfile.
+ */
+async function ensureStub(): Promise<void> {
+  const pluginsDir = getPluginsDir()
+  await fs.promises.mkdir(pluginsDir, { recursive: true })
+  const stubPath = path.join(pluginsDir, 'package.json')
+  try {
+    await fs.promises.access(stubPath)
+  } catch {
+    await fs.promises.writeFile(stubPath, JSON.stringify({ name: 'openwhale-plugins', private: true }, null, 2))
+  }
+}
+
+/** The stub's `dependencies` map — npm's own record of what is installed. */
+async function stubDeps(): Promise<Record<string, string>> {
+  try {
+    const raw = await fs.promises.readFile(path.join(getPluginsDir(), 'package.json'), 'utf8')
+    return (JSON.parse(raw) as { dependencies?: Record<string, string> }).dependencies ?? {}
+  } catch {
+    return {}
+  }
+}
+
 /** Read the package name from a local package dir; validates it looks like a package. */
 function localPackageName(dir: string): string {
   let pkg: { name?: string }
@@ -139,8 +174,18 @@ function localPackageName(dir: string): string {
   return pkg.name
 }
 
-/** Resolve a package's ESM entry from its package.json (exports > module > main). */
-function resolveEntry(pkgDir: string): string {
+/**
+ * Resolve a package's ESM entry from its package.json (exports > module > main).
+ *
+ * The entry is checked for existence here rather than left to the loader,
+ * because the interesting case declares one that was never built: a Git
+ * install ships sources, and `dist/index.js` exists only if the package's
+ * `prepare` script produced it. The loader's own report for that is
+ * ERR_MODULE_NOT_FOUND on a path deep inside node_modules, which reads like
+ * a broken engine rather than a package that needs a build step — so callers
+ * pass the `hint` that explains their own failure mode.
+ */
+export function resolveEntry(pkgDir: string, hint?: string): string {
   const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')) as {
     exports?: unknown
     module?: string
@@ -151,16 +196,31 @@ function resolveEntry(pkgDir: string): string {
   if (typeof exp === 'string') {
     entry = exp
   } else if (exp && typeof exp === 'object') {
-    const dot = (exp as Record<string, unknown>)['.']
+    /* Two shapes are legal. The subpath map keys on './…', and the sugar form
+       drops the map entirely when a package exports only its root — so an
+       object with no './' key IS the '.' entry, and reading it as a subpath
+       map finds nothing and falls through to `main`, which such a package
+       usually does not declare. (p-limit ships exactly this.) */
+    const map = exp as Record<string, unknown>
+    const isSubpathMap = Object.keys(map).some(k => k.startsWith('.'))
+    const dot = isSubpathMap ? map['.'] : map
     if (typeof dot === 'string') entry = dot
     else if (dot && typeof dot === 'object') {
       const d = dot as Record<string, unknown>
-      entry = (d['import'] ?? d['default']) as string | undefined
-      if (entry && typeof entry === 'object') entry = (entry as Record<string, string>)['default']
+      const picked = d['import'] ?? d['default']
+      entry = typeof picked === 'object' && picked !== null
+        ? (picked as Record<string, string>)['default']
+        : (picked as string | undefined)
     }
   }
   entry = entry ?? pkg.module ?? pkg.main ?? 'index.js'
-  return path.join(pkgDir, entry)
+  const entryPath = path.join(pkgDir, entry)
+  if (!fs.existsSync(entryPath)) {
+    throw new Error(
+      `The installed package declares its entry as "${entry}", but that file is not there.${hint ? ` ${hint}` : ''}`,
+    )
+  }
+  return entryPath
 }
 
 /**
@@ -177,15 +237,7 @@ export async function installFromNpm(
   const localPath = asLocalPath(spec)
   const packageName = localPath ? localPackageName(localPath) : parsePackageSpec(spec).packageName
   const pluginsDir = getPluginsDir()
-  await fs.promises.mkdir(pluginsDir, { recursive: true })
-
-  // A stub package.json keeps npm from walking up to the repo's workspace
-  const stubPath = path.join(pluginsDir, 'package.json')
-  try {
-    await fs.promises.access(stubPath)
-  } catch {
-    await fs.promises.writeFile(stubPath, JSON.stringify({ name: 'openwhale-plugins', private: true }, null, 2))
-  }
+  await ensureStub()
 
   log().info({ spec, local: Boolean(localPath) }, 'Installing plugin')
   const npm = npmSpawn()
@@ -210,6 +262,196 @@ export async function installFromNpm(
 
   const info = runtime.listLoadedPlugins().find(p => p.name === name)!
   return { ...info, source }
+}
+
+// ── GitHub install ────────────────────────────────────────────────────────────
+
+/**
+ * Everything a person plausibly has on their clipboard → `owner/repo` plus a
+ * ref, plus the one spec form npm is unambiguous about.
+ *
+ * The forms matter because the address bar is where a repo actually comes
+ * from. `https://github.com/o/r/tree/main/...` is what you get by browsing to
+ * a plugin and hitting copy, and npm rejects it outright — asking the user to
+ * hand-translate that into `github:o/r#main` is asking them to know npm's
+ * spec grammar to paste a link.
+ *
+ * Output is always `git+https://…​.git`, never the `github:` shorthand, because
+ * npm resolves the shorthand to ssh or https depending on the machine's git
+ * config — and the token injection below only attaches to https. One spec
+ * form means one auth path.
+ */
+export function parseGithubSpec(input: string, refOverride?: string): { repo: string; ref?: string; url: string } {
+  let s = input.trim()
+  if (!s) throw new Error('Give a repository, e.g. owner/repo or https://github.com/owner/repo')
+
+  let ref: string | undefined
+  const hash = s.indexOf('#')
+  if (hash >= 0) {
+    ref = s.slice(hash + 1).trim() || undefined
+    s = s.slice(0, hash)
+  }
+  if (s.includes('?')) s = s.slice(0, s.indexOf('?'))
+
+  s = s
+    .replace(/^git\+/i, '')
+    .replace(/^ssh:\/\/git@github\.com\//i, '')
+    .replace(/^git@github\.com:/i, '')
+    .replace(/^github:/i, '')
+    .replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//i, '')
+    .replace(/\.git$/i, '')
+    .replace(/^\/+|\/+$/g, '')
+
+  if (/^[a-z+]+:\/\//i.test(s)) {
+    throw new Error(`Only github.com repositories are supported here — "${input}" points somewhere else`)
+  }
+
+  const seg = s.split('/')
+  const [owner, repoName, kind, ...rest] = seg
+  if (seg.length > 2) {
+    /* Browser URLs carry the ref in the path. A branch name may itself contain
+       slashes (`feat/venue-proxy`), and a /tree/ URL gives no way to tell a
+       slashed branch from a branch plus a directory — so the whole tail is
+       read as the ref, which is right for the link people actually copy (the
+       repo root on a branch) and wrong only for a deep-directory link. */
+    if (/^(tree|blob|commit|commits)$/i.test(kind ?? '') && rest.length > 0) {
+      ref = ref ?? rest.join('/')
+    } else if (/^releases$/i.test(kind ?? '') && rest[0] === 'tag' && rest.length > 1) {
+      ref = ref ?? rest.slice(1).join('/')
+    } else {
+      throw new Error(`"${input}" does not look like a repository — expected owner/repo, got ${seg.length} path segments`)
+    }
+  }
+
+  if (refOverride?.trim()) ref = refOverride.trim()
+  if (!owner || !repoName || !/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repoName)) {
+    throw new Error(`"${input}" is not a valid GitHub repository — expected owner/repo`)
+  }
+  if (ref !== undefined && !/^[\w.\-/]+$/.test(ref)) {
+    throw new Error(`"${ref}" is not a valid branch, tag or commit`)
+  }
+
+  const repo = `${owner}/${repoName}`
+  return {
+    repo,
+    ...(ref !== undefined ? { ref } : {}),
+    url: `git+https://github.com/${repo}.git${ref !== undefined ? `#${ref}` : ''}`,
+  }
+}
+
+function githubToken(): string {
+  return (process.env['OPENWHALE_GITHUB_TOKEN'] ?? process.env['GITHUB_TOKEN'] ?? process.env['GH_TOKEN'] ?? '').trim()
+}
+
+/**
+ * Environment for the npm child so its `git clone` can reach a private repo.
+ *
+ * The token goes in as an ephemeral git config (`GIT_CONFIG_*`, git ≥ 2.31)
+ * rather than embedded in the clone URL, because a URL travels: npm writes
+ * the spec it was given into this dir's package.json and lockfile, and the
+ * manifest keeps it forever. A credential that reaches disk in a process that
+ * also holds exchange keys is not a credential any more. As a config on the
+ * child's environment it exists for the length of one install.
+ *
+ * GIT_TERMINAL_PROMPT is off regardless: without it, a private repo and no
+ * token makes git block on a username prompt nobody can answer, and the
+ * install "hangs" until the timeout instead of saying it needs auth.
+ */
+function gitEnv(): NodeJS.ProcessEnv {
+  const token = githubToken()
+  const base = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  if (!token) return base
+  return {
+    ...base,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `url.https://x-access-token:${token}@github.com/.insteadOf`,
+    GIT_CONFIG_VALUE_0: 'https://github.com/',
+  }
+}
+
+/** Which of the stub's dependencies is the one npm just brought in. */
+function installedName(before: Record<string, string>, after: Record<string, string>, repo: string): string {
+  const added = Object.keys(after).filter(k => !(k in before))
+  if (added.length === 1) return added[0]!
+  // Re-installing an existing plugin adds no key — find it by what it points at
+  const byUrl = Object.keys(after).find(k => (after[k] ?? '').toLowerCase().includes(repo.toLowerCase()))
+  if (byUrl) return byUrl
+  if (added.length > 1) throw new Error(`npm installed several packages and none names ${repo}: ${added.join(', ')}`)
+  throw new Error(`npm installed nothing for ${repo}`)
+}
+
+const BUILD_HINT =
+  'npm builds a Git install by running the package\'s "prepare" script — a repo that ships TypeScript sources ' +
+  'and no build output needs one (e.g. "prepare": "npm run build"), or must commit its built files.'
+
+/**
+ * Install a plugin straight from a GitHub repository and load it.
+ *
+ * npm does the acquiring — it has cloned git specs for a decade, runs the
+ * package's `prepare` script so a source-only repo still builds, and leaves
+ * the result in the same node_modules the npm path uses, so uninstall and
+ * boot-restore need no second code path.
+ *
+ * What it cannot do is tell us the package's name in advance: a repo called
+ * `openwhale-funding-arb` may publish itself as `@someone/funding-arb`, and
+ * the entry lives under the package name. So the stub's dependency map is
+ * read before and after — npm's own record of what it did.
+ *
+ * ⚠️ Installing a package executes third-party code in this process.
+ */
+export async function installFromGithub(
+  runtime: OpenWhaleRuntime,
+  repoInput: string,
+  refInput: string | undefined,
+  config: unknown,
+): Promise<InstalledPluginView> {
+  const { repo, ref, url } = parseGithubSpec(repoInput, refInput)
+  const pluginsDir = getPluginsDir()
+  await ensureStub()
+
+  const before = await stubDeps()
+  log().info({ repo, ref, authenticated: githubToken() !== '' }, 'Installing plugin from GitHub')
+  const npm = npmSpawn()
+  try {
+    await execFileAsync(
+      npm.file,
+      [...npm.args, 'install', url, '--prefix', pluginsDir, '--no-audit', '--no-fund', '--loglevel=error'],
+      // Longer than the npm path's: this one clones AND builds.
+      { timeout: 600_000, env: gitEnv() },
+    )
+  } catch (err) {
+    throw cloneError(err, repo)
+  }
+
+  const packageName = installedName(before, await stubDeps(), repo)
+  const entryPath = resolveEntry(path.join(pluginsDir, 'node_modules', packageName), BUILD_HINT)
+  const name = await runtime.loadPluginFromPath(entryPath, config)
+
+  const source: PluginSource = { kind: 'github', repo, ...(ref !== undefined ? { ref } : {}), packageName }
+  await upsertManifest({ name, source, entryPath, config, installedAt: new Date().toISOString() })
+  loadErrors.delete(name)
+
+  const info = runtime.listLoadedPlugins().find(p => p.name === name)!
+  return { ...info, source }
+}
+
+/**
+ * GitHub answers 404 for a private repo you are not authorised to see, so
+ * git's "repository not found" is the same sentence for "wrong name" and
+ * "needs a token". Saying so is the whole point of this function.
+ */
+function cloneError(err: unknown, repo: string): Error {
+  const e = err as { stderr?: string; message?: string }
+  const text = `${e.stderr ?? ''}\n${e.message ?? ''}`.trim()
+  const denied = /not found|Authentication failed|could not read Username|Permission denied|access rights/i.test(text)
+  if (denied && !githubToken()) {
+    return new Error(
+      `Could not read ${repo} from GitHub.\n\nIf the repository is private, that is what this looks like — ` +
+        `GitHub returns "not found" rather than "not authorised" to anyone without access. Set ` +
+        `OPENWHALE_GITHUB_TOKEN to a token with repo read access and restart the engine.\n\n${text}`,
+    )
+  }
+  return new Error(text || `Installing ${repo} from GitHub failed`)
 }
 
 // ── file install ──────────────────────────────────────────────────────────────
@@ -270,8 +512,12 @@ export async function uninstallPlugin(runtime: OpenWhaleRuntime, name: string): 
   loadErrors.delete(name)
   if (!entry) return
 
-  if (entry.source.kind === 'npm' || entry.source.kind === 'local') {
-    const packageName = entry.source.kind === 'local' ? entry.source.packageName : parsePackageSpec(entry.source.package).packageName
+  if (entry.source.kind !== 'file') {
+    // npm derives the package name from its spec; the other two carry it,
+    // because neither a directory nor a repo is named after what it publishes.
+    const packageName = entry.source.kind === 'npm'
+      ? parsePackageSpec(entry.source.package).packageName
+      : entry.source.packageName
     try {
       const npm = npmSpawn()
       await execFileAsync(npm.file, [...npm.args, 'uninstall', packageName, '--prefix', getPluginsDir(), '--loglevel=error'], { timeout: 120_000 })

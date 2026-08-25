@@ -217,8 +217,14 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
 
   const sourceBadge = !plugin.source ? 'built-in'
     : plugin.source.kind === 'npm' ? `npm: ${plugin.source.package}`
+    : plugin.source.kind === 'github' ? `github: ${plugin.source.repo}${plugin.source.ref ? `#${plugin.source.ref}` : ''}`
     : plugin.source.kind === 'local' ? `local: ${plugin.source.path}`
     : `file: ${plugin.source.originalName}`
+  /* The repo is the one source you can go and look at before trusting it —
+     link it, since the badge already carries the address. */
+  const sourceHref = plugin.source?.kind === 'github'
+    ? `https://github.com/${plugin.source.repo}${plugin.source.ref ? `/tree/${plugin.source.ref}` : ''}`
+    : null
 
   return (
     <>
@@ -227,7 +233,11 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
           <TypeMark logo={pluginMark(plugin, credentialTypes).logo} icon={pluginMark(plugin, credentialTypes).icon} label={plugin.name} size={26} />
           <span className="text-base font-medium">{plugin.name}</span>
           <span className="badge badge-neutral">v{plugin.version}</span>
-          <span className="badge badge-neutral truncate max-w-[24rem]" title={sourceBadge}>{sourceBadge}</span>
+          {sourceHref ? (
+            <a href={sourceHref} target="_blank" rel="noopener noreferrer" className="badge badge-neutral truncate max-w-[24rem] hover:underline" title={sourceHref}>{sourceBadge}</a>
+          ) : (
+            <span className="badge badge-neutral truncate max-w-[24rem]" title={sourceBadge}>{sourceBadge}</span>
+          )}
           {plugin.installedAt && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>installed {new Date(plugin.installedAt).toLocaleString()}</span>}
         </div>
         {plugin.source && (
@@ -489,11 +499,19 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
   )
 }
 
-// ── Install form (unchanged mechanics: npm package or bundle file) ────────────
+// ── Install form: bundle file, GitHub repo, or npm package ───────────────────
+
+const MODES = [
+  ['file', 'From file'],
+  ['github', 'From GitHub'],
+  ['npm', 'From npm'],
+] as const
 
 function InstallForm({ onSuccess }: { onSuccess: () => void }) {
-  const [mode, setMode] = useState<'npm' | 'file'>('file')
+  const [mode, setMode] = useState<'npm' | 'github' | 'file'>('file')
   const [pkg, setPkg] = useState('')
+  const [repo, setRepo] = useState('')
+  const [ref, setRef] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [config, setConfig] = useState('{}')
   const [error, setError] = useState('')
@@ -512,11 +530,13 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
     setInstalling(true)
     try {
       let res: Response
-      if (mode === 'npm') {
+      if (mode === 'npm' || mode === 'github') {
         res = await fetch('/api/plugins', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'npm', package: pkg.trim(), config: parsedConfig }),
+          body: JSON.stringify(mode === 'npm'
+            ? { source: 'npm', package: pkg.trim(), config: parsedConfig }
+            : { source: 'github', repo: repo.trim(), ref: ref.trim(), config: parsedConfig }),
         })
       } else {
         if (!file) { setError('Choose a .js/.mjs bundle file'); setInstalling(false); return }
@@ -538,9 +558,9 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <h2 className="font-semibold text-base">Install Plugin</h2>
       <div className="flex gap-2">
-        {(['file', 'npm'] as const).map((m) => (
+        {MODES.map(([m, label]) => (
           <button key={m} type="button" onClick={() => setMode(m)} className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}>
-            {m === 'npm' ? 'From npm' : 'From file'}
+            {label}
           </button>
         ))}
       </div>
@@ -552,6 +572,30 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
           </label>
           <input value={pkg} onChange={(e) => setPkg(e.target.value)} required placeholder="@scope/package-name or /abs/path/to/package" className="input font-mono" />
         </div>
+      ) : mode === 'github' ? (
+        /* Two fields, not one: the URL people paste already carries a branch
+           (…/tree/main), so the ref box stays optional and simply wins when
+           filled — nobody should have to edit a URL to change a branch. */
+        <>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted">
+              Repository <span className="text-danger">*</span>
+              <span className="ml-1 opacity-60">— owner/repo, or paste the address bar: https://github.com/owner/repo</span>
+            </label>
+            <input value={repo} onChange={(e) => setRepo(e.target.value)} required placeholder="OpenWhale-Org/OpenWhale" className="input font-mono" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted">
+              Branch, tag or commit
+              <span className="ml-1 opacity-60">— optional; defaults to the repo&apos;s default branch</span>
+            </label>
+            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main / v1.2.0 / 4f3a91c" className="input font-mono" />
+          </div>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>
+            The repo is cloned and built by npm — a source-only repo needs a <code className="font-mono">prepare</code> script in its
+            package.json. Private repos need <code className="font-mono">OPENWHALE_GITHUB_TOKEN</code> set on the engine.
+          </p>
+        </>
       ) : (
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted">
@@ -569,8 +613,14 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
         ⚠️ Installing a plugin runs third-party code inside the engine process with full access to credentials and accounts. Only install packages you trust.
       </p>
       {error && <p className="alert alert-danger whitespace-pre-wrap">{error}</p>}
-      <button type="submit" disabled={installing || (mode === 'npm' ? !pkg.trim() : !file)} className="btn btn-primary self-end">
-        {installing ? 'Installing… (npm may take a minute)' : 'Install'}
+      <button
+        type="submit"
+        disabled={installing || (mode === 'npm' ? !pkg.trim() : mode === 'github' ? !repo.trim() : !file)}
+        className="btn btn-primary self-end"
+      >
+        {installing
+          ? mode === 'github' ? 'Cloning and building… (may take a few minutes)' : 'Installing… (npm may take a minute)'
+          : 'Install'}
       </button>
     </form>
   )

@@ -168,7 +168,9 @@ export default definePlugin((ctx) => ({
 }))
 ```
 
-Install from the dashboard's Plugins page (npm name or local path) or `runtime.loadPlugin()` in code. Components register namespaced (`my-plugin/momentum`); hot reload is supported.
+Install from the dashboard's Plugins page — a built `.js`/`.mjs` bundle, a **GitHub repository** (`owner/repo`, or paste the address bar; optional branch/tag/commit), or an npm name or local path — or `runtime.loadPlugin()` in code. Components register namespaced (`my-plugin/momentum`); hot reload is supported.
+
+A GitHub install is cloned and built by npm, so a repo shipping only TypeScript sources needs a `prepare` script in its package.json (`"prepare": "npm run build"`); private repos need `OPENWHALE_GITHUB_TOKEN` set on the engine.
 
 ### Writing plugins with Claude
 

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { asLocalPath, npmSpawn } from '../plugins.js'
+import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry } from '../plugins.js'
 
 const isWin = process.platform === 'win32'
 
@@ -52,5 +53,111 @@ describe('npmSpawn', () => {
     expect(npm.file).toBe(process.execPath)
     expect(npm.args).toHaveLength(1)
     expect(npm.args[0]).toMatch(/[\\/]npm-cli\.js$/)
+  })
+})
+
+describe('parseGithubSpec', () => {
+  const url = (repo: string, ref?: string) => `git+https://github.com/${repo}.git${ref ? `#${ref}` : ''}`
+
+  it('accepts every shorthand and URL a repo is copied as', () => {
+    for (const input of [
+      'OpenWhale-Org/OpenWhale',
+      'github:OpenWhale-Org/OpenWhale',
+      'https://github.com/OpenWhale-Org/OpenWhale',
+      'http://www.github.com/OpenWhale-Org/OpenWhale',
+      'https://github.com/OpenWhale-Org/OpenWhale.git',
+      'git+https://github.com/OpenWhale-Org/OpenWhale.git',
+      'git@github.com:OpenWhale-Org/OpenWhale.git',
+      'ssh://git@github.com/OpenWhale-Org/OpenWhale.git',
+      '  https://github.com/OpenWhale-Org/OpenWhale/  ',
+    ]) {
+      expect(parseGithubSpec(input), `input: ${input}`).toEqual({
+        repo: 'OpenWhale-Org/OpenWhale',
+        url: url('OpenWhale-Org/OpenWhale'),
+      })
+    }
+  })
+
+  /* The whole reason this parser exists: what the address bar gives you is a
+     /tree/ URL, and npm rejects it. */
+  it('reads the ref out of a browsed URL', () => {
+    expect(parseGithubSpec('https://github.com/o/r/tree/main')).toEqual({ repo: 'o/r', ref: 'main', url: url('o/r', 'main') })
+    expect(parseGithubSpec('https://github.com/o/r/commit/4f3a91c').ref).toBe('4f3a91c')
+    expect(parseGithubSpec('https://github.com/o/r/releases/tag/v1.2.0').ref).toBe('v1.2.0')
+  })
+
+  it('keeps a slashed branch name whole', () => {
+    // A branch may contain slashes, so the tail of a /tree/ URL is the ref —
+    // `feat/venue-proxy`, not `feat`.
+    expect(parseGithubSpec('https://github.com/o/r/tree/feat/venue-proxy').ref).toBe('feat/venue-proxy')
+  })
+
+  it('takes the ref from a # suffix', () => {
+    expect(parseGithubSpec('o/r#v2').ref).toBe('v2')
+    expect(parseGithubSpec('git+https://github.com/o/r.git#abc123').ref).toBe('abc123')
+  })
+
+  it('lets an explicit ref beat one carried by the URL', () => {
+    // The form's ref box exists so a pasted link can be retargeted without editing it
+    expect(parseGithubSpec('https://github.com/o/r/tree/main', 'v1.0.0').ref).toBe('v1.0.0')
+    expect(parseGithubSpec('o/r#main', ' dev ').ref).toBe('dev')
+    expect(parseGithubSpec('o/r#main', '  ').ref).toBe('main')   // blank box = no opinion
+  })
+
+  it('drops query strings', () => {
+    expect(parseGithubSpec('https://github.com/o/r?tab=readme-ov-file').repo).toBe('o/r')
+  })
+
+  it('rejects what is not a github repo', () => {
+    for (const input of [
+      '',
+      'lodash',                                   // npm package, wrong tab
+      'https://gitlab.com/o/r',                   // another host
+      'https://github.com/o/r/issues/34',         // a page, not a ref
+      'https://github.com/OpenWhale-Org',         // owner only
+      'o/r#bad ref',                              // space in ref
+      'o/r#--upload-pack=x',                      // argument-shaped ref
+    ]) {
+      expect(() => parseGithubSpec(input), `input: ${input}`).toThrow()
+    }
+  })
+})
+
+describe('resolveEntry', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-entry-'))
+  /** A package dir with the given package.json and the listed files present. */
+  const pkg = (name: string, manifest: unknown, files: string[]) => {
+    const dir = path.join(root, name)
+    fs.mkdirSync(path.join(dir, 'dist'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest))
+    for (const f of files) fs.writeFileSync(path.join(dir, f), '')
+    return dir
+  }
+
+  it('reads the subpath map, preferring import over default', () => {
+    const dir = pkg('subpath', { exports: { '.': { import: './dist/esm.js', default: './dist/cjs.js' } } }, ['dist/esm.js', 'dist/cjs.js'])
+    expect(resolveEntry(dir)).toBe(path.join(dir, 'dist/esm.js'))
+  })
+
+  /* The sugar form has no './' key, so reading it as a subpath map finds
+     nothing and silently falls through to `main` — which a package shaped
+     this way usually does not declare. p-limit ships exactly this. */
+  it('treats a conditions-only exports object as the root entry', () => {
+    const dir = pkg('sugar', { exports: { types: './index.d.ts', default: './dist/real.js' }, main: './wrong.js' }, ['dist/real.js', 'wrong.js'])
+    expect(resolveEntry(dir)).toBe(path.join(dir, 'dist/real.js'))
+  })
+
+  it('falls back to module then main then index.js', () => {
+    const a = pkg('mod', { module: './dist/m.js', main: './dist/c.js' }, ['dist/m.js', 'dist/c.js'])
+    expect(resolveEntry(a)).toBe(path.join(a, 'dist/m.js'))
+    const b = pkg('bare', {}, ['index.js'])
+    expect(resolveEntry(b)).toBe(path.join(b, 'index.js'))
+  })
+
+  /* The GitHub case this exists for: the repo declares dist/index.js and
+     shipped only sources, because nothing built it. */
+  it('names the missing entry instead of leaving it to the loader', () => {
+    const dir = pkg('unbuilt', { exports: './dist/index.js' }, [])
+    expect(() => resolveEntry(dir, 'needs a prepare script')).toThrow(/dist\/index\.js.*not there.*needs a prepare script/s)
   })
 })

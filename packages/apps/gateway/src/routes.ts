@@ -17,7 +17,7 @@ import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance 
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
-import { installFromNpm, installFromFile, uninstallPlugin, listInstalledPlugins } from './plugins.js'
+import { installFromNpm, installFromGithub, installFromFile, uninstallPlugin, listInstalledPlugins } from './plugins.js'
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
 import { sseHandler } from './events.js'
 import { activityMeter } from './activity.js'
@@ -1153,9 +1153,18 @@ export function buildRouter(): Router {
         res.status(201).json(view)
         return
       }
-      const body = req.body as { source?: string; package?: string; config?: unknown }
+      const body = req.body as { source?: string; package?: string; repo?: string; ref?: string; config?: unknown }
+      if (body.source === 'github') {
+        if (!body.repo) {
+          res.status(400).send('Expected { source: "github", repo: "owner/repo" }')
+          return
+        }
+        const ref = body.ref?.trim()
+        res.status(201).json(await installFromGithub(runtime, body.repo.trim(), ref || undefined, body.config ?? {}))
+        return
+      }
       if (body.source !== 'npm' || !body.package) {
-        res.status(400).send('Expected { source: "npm", package: "..." }')
+        res.status(400).send('Expected { source: "npm", package: "..." } or { source: "github", repo: "..." }')
         return
       }
       res.status(201).json(await installFromNpm(runtime, body.package.trim(), body.config ?? {}))

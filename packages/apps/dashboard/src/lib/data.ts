@@ -68,6 +68,7 @@ export interface ExecutorStatusView {
 /** Installed-plugin view served by /api/plugins (gateway's plugin service). */
 export type PluginSource =
   | { kind: 'npm'; package: string }
+  | { kind: 'github'; repo: string; ref?: string; packageName: string }
   | { kind: 'local'; path: string; packageName: string }
   | { kind: 'file'; originalName: string }
 
