@@ -854,20 +854,21 @@ export class OpenWhaleRuntime implements IRuntime {
         for (const decl of executor.credentials) {
           const name = credentials[decl.label]
           if (!name) throw new Error(`Credential slot '${decl.label}' requires a credential (pass credentials['${decl.label}'])`)
-          const { type, data } = await this.readCredential(name)
           if ('raw' in decl) {
+            const { type, data } = await this.readCredential(name)
             if (decl.type !== type) throw new Error(`Slot '${decl.label}' requires a "${decl.type}" credential, but "${name}" is "${type}"`)
             if (!this.credentialTypes.get(type)?.raw) throw new Error(`Credential type "${type}" does not allow raw materialization`)
             slots.push({ label: decl.label, credentialName: name, raw: data })
           } else {
-            // decl.type pins a venue; the cell decides which credential types open it
-            const declVenue = decl.type
-            if (declVenue !== undefined) {
-              const ok = this.adapterRegistry.acceptedCredentialTypes(decl.kind, declVenue) ?? [declVenue]
-              if (!ok.includes(type)) throw new Error(`Slot '${decl.label}' requires a "${declVenue}" venue (accepts ${ok.join('/')}), but "${name}" is "${type}"`)
-            }
-            const session = await this.ensureSession(manualId, name, type, decl.kind, data, declVenue)
-            slots.push({ label: decl.label, credentialName: name, session })
+            // Account slots take an ACCOUNT name (venue-pinned accounts resolve
+            // through their cell) — bare credential names stay accepted.
+            const resolved = await this.resolveAccountBinding(name, {
+              kind: decl.kind,
+              ...(decl.type !== undefined ? { venueType: decl.type } : {}),
+              context: `Manual fire of "${executorId}", slot '${decl.label}'`,
+            })
+            const session = await this.ensureSession(manualId, resolved.credentialName, resolved.type, decl.kind, resolved.data, resolved.venue)
+            slots.push({ label: decl.label, credentialName: resolved.credentialName, session })
           }
         }
         executor.setMaterialized(manualId, slots)
