@@ -310,47 +310,12 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
       <div ref={areaRef} className="flex items-start">
       {showBoard && (
         <div className="flex flex-col gap-3 min-w-0" style={{ flexBasis: showManage ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
-          {/* What is being collected, and when it last spoke. */}
-          <KeyStrip
-            status={status}
-            events={events}
-            connected={connected}
-            subscribers={subscribers}
-          />
-
           <MonitorBoards
             monitorId={status.id}
             keys={Array.from(new Set([...status.activeKeys.map(k => k.key), ...status.manualKeys, ...status.dataKeys]))}
             emitCount={events.length}
           />
 
-          <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
-              <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} />
-              Live feed · {events.length} emits
-            </summary>
-            <div className="max-h-80 overflow-y-auto scroll-hidden font-mono text-xs" style={{ borderTop: '1px solid var(--border)' }}>
-              {events.length === 0 ? (
-                <p className="p-4" style={{ color: 'var(--muted)' }}>Waiting for emits…</p>
-              ) : events.map((event, i) => (
-                <div key={`${event.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-                  <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(event.ts).toLocaleTimeString()}</span>
-                  <span className="shrink-0" style={{ color: 'var(--warning)' }}>{event.key}</span>
-                  <DataView data={event.data} />
-                </div>
-              ))}
-            </div>
-          </details>
-
-          <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
-              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--muted)' }} />
-              Logs
-            </summary>
-            <div style={{ borderTop: '1px solid var(--border)' }}>
-              <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />
-            </div>
-          </details>
         </div>
       )}
       {showBoard && showManage && (
@@ -435,6 +400,42 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
             )}
             {error && <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
           </section>
+
+          {/* What is being collected, and when it last spoke. */}
+          <KeyStrip
+            status={status}
+            events={events}
+            connected={connected}
+            subscribers={subscribers}
+          />
+
+          <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} />
+              Live feed · {events.length} emits
+            </summary>
+            <div className="max-h-80 overflow-y-auto scroll-hidden font-mono text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+              {events.length === 0 ? (
+                <p className="p-4" style={{ color: 'var(--muted)' }}>Waiting for emits…</p>
+              ) : events.map((event, i) => (
+                <div key={`${event.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                  <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(event.ts).toLocaleTimeString()}</span>
+                  <span className="shrink-0" style={{ color: 'var(--warning)' }}>{event.key}</span>
+                  <DataView data={event.data} />
+                </div>
+              ))}
+            </div>
+          </details>
+
+          <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--muted)' }} />
+              Logs
+            </summary>
+            <div style={{ borderTop: '1px solid var(--border)' }}>
+              <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />
+            </div>
+          </details>
         </div>
       )}
       </div>
