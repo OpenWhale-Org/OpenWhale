@@ -5,7 +5,7 @@ description: Write runnable OpenWhale components — strategies, monitors, execu
 
 # OpenWhale Plugin Development
 
-> **Calibrated against `@openwhaleorg/core` v0.1.1 (re-verified 2026-08-06).** If the installed core is newer,
+> **Calibrated against `@openwhaleorg/core` v0.1.1 on main (re-verified 2026-08-25).** If the installed core is newer,
 > verify signatures against the framework source before trusting a template verbatim.
 
 OpenWhale is an AI-native trading framework: **Monitor → Trigger → Strategy → Queue → Executor**.
@@ -17,17 +17,19 @@ running Gateway; no framework code is ever modified.
 
 | Concept | One-liner | You write |
 |---|---|---|
-| **Credential** | A key: `type` + user-chosen `name` + encrypted data | a `credentialTypes` entry (Zod schema + `test`) |
+| **Credential** | A key: `type` + user-chosen `name` + encrypted data. A type is a key FAMILY — a CEX issues its own (`'binance'`), on-chain one wallet key (`'web3/evm'`) opens many venues | a `credentialTypes` entry (Zod schema + `test`, optional `logo`/`managed`) |
 | **Kind** | Domain vocabulary, namespaced (`'exchange/perp'`) | nothing to register — a kind exists iff a cell/implementation claims it |
-| **Adapter** | The `(kind, type)` cell: factory `create(data?)` | an `adapters` entry |
-| **Account** | First-class entity: implementation × credential | an `@OwAccount` class (read view) |
+| **Adapter** | The `(kind, venue)` cell: factory `create(data?)` + the credential types it accepts | an `adapters` entry |
+| **Account** | First-class entity: implementation × credential × declared params | an `@OwAccount` class (read view; may declare `paramsSchema` and a declarative detail panel) |
 | **Monitor** | contract / implementation / instance, data keyed by `(contractName, key)` | an `@OwMonitor` class |
 | **Executor** | Singleton service with named credential slots | an `@OwExecutor` class |
 | **Strategy** | Declarations + params + `triggers()` + `evaluate()` | an `@OwStrategy` class |
 | **Plugin** | Pure manifest — decorators attach metadata, arrays register | `definePlugin({...})` |
 
-Core rule everything hangs off: the **type × kind matrix**. kind = domain column, type = venue/credential
-row. Generic implementations claim a column, specializations claim a cell, specialization wins.
+Core rule everything hangs off: the **venue × kind matrix**. kind = domain column, venue = the place
+you trade/read (`'binance'`, `'boros'`, `'evm'`). A cell `(kind, venue)` names the credential types that
+open it (`credentialTypes`, default `[venue]` — the CEX case). Generic implementations claim a column,
+specializations claim a cell, specialization wins. `type` is the deprecated spelling of `venue`.
 
 ## What are you being asked to write?
 
@@ -51,7 +53,26 @@ LLM-driven analyst, copy-trading) over a tested `indicators.ts`. Read the one cl
 before writing: they show the account-slot / `accountVenue` idiom, `store`-based idempotency, and
 the discipline that risk limits live in code even when a model produces the signal.
 
-## Since v0.1.0 (quick delta index)
+## Since 2026-08-06 (newest first)
+
+- **`venue` replaces `type` on cells and account implementations** — `{ kind, venue, credentialTypes?,
+  create }`. On-chain venues list a shared key family (`credentialTypes: ['web3/evm']`) instead of a
+  venue-issued key; a cell without `credentialTypes` accepts `[venue]`. (`references/plugin.md`)
+- **Account params + declarative detail panels** — `@OwAccount({ paramsSchema, sections })`: params
+  render on the account form and reach the constructor as a third argument; `sections` describes the
+  detail tables/key-values the Dashboard draws from the class's own reader methods. (`references/plugin.md`)
+- **`paramsIllustrations`** on a strategy — sandboxed HTML iframes rendered inside the param form, fed
+  the live field values via postMessage. (`references/strategy.md`)
+- **Brand marks** — `logo` / `icon` / `readme` on the manifest; `logo` / `icon` / `description` /
+  `managed` on a credential type (`managed` hides it from the add-credential picker: created by a
+  script, e.g. a venue's delegated agent key). (`references/plugin.md`)
+- **Scripts stream and attach** — `ctx.emit?.(line)` feeds progress to the page while a run lasts;
+  `ScriptResult.files` offers downloads (inline content, report-sized). (`references/plugin.md`)
+- **`@openwhaleorg/web3`** — kind `'web3/chain'` (EVM read/sign session, `ChainAccount` wallet view),
+  credential types `'web3/evm'` (wallet key) and `'web3/rpc'`. On-chain venue packages depend on it for
+  the wallet key family and never ship their own chain client.
+
+## Since v0.1.0
 
 - **Optional executor credential slots** — `{ label, type, raw: true, optional: true }`: activation
   proceeds with the slot unbound; read with `this.rawIfBound(label)` (undefined = unbound) and
@@ -84,7 +105,8 @@ verified against the framework source — copy their shape exactly.
    exist on the object). All order flow travels `instruction → queue → executor`. Never try to
    place an order from a strategy.
 5. **No venue parameter when an account binding implies it.** The runtime injects
-   `AccountSlotMeta` before `triggers()`; derive the venue with `this.accountVenue('slotLabel')`.
+   `AccountSlotMeta` before `triggers()`; derive the venue with `this.accountVenue('slotLabel')` —
+   the account's cell venue (equal to the credential type only for venue-issued keys).
 6. **Monitor keys are clean**: no credential or instance identifiers inside a key. Data lives in
    `dataDir/monitors/{contractName}/{key}.jsonl`, shared by all implementations of a contract.
 7. **Params are read once, at activation** — triggers, subscriptions and executor slots all derive

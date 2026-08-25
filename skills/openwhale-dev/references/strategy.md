@@ -103,7 +103,7 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 |---|---|
 | `this.params` | `{ base, tunable }` raw objects — parse with your schemas for typing + defaults |
 | `this.account('label')` | The account slot's read view, typed as the declared class |
-| `this.accountVenue('label')` / `this.accountMeta('label')` | Bound account's venue (= credential type) / full `{label, accountName, venue, kind}` |
+| `this.accountVenue('label')` / `this.accountMeta('label')` | Bound account's venue — its cell's venue (`'binance'`, `'boros'`; equals the credential type only for venue-issued keys) / full `{label, accountName, venue, kind}` |
 | `this.monitor('label')` / `this.executor('label')` | Validated label, for triggers / rarely needed directly |
 | `this.monitorData('label')` | A `MonitorDataReader` for historical data: `keys() / readLast(key,n) / readAll(key) / readLatest(key) / readRange(key,from,to) / count(key) / stream(key) / readAllLatest() / readAllLast(n)` — records are `{ ts, data }`. `readAll` returns the whole stored history with no cap: prefer it over a large `readLast` when a fit needs every sample, since a windowed read silently truncates the evidence |
 | `this.instruction(execLabel, action, params, accountLabels?)` | Build a serializable `ExecutionInstruction` |
@@ -169,7 +169,38 @@ symbolA: z.string().meta({
 ```
 
 Free text still submits, so an unlisted symbol never blocks the form. See `references/monitor.md`
-§Symbol fields for the full contract.
+§Symbol fields for the full contract. Non-exchange kinds use the same marker with their own kind
+(`catalogue: { source: 'market', kind: 'pendle/rates' }`) — the venue's session must implement the
+catalogue read (`fetchMarkets`) for the picker to list anything.
+
+## Illustrating params
+
+A param whose meaning is geometric (a band, a timeline, a ladder) is easier to set with a picture
+that moves as the field changes. Declare `paramsIllustrations` on the strategy class — each entry is
+a self-contained HTML page rendered in a sandboxed iframe under its `section`'s fields, receiving the
+live values via `postMessage`:
+
+```ts
+import type { ParamIllustration } from '@openwhaleorg/core'
+
+const CORRIDOR_HTML = `<!doctype html><html><body><svg id="s"></svg><script>
+var v = {};
+function draw() { var edge = parseFloat(v.edgeRatio) || 0.95; /* draw with plain string concat */ }
+window.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'ow-params') { v = e.data.values || {}; draw(); }
+});
+window.addEventListener('resize', draw); draw();
+</script></body></html>`
+
+export const illustrations: ParamIllustration[] = [
+  { section: 'Corridor', title: 'Where orders rest', html: CORRIDOR_HTML, height: 225 },   // section matches .meta({ section })
+]
+// in the class:  readonly paramsIllustrations = illustrations
+```
+
+Compute layout from the iframe's real width on every draw (a fixed viewBox stretches text), keep the
+page dependency-free, and write it in plain string concatenation — the page is data shipped inside
+the plugin, not code with two escape layers.
 
 ## Don'ts
 

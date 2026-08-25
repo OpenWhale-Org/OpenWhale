@@ -13,6 +13,8 @@ import type { RawCredentialData } from '@openwhaleorg/core'
 export default definePlugin({
   name: 'my-plugin',            // becomes the id namespace for every component
   version: '1.0.0',
+  readme: '# my-plugin\n…',      // markdown for the Plugins page detail pane (optional)
+  logo: 'data:image/png;base64,…', // brand mark: https URL or data: URI; `icon: '🎯'` is the fallback
 
   credentialTypes: [ /* §Credential types */ ],
   adapters:        [ /* §Adapters */ ],
@@ -28,6 +30,9 @@ export default definePlugin({
 
 Plugin archetypes:
 - **Venue plugin** (binance, hyperliquid): credentialTypes + adapters (+ specialized Account).
+- **On-chain venue plugin** (pendle): adapters whose cells accept the shared wallet family
+  (`credentialTypes: ['web3/evm']`, from `@openwhaleorg/web3`) plus any venue-issued key of its own
+  (a delegated agent key, usually `managed`) — no chain client of its own.
 - **Domain package** (exchange): mock adapter cells + generic Account/Monitor/Executor classes.
 - **Strategy package**: strategies + their private monitors/executors.
 - **Pure data source**: credentialTypes + a specialized Monitor.
@@ -46,8 +51,15 @@ credentialTypes: [{
   }),
   test: async (data) => { await buildAdapter(data).fetchBalance() },   // throws = form shows error
   // raw: true,   // ONLY if some executor needs the raw data (raw slots are gated on this)
+  // logo: PNG_DATA_URI, icon: '🔑', description: 'One line under the name in the picker',
+  // managed: true,   // created by a script/flow (e.g. a delegated agent key): hidden from the
+  //                  // add-credential picker, existing entries still list and edit
 }],
 ```
+
+`type` names a key FAMILY, so it need not equal a venue: `'web3/evm'` is one wallet key that opens
+every EVM venue; a CEX key is its own family (`'binance'`). Namespace types the plugin owns as
+`'{plugin}/{name}'` when the plugin has more than one (`'pendle/boros-agent'`).
 
 Anything that changes how the credential is INTERPRETED (testnet, unified-account flag) belongs in
 the credential schema — never in plugin config.
@@ -79,7 +91,7 @@ Write a real venue package only when the venue needs code: a quirk override (Hyp
 orders need a price), a specialized Account (Binance portfolio-margin equity), or a venue-only
 Monitor.
 
-## Adapters — the (kind, type) cells
+## Adapters — the (kind, venue) cells
 
 ```ts
 const build = (data: RawCredentialData) => new MyVenueAdapter({
@@ -89,11 +101,25 @@ const build = (data: RawCredentialData) => new MyVenueAdapter({
 })
 
 adapters: [{
-  kind: 'exchange/perp', type: 'my-venue',
+  kind: 'exchange/perp', venue: 'my-venue',          // credentialTypes defaults to ['my-venue']
   // data optional: keyless call → public/read-only form (or throw if none exists)
   create: (data?) => data ? build(data) : new CcxtAdapter({ exchangeId: 'myvenue' }),
 }],
 ```
+
+A cell is `(kind, venue)`; `credentialTypes` lists the key families that open it. On-chain venues
+share the wallet family instead of issuing keys:
+
+```ts
+adapters: [
+  { kind: 'pendle/market', venue: 'pendle', credentialTypes: ['web3/evm'],
+    create: (data) => new PendleMarketSession(data ? { privateKey: String(data['privateKey']) } : {}) },
+  { kind: 'pendle/rates',  venue: 'boros',  credentialTypes: ['pendle/boros-agent'],   // venue-issued agent key
+    create: (data) => new BorosSession(data ? toAgentOptions(data) : {}) },
+]
+```
+
+`type:` is the deprecated spelling of `venue:` — existing cells load unchanged, write `venue` in new code.
 
 For `'exchange/perp'` cells the returned object must implement `PerpExchangeAdapter` from
 `@openwhaleorg/exchange` (fetchTicker/fetchBalance/fetchPositions/createOrder/setLeverage/
@@ -102,15 +128,15 @@ fetchFundingRates/watchTrades/...). If the venue is on ccxt, `CcxtAdapter` from
 
 ## Account implementations
 
-An account implementation is a plain class: `constructor(accountName, session)` where session is
-the adapter for the bound credential. It is the READ VIEW strategies receive — expose read
-methods only.
+An account implementation is a plain class: `constructor(accountName, session, params?)` where
+session is the adapter for the bound credential and `params` the values of its `paramsSchema`. It is
+the READ VIEW strategies receive — expose read methods only.
 
 ```ts
 import { OwAccount } from '@openwhaleorg/core'
 import type { PerpExchangeAdapter } from '@openwhaleorg/exchange'
 
-@OwAccount({ id: 'my-venue-perp', kind: 'exchange/perp', type: 'my-venue',   // omit type = kind-generic
+@OwAccount({ id: 'my-venue-perp', kind: 'exchange/perp', venue: 'my-venue',   // omit venue = kind-generic
              displayName: 'My Venue Perp Account' })
 export class MyVenuePerpAccount {
   constructor(readonly accountName: string, protected readonly session: PerpExchangeAdapter) {}
@@ -127,6 +153,46 @@ The generic `PerpAccount` / `SpotAccount` from `@openwhaleorg/exchange` already 
 venue — only specialize when the venue needs different math (e.g. Binance portfolio-margin equity).
 Strategies reference the CLASS in their `accounts` declaration to get its typed surface.
 
+### Account params and a declarative detail panel
+
+One credential can back many accounts that differ by configuration (which chains a wallet
+aggregates, which sub-account a venue key addresses). Declare that configuration as `paramsSchema`;
+the Dashboard renders it on the account form and hands the validated values to the constructor.
+When the generic balance/positions/orders panels don't fit the domain, declare the panel instead of
+writing UI — `sections` maps the class's own reader methods to tables and key-value blocks:
+
+```ts
+const paramsSchema = z.object({
+  chains: z.string().default('42161').meta({ displayName: 'Chain ids', placeholder: '1,42161,8453' }),
+})
+
+@OwAccount({
+  id: 'boros-account', kind: 'pendle/rates', venue: 'boros', displayName: 'Boros Account',
+  paramsSchema,
+  sections: [
+    { method: 'positions', title: 'Positions', kind: 'table', count: true, default: true, empty: 'No open positions.',
+      columns: [
+        { key: 'symbol', label: 'Market', format: 'mono', grow: true },
+        { key: 'side', label: 'Side', format: 'side' },
+        { key: 'sizeYu', label: 'Size (YU)', format: 'number', digits: 2, align: 'right' },
+        { key: 'unrealisedPnl', label: 'Unrealised', format: 'signed', digits: 2, align: 'right' },
+      ] },
+    { method: 'summary', title: 'Summary', kind: 'keyvalue' },   // method returns Record<string, unknown>
+  ],
+})
+export class BorosRatesAccount {
+  constructor(readonly accountName: string, private readonly session: BorosSession, params?: Record<string, unknown>) { … }
+  async positions(): Promise<Array<Record<string, unknown>>> { … }   // rows; keys match `columns[].key`
+  async summary(): Promise<Record<string, unknown>> { … }
+}
+```
+
+Column `format`s: `text | mono | number | usd | pct | signed | side | time | badge` (+ `digits`,
+`align`, `grow`). A `table` section's method returns an array of rows; a `keyvalue` section's returns
+one object. `count` shows the row count in the section header, `default` opens that section first,
+`empty` is the text for no rows. Without `sections` the Dashboard falls back to the duck-typed
+`balance()/positions()/orders()` panels.
+
 ## Extending the vocabulary: a new kind
 
 A kind exists iff something claims it — there is no registration call. To introduce
@@ -141,7 +207,7 @@ declare module '@openwhaleorg/core' {
 }
 
 // 2. A mock cell — canned data + no-op writes, powers AI-compiler dry-runs:
-adapters: [{ kind: 'lending/pool', type: 'mock', create: () => new MockLendingAdapter() }],
+adapters: [{ kind: 'lending/pool', venue: 'mock', create: () => new MockLendingAdapter() }],
 
 // 3. A kind-generic Account implementation (the canonical read view):
 @OwAccount({ kind: 'lending/pool', displayName: 'Lending Pool Account' })
@@ -149,7 +215,14 @@ export class LendingPoolAccount { ... }
 ```
 
 Kind names are namespaced `'domain/subkind'` — validated at load. After this, any plugin can add
-`(kind='lending/pool', type='aave')` cells and any strategy can declare slots of that kind.
+`(kind='lending/pool', venue='aave')` cells and any strategy can declare slots of that kind.
+
+The vocabulary, so packages agree: a **kind** is `'domain/product'` (`'exchange/perp'`,
+`'pendle/rates'`); a **venue** is where it happens (`'binance'`, `'boros'`, `'evm'`); a **credential
+type** is a key family (`'binance'`, `'web3/evm'`, `'pendle/boros-agent'`); a **cell** is
+`(kind, venue)` plus the credential types that open it. Products that are their own category
+(Pendle, Boros) get their own kinds under the plugin's namespace rather than being forced into
+`exchange/*`.
 
 ## Scripts (operator utilities) — and the raw factory form
 
@@ -167,7 +240,11 @@ export const planPreviewScript: ScriptDefinition = {
   paramOptions: async (runtime) => ({
     instanceId: (await (runtime as Rt).listInstanceViews()).map(v => ({ value: v.id, label: v.name })),
   }),
-  run: async ({ params, runtime }) => ({ text: report, json: rows }),   // text = monospace report
+  run: async ({ params, runtime, emit }) => {
+    emit?.('scanning 40 markets…')        // streamed to the page while the run lasts (absent when not streaming)
+    return { text: report, json: rows,   // text = monospace report, json = collapsible
+             files: [{ name: 'report.csv', mime: 'text/csv', content: csv }] }   // downloads; inline, report-sized
+  },
 }
 ```
 
