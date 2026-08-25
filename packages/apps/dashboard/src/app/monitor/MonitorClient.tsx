@@ -182,7 +182,6 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
   pendingKeys: Record<string, string[]>
   credentials: CredentialInfo[]
 }) {
-  const [historyKey, setHistoryKey] = useState<string | null>(null)
   /* Board is what you open this page FOR; Manage is the plumbing you set up
      once. Both can be on screen (Split), but Board is the default alone. */
   const [view, setView] = useState<'board' | 'split' | 'manage'>(() => {
@@ -435,33 +434,6 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
               </div>
             )}
             {error && <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
-          </section>
-
-          <section className="rounded-lg p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>
-              STORED ({status.dataKeys.length})
-            </span>
-            {status.dataKeys.length === 0 ? (
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>No recorded data yet.</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {status.dataKeys.map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setHistoryKey(historyKey === k ? null : k)}
-                    className="hoverable hoverable-flat text-xs px-2 py-1 rounded-md font-mono"
-                    style={{
-                      background: historyKey === k ? 'var(--accent)' : 'var(--background)',
-                      color: historyKey === k ? '#fff' : 'var(--foreground)',
-                      border: '1px solid var(--border)',
-                    }}
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
-            )}
-            {historyKey && <HistoryPanel monitorId={status.id} dataKey={historyKey} />}
           </section>
         </div>
       )}
@@ -727,48 +699,6 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
 
 // ── History panel ─────────────────────────────────────────────────────────────
 
-function HistoryPanel({ monitorId, dataKey }: { monitorId: string; dataKey: string }) {
-  const [records, setRecords] = useState<MonitorRecord[]>([])
-  const [total, setTotal] = useState(0)
-  const [limit, setLimit] = useState(100)
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async (n: number) => {
-    setLoading(true)
-    const res = await fetch(`/api/monitor/${encodeURIComponent(monitorId)}/${encodeURIComponent(dataKey)}?n=${n}`)
-    if (res.ok) {
-      const body = await res.json() as { records: MonitorRecord[]; total: number }
-      setRecords(body.records)
-      setTotal(body.total)
-    }
-    setLoading(false)
-  }, [monitorId, dataKey])
-
-  useEffect(() => { void load(limit) }, [load, limit])
-
-  return (
-    <div className="rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-      <div className="px-3 py-1.5 flex items-center gap-2 text-xs" style={{ background: 'var(--background)', color: 'var(--muted)' }}>
-        <span className="font-mono">{dataKey}</span>
-        <span className="flex-1">{records.length} of {total} records{loading ? ' · loading…' : ''}</span>
-        {total > records.length && (
-          <button onClick={() => setLimit((n) => Math.min(1000, n + 200))} style={{ color: 'var(--accent)' }}>load more</button>
-        )}
-        <button onClick={() => void load(limit)} style={{ color: 'var(--accent)' }}>refresh</button>
-      </div>
-      <div className="max-h-72 overflow-y-auto font-mono text-xs">
-        {records.length === 0 ? (
-          <p className="p-3" style={{ color: 'var(--muted)' }}>No records.</p>
-        ) : [...records].reverse().map((r, i) => (
-          <div key={`${r.ts}-${i}`} className="px-3 py-1.5 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-            <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.ts).toLocaleString()}</span>
-            <DataView data={r.data} />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 /**
  * Friendly rendering: scalar fields inline; arrays/objects become chips that

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { JsonTree } from './JsonTree'
 
 /** One-click copy with transient feedback. Copies pretty JSON for objects, raw text otherwise. */
 export function CopyButton({ value, label }: { value: unknown; label?: string }) {
@@ -47,9 +48,9 @@ export function JsonModal({ title, data, onClose }: { title: string; data: unkno
           <CopyButton value={text} label="copy JSON" />
           <button onClick={onClose} className="text-sm px-2" style={{ color: 'var(--muted)' }}>✕</button>
         </div>
-        <pre className="flex-1 overflow-auto p-4 text-xs font-mono whitespace-pre" style={{ color: 'var(--foreground)' }}>
-          {text}
-        </pre>
+        <div className="flex-1 overflow-auto scroll-hidden p-4">
+          <JsonTree data={data} openDepth={2} />
+        </div>
       </div>
     </div>
   )
