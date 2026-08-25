@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { pathToFileURL } from 'url'
-import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged } from '../plugins.js'
+import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged, suggestAlias } from '../plugins.js'
 
 const isWin = process.platform === 'win32'
 
@@ -240,5 +240,36 @@ describe('staging — what makes a reinstall load new code', () => {
     ]) {
       expect(stagedDirOf(p), `path: ${p}`).toBeUndefined()
     }
+  })
+})
+
+describe('suggestAlias — a namespace for somebody else\'s plugin of the same name', () => {
+  /* The suggestion is not a throwaway: from here on it is the first half of
+     every id the plugin registers, and instances persist those ids. Naming the
+     publisher is what makes two `funding-arb`s tellable apart in a rail. */
+  it('names the publisher when the source has one', () => {
+    expect(suggestAlias('funding-arb', { kind: 'github', repo: 'alice/funding-arb', packageName: 'funding-arb' }, ['funding-arb']))
+      .toBe('alice-funding-arb')
+    expect(suggestAlias('funding-arb', { kind: 'npm', package: '@alice/funding-arb' }, ['funding-arb']))
+      .toBe('alice-funding-arb')
+  })
+
+  it('falls back to numbering when there is no publisher to name', () => {
+    // An unscoped npm package and an uploaded bundle say nothing about whose it is
+    expect(suggestAlias('funding-arb', { kind: 'npm', package: 'funding-arb' }, ['funding-arb'])).toBe('funding-arb-2')
+    expect(suggestAlias('funding-arb', { kind: 'file', originalName: 'bundle.mjs' }, ['funding-arb'])).toBe('funding-arb-2')
+  })
+
+  it('keeps going until it finds one nothing is using', () => {
+    const taken = ['funding-arb', 'alice-funding-arb', 'funding-arb-2', 'funding-arb-3']
+    expect(suggestAlias('funding-arb', { kind: 'github', repo: 'alice/funding-arb', packageName: 'x' }, taken))
+      .toBe('funding-arb-4')
+  })
+
+  it('produces something usable as one id segment', () => {
+    // Whatever the source looked like, the result has to survive being half of
+    // `<namespace>/<strategy>` — the runtime rejects anything else
+    const alias = suggestAlias('funding arb!', { kind: 'github', repo: 'Al.ice_9/x', packageName: 'x' }, [])
+    expect(alias).toMatch(/^[A-Za-z0-9][\w.-]*$/)
   })
 })

@@ -1150,26 +1150,27 @@ export function buildRouter(): Router {
       if (req.file) {
         const form = req.body as Record<string, string>
         const config = parseConfig(form['config'])
-        const view = await installFromFile(runtime, req.file.originalname, req.file.buffer.toString('utf8'), config, form['overwrite'] === 'true')
+        const view = await installFromFile(runtime, req.file.originalname, req.file.buffer.toString('utf8'), config, form['overwrite'] === 'true', form['alias'] || undefined)
         res.status(201).json(view)
         return
       }
-      const body = req.body as { source?: string; package?: string; repo?: string; ref?: string; config?: unknown; overwrite?: boolean }
+      const body = req.body as { source?: string; package?: string; repo?: string; ref?: string; config?: unknown; overwrite?: boolean; alias?: string }
       const overwrite = body.overwrite === true
+      const alias = body.alias?.trim() || undefined
       if (body.source === 'github') {
         if (!body.repo) {
           res.status(400).send('Expected { source: "github", repo: "owner/repo" }')
           return
         }
         const ref = body.ref?.trim()
-        res.status(201).json(await installFromGithub(runtime, body.repo.trim(), ref || undefined, body.config ?? {}, overwrite))
+        res.status(201).json(await installFromGithub(runtime, body.repo.trim(), ref || undefined, body.config ?? {}, overwrite, alias))
         return
       }
       if (body.source !== 'npm' || !body.package) {
         res.status(400).send('Expected { source: "npm", package: "..." } or { source: "github", repo: "..." }')
         return
       }
-      res.status(201).json(await installFromNpm(runtime, body.package.trim(), body.config ?? {}, overwrite))
+      res.status(201).json(await installFromNpm(runtime, body.package.trim(), body.config ?? {}, overwrite, alias))
     } catch (err) {
       /* A name collision is a question the user can answer, so it comes back
          as structured data rather than prose: 409 with what it collided with,
@@ -1178,6 +1179,11 @@ export function buildRouter(): Router {
         res.status(409).json({
           conflict: {
             plugin: err.plugin,
+            /* sameSource is the difference between "a new version of this" and
+               "somebody else's plugin of the same name" — the form needs it to
+               know whether to offer overwrite or a namespace. */
+            sameSource: err.sameSource,
+            suggestedAlias: err.suggestedAlias,
             ...(err.existing ? { source: describeSource(err.existing.source), installedAt: err.existing.installedAt } : {}),
           },
           error: errText(err),

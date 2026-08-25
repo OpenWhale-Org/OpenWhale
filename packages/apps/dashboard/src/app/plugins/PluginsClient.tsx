@@ -255,6 +255,13 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <TypeMark logo={pluginMark(plugin, credentialTypes).logo} icon={pluginMark(plugin, credentialTypes).icon} label={plugin.name} size={26} />
           <span className="text-base font-medium">{plugin.name}</span>
+          {/* Installed under a namespace that is not its own name — say whose
+              plugin this actually is, or the rail is a list of aliases. */}
+          {plugin.declaredName && (
+            <span className="badge badge-neutral" title={`The package calls itself "${plugin.declaredName}"`}>
+              declared: {plugin.declaredName}
+            </span>
+          )}
           <span className="badge badge-neutral">v{plugin.version}</span>
           {sourceHref ? (
             <a href={sourceHref} target="_blank" rel="noopener noreferrer" className="badge badge-neutral truncate max-w-[24rem] hover:underline" title={sourceHref}>{sourceBadge}</a>
@@ -567,7 +574,14 @@ const MODES = [
   ['npm', 'From npm'],
 ] as const
 
-type Conflict = { plugin: string; source?: string; installedAt?: string }
+type Conflict = {
+  plugin: string
+  /** True when the incoming package is the same artefact — a new version. */
+  sameSource: boolean
+  suggestedAlias: string
+  source?: string
+  installedAt?: string
+}
 type ReplaceOutcome = { plugin: string; resumed: string[]; orphaned: string[] }
 
 function InstallForm({ onSuccess }: { onSuccess: () => void }) {
@@ -582,28 +596,34 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   /* The same plugin arriving from a second source is a question, not a
      failure — the engine says what it collided with and waits to be told. */
   const [conflict, setConflict] = useState<Conflict | null>(null)
+  /* The namespace to install a same-named-but-different plugin under. Every id
+     it registers is built from this, and instances persist those ids, so it is
+     chosen once here and never again. */
+  const [alias, setAlias] = useState('')
   /* A replacement is the one install worth reporting instead of just closing:
      it may have left instances behind that the new version cannot run. */
   const [outcome, setOutcome] = useState<ReplaceOutcome | null>(null)
 
-  async function post(overwrite: boolean, parsedConfig: unknown): Promise<Response> {
+  async function post(overwrite: boolean, as: string, parsedConfig: unknown): Promise<Response> {
     if (mode === 'npm' || mode === 'github') {
+      const common = { config: parsedConfig, overwrite, ...(as ? { alias: as } : {}) }
       return fetch('/api/plugins', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mode === 'npm'
-          ? { source: 'npm', package: pkg.trim(), config: parsedConfig, overwrite }
-          : { source: 'github', repo: repo.trim(), ref: ref.trim(), config: parsedConfig, overwrite }),
+          ? { source: 'npm', package: pkg.trim(), ...common }
+          : { source: 'github', repo: repo.trim(), ref: ref.trim(), ...common }),
       })
     }
     const form = new FormData()
     form.set('file', file!)
     form.set('config', JSON.stringify(parsedConfig))
     if (overwrite) form.set('overwrite', 'true')
+    if (as) form.set('alias', as)
     return fetch('/api/plugins', { method: 'POST', body: form })
   }
 
-  async function run(overwrite: boolean) {
+  async function run(overwrite: boolean, as = '') {
     setError('')
     setConflict(null)
     let parsedConfig: unknown
@@ -616,11 +636,13 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
     if (mode === 'file' && !file) { setError('Choose a .js/.mjs bundle file'); return }
     setInstalling(true)
     try {
-      const res = await post(overwrite, parsedConfig)
+      const res = await post(overwrite, as, parsedConfig)
       if (res.status === 409) {
         const body = await res.json() as { conflict?: Conflict; error?: string }
-        if (body.conflict) setConflict(body.conflict)
-        else setError(body.error ?? 'Install failed')
+        if (body.conflict) {
+          setConflict(body.conflict)
+          setAlias(body.conflict.suggestedAlias)
+        } else setError(body.error ?? 'Install failed')
         return
       }
       if (!res.ok) {
@@ -729,28 +751,69 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
       </p>
       {error && <p className="alert alert-danger whitespace-pre-wrap">{error}</p>}
       {conflict && (
-        <div className="alert alert-warning text-xs flex flex-col gap-1.5">
-          <span className="font-medium">
-            <span className="font-mono">{conflict.plugin}</span> is already installed
-            {conflict.source && <> from <span className="font-mono">{conflict.source}</span></>}
-            {conflict.installedAt && <span className="opacity-70"> ({new Date(conflict.installedAt).toLocaleString()})</span>}.
-          </span>
-          {/* Deliberately not the same bargain as uninstall: replacing keeps
-              every instance, account and credential, because the new version
-              almost certainly still has the strategies they name. */}
-          <span className="opacity-70">
-            Overwriting replaces its code. Instances, accounts and credentials are kept — anything running is restarted on
-            the new code, and anything whose strategy the new version dropped is left marked broken rather than deleted.
-          </span>
+        /* Two very different situations wear the same collision, and the
+           source tells them apart. Same package = a new version of what is
+           installed, so overwrite is the answer. Different package = two
+           authors who both called their plugin `funding-arb`, and the right
+           answer is a namespace of its own — overwriting there would replace a
+           stranger's plugin with this one and take its strategies with it. */
+        <div className="alert alert-warning text-xs flex flex-col gap-2">
+          {conflict.sameSource ? (
+            <>
+              <span className="font-medium">
+                <span className="font-mono">{conflict.plugin}</span> is already installed from this same source
+                {conflict.source && <> (<span className="font-mono">{conflict.source}</span>)</>}
+                {conflict.installedAt && <span className="opacity-70"> — {new Date(conflict.installedAt).toLocaleString()}</span>}.
+              </span>
+              <span className="opacity-70">
+                Overwriting replaces its code. Instances, accounts and credentials are kept — anything running restarts on
+                the new code, and anything whose strategy the new version dropped is left marked broken rather than deleted.
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-medium">
+                The namespace <span className="font-mono">{conflict.plugin}</span> is taken
+                {conflict.source && <> by an install from <span className="font-mono">{conflict.source}</span></>}.
+              </span>
+              <span className="opacity-70">
+                This package came from somewhere else, so it is a different plugin that happens to share a name. Give it a
+                namespace of its own — its strategies, monitors and accounts will be named after it
+                (<span className="font-mono">{alias || conflict.suggestedAlias}/…</span>), and it cannot be changed later
+                because instances are saved under those ids.
+              </span>
+              <label className="flex flex-col gap-1 mt-0.5">
+                <span className="opacity-70">Install as</span>
+                <input
+                  value={alias}
+                  onChange={(e) => setAlias(e.target.value)}
+                  pattern="[A-Za-z0-9][\w.-]*"
+                  className="input font-mono"
+                  placeholder={conflict.suggestedAlias}
+                />
+              </label>
+            </>
+          )}
         </div>
       )}
       <div className="flex gap-2 self-end">
+        {conflict && !conflict.sameSource && (
+          <button
+            type="button"
+            onClick={() => void run(false, alias.trim() || conflict.suggestedAlias)}
+            disabled={installing}
+            className="btn btn-primary"
+          >
+            {installing ? 'Installing…' : `Install as ${alias.trim() || conflict.suggestedAlias}`}
+          </button>
+        )}
         {conflict && (
           <button
             type="button"
             onClick={() => void run(true)}
             disabled={installing}
-            className="btn btn-danger-solid"
+            className={`btn ${conflict.sameSource ? 'btn-danger-solid' : 'btn-danger'}`}
+            title={conflict.sameSource ? undefined : 'Only if this really is the same plugin, moved to a new source'}
           >
             {installing ? 'Overwriting…' : `Overwrite ${conflict.plugin}`}
           </button>

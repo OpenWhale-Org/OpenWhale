@@ -108,6 +108,32 @@ function assertNamespacedKind(kind: string): void {
   }
 }
 
+/** How a plugin is loaded — currently just which namespace it takes. */
+export interface PluginLoadOptions {
+  /**
+   * Namespace to install under, instead of the name the package declares.
+   *
+   * The escape hatch for the fact that plugin names are not globally unique:
+   * two authors can each publish a `funding-arb`, and without this the second
+   * one is unusable — its ids would collide with the first's, silently, since
+   * the component registries are last-writer-wins.
+   *
+   * It is chosen once, at install, and cannot change afterwards: instances
+   * persist `<namespace>/<strategy>`, so renaming would orphan every one.
+   */
+  as?: string
+}
+
+/** Namespaces become the first segment of every id the plugin registers. */
+function resolveNamespace(plugin: OpenWhalePlugin, opts?: PluginLoadOptions): string {
+  const ns = opts?.as?.trim()
+  if (!ns) return plugin.name
+  if (!/^[a-z0-9][\w.-]*$/i.test(ns)) {
+    throw new Error(`"${ns}" is not a usable plugin namespace — letters, digits, dot, dash and underscore only, and no "/"`)
+  }
+  return ns
+}
+
 /** Import a built plugin module and hand back its default-exported factory. */
 async function importPluginFactory(filePath: string): Promise<PluginFactory<unknown>> {
   // webpackIgnore: true — keep bundlers from trying to resolve the dynamic path
@@ -951,10 +977,11 @@ export class OpenWhaleRuntime implements IRuntime {
     await def.test(parsed)
   }
 
-  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): string {
+  loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig, opts?: PluginLoadOptions): string {
     const plugin = this.buildPlugin(factory, config)
-    if (this.loadedPlugins.has(plugin.name)) throw new PluginAlreadyLoadedError(plugin.name)
-    return this.registerPlugin(plugin)
+    const ns = resolveNamespace(plugin, opts)
+    if (this.loadedPlugins.has(ns)) throw new PluginAlreadyLoadedError(ns, plugin.name)
+    return this.registerPlugin(plugin, ns)
   }
 
   /**
@@ -972,8 +999,7 @@ export class OpenWhaleRuntime implements IRuntime {
     return factory({ credentials: this.credentialStore, config, adapters: this.adapterRegistry, publicSessions: this.publicSessions })
   }
 
-  private registerPlugin(plugin: OpenWhalePlugin): string {
-    const ns = plugin.name  // e.g. 'hyperliquid'
+  private registerPlugin(plugin: OpenWhalePlugin, ns: string): string {
     const p = (id: string) => `${ns}/${id}`
 
     for (const cell of plugin.adapters ?? []) {
@@ -1020,6 +1046,7 @@ export class OpenWhaleRuntime implements IRuntime {
 
     this.loadedPlugins.set(ns, {
       name: ns,
+      ...(plugin.name !== ns ? { declaredName: plugin.name } : {}),
       version: plugin.version,
       ...(plugin.readme !== undefined ? { readme: plugin.readme } : {}),
       ...(plugin.logo !== undefined ? { logo: plugin.logo } : {}),
@@ -1043,8 +1070,8 @@ export class OpenWhaleRuntime implements IRuntime {
    * Load a plugin from a built JS module on disk. The module must default-export
    * a PluginFactory. Same namespacing and registration as loadPlugin().
    */
-  async loadPluginFromPath(filePath: string, config: unknown): Promise<string> {
-    return this.loadPlugin(await importPluginFactory(filePath), config)
+  async loadPluginFromPath(filePath: string, config: unknown, opts?: PluginLoadOptions): Promise<string> {
+    return this.loadPlugin(await importPluginFactory(filePath), config, opts)
   }
 
   /**
@@ -1065,14 +1092,14 @@ export class OpenWhaleRuntime implements IRuntime {
    * deactivate would persist enabled=false, which would silently turn "I
    * upgraded a plugin" into "my strategies are off after the next reboot".
    */
-  async replacePluginFromPath(filePath: string, config: unknown): Promise<PluginReplaceResult> {
-    return this.replacePlugin(await importPluginFactory(filePath), config)
+  async replacePluginFromPath(filePath: string, config: unknown, opts?: PluginLoadOptions): Promise<PluginReplaceResult> {
+    return this.replacePlugin(await importPluginFactory(filePath), config, opts)
   }
 
   /** replacePluginFromPath for a factory already in hand. */
-  async replacePlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): Promise<PluginReplaceResult> {
+  async replacePlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig, opts?: PluginLoadOptions): Promise<PluginReplaceResult> {
     const plugin = this.buildPlugin(factory, config)
-    const ns = plugin.name
+    const ns = resolveNamespace(plugin, opts)
     const existing = this.loadedPlugins.get(ns)
 
     if (existing) {
@@ -1082,7 +1109,7 @@ export class OpenWhaleRuntime implements IRuntime {
       // Nothing of the plugin's is live now, so the ordinary guard is satisfied
       this.unloadPlugin(ns)
     }
-    this.registerPlugin(plugin)
+    this.registerPlugin(plugin, ns)
 
     /* Start everything of this plugin's that is marked enabled and is not
        already running — boot's exact rule, `enabled` meaning "should be

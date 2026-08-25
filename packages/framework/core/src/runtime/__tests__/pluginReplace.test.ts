@@ -168,6 +168,43 @@ describe('replacing a plugin in place', () => {
     }
   })
 
+  /* The reason a namespace can differ from a plugin's name at all: plugin
+     names are not globally unique. Two people each publish a `funding-arb`,
+     and without a namespace of its own the second one is not merely refused —
+     its ids would collide with the first's, and the component registries are
+     last-writer-wins, so it would quietly replace strategies that are running. */
+  it('installs someone else\'s plugin of the same name under its own namespace', async () => {
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'run-'))
+    const runtime = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
+    runtime.loadPlugin(BOTH, {})
+    const ns = runtime.loadPlugin(ALPHA_ONLY, {}, { as: 'alice-swappable' })
+
+    expect(ns).toBe('alice-swappable')
+    expect(runtime.listStrategies().map(s => s.id).sort())
+      .toEqual(['alice-swappable/alpha', 'swappable/alpha', 'swappable/beta'])
+
+    // Both are listed, and the stranger says what it actually calls itself
+    const loaded = runtime.listLoadedPlugins()
+    expect(loaded.map(p => p.name).sort()).toEqual(['alice-swappable', 'swappable'])
+    expect(loaded.find(p => p.name === 'alice-swappable')?.declaredName).toBe('swappable')
+    expect(loaded.find(p => p.name === 'swappable')?.declaredName).toBeUndefined()
+
+    // Removing one leaves the other whole — separate namespaces, separate ids
+    runtime.unloadPlugin('alice-swappable')
+    expect(runtime.listStrategies().map(s => s.id).sort()).toEqual(['swappable/alpha', 'swappable/beta'])
+  })
+
+  it('rejects a namespace that would not survive being half of an id', () => {
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'run-'))
+    const runtime = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
+    // A '/' would split into a second segment and make `a/b/alpha` ambiguous.
+    // An EMPTY alias is not an error — it means "use the declared name".
+    for (const bad of ['alice/swappable', '-leading', 'has space', 'a/b']) {
+      expect(() => runtime.loadPlugin(BOTH, {}, { as: bad }), `alias: ${bad}`).toThrow()
+      runtime.listLoadedPlugins().forEach(p => runtime.unloadPlugin(p.name))
+    }
+  })
+
   /* Uninstall's promise, stated from the other side: a plugin with instances
      cannot simply be dropped. pluginDependents is what the gateway reads to
      refuse, and it must count a STOPPED instance too — its params are just as

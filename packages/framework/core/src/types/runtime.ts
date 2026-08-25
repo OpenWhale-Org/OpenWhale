@@ -32,7 +32,19 @@ export interface RuntimeOptions {
 
 /** Summary of a loaded plugin: its namespace and the registry ids it contributed. */
 export interface LoadedPluginInfo {
+  /**
+   * The NAMESPACE this install occupies — what every id it registers is
+   * prefixed with, and the key it is addressed by.
+   *
+   * Usually the name the package gives itself, but not necessarily: plugin
+   * names are not globally unique (two people can both publish a
+   * `funding-arb`), while a namespace has to be unique on one machine or the
+   * two would silently overwrite each other's strategies. So a second plugin
+   * claiming a taken name is installed under a different namespace instead.
+   */
   name: string
+  /** What the package calls itself, when that is not the namespace it got. */
+  declaredName?: string
   version: string
   /** Markdown shipped by the plugin (manifest `readme`) — the Plugins page's detail pane. */
   readme?: string
@@ -53,10 +65,19 @@ export interface LoadedPluginInfo {
   cells: Array<{ kind: string; venue: string }>
 }
 
-/** Thrown when a plugin with this name is already loaded — the signal to offer a replace. */
+/**
+ * Thrown when the namespace a plugin wants is taken — the signal to ask
+ * whether this is a new version of what is there, or a different plugin that
+ * happens to share a name and needs one of its own.
+ */
 export class PluginAlreadyLoadedError extends Error {
-  constructor(public readonly pluginName: string) {
-    super(`Plugin "${pluginName}" is already loaded — unload it first`)
+  constructor(
+    /** The namespace already in use. */
+    public readonly pluginName: string,
+    /** What the incoming package calls itself, when it differs from the namespace. */
+    public readonly declaredName?: string,
+  ) {
+    super(`Plugin namespace "${pluginName}" is already in use — unload it first, or install under another namespace`)
     this.name = 'PluginAlreadyLoadedError'
   }
 }

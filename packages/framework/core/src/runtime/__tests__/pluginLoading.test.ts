@@ -87,7 +87,7 @@ describe('runtime plugin loading', () => {
 
   it('rejects loading the same plugin twice', async () => {
     await runtime.loadPluginFromPath(pluginPath, {})
-    await expect(runtime.loadPluginFromPath(pluginPath, {})).rejects.toThrow(/already loaded/)
+    await expect(runtime.loadPluginFromPath(pluginPath, {})).rejects.toThrow(/namespace "testplug" is already in use/)
   })
 
   it('rejects a module without a default factory export', async () => {

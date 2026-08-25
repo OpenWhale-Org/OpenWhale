@@ -32,8 +32,15 @@ export type PluginSource =
   | { kind: 'file'; originalName: string }
 
 export interface PluginManifestEntry {
-  /** Plugin namespace (OpenWhalePlugin.name), known after first load. */
+  /** The namespace this install occupies — the key everything addresses it by. */
   name: string
+  /**
+   * Set when the namespace was chosen at install rather than taken from the
+   * package, i.e. this is somebody else's plugin of the same name. Kept
+   * because every later load has to reproduce it — the ids in the user's
+   * instances are built from it.
+   */
+  alias?: string
   source: PluginSource
   /** Absolute path of the module loaded via runtime.loadPluginFromPath. */
   entryPath: string
@@ -62,14 +69,79 @@ export interface InstalledPluginView extends LoadedPluginInfo {
  */
 export class PluginConflictError extends Error {
   constructor(
+    /** The namespace already taken. */
     readonly plugin: string,
     readonly existing: PluginManifestEntry | undefined,
+    /**
+     * Whether the incoming package is the SAME artefact as the installed one.
+     *
+     * The whole question in one flag. Plugin names are not globally unique —
+     * two authors can each publish a `funding-arb` — so a name collision alone
+     * says nothing about whether this is a new version or a stranger. Where it
+     * came from does: the same npm package or the same repo is an upgrade,
+     * anything else is a different plugin that needs a namespace of its own.
+     */
+    readonly sameSource: boolean,
+    /** A free namespace to offer when it is a different plugin. */
+    readonly suggestedAlias: string,
   ) {
     super(
-      `"${plugin}" is already installed${existing ? ` (${describeSource(existing.source)})` : ''}` +
-        ' — install again with overwrite to replace it.',
+      sameSource
+        ? `"${plugin}" is already installed from the same source${existing ? ` (${describeSource(existing.source)})` : ''}` +
+            ' — install again with overwrite to replace it.'
+        : `The namespace "${plugin}" is taken${existing ? ` by an install from ${describeSource(existing.source)}` : ''}.` +
+            ` This package came from somewhere else, so it is a different plugin sharing a name — install it as "${suggestedAlias}",` +
+            ' or overwrite if it really is the same plugin that moved.',
     )
     this.name = 'PluginConflictError'
+  }
+}
+
+/**
+ * Where a source points, as one comparable string.
+ *
+ * Compared instead of the plugin name because the name is what collided.
+ * Version and branch are left out on purpose: `funding-arb@2` replacing
+ * `funding-arb@1`, or a repo on a different tag, is the same plugin.
+ */
+function sourceIdentity(source: PluginSource): string {
+  switch (source.kind) {
+    case 'npm': return `npm:${parsePackageSpec(source.package).packageName}`
+    case 'github': return `github:${source.repo.toLowerCase()}`
+    case 'local': return `local:${source.path}`
+    case 'file': return `file:${source.originalName}`
+  }
+}
+
+/** Whoever published it — the half of a source that makes a good namespace prefix. */
+function ownerOf(source: PluginSource): string | undefined {
+  switch (source.kind) {
+    case 'github': return source.repo.split('/')[0]
+    case 'npm': {
+      const scope = /^@([^/]+)\//.exec(source.package)
+      return scope?.[1]
+    }
+    case 'local': return path.basename(path.dirname(source.path))
+    case 'file': return undefined
+  }
+}
+
+/**
+ * A namespace nothing is using yet, for the second plugin of a given name.
+ *
+ * Prefers the publisher — `alice-funding-arb` says whose it is at a glance,
+ * which matters because from here on that string is what the user sees on
+ * every strategy the plugin provides.
+ */
+export function suggestAlias(declared: string, source: PluginSource, taken: Iterable<string>): string {
+  const used = new Set(taken)
+  const clean = (v: string) => v.replace(/[^\w.-]/g, '-').replace(/^-+|-+$/g, '')
+  const owner = ownerOf(source)
+  const preferred = owner ? `${clean(owner)}-${clean(declared)}` : ''
+  if (preferred && !used.has(preferred)) return preferred
+  for (let n = 2; ; n++) {
+    const candidate = `${clean(declared)}-${n}`
+    if (!used.has(candidate)) return candidate
   }
 }
 
@@ -302,13 +374,14 @@ async function stageLoadAndRecord(
   source: PluginSource,
   config: unknown,
   overwrite: boolean,
+  alias: string | undefined,
   hint?: string,
 ): Promise<InstalledPluginView> {
   const before = await readManifest()
   const { entryPath, dir } = await stage(packageName, hint)
-  let loaded: { name: string; replace?: PluginReplaceResult }
+  let loaded: { name: string; alias?: string; replace?: PluginReplaceResult }
   try {
-    loaded = await loadOrReplace(runtime, entryPath, config, overwrite, before)
+    loaded = await loadOrReplace(runtime, entryPath, config, { overwrite, alias, source, manifest: before })
   } catch (err) {
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     throw err
@@ -326,18 +399,26 @@ async function loadOrReplace(
   runtime: OpenWhaleRuntime,
   entryPath: string,
   config: unknown,
-  overwrite: boolean,
-  manifest: PluginManifestEntry[],
-): Promise<{ name: string; replace?: PluginReplaceResult }> {
-  if (overwrite) {
-    const replace = await runtime.replacePluginFromPath(entryPath, config)
-    return { name: replace.name, replace }
+  ctx: { overwrite: boolean; alias?: string | undefined; source: PluginSource; manifest: PluginManifestEntry[] },
+): Promise<{ name: string; alias?: string; replace?: PluginReplaceResult }> {
+  const opts = ctx.alias !== undefined ? { as: ctx.alias } : undefined
+  const alias = ctx.alias !== undefined ? { alias: ctx.alias } : {}
+  if (ctx.overwrite) {
+    const replace = await runtime.replacePluginFromPath(entryPath, config, opts)
+    return { name: replace.name, ...alias, replace }
   }
   try {
-    return { name: await runtime.loadPluginFromPath(entryPath, config) }
+    return { name: await runtime.loadPluginFromPath(entryPath, config, opts), ...alias }
   } catch (err) {
     if (err instanceof PluginAlreadyLoadedError) {
-      throw new PluginConflictError(err.pluginName, manifest.find(e => e.name === err.pluginName))
+      const existing = ctx.manifest.find(e => e.name === err.pluginName)
+      const declared = err.declaredName ?? err.pluginName
+      throw new PluginConflictError(
+        err.pluginName,
+        existing,
+        existing !== undefined && sourceIdentity(existing.source) === sourceIdentity(ctx.source),
+        suggestAlias(declared, ctx.source, runtime.listLoadedPlugins().map(p => p.name)),
+      )
     }
     throw err
   }
@@ -346,7 +427,7 @@ async function loadOrReplace(
 /** Write the manifest and clear away whatever the install replaced. */
 async function record(
   runtime: OpenWhaleRuntime,
-  loaded: { name: string; replace?: PluginReplaceResult },
+  loaded: { name: string; alias?: string; replace?: PluginReplaceResult },
   source: PluginSource,
   entryPath: string,
   config: unknown,
@@ -354,7 +435,11 @@ async function record(
   staged?: { packageName: string; dir: string },
 ): Promise<InstalledPluginView> {
   const { name } = loaded
-  await upsertManifest({ name, source, entryPath, config, installedAt: new Date().toISOString() })
+  await upsertManifest({
+    name,
+    ...(loaded.alias !== undefined ? { alias: loaded.alias } : {}),
+    source, entryPath, config, installedAt: new Date().toISOString(),
+  })
   loadErrors.delete(name)
   if (staged) await pruneStaged(staged.packageName, staged.dir)
 
@@ -457,6 +542,7 @@ export async function installFromNpm(
   spec: string,
   config: unknown,
   overwrite = false,
+  alias?: string,
 ): Promise<InstalledPluginView> {
   // Local package directory: npm symlinks it, so rebuilding the package and
   // restarting picks up changes — the dev loop for unpublished plugins.
@@ -474,7 +560,7 @@ export async function installFromNpm(
   const source: PluginSource = localPath
     ? { kind: 'local', path: localPath, packageName }
     : { kind: 'npm', package: spec }
-  return stageLoadAndRecord(runtime, packageName, source, config, overwrite)
+  return stageLoadAndRecord(runtime, packageName, source, config, overwrite, alias)
 }
 
 // ── GitHub install ────────────────────────────────────────────────────────────
@@ -618,6 +704,7 @@ export async function installFromGithub(
   refInput: string | undefined,
   config: unknown,
   overwrite = false,
+  alias?: string,
 ): Promise<InstalledPluginView> {
   const { repo, ref, url } = parseGithubSpec(repoInput, refInput)
   const pluginsDir = getPluginsDir()
@@ -639,7 +726,7 @@ export async function installFromGithub(
 
   const packageName = installedName(before, await stubDeps(), repo)
   const source: PluginSource = { kind: 'github', repo, ...(ref !== undefined ? { ref } : {}), packageName }
-  return stageLoadAndRecord(runtime, packageName, source, config, overwrite, BUILD_HINT)
+  return stageLoadAndRecord(runtime, packageName, source, config, overwrite, alias, BUILD_HINT)
 }
 
 /**
@@ -674,6 +761,7 @@ export async function installFromFile(
   content: string,
   config: unknown,
   overwrite = false,
+  alias?: string,
 ): Promise<InstalledPluginView> {
   if (!/\.(mjs|js)$/i.test(originalName)) {
     throw new Error('Only built .js/.mjs bundles are supported for file install — for TypeScript sources or plugins with dependencies, publish to npm and install by package name')
@@ -686,15 +774,16 @@ export async function installFromFile(
   await fs.promises.writeFile(entryPath, content, 'utf8')
 
   const before = await readManifest()
-  let loaded: { name: string; replace?: PluginReplaceResult }
+  const source: PluginSource = { kind: 'file', originalName }
+  let loaded: { name: string; alias?: string; replace?: PluginReplaceResult }
   try {
-    loaded = await loadOrReplace(runtime, entryPath, config, overwrite, before)
+    loaded = await loadOrReplace(runtime, entryPath, config, { overwrite, alias, source, manifest: before })
   } catch (err) {
     await fs.promises.rm(entryPath, { force: true })
     throw err
   }
   // No staging: each upload already lands on a filename nothing has imported
-  return record(runtime, loaded, { kind: 'file', originalName }, entryPath, config, before)
+  return record(runtime, loaded, source, entryPath, config, before)
 }
 
 // ── uninstall ─────────────────────────────────────────────────────────────────
@@ -776,7 +865,7 @@ export async function restorePlugins(runtime: OpenWhaleRuntime): Promise<void> {
   for (const entry of entries) {
     if (runtime.listLoadedPlugins().some(p => p.name === entry.name)) continue
     try {
-      await runtime.loadPluginFromPath(entry.entryPath, entry.config)
+      await runtime.loadPluginFromPath(entry.entryPath, entry.config, entry.alias !== undefined ? { as: entry.alias } : undefined)
       loadErrors.delete(entry.name)
       log().info({ plugin: entry.name }, 'Restored plugin')
     } catch (err) {
