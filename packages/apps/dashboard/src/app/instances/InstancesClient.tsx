@@ -1725,6 +1725,8 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   const [credentialTypes, setCredentialTypes] = useState<Array<{ type: string; kinds: string[] }>>([])
   // Account entities — the binding targets for account slots (credential names accepted as legacy fallback)
   const [accounts, setAccounts] = useState<Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; status: string }>>([])
+  /** implementation id → venue pin, so a catalogue can ask the VENUE, not the credential type. */
+  const [implVenues, setImplVenues] = useState<Record<string, string>>({})
   // Per-label LLM slot overrides: { [label]: { model?, credentialName? } }
   const [llmBindings, setLlmBindings] = useState<Record<string, { model?: string; credentialName?: string }>>(initial?.llm ?? {})
   // Generic field values for strategies with paramsFields
@@ -1746,12 +1748,13 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       fetch('/api/strategies').then((r) => r.json() as Promise<StrategyDefinition[]>),
       fetch('/api/credentials').then((r) => r.json() as Promise<CredentialInfo[]>),
       fetch('/api/credential-types').then((r) => r.json() as Promise<Array<{ type: string; kinds: string[] }>>),
-      fetch('/api/accounts').then((r) => r.json() as Promise<{ accounts: Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; status: string }> }>),
+      fetch('/api/accounts').then((r) => r.json() as Promise<{ accounts: Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; status: string }>; implementations?: Array<{ id: string; type?: string }> }>),
     ]).then(([s, c, ct, a]) => {
       setStrategies(s)
       setCredentials(c)
       setCredentialTypes(ct)
       setAccounts(a.accounts ?? [])
+      setImplVenues(Object.fromEntries((a.implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : [])))
       if (initial) {
         // Edit mode: the strategy is fixed; prefill fields from the saved params
         const strat = s.find((x) => x.id === initial.strategyId)
@@ -1891,7 +1894,12 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       const bound = slotBindings[slot.label]
       if (!bound) continue
       const account = accounts.find((a) => a.name === bound)
-      if (account?.type) return account.type
+      if (!account) continue
+      // A venue-pinned implementation names the venue; otherwise (CEX) the
+      // credential type IS the venue. On-chain venues differ: a Boros account
+      // binds a pendle/boros-agent key, but the catalogue lives on 'boros'.
+      const venue = implVenues[account.implementation] ?? account.type
+      if (venue) return venue
     }
     return undefined
   })()
