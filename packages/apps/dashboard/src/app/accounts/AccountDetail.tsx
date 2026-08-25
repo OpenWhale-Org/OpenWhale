@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useColumnWidths, ResizeHandle } from '@/components/ResizableColumns'
 
 /** Shapes follow the exchange read-view interfaces (IAccountBalance/IPosition/IOrder). */
 interface TokenBalance { token: string; free: number; locked: number; total: number; usdValue?: number }
@@ -49,17 +50,29 @@ function fmtCell(value: unknown, col: ColumnDef): { text: string; color?: string
   }
 }
 
-/** A declared table section: rows by the implementation's own columns. */
+/** A declared table section: rows by the implementation's own columns, widths draggable and remembered. */
 function DeclaredTable({ rows, def }: { rows: Array<Record<string, unknown>>; def: SectionDef }) {
   const columns: ColumnDef[] = def.columns ?? Object.keys(rows[0] ?? {}).map(key => ({ key, label: key }))
+  const growKey = columns.find(c => c.grow)?.key ?? columns[0]?.key
+  const { widthOf, startResize } = useColumnWidths(`account.${def.method}.${columns.map(c => c.key).join('|')}`, columns.map(c => c.key), growKey)
   if (rows.length === 0) return <p className="text-xs" style={{ color: 'var(--muted)' }}>{def.empty ?? `No ${def.title.toLowerCase()}.`}</p>
   return (
     <div className="overflow-x-auto scroll-hidden">
-      <table className="w-full text-xs" style={{ minWidth: '17rem' }}>
+      <table className="w-full text-xs" style={{ tableLayout: 'fixed', minWidth: '17rem' }}>
+        <colgroup>
+          {columns.map(c => <col key={c.key} style={widthOf(c.key) !== undefined ? { width: widthOf(c.key) } : undefined} />)}
+        </colgroup>
         <thead>
           <tr style={{ color: 'var(--muted)' }}>
             {columns.map(c => (
-              <th key={c.key} className={`py-1 font-medium ${c.align === 'right' ? 'text-right' : 'text-left'}`} style={c.grow ? { width: '100%' } : undefined}>{c.label}</th>
+              <th
+                key={c.key}
+                className={`relative py-1 pr-3 font-medium whitespace-nowrap overflow-hidden text-ellipsis ${c.align === 'right' ? 'text-right' : 'text-left'}`}
+                title={c.label}
+              >
+                {c.label}
+                <ResizeHandle onMouseDown={(e) => startResize(c.key, e)} />
+              </th>
             ))}
           </tr>
         </thead>
@@ -72,8 +85,9 @@ function DeclaredTable({ rows, def }: { rows: Array<Record<string, unknown>>; de
                 return (
                   <td
                     key={c.key}
-                    className={`py-1 pr-3 whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'} ${mono ? 'font-mono' : ''}`}
+                    className={`py-1 pr-3 whitespace-nowrap overflow-hidden text-ellipsis ${c.align === 'right' ? 'text-right' : 'text-left'} ${mono ? 'font-mono' : ''}`}
                     style={cell.color ? { color: cell.color } : undefined}
+                    title={cell.text}
                   >
                     {c.format === 'badge'
                       ? <span className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: 'color-mix(in srgb, var(--border) 40%, transparent)' }}>{cell.text}</span>
