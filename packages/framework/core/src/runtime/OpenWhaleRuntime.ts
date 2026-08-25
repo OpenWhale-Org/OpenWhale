@@ -315,6 +315,20 @@ export class OpenWhaleRuntime implements IRuntime {
       // the use site with a "no adapter for kind" error.
       assertNamespacedKind(kind)
     }
+    /* Credential types are global by name — a venue's key type is meant to be
+       shared, so it is deliberately NOT namespaced. That makes a second plugin
+       claiming the same type an overwrite, and a silent one: every account
+       bound to it would quietly start materializing through the newcomer's
+       schema. Adapter cells have thrown on this for the same reason; this is
+       the same rule, applied where it was missing. */
+    const incumbent = this.credentialTypeOwners.get(definition.type)
+    if (incumbent !== undefined && incumbent !== owner) {
+      throw new Error(
+        `Credential type "${definition.type}" is already registered by ${incumbent === 'core' ? 'the engine' : `plugin "${incumbent}"`}. ` +
+          'Credential types are shared by name rather than namespaced, so only one plugin can define each — ' +
+          'these two cannot both be installed.',
+      )
+    }
     this.credentialTypes.set(definition.type, definition)
     this.credentialTypeOwners.set(definition.type, owner)
   }
@@ -330,10 +344,15 @@ export class OpenWhaleRuntime implements IRuntime {
    * monitor registry (that's what triggers and the dashboard address); user-
    * created instances of the implementation do the actual listening.
    */
-  registerMonitorImplementation(owner: string, impl: MonitorImplementation): void {
+  /** @returns the contract facade this call created, if it created one — the
+   *  only piece a rollback may take back, since an existing facade belongs to
+   *  whoever registered the first implementation of that contract. */
+  registerMonitorImplementation(owner: string, impl: MonitorImplementation): string | undefined {
     const facade = this.monitorInstances.registerImplementation(owner, impl)
     const contractId = impl.contract.includes('/') ? impl.contract : `${owner}/${impl.contract}`
+    let created: string | undefined
     if (!this.monitorRegistry.get(contractId)) {
+      created = contractId
       const now = new Date().toISOString()
       this.registerMonitor({
         id: contractId,
@@ -349,6 +368,7 @@ export class OpenWhaleRuntime implements IRuntime {
     // immediately — boot-time restore() won't run again until the next start.
     // restore() is idempotent: existing instances/actives are skipped.
     if (this.running) void this.monitorInstances.restore()
+    return created
   }
 
   listMonitorImplementations(): Array<ReturnType<MonitorInstanceManager['listImplementations']>[number] & { paramsFields?: import('../types/definition.js').ParamFieldDef[] }> {
@@ -999,49 +1019,98 @@ export class OpenWhaleRuntime implements IRuntime {
     return factory({ credentials: this.credentialStore, config, adapters: this.adapterRegistry, publicSessions: this.publicSessions })
   }
 
+  /**
+   * Register a plugin's contributions — all of them, or none.
+   *
+   * Several of these registrations refuse a name somebody else already holds
+   * (adapter cells, credential types, scripts), and a plugin that trips one
+   * halfway through used to leave everything before it registered with no
+   * `loadedPlugins` entry to find it by — so `unloadPlugin` would answer
+   * "Plugin not loaded" and the debris stayed until the engine restarted, with
+   * the next attempt failing on the wreckage of the last one rather than the
+   * real cause.
+   *
+   * Undo steps are recorded as they are earned rather than derived afterwards,
+   * because "what this call registered" and "what this plugin lists" are not
+   * the same set: a contract facade is created only by the FIRST
+   * implementation of that contract, and taking one back on behalf of a
+   * failed install would unregister a monitor another plugin is serving.
+   */
   private registerPlugin(plugin: OpenWhalePlugin, ns: string): string {
     const p = (id: string) => `${ns}/${id}`
+    const undo: Array<() => void> = []
 
-    for (const cell of plugin.adapters ?? []) {
-      assertNamespacedKind(cell.kind)
-      this.adapterRegistry.register(ns, cell)
-    }
-    // Legacy publicSessions entries become keyless-only cells (venue = plugin name)
-    for (const reg of plugin.publicSessions ?? []) {
-      assertNamespacedKind(reg.kind)
-      this.adapterRegistry.register(ns, { kind: reg.kind, type: ns, create: () => reg.create() })
-    }
-
-    for (const { definition, instance } of plugin.monitors ?? []) {
-      this.registerMonitor({ ...definition, id: p(instance.monitorName), pluginName: ns }, instance)
-    }
-    for (const { definition, instance } of plugin.executors ?? []) {
-      this.registerExecutor({ ...definition, id: p(instance.executorName), pluginName: ns }, instance)
-    }
-    for (const { definition, factory: sf } of plugin.strategies ?? []) {
-      // pluginName carries the namespace; registerStrategy derives monitorIds/
-      // executorIds from the class declarations resolved against it. The
-      // strategy instance itself never learns the namespace.
-      const { monitorIds: _m, executorIds: _e, ...rest } = definition
-      this.registerStrategy({ ...rest, id: p(definition.id), pluginName: ns }, sf)
-    }
-    for (const credentialType of plugin.credentialTypes ?? []) {
-      this.registerCredentialType(credentialType, ns)
-    }
-    for (const script of plugin.scripts ?? []) {
-      const id = p(script.id)
-      if (this.scriptRegistry.has(id)) throw new Error(`Script "${id}" is already registered`)
-      this.scriptRegistry.set(id, { def: { ...script, id }, owner: ns })
-    }
     // Class entries (@OwAccount/@OwMonitor) lower to plain registrations here,
     // so plugin factories may reference classes directly, not just definePlugin.
     const accountImpls = (plugin.accounts ?? []).map(entry => lowerAccountEntry(entry, ns))
     const monitorImpls = (plugin.monitorImplementations ?? []).map(entry => lowerMonitorEntry(entry, ns))
-    for (const impl of accountImpls) {
-      this.registerAccountImplementation(ns, impl)
-    }
-    for (const impl of monitorImpls) {
-      this.registerMonitorImplementation(ns, impl)
+
+    try {
+      for (const cell of plugin.adapters ?? []) {
+        assertNamespacedKind(cell.kind)
+        this.adapterRegistry.register(ns, cell)
+        undo.push(() => void this.adapterRegistry.unregisterOwner(ns))
+      }
+      // Legacy publicSessions entries become keyless-only cells (venue = plugin name)
+      for (const reg of plugin.publicSessions ?? []) {
+        assertNamespacedKind(reg.kind)
+        this.adapterRegistry.register(ns, { kind: reg.kind, type: ns, create: () => reg.create() })
+        undo.push(() => void this.adapterRegistry.unregisterOwner(ns))
+      }
+
+      for (const { definition, instance } of plugin.monitors ?? []) {
+        const id = p(instance.monitorName)
+        this.registerMonitor({ ...definition, id, pluginName: ns }, instance)
+        undo.push(() => this.monitorRegistry.unregister(id))
+      }
+      for (const { definition, instance } of plugin.executors ?? []) {
+        const id = p(instance.executorName)
+        this.registerExecutor({ ...definition, id, pluginName: ns }, instance)
+        undo.push(() => {
+          this.queue.cancelConsumers?.(id)
+          this.executorRegistry.unregister(id)
+        })
+      }
+      for (const { definition, factory: sf } of plugin.strategies ?? []) {
+        // pluginName carries the namespace; registerStrategy derives monitorIds/
+        // executorIds from the class declarations resolved against it. The
+        // strategy instance itself never learns the namespace.
+        const { monitorIds: _m, executorIds: _e, ...rest } = definition
+        const id = p(definition.id)
+        this.registerStrategy({ ...rest, id, pluginName: ns }, sf)
+        undo.push(() => this.strategyRegistry.unregister(id))
+      }
+      for (const credentialType of plugin.credentialTypes ?? []) {
+        this.registerCredentialType(credentialType, ns)
+        undo.push(() => {
+          this.credentialTypes.delete(credentialType.type)
+          this.credentialTypeOwners.delete(credentialType.type)
+        })
+      }
+      for (const script of plugin.scripts ?? []) {
+        const id = p(script.id)
+        if (this.scriptRegistry.has(id)) throw new Error(`Script "${id}" is already registered`)
+        this.scriptRegistry.set(id, { def: { ...script, id }, owner: ns })
+        undo.push(() => this.scriptRegistry.delete(id))
+      }
+      for (const impl of accountImpls) {
+        this.registerAccountImplementation(ns, impl)
+        undo.push(() => this.accountImpls.delete(impl.id))
+      }
+      for (const impl of monitorImpls) {
+        const createdFacade = this.registerMonitorImplementation(ns, impl)
+        undo.push(() => {
+          void this.monitorInstances.unregisterOwner(ns)
+          if (createdFacade !== undefined) this.monitorRegistry.unregister(createdFacade)
+        })
+      }
+    } catch (err) {
+      // Newest first, so each step unwinds against the state it was made in
+      for (const step of undo.reverse()) {
+        try { step() } catch (cleanupErr) { log.warn({ plugin: ns, err: cleanupErr }, 'Rollback step failed') }
+      }
+      log.warn({ plugin: ns, err }, 'Plugin registration rolled back')
+      throw err
     }
 
     this.loadedPlugins.set(ns, {
@@ -1167,6 +1236,9 @@ export class OpenWhaleRuntime implements IRuntime {
     }
     for (const id of plugin.strategies) this.strategyRegistry.unregister(id)
     for (const type of plugin.credentialTypes) {
+      // Only what this plugin actually owns — a type it merely declared but
+      // lost to an incumbent still belongs to the incumbent
+      if (this.credentialTypeOwners.get(type) !== name) continue
       this.credentialTypes.delete(type)
       this.credentialTypeOwners.delete(type)
     }

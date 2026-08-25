@@ -205,6 +205,70 @@ describe('replacing a plugin in place', () => {
     }
   })
 
+  /* Not everything a plugin registers is namespaced, and the parts that are
+     not are the reason a namespace cannot always rescue a collision. An
+     adapter cell is addressed by (kind, venue) — that IS how a session is
+     resolved — so a venue has exactly one provider, whatever the plugins are
+     called. Same for credential types, which are shared by name on purpose. */
+  it('refuses a second provider of the same cell or credential type, namespace or not', async () => {
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'run-'))
+    const runtime = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
+
+    const venuePlugin = (): OpenWhalePlugin => ({
+      name: 'venue', version: '1',
+      adapters: [{ kind: 'demo/rates', venue: 'boros', create: () => ({}) }],
+      credentialTypes: [{ type: 'demo/key', raw: true }],
+    })
+    runtime.loadPlugin(venuePlugin, {})
+
+    // A namespace of its own does not make room for it
+    expect(() => runtime.loadPlugin(venuePlugin, {}, { as: 'venue-2' }))
+      .toThrow(/\(demo\/rates, boros\).*already registered by plugin "venue"/s)
+
+    const credentialClash = (): OpenWhalePlugin => ({
+      name: 'other', version: '1',
+      credentialTypes: [{ type: 'demo/key', raw: true }],
+    })
+    expect(() => runtime.loadPlugin(credentialClash, {}))
+      .toThrow(/Credential type "demo\/key" is already registered by plugin "venue"/)
+  })
+
+  /* A refused registration must leave nothing behind. Half of a plugin used to
+     stay registered with no loadedPlugins entry to find it by, so unloadPlugin
+     answered "Plugin not loaded" and the next attempt failed on the wreckage
+     of the last one instead of on the real cause. */
+  it('rolls back completely when a registration is refused partway', async () => {
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'run-'))
+    const runtime = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
+    runtime.loadPlugin((): OpenWhalePlugin => ({
+      name: 'incumbent', version: '1',
+      credentialTypes: [{ type: 'shared/key', raw: true }],
+    }), {})
+
+    // Registers a strategy and a cell FIRST, then trips on the credential type
+    const latecomer = (): OpenWhalePlugin => {
+      const now = new Date().toISOString()
+      const Cls = strategyClass('alpha')
+      return {
+        name: 'latecomer', version: '1',
+        adapters: [{ kind: 'demo/rates', venue: 'boros', create: () => ({}) }],
+        strategies: [{ definition: { id: 'alpha', name: 'alpha', source: 'plugin', createdAt: now, updatedAt: now }, factory: () => new Cls() }],
+        credentialTypes: [{ type: 'shared/key', raw: true }],
+      }
+    }
+    expect(() => runtime.loadPlugin(latecomer, {})).toThrow(/shared\/key/)
+
+    expect(runtime.listLoadedPlugins().map(p => p.name)).toEqual(['incumbent'])
+    expect(runtime.listStrategies().map(s => s.id)).not.toContain('latecomer/alpha')
+    // The cell it did register is gone, so a corrected retry is not blocked by it
+    expect(() => runtime.loadPlugin((): OpenWhalePlugin => ({
+      name: 'latecomer', version: '2',
+      adapters: [{ kind: 'demo/rates', venue: 'boros', create: () => ({}) }],
+    }), {})).not.toThrow()
+    // …and the incumbent still owns what was always its own
+    expect(runtime.listCredentialTypes().filter(t => t.type === 'shared/key')).toHaveLength(1)
+  })
+
   /* Uninstall's promise, stated from the other side: a plugin with instances
      cannot simply be dropped. pluginDependents is what the gateway reads to
      refuse, and it must count a STOPPED instance too — its params are just as

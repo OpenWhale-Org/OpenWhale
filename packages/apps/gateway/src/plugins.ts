@@ -101,16 +101,20 @@ export class PluginConflictError extends Error {
  * Where a source points, as one comparable string.
  *
  * Compared instead of the plugin name because the name is what collided.
- * Version and branch are left out on purpose: `funding-arb@2` replacing
- * `funding-arb@1`, or a repo on a different tag, is the same plugin.
+ *
+ * The PACKAGE NAME is the identity, not the kind of source it arrived
+ * through, so a checkout at /Users/me/openwhale-pendle and the published
+ * `@openwhaleorg/pendle` are one plugin — which is the whole developer
+ * workflow: install the local build, later install the release over it. Told
+ * apart by source kind, that install is offered a namespace of its own, and
+ * then fails anyway on the venue cells it re-registers.
+ *
+ * Version and branch are left out for the same reason: `funding-arb@2` over
+ * `@1`, or a repo on a different tag, is the same plugin.
  */
 function sourceIdentity(source: PluginSource): string {
-  switch (source.kind) {
-    case 'npm': return `npm:${parsePackageSpec(source.package).packageName}`
-    case 'github': return `github:${source.repo.toLowerCase()}`
-    case 'local': return `local:${source.path}`
-    case 'file': return `file:${source.originalName}`
-  }
+  // An uploaded bundle declares no package, so its filename is all there is
+  return packageNameOf(source) ?? `file:${source.kind === 'file' ? source.originalName : ''}`
 }
 
 /** Whoever published it — the half of a source that makes a good namespace prefix. */

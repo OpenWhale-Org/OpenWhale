@@ -40,8 +40,15 @@ export class AdapterRegistry implements AdapterResolver {
     const key = cellKey(registration.kind, venue)
     const existing = this.cells.get(key)
     if (existing) {
+      /* Says why a different namespace does not help, because that is the
+         obvious next thing to try and it will fail the same way: cells are
+         looked up by (kind, venue) — that IS the address a session is resolved
+         through — so unlike a strategy there can only ever be one. */
       throw new Error(
-        `Adapter cell (${registration.kind}, ${venue}) is already registered by plugin "${existing.owner}"`
+        `Adapter cell (${registration.kind}, ${venue}) is already registered by plugin "${existing.owner}". ` +
+          'Cells are addressed by (kind, venue) rather than by plugin namespace, so a venue can have exactly one ' +
+          `provider for a kind — installing under another name will not help. Overwrite "${existing.owner}" if this ` +
+          'is a new version of it, or uninstall it first.'
       )
     }
     this.cells.set(key, { registration: { ...registration, venue }, owner })
