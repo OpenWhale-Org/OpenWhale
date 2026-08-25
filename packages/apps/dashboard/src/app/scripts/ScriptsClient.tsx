@@ -18,14 +18,24 @@ import { TypeMark } from '../../components/TypeMark'
 
 const SELECTED_KEY = 'ow.scripts.selected'
 
+function readSelection(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SELECTED_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
 export function ScriptsClient() {
   const [scripts, setScripts] = useState<ScriptInfo[] | null>(null)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [selectedId, setSelectedId] = useState<string | null>(() => {
-    try { return localStorage.getItem(SELECTED_KEY) } catch { return null }
-  })
+  /** Multi-select: several scripts open side by side in the pane, remembered per browser. */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(readSelection)
 
   useEffect(() => {
     void fetch('/api/scripts')
@@ -47,11 +57,23 @@ export function ScriptsClient() {
       .map(([pkg, items]) => ({ pkg, items: items.sort((a, b) => a.name.localeCompare(b.name)) }))
   }, [scripts, query])
 
-  // Land on something: the remembered script if it still exists, else the first
-  const selected = scripts?.find(s => s.id === selectedId) ?? groups[0]?.items[0] ?? null
-  function pick(id: string) {
-    setSelectedId(id)
-    try { localStorage.setItem(SELECTED_KEY, id) } catch { /* private mode */ }
+  // Open scripts in rail order; with nothing remembered, land on the first one
+  const known = new Set((scripts ?? []).map(s => s.id))
+  const openIds = Array.from(selectedIds).filter(id => known.has(id))
+  const open = openIds.length > 0
+    ? (scripts ?? []).filter(s => selectedIds.has(s.id))
+    : groups[0]?.items[0] ? [groups[0].items[0]] : []
+  function toggle(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (!next.delete(id)) next.add(id)
+      try { localStorage.setItem(SELECTED_KEY, JSON.stringify(Array.from(next))) } catch { /* private mode */ }
+      return next
+    })
+  }
+  function clearSelection() {
+    setSelectedIds(new Set())
+    try { localStorage.removeItem(SELECTED_KEY) } catch { /* private mode */ }
   }
 
   const header = (
@@ -102,20 +124,30 @@ export function ScriptsClient() {
                     <span className="ml-auto font-normal opacity-70">{items.length}</span>
                   </button>
                   {!isCollapsed && items.map(s => {
-                    const active = selected?.id === s.id
+                    const active = open.some(o => o.id === s.id)
                     return (
                       <button
                         key={s.id}
-                        onClick={() => pick(s.id)}
-                        className="hoverable hoverable-flat w-full text-left px-3 py-2.5"
+                        onClick={() => toggle(s.id)}
+                        title={active ? 'Click to close' : 'Click to open alongside'}
+                        className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-start gap-2.5"
                         style={{
                           background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
                           borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
                           borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
                         }}
                       >
-                        <div className="text-sm truncate">{s.name}</div>
-                        {s.description && <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{s.description}</div>}
+                        <span
+                          aria-hidden
+                          className="mt-1 shrink-0 grid place-items-center rounded"
+                          style={{ width: 14, height: 14, border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'transparent', color: '#fff', fontSize: 10, lineHeight: 1 }}
+                        >
+                          {active ? '✓' : ''}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-sm truncate">{s.name}</div>
+                          {s.description && <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{s.description}</div>}
+                        </div>
                       </button>
                     )
                   })}
@@ -123,18 +155,21 @@ export function ScriptsClient() {
               )
             })}
           </div>
-          <div className="px-3 py-2 text-[11px] shrink-0" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
-            {scripts.length} scripts · {groups.length} packages
+          <div className="px-3 py-2 text-[11px] shrink-0 flex items-center gap-2" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+            <span>{scripts.length} scripts · {groups.length} packages · {open.length} open</span>
+            {openIds.length > 0 && (
+              <button onClick={clearSelection} className="ml-auto px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>Clear</button>
+            )}
           </div>
         </div>
 
         {/* ── detail: the selected script ──────────────────────────────── */}
-        <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden">
-          {selected ? (
-            <ScriptCard key={selected.id} script={selected} />
-          ) : (
+        <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3">
+          {open.length > 0 ? open.map(s => (
+            <ScriptCard key={s.id} script={s} />
+          )) : (
             <div className="rounded-lg p-10 text-center text-sm" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-              Pick a script.
+              Pick one or more scripts.
             </div>
           )}
         </div>
