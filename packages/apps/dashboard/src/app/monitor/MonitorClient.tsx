@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Rail, RailGroup, RailItem, StatusDot } from '../../components/Rail'
 import type { MonitorDefinition, ParamFieldCatalogue, MonitorInstanceView, CredentialInfo } from '@openwhaleorg/core'
@@ -112,9 +112,9 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
   }
 
   return (
-    <div className="flex gap-4 items-start">
+    <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
       {/* ── Left: monitors grouped by package ── */}
-      <Rail width="18rem" className="self-stretch">
+      <Rail width="18rem">
         {statuses.length === 0 && monitors.length === 0 && (
           <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No monitors registered.</p>
         )}
@@ -183,8 +183,34 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
   credentials: CredentialInfo[]
 }) {
   const [historyKey, setHistoryKey] = useState<string | null>(null)
-  const [showLogs, setShowLogs] = useState(false)
-  const [tab, setTab] = useState<'board' | 'manage'>('board')
+  /* Board is what you open this page FOR; Manage is the plumbing you set up
+     once. Both can be on screen (Split), but Board is the default alone. */
+  const [view, setView] = useState<'board' | 'split' | 'manage'>(() => {
+    try { return (localStorage.getItem('ow.monitor.view') as 'board' | 'split' | 'manage') || 'board' } catch { return 'board' }
+  })
+  const [splitPct, setSplitPct] = useState<number>(() => {
+    try { return Number(localStorage.getItem('ow.monitor.split')) || 60 } catch { return 60 }
+  })
+  const areaRef = useRef<HTMLDivElement>(null)
+  function pickView(v: 'board' | 'split' | 'manage') {
+    setView(v)
+    try { localStorage.setItem('ow.monitor.view', v) } catch { /* private mode */ }
+  }
+  function startDrag(e: React.MouseEvent) {
+    e.preventDefault()
+    const rect = areaRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const move = (ev: MouseEvent) => setSplitPct(Math.min(80, Math.max(30, ((ev.clientX - rect.left) / rect.width) * 100)))
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setSplitPct(p => { try { localStorage.setItem('ow.monitor.split', String(Math.round(p))) } catch { /* private mode */ } return p })
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  const showBoard = view !== 'manage'
+  const showManage = view !== 'board'
   const [watching, setWatching] = useState(false)
   const mine = instances.filter(i => i.contract === status.id)
 
@@ -234,7 +260,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
     <div className="flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-start gap-2 flex-wrap">
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">{status.id}</h2>
             <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
@@ -255,16 +281,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           </div>
           {status.description && <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{status.description}</p>}
         </div>
-        <button
-          onClick={() => setShowLogs(v => !v)}
-          className="text-xs px-2 py-1 rounded"
-          style={{ background: showLogs ? 'var(--accent)' : 'var(--surface)', color: showLogs ? '#fff' : 'var(--muted)', border: '1px solid var(--border)' }}
-        >
-          logs
-        </button>
       </div>
-
-      {showLogs && <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />}
 
       {/* Two tabs, not a stack of boxes.
           Board is what you open this page FOR: the charts, what is being
@@ -272,13 +289,28 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           runners and subscriptions — which you set up once and then leave
           alone. Giving them equal billing on one screen is what made this page
           hard to read; the charts were a band in the middle of five forms. */}
-      <div className="flex items-center gap-1.5">
-        <TabButton active={tab === 'board'} onClick={() => setTab('board')} label="Board" />
-        <TabButton active={tab === 'manage'} onClick={() => setTab('manage')} label="Manage" note={`${mine.length} inst · ${status.activeKeys.length} watched`} />
+      <div className="flex items-center gap-2">
+        <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          {([['board', 'Board'], ['split', 'Split'], ['manage', 'Manage']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => pickView(key)}
+              className="text-[11px] px-2.5 py-1"
+              style={{
+                background: view === key ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+                color: view === key ? 'var(--foreground)' : 'var(--muted)',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs" style={{ color: 'var(--muted)' }}>{mine.length} inst · {status.activeKeys.length} watched</span>
       </div>
 
-      {tab === 'board' ? (
-        <div className="flex flex-col gap-3">
+      <div ref={areaRef} className="flex items-start">
+      {showBoard && (
+        <div className="flex flex-col gap-3 min-w-0" style={{ flexBasis: showManage ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
           {/* What is being collected, and when it last spoke. */}
           <KeyStrip
             status={status}
@@ -310,9 +342,25 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
               ))}
             </div>
           </details>
+
+          <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--muted)' }} />
+              Logs
+            </summary>
+            <div style={{ borderTop: '1px solid var(--border)' }}>
+              <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />
+            </div>
+          </details>
         </div>
-      ) : (
-        <div className="flex flex-col gap-3">
+      )}
+      {showBoard && showManage && (
+        <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center self-stretch mx-1" style={{ width: 8, minHeight: 200 }} title="Drag to resize">
+          <div className="w-0.5 h-8 rounded-full" style={{ background: 'var(--muted)', opacity: 0.6 }} />
+        </div>
+      )}
+      {showManage && (
+        <div className="flex flex-col gap-3 flex-1 min-w-0">
           <MonitorInstancesPanel
             contract={status.id}
             instances={instances}
@@ -417,6 +465,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           </section>
         </div>
       )}
+      </div>
 
       {watching && (
         <Modal onClose={() => setWatching(false)} maxWidth="34rem">
@@ -438,27 +487,6 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
 }
 
 /** One of the two top-level tabs. */
-function TabButton({ active, onClick, label, note }: {
-  active: boolean
-  onClick: () => void
-  label: string
-  note?: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="hoverable hoverable-flat rounded-md px-3 h-8 flex items-center gap-2 text-sm"
-      style={{
-        background: active ? 'var(--accent)' : 'transparent',
-        color: active ? '#fff' : 'var(--muted)',
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-      }}
-    >
-      {label}
-      {note && <span className="text-xs" style={{ opacity: 0.75 }}>{note}</span>}
-    </button>
-  )
-}
 
 /**
  * What is being collected, and when each key last spoke.
@@ -474,35 +502,86 @@ function KeyStrip({ status, events, connected, subscribers }: {
   connected: boolean
   subscribers: Record<string, string[]>
 }) {
+  const [openKey, setOpenKey] = useState<string | null>(null)
+  const [records, setRecords] = useState<{ key: string; total: number; rows: Array<{ ts: number; data: unknown }> } | null>(null)
+  const [loading, setLoading] = useState(false)
+
   const lastSeen = new Map<string, number>()
   for (const e of events) if (!lastSeen.has(e.key)) lastSeen.set(e.key, e.ts)
 
   const keys = Array.from(new Set([...status.activeKeys.map(k => k.key), ...status.dataKeys])).filter(k => k.trim())
+
+  async function toggle(k: string) {
+    if (openKey === k) { setOpenKey(null); return }
+    setOpenKey(k)
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/monitor/${encodeURIComponent(status.id)}/${encodeURIComponent(k)}?n=20`)
+      const body = res.ok ? await res.json() as { records: Array<{ ts: number; data: unknown }>; total: number } : { records: [], total: 0 }
+      setRecords({ key: k, total: body.total, rows: [...body.records].reverse() })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (keys.length === 0) return null
 
   return (
-    <div className="rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} title={connected ? 'Live stream connected' : 'Live stream disconnected'} />
-      {keys.map((k) => {
-        const running = status.activeKeys.some(a => a.key === k)
-        const seen = lastSeen.get(k)
-        const by = subscribers[k] ?? []
-        return (
-          <a
-            key={k}
-            href={`/monitor-data?monitor=${encodeURIComponent(status.id)}&key=${encodeURIComponent(k)}`}
-            className="hoverable hoverable-flat rounded-md px-2 py-1 flex items-center gap-2 text-xs"
-            style={{ background: 'var(--background)', border: `1px solid ${running ? 'var(--accent)' : 'var(--border)'}` }}
-            title={by.length > 0 ? `Subscribed by ${by.join(', ')} — open in Explorer` : 'Open in Explorer'}
-          >
-            <span className="font-mono">{k}</span>
-            {by.length > 0 && <span style={{ color: 'var(--muted)' }}>{by.length === 1 ? by[0] : `${by.length} strategies`}</span>}
-            <span style={{ color: 'var(--muted)' }}>
-              {seen ? new Date(seen).toLocaleTimeString() : running ? 'waiting' : 'stored'}
-            </span>
-          </a>
-        )
-      })}
+    <div className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} title={connected ? 'Live stream connected' : 'Live stream disconnected'} />
+        {keys.map((k) => {
+          const running = status.activeKeys.some(a => a.key === k)
+          const seen = lastSeen.get(k)
+          const by = subscribers[k] ?? []
+          const open = openKey === k
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => void toggle(k)}
+              className="hoverable hoverable-flat rounded-md px-2 py-1 flex items-center gap-2 text-xs"
+              style={{
+                background: open ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'var(--background)',
+                border: `1px solid ${open || running ? 'var(--accent)' : 'var(--border)'}`,
+              }}
+              title={by.length > 0 ? `Subscribed by ${by.join(', ')} — click for recent events` : 'Click for recent events'}
+            >
+              <span className="font-mono">{k}</span>
+              {by.length > 0 && <span style={{ color: 'var(--muted)' }}>{by.length === 1 ? by[0] : `${by.length} strategies`}</span>}
+              <span style={{ color: 'var(--muted)' }}>
+                {seen ? new Date(seen).toLocaleTimeString() : running ? 'waiting' : 'stored'}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      {openKey && (
+        <div style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="px-3 py-1.5 flex items-center gap-2 text-xs" style={{ color: 'var(--muted)' }}>
+            <span className="font-mono">{openKey}</span>
+            <span>· {loading ? 'loading…' : `last ${records?.rows.length ?? 0} of ${records?.total ?? 0} records`}</span>
+            <a
+              href={`/monitor-data?monitor=${encodeURIComponent(status.id)}&key=${encodeURIComponent(openKey)}`}
+              className="ml-auto px-2 py-0.5 rounded-md"
+              style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}
+            >
+              Open in Explorer ↗
+            </a>
+          </div>
+          <div className="max-h-72 overflow-y-auto scroll-hidden font-mono text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+            {!loading && records?.key === openKey && records.rows.length === 0 && (
+              <p className="p-3" style={{ color: 'var(--muted)' }}>No stored records for this key yet.</p>
+            )}
+            {records?.key === openKey && records.rows.map((r, i) => (
+              <div key={`${r.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.ts).toLocaleTimeString()}</span>
+                <DataView data={r.data} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

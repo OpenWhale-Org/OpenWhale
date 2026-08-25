@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 import { LogsPanel } from '@/components/LogsPanel'
@@ -46,9 +46,9 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
   }
 
   return (
-    <div className="flex gap-4 items-start">
+    <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
       {/* ── Left: executors grouped by package ── */}
-      <Rail width="18rem" className="self-stretch">
+      <Rail width="18rem">
         {initialExecutors.length === 0 && (
           <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No executors registered.</p>
         )}
@@ -71,7 +71,7 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
       </Rail>
 
       {/* ── Right: selected executor detail ── */}
-      <main className="flex-1 min-w-0">
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col">
         {selected ? (
           <ExecutorDetail key={selected.id} executor={selected} credentials={credentials} credentialTypes={credentialTypes} />
         ) : (
@@ -105,9 +105,35 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ExecutionRecord | null>(null)
   const [error, setError] = useState('')
-  const [showLogs, setShowLogs] = useState(false)
   const [records, setRecords] = useState<ExecutionRecord[] | null>(null)
+  const [view, setView] = useState<'fire' | 'split' | 'records'>(() => {
+    try { return (localStorage.getItem('ow.executors.view') as 'fire' | 'split' | 'records') || 'split' } catch { return 'split' }
+  })
+  const [splitPct, setSplitPct] = useState<number>(() => {
+    try { return Number(localStorage.getItem('ow.executors.split')) || 48 } catch { return 48 }
+  })
+  const areaRef = useRef<HTMLDivElement>(null)
+  function pickView(v: 'fire' | 'split' | 'records') {
+    setView(v)
+    try { localStorage.setItem('ow.executors.view', v) } catch { /* private mode */ }
+  }
+  function startDrag(e: React.MouseEvent) {
+    e.preventDefault()
+    const rect = areaRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const move = (ev: MouseEvent) => setSplitPct(Math.min(75, Math.max(25, ((ev.clientX - rect.left) / rect.width) * 100)))
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setSplitPct(p => { try { localStorage.setItem('ow.executors.split', String(Math.round(p))) } catch { /* private mode */ } return p })
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
   const [recordModal, setRecordModal] = useState<ExecutionRecord | null>(null)
+
+  // Records are the other half of the page now, not a toggle — load them with the executor
+  useEffect(() => { void loadRecords() }, [executor.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const schema = executor.actionSchemas?.[action]
   const properties = (schema?.['properties'] ?? {}) as Record<string, Record<string, unknown>>
@@ -152,61 +178,39 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
 
   const missingCreds = executor.credentialSlots.some(s => !slotCreds[s.label])
 
+  const showFire = view !== 'records'
+  const showRecords = view !== 'fire'
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-3">
       {/* Header */}
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-3 shrink-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">{executor.id}</h2>
             {executor.credentialSlots.length > 0 && (
-              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>write-capable</span>
+              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>write-capable</span>
             )}
           </div>
           {executor.description && <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{executor.description}</p>}
         </div>
-        <div className="flex gap-1.5 shrink-0">
-          <button
-            onClick={() => { if (records === null) void loadRecords(); else setRecords(null) }}
-            className="text-xs px-2 py-1 rounded"
-            style={{ background: records !== null ? 'var(--accent)' : 'var(--surface)', color: records !== null ? '#fff' : 'var(--muted)', border: '1px solid var(--border)' }}
-          >
-            records
-          </button>
-          <button
-            onClick={() => setShowLogs(v => !v)}
-            className="text-xs px-2 py-1 rounded"
-            style={{ background: showLogs ? 'var(--accent)' : 'var(--surface)', color: showLogs ? '#fff' : 'var(--muted)', border: '1px solid var(--border)' }}
-          >
-            logs
-          </button>
+        <div className="flex rounded-md overflow-hidden shrink-0" style={{ border: '1px solid var(--border)' }}>
+          {([['fire', 'Manual fire'], ['split', 'Split'], ['records', 'Records & logs']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => pickView(key)}
+              className="text-[11px] px-2.5 py-1"
+              style={{
+                background: view === key ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+                color: view === key ? 'var(--foreground)' : 'var(--muted)',
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {showLogs && <LogsPanel id={executor.id} logsUrl={`/api/executor/${encodeURIComponent(executor.id)}/logs?n=200`} sseType="executor_log" />}
-
-      {records !== null && (
-        <div className="rounded-md overflow-hidden max-h-72 overflow-y-auto font-mono text-xs" style={{ border: '1px solid var(--border)' }}>
-          {records.length === 0 ? (
-            <p className="p-3" style={{ color: 'var(--muted)' }}>No execution records.</p>
-          ) : records.map((r, i) => (
-            <div key={`${r.executedAt}-${i}`} className="px-3 py-1.5 flex gap-2 items-center" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-              <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.executedAt).toLocaleString()}</span>
-              <span className="shrink-0" style={{ color: r.status === 'success' ? '#4ade80' : r.status === 'failed' ? 'var(--danger)' : 'var(--warning)' }}>{r.status}</span>
-              <span className="shrink-0" style={{ color: 'var(--accent)' }}>{r.instruction?.action}</span>
-              <button
-                onClick={() => setRecordModal(r)}
-                className="flex-1 min-w-0 text-left truncate"
-                title="Open full record"
-                style={{ color: 'var(--muted)', background: 'transparent' }}
-              >
-                {JSON.stringify(r.instruction?.params)}{r.error ? ` — ${r.error}` : ''}{r.data ? ` → ${JSON.stringify(r.data)}` : ''}
-              </button>
-              <CopyButton value={r} />
-            </div>
-          ))}
-        </div>
-      )}
       {recordModal && (
         <JsonModal
           title={`${recordModal.instruction?.action} · ${new Date(recordModal.executedAt).toLocaleString()}`}
@@ -215,6 +219,10 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
         />
       )}
 
+      {/* fire | divider | records + logs */}
+      <div ref={areaRef} className="flex-1 min-h-0 flex">
+        {showFire && (
+          <div className="min-w-0 min-h-0 overflow-y-auto scroll-hidden" style={{ flexBasis: showRecords ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
       {/* Manual fire console */}
       <section className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>MANUAL FIRE</span>
@@ -322,13 +330,49 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           {busy ? 'Firing…' : 'Fire'}
         </button>
 
-        {error && <p className="text-xs px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
+        {error && <p className="text-xs px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{error}</p>}
         {result && (
-          <div className="text-xs px-3 py-2 rounded-md font-mono" style={{ background: result.status === 'success' ? '#1a3a24' : '#3f1f1f', color: result.status === 'success' ? '#4ade80' : 'var(--danger)' }}>
+          <div className="text-xs px-3 py-2 rounded-md font-mono" style={{ background: result.status === 'success' ? 'var(--success-soft)' : 'var(--danger-soft)', color: result.status === 'success' ? 'var(--success)' : 'var(--danger)' }}>
             {result.status}{result.error ? ` — ${result.error}` : ''}{result.data ? ` → ${JSON.stringify(result.data)}` : ''}
           </div>
         )}
       </section>
+          </div>
+        )}
+        {showFire && showRecords && (
+          <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center mx-1" style={{ width: 8 }} title="Drag to resize">
+            <div className="w-0.5 h-8 rounded-full" style={{ background: 'var(--muted)', opacity: 0.6 }} />
+          </div>
+        )}
+        {showRecords && (
+          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3">
+            <div className="rounded-lg overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div className="px-3 py-2 text-xs font-semibold flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+                <span>RECORDS{records ? ` · ${records.length}` : ''}</span>
+                <button onClick={() => void loadRecords()} className="px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>⟳</button>
+              </div>
+              <div className="max-h-[50vh] overflow-y-auto scroll-hidden font-mono text-xs">
+                {records === null ? (
+                  <p className="p-3" style={{ color: 'var(--muted)' }}>Loading…</p>
+                ) : records.length === 0 ? (
+                  <p className="p-3" style={{ color: 'var(--muted)' }}>No execution records.</p>
+                ) : records.map((r, i) => (
+                  <div key={`${r.executedAt}-${i}`} className="px-3 py-1.5 flex gap-2 items-center" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                    <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.executedAt).toLocaleString()}</span>
+                    <span className="shrink-0" style={{ color: r.status === 'success' ? 'var(--success)' : r.status === 'failed' ? 'var(--danger)' : 'var(--warning)' }}>{r.status}</span>
+                    <span className="shrink-0" style={{ color: 'var(--accent)' }}>{r.instruction?.action}</span>
+                    <button onClick={() => setRecordModal(r)} className="flex-1 min-w-0 text-left truncate" title="Open full record" style={{ color: 'var(--muted)', background: 'transparent' }}>
+                      {JSON.stringify(r.instruction?.params)}{r.error ? ` — ${r.error}` : ''}{r.data ? ` → ${JSON.stringify(r.data)}` : ''}
+                    </button>
+                    <CopyButton value={r} />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <LogsPanel id={executor.id} logsUrl={`/api/executor/${encodeURIComponent(executor.id)}/logs?n=200`} sseType="executor_log" />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
