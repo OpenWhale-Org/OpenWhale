@@ -569,10 +569,16 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
 // ── Install form: bundle file, GitHub repo, or npm package ───────────────────
 
 const MODES = [
-  ['file', 'From file'],
-  ['github', 'From GitHub'],
   ['npm', 'From npm'],
+  ['github', 'From GitHub'],
+  ['file', 'From file'],
 ] as const
+
+const MODE_HINT: Record<(typeof MODES)[number][0], string> = {
+  npm: 'Recommended — published packages install with their dependencies and update by version (e.g. @openwhaleorg/pendle). A local absolute path works too.',
+  github: 'For a repository that is not on npm yet: the gateway clones and builds it, which takes a few minutes and needs the build toolchain on the server.',
+  file: 'A single pre-built bundle you upload by hand — for trying a plugin before it has a package or a repo.',
+}
 
 type Conflict = {
   plugin: string
@@ -585,7 +591,7 @@ type Conflict = {
 type ReplaceOutcome = { plugin: string; resumed: string[]; orphaned: string[] }
 
 function InstallForm({ onSuccess }: { onSuccess: () => void }) {
-  const [mode, setMode] = useState<'npm' | 'github' | 'file'>('file')
+  const [mode, setMode] = useState<'npm' | 'github' | 'file'>('npm')
   const [pkg, setPkg] = useState('')
   const [repo, setRepo] = useState('')
   const [ref, setRef] = useState('')
@@ -694,13 +700,15 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <h2 className="font-semibold text-base">Install Plugin</h2>
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-center flex-wrap">
         {MODES.map(([m, label]) => (
           <button key={m} type="button" onClick={() => setMode(m)} className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}>
             {label}
+            {m === 'npm' && <span className="ml-1.5 text-[10px] px-1 rounded" style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)', color: 'var(--success, #22c55e)' }}>recommended</span>}
           </button>
         ))}
       </div>
+      <p className="text-xs -mt-2" style={{ color: 'var(--muted)' }}>{MODE_HINT[mode]}</p>
       {mode === 'npm' ? (
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted">
