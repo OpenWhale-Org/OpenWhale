@@ -1,392 +1,148 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useSortable, DragHandle } from '../../components/Sortable'
-import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
+import { useEffect, useMemo, useState } from 'react'
 import type { ScriptInfo, ParamFieldDef } from '@openwhaleorg/core'
+import { TypeMark } from '../../components/TypeMark'
 
 /**
- * How the page is arranged (server-side; see the gateway's scriptShelf).
+ * Scripts — plugin-shipped operator utilities, run on click. A rail on the
+ * left lists every script grouped by the package that ships it; the pane on
+ * the right is the selected script's form (derived from its zod schema), its
+ * Run button and the report it returns. No lifecycle, no persistence —
+ * anything recurring belongs in a monitor or strategy.
  *
- * Same model as the STRATEGY layout: a folder is a NAME carried by its
- * members plus a sortOrder, not an entity with an id. That is what lets the
- * two pages share drag-and-drop semantics exactly — drop a card on a card to
- * reorder or re-file it, drag a folder header to move the whole block.
+ * The earlier folder shelf (drag to re-file, unmount to hide) went away with
+ * this layout: the package IS the grouping, and a rail scales to any number
+ * of scripts without hiding any.
  */
-interface ScriptShelfEntry { folder?: string; sortOrder?: number; unmounted?: boolean }
-interface ScriptShelf { items: Record<string, ScriptShelfEntry> }
 
-const EMPTY_SHELF: ScriptShelf = { items: {} }
+const SELECTED_KEY = 'ow.scripts.selected'
 
-/**
- * Scripts — plugin-shipped operator utilities, run on click. One card per
- * script: a small flat param form (derived from the script's zod schema) and
- * the monospace report it returns. No lifecycle, no persistence — anything
- * recurring belongs in a monitor or strategy.
- *
- * Plugins keep adding scripts and the page grew into one long column of cards,
- * so the shelf sits on top of that: folders to group them, and unmounting to
- * put the ones you never run out of sight. UNMOUNTING IS COSMETIC — the script
- * stays registered and runnable through the API; this only decides what the
- * page shows. Nothing here can break a plugin, which is the point.
- */
 export function ScriptsClient() {
   const [scripts, setScripts] = useState<ScriptInfo[] | null>(null)
-  const [shelf, setShelf] = useState<ScriptShelf>(EMPTY_SHELF)
   const [error, setError] = useState('')
-  const [saveError, setSaveError] = useState('')
-  /** The mount manager: every script by package, mounted or not. */
-  const [manage, setManage] = useState(false)
+  const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  /** Says where an unmounted script went — otherwise it just vanishes on click. */
-  const [notice, setNotice] = useState('')
-
-  const drops = useRef<{
-    reorder: (order: string[]) => void
-    refile: (id: string, folder: string) => void
-    folder: (a: string, b: string) => void
-  }>({ reorder: () => {}, refile: () => {}, folder: () => {} })
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    try { return localStorage.getItem(SELECTED_KEY) } catch { return null }
+  })
 
   useEffect(() => {
     void fetch('/api/scripts')
       .then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); setScripts(await r.json() as ScriptInfo[]) })
       .catch(err => setError(err instanceof Error ? err.message : String(err)))
-    // A shelf that fails to load degrades to "show everything, ungrouped" —
-    // never to a blank page.
-    void fetch('/api/scripts/shelf')
-      .then(async r => { if (r.ok) setShelf(await r.json() as ScriptShelf) })
-      .catch(() => {})
   }, [])
 
-  /** Optimistic: the arrangement is cheap to redraw and the write is one row. */
-  async function save(next: ScriptShelf) {
-    setShelf(next)
-    setSaveError('')
-    try {
-      const res = await fetch('/api/scripts/shelf', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    } catch (err) {
-      setSaveError(`Arrangement not saved: ${err instanceof Error ? err.message : String(err)}`)
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const hits = (scripts ?? []).filter(s => !q || s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q))
+    const byPkg = new Map<string, ScriptInfo[]>()
+    for (const s of hits) {
+      const list = byPkg.get(s.pluginName) ?? []
+      list.push(s)
+      byPkg.set(s.pluginName, list)
     }
+    return Array.from(byPkg.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([pkg, items]) => ({ pkg, items: items.sort((a, b) => a.name.localeCompare(b.name)) }))
+  }, [scripts, query])
+
+  // Land on something: the remembered script if it still exists, else the first
+  const selected = scripts?.find(s => s.id === selectedId) ?? groups[0]?.items[0] ?? null
+  function pick(id: string) {
+    setSelectedId(id)
+    try { localStorage.setItem(SELECTED_KEY, id) } catch { /* private mode */ }
   }
 
-  /** Page header — same shape as the instances page: title left, actions right. */
-  const header = (right?: React.ReactNode) => (
-    <div className="flex items-start justify-between gap-4 mb-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Scripts</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          Plugin-shipped operator utilities, run on demand
-        </p>
-      </div>
-      <div className="flex gap-2 shrink-0">{right}</div>
+  const header = (
+    <div className="mb-4">
+      <h1 className="text-2xl font-semibold">Scripts</h1>
+      <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Plugin-shipped operator utilities, run on demand</p>
     </div>
   )
 
-  /* Same reordering as the strategies page, from the same module.
-
-     Called HERE, above the early returns below: the handlers it needs close
-     over `groups`, which only exists further down, but a hook that runs only
-     on some renders changes the hook count between them and React throws.
-     So the hook goes first and reads the handlers through a ref. */
-  const { beginDrag, cardStyle, folderStyle, refileStyle } = useSortable({
-    onReorder: (order) => drops.current.reorder(order),
-    onRefile: (id, folder) => drops.current.refile(id, folder),
-    onFolderMove: (a, b) => drops.current.folder(a, b),
-  })
-
-  if (error) return <div>{header()}<div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div></div>
-  if (scripts === null) return <div>{header()}<div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div></div>
+  if (error) return <div>{header}<div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div></div>
+  if (scripts === null) return <div>{header}<div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div></div>
   if (scripts.length === 0) {
-    return <div>{header()}<div className="text-sm" style={{ color: 'var(--muted)' }}>No scripts registered — plugins provide them via `scripts: [...]`.</div></div>
-  }
-
-  const entry = (id: string): ScriptShelfEntry => shelf.items[id] ?? {}
-  const patch = (id: string, e: ScriptShelfEntry) =>
-    ({ items: { ...shelf.items, [id]: { ...entry(id), ...e } } })
-
-  const mounted = scripts.filter(s => !entry(s.id).unmounted)
-  const groups = groupByFolder(mounted, entry)
-  const folderNames = groups.map(g => g.folder).filter((f): f is string => f !== undefined)
-
-  const setFolder = (id: string, name: string) => {
-    const next = patch(id, { folder: name })
-    if (!name) delete next.items[id]!.folder
-    void save(next)
-  }
-
-  const setMounted = (id: string, on: boolean) => {
-    const next = patch(id, { unmounted: !on })
-    if (on) delete next.items[id]!.unmounted
-    void save(next)
-    // Bridges the two words on purpose: the control says "minimize", the
-    // manager says "mounted" — the notice is where the operator learns they
-    // are the same thing.
-    if (!on) setNotice('Minimized — it is now unmounted. Bring it back any time from Manage.')
-  }
-
-  /** A group's new id order, straight from the drag. */
-  const reorder = (order: string[]) => {
-    const gi = groups.findIndex(g => g.items.some(x => x.id === order[0]))
-    if (gi < 0) return
-    const byId = new Map(groups[gi]!.items.map(x => [x.id, x]))
-    const next = groups.map((g, i) =>
-      i === gi ? { ...g, items: order.map(x => byId.get(x)!).filter(Boolean) } : g)
-    void save(layout(next, shelf))
-  }
-
-  const dropFolder = (dragName: string, targetName: string) => {
-    if (dragName === targetName) return
-    const next = groups.map(g => ({ ...g, items: [...g.items] }))
-    const fi = next.findIndex(g => g.folder === dragName)
-    const ti = next.findIndex(g => g.folder === targetName)
-    if (fi < 0 || ti < 0) return
-    const [moved] = next.splice(fi, 1)
-    next.splice(ti, 0, moved!)
-    void save(layout(next, shelf))
-  }
-
-  /* The handlers are published to this ref further down, once `groups` exists. */
-  drops.current = { reorder, refile: setFolder, folder: dropFolder }
-
-  if (manage) {
-    return (
-      <div>
-        {header(
-          <button onClick={() => { setManage(false); setNotice('') }} className="btn btn-primary">
-            Done
-          </button>,
-        )}
-        <MountManager
-          scripts={scripts}
-          isMounted={(id) => !entry(id).unmounted}
-          onToggle={setMounted}
-          error={saveError}
-        />
-      </div>
-    )
+    return <div>{header}<div className="text-sm" style={{ color: 'var(--muted)' }}>No scripts registered — plugins provide them via `scripts: [...]`.</div></div>
   }
 
   return (
     <div>
-      {header(
-        <button
-          onClick={() => { setManage(true); setNotice('') }}
-          className="btn btn-primary"
-          title="Mount or unmount scripts, by package"
+      {header}
+      <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
+        {/* ── rail: scripts by package ─────────────────────────────────── */}
+        <div
+          className="flex flex-col rounded-lg overflow-hidden shrink-0"
+          style={{ width: '18rem', background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
-          Manage
-        </button>,
-      )}
-      <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
-          {mounted.length} of {scripts.length} mounted · drag the ⠿ grip to reorder or re-file
-        </span>
-      </div>
-
-      {notice && (
-        <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-          {notice}
-          <button onClick={() => { setManage(true); setNotice('') }} className="px-2 py-0.5 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>
-            Open Manage
-          </button>
-          <button onClick={() => setNotice('')} className="ml-auto" style={{ color: 'var(--muted)' }}>✕</button>
-        </div>
-      )}
-
-      {saveError && <div className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{saveError}</div>}
-
-      {groups.map(({ folder, items }) => (
-        <div key={folder ?? '·'} className="flex flex-col gap-3">
-          {folder !== undefined && (
-            <div
-              data-folder-id={folder}
-              className="flex items-center gap-2 mt-2 select-none"
-              style={folderStyle(folder)}
-            >
-              <button
-                className="flex items-center gap-2 text-left text-sm font-medium"
-                style={{ color: 'var(--foreground)' }}
-                onClick={() => setCollapsed(prev => {
-                  const next = new Set(prev)
-                  if (!next.delete(folder)) next.add(folder)
-                  return next
-                })}
-              >
-                <span>{collapsed.has(folder) ? '▸' : '▾'}</span>
-                <span>📁 {folder}</span>
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
-              </button>
-              <DragHandle title="Drag to reorder folders" onPointerDown={(e) => beginDrag('folder', folder, e)} />
-            </div>
-          )}
-          {folder === undefined && groups.length > 1 && (
-            <div className="text-xs mt-2" style={{ color: 'var(--muted)' }}>Ungrouped</div>
-          )}
-          {(folder === undefined || !collapsed.has(folder)) && (
-          <div
-            data-cards={folder ?? ''}
-            className="flex flex-col gap-3"
-            style={refileStyle(folder)}
-          >
-          {items.map((s) => (
-            <div key={s.id} data-card-id={s.id} style={cardStyle(s.id)}>
-              <ScriptCard
-                script={s}
-                folder={entry(s.id).folder}
-                folders={folderNames}
-                dragHandle={<DragHandle title="Drag to reorder or move between folders" onPointerDown={(e) => beginDrag('card', s.id, e)} />}
-                onSetFolder={(name) => setFolder(s.id, name)}
-                onUnmount={() => setMounted(s.id, false)}
-              />
-            </div>
-          ))}
+          <div className="p-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search scripts…"
+              className="w-full rounded-md px-2.5 py-1.5 text-xs"
+              style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+            />
           </div>
-          )}
-        </div>
-      ))}
-      </div>
-    </div>
-  )
-}
-
-/** Folder groups: FOLDERS first (ordered by min sortOrder), ungrouped last; items by sortOrder then id. */
-function groupByFolder(
-  scripts: ScriptInfo[],
-  entry: (id: string) => ScriptShelfEntry,
-): Array<{ folder: string | undefined; items: ScriptInfo[] }> {
-  const byKey = new Map<string | undefined, ScriptInfo[]>()
-  for (const s of scripts) {
-    const key = entry(s.id).folder || undefined
-    if (!byKey.has(key)) byKey.set(key, [])
-    byKey.get(key)!.push(s)
-  }
-  const order = (s: ScriptInfo) => entry(s.id).sortOrder ?? Number.MAX_SAFE_INTEGER
-  const sortItems = (xs: ScriptInfo[]) => [...xs].sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id))
-  const minOrder = (xs: ScriptInfo[]) => Math.min(...xs.map(order))
-  const folders = [...byKey.keys()].filter((k): k is string => k !== undefined)
-    .sort((a, b) => minOrder(byKey.get(a)!) - minOrder(byKey.get(b)!) || a.localeCompare(b))
-  const out: Array<{ folder: string | undefined; items: ScriptInfo[] }> = []
-  for (const f of folders) out.push({ folder: f, items: sortItems(byKey.get(f)!) })
-  if (byKey.has(undefined)) out.push({ folder: undefined, items: sortItems(byKey.get(undefined)!) })
-  return out
-}
-
-/**
- * Rewrite the FULL layout after a drag: folder blocks get contiguous
- * sortOrder bands (folderIdx×1000 + position×10, ungrouped last), so folder
- * order derives stably from min member order and every drop is durable.
- * `moved` re-files the dragged script, which the group arrays cannot express
- * on their own — they carry position, not membership.
- */
-function layout(
-  groups: Array<{ folder: string | undefined; items: ScriptInfo[] }>,
-  shelf: ScriptShelf,
-  moved?: { id: string; folder: string | undefined },
-): ScriptShelf {
-  const items: Record<string, ScriptShelfEntry> = { ...shelf.items }
-  groups.forEach((g, gi) => {
-    g.items.forEach((s, i) => {
-      const prev = items[s.id] ?? {}
-      const next: ScriptShelfEntry = { ...prev, sortOrder: gi * 1000 + i * 10 }
-      if (g.folder) next.folder = g.folder
-      else delete next.folder
-      items[s.id] = next
-    })
-  })
-  if (moved) {
-    const e = { ...(items[moved.id] ?? {}) }
-    if (moved.folder) e.folder = moved.folder
-    else delete e.folder
-    items[moved.id] = e
-  }
-  return { items }
-}
-
-/**
- * The mount manager — every registered script, grouped by the PACKAGE that
- * ships it. Package is the axis that matters here: you mount and unmount by
- * where something came from ("I don't use the pair-arb tools"), while folders
- * are the arrangement you build by hand on the page itself.
- */
-function MountManager({ scripts, isMounted, onToggle, error }: {
-  scripts: ScriptInfo[]
-  isMounted: (id: string) => boolean
-  onToggle: (id: string, on: boolean) => void
-  error: string
-}) {
-  const byPackage = new Map<string, ScriptInfo[]>()
-  for (const s of [...scripts].sort((a, b) => a.id.localeCompare(b.id))) {
-    if (!byPackage.has(s.pluginName)) byPackage.set(s.pluginName, [])
-    byPackage.get(s.pluginName)!.push(s)
-  }
-  const mountedCount = scripts.filter(s => isMounted(s.id)).length
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>
-          {mountedCount} of {scripts.length} mounted · unmounting only hides it from the page
-        </span>
-      </div>
-
-      {error && <div className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</div>}
-
-      {[...byPackage.entries()].map(([pkg, items]) => (
-        <section key={pkg} className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-2 px-3 py-2 text-xs" style={{ background: 'var(--surface)', color: 'var(--muted)' }}>
-            <span className="font-semibold uppercase">{pkg}</span>
-            <span>{items.filter(s => isMounted(s.id)).length}/{items.length}</span>
-            <button
-              onClick={() => {
-                const allOn = items.every(s => isMounted(s.id))
-                for (const s of items) onToggle(s.id, !allOn)
-              }}
-              className="ml-auto px-2 py-0.5 rounded"
-              style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-            >
-              {items.every(s => isMounted(s.id)) ? 'Unmount all' : 'Mount all'}
-            </button>
-          </div>
-          {items.map((s, i) => {
-            const on = isMounted(s.id)
-            return (
-              <div
-                key={s.id}
-                className="flex items-center gap-3 px-3 py-2"
-                style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)', opacity: on ? 1 : 0.55 }}
-              >
-                <button
-                  onClick={() => onToggle(s.id, !on)}
-                  className="text-xs shrink-0"
-                  style={{ color: on ? 'var(--accent)' : 'var(--muted)' }}
-                  title={on ? 'Unmount — hide it from the page' : 'Mount — show it on the page'}
-                >
-                  {on ? '☑' : '☐'}
-                </button>
-                <div className="min-w-0">
-                  <div className="text-sm">{s.name}</div>
-                  <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-                    {s.id}{s.description ? ` — ${s.description}` : ''}
-                  </div>
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
+            {groups.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Nothing matches.</p>}
+            {groups.map(({ pkg, items }) => {
+              const isCollapsed = collapsed.has(pkg) && !query
+              return (
+                <div key={pkg}>
+                  <button
+                    onClick={() => setCollapsed(prev => { const next = new Set(prev); if (!next.delete(pkg)) next.add(pkg); return next })}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: 'var(--muted)', borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)', background: 'color-mix(in srgb, var(--border) 18%, transparent)' }}
+                  >
+                    <span className="w-3 text-center">{isCollapsed ? '▸' : '▾'}</span>
+                    <TypeMark label={pkg} size={16} />
+                    <span className="truncate">{pkg}</span>
+                    <span className="ml-auto font-normal opacity-70">{items.length}</span>
+                  </button>
+                  {!isCollapsed && items.map(s => {
+                    const active = selected?.id === s.id
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => pick(s.id)}
+                        className="hoverable hoverable-flat w-full text-left px-3 py-2.5"
+                        style={{
+                          background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+                          borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                          borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
+                        }}
+                      >
+                        <div className="text-sm truncate">{s.name}</div>
+                        {s.description && <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{s.description}</div>}
+                      </button>
+                    )
+                  })}
                 </div>
-              </div>
-            )
-          })}
-        </section>
-      ))}
+              )
+            })}
+          </div>
+          <div className="px-3 py-2 text-[11px] shrink-0" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+            {scripts.length} scripts · {groups.length} packages
+          </div>
+        </div>
+
+        {/* ── detail: the selected script ──────────────────────────────── */}
+        <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden">
+          {selected ? (
+            <ScriptCard key={selected.id} script={selected} />
+          ) : (
+            <div className="rounded-lg p-10 text-center text-sm" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+              Pick a script.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
 
-/**
- * Folder picker, same shape as the strategy list's: pick an existing folder,
- * type a new one, or drop out of the folder entirely.
- */
-/** An attachment a script returned alongside its report. */
 interface ScriptFile { name: string; mime?: string; content: string }
 interface ScriptOutput { text: string; json?: unknown; files?: ScriptFile[] }
 
@@ -452,15 +208,7 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
   return out
 }
 
-function ScriptCard({ script, folder, folders, dragHandle, onSetFolder, onUnmount }: {
-  script: ScriptInfo
-  folder?: string
-  folders?: string[]
-  /** The six-dot grip. Dragging starts there and nowhere else. */
-  dragHandle?: React.ReactNode
-  onSetFolder?: (name: string) => void
-  onUnmount?: () => void
-}) {
+function ScriptCard({ script }: { script: ScriptInfo }) {
   const [values, setValues] = useState<Record<string, string>>(() => seedValues(script.paramsFields))
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<ScriptOutput | null>(null)
@@ -563,9 +311,7 @@ function ScriptCard({ script, folder, folders, dragHandle, onSetFolder, onUnmoun
 
   return (
     <div className="hoverable rounded-lg p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      {/* Same header shape as an instance card: identity left, then the one
-          action, the ⋯ menu, and the grip LAST. Filing and minimizing used to
-          be two loose controls sitting where another page puts its menu. */}
+      {/* Identity left, the one action right. */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="font-medium">{script.name}</div>
@@ -583,32 +329,6 @@ function ScriptCard({ script, folder, folders, dragHandle, onSetFolder, onUnmoun
           >
             {running ? 'Running…' : '▶ Run'}
           </button>
-          {(onSetFolder || onUnmount) && (
-            <KebabMenu>
-              {(close) => (
-                <>
-                  {onSetFolder && (
-                    <FolderSection current={folder} folders={folders ?? []} onPick={onSetFolder} close={close} />
-                  )}
-                  {/* Still "put this away", just no longer a lone — button in a
-                      corner where the other page keeps a menu. */}
-                  {onUnmount && (
-                    <button
-                      type="button"
-                      className={MENU_ITEM}
-                      style={{ color: 'var(--foreground)', borderTop: '1px solid var(--border)' }}
-                      onClick={() => { onUnmount(); close() }}
-                      title="Take it off this page; restore it from Manage"
-                    >
-                      Minimize
-                    </button>
-                  )}
-                </>
-              )}
-            </KebabMenu>
-          )}
-          {/* Last in the row, as on the strategies page. */}
-          {dragHandle}
         </div>
       </div>
 
