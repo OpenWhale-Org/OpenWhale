@@ -351,10 +351,11 @@ function IllustrationFrame({ ill, values }: { ill: ParamIllustration; values: Re
       <iframe
         ref={ref}
         sandbox="allow-scripts"
+        scrolling="no"
         srcDoc={ill.html}
         onLoad={() => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values }, '*')}
         className="w-full rounded-md"
-        style={{ height: ill.height ?? 220, border: '1px solid var(--border)', background: 'var(--surface)' }}
+        style={{ height: ill.height ?? 220, border: '1px solid var(--border)', background: 'var(--surface)', overflow: 'hidden' }}
       />
     </div>
   )
@@ -1950,7 +1951,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           <ModalMaximizeButton />
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-5 py-4 flex flex-col gap-4">
           {!initial && strategies.length === 0 && (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>No strategies registered.</p>
           )}
