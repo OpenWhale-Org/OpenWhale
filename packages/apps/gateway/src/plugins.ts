@@ -262,6 +262,12 @@ export async function stage(packageName: string, hint?: string): Promise<{ entry
       return base !== 'node_modules' && base !== '.git'
     },
   })
+  // The copy carries no node_modules. An npm install's dependencies sit flat
+  // in the plugins dir and resolve by walking up; a local package's sit in
+  // its own node_modules (pnpm's, full of relative symlinks that a copy would
+  // break), so point the copy back at them rather than copying them.
+  const ownModules = path.join(installed, 'node_modules')
+  if (fs.existsSync(ownModules)) await fs.promises.symlink(ownModules, path.join(dir, 'node_modules'), 'dir')
   return { entryPath: path.join(dir, rel), dir }
 }
 

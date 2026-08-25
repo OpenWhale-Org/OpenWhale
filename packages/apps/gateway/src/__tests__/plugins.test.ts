@@ -186,15 +186,17 @@ describe('staging — what makes a reinstall load new code', () => {
     fs.writeFileSync(path.join(pkgDir, 'node_modules', 'some-dep', 'index.js'), '')
   }
 
-  it('copies the package out of node_modules, leaving its own node_modules behind', async () => {
+  it('copies the package out of node_modules, linking back to its own node_modules', async () => {
     install('v1')
     const { entryPath, dir } = await stage('demo-plugin')
     expect(stagedDirOf(entryPath)).toBe(dir)
     expect(fs.existsSync(entryPath)).toBe(true)
     expect(fs.existsSync(path.join(dir, 'dist', 'helper.js'))).toBe(true)
-    // Left behind on purpose: the deps live in the shared prefix, which is
-    // still an ancestor of the staging dir
-    expect(fs.existsSync(path.join(dir, 'node_modules'))).toBe(false)
+    // Not copied (pnpm's relative symlinks would break) but reachable: a
+    // local package's own deps resolve through a link to the original dir
+    const nm = path.join(dir, 'node_modules')
+    expect(fs.lstatSync(nm).isSymbolicLink()).toBe(true)
+    expect(fs.existsSync(path.join(nm, 'some-dep', 'index.js'))).toBe(true)
   })
 
   /* The whole point. Node's ESM registry is keyed by resolved URL and cannot
