@@ -1184,6 +1184,9 @@ export function buildRouter(): Router {
                know whether to offer overwrite or a namespace. */
             sameSource: err.sameSource,
             suggestedAlias: err.suggestedAlias,
+            /* Non-empty = a fresh namespace cannot work, so the form must not
+               offer one: both plugins claim something only one can hold. */
+            blockedBy: err.blockedBy,
             ...(err.existing ? { source: describeSource(err.existing.source), installedAt: err.existing.installedAt } : {}),
           },
           error: errText(err),

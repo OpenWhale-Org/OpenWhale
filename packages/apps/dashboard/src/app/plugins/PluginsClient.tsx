@@ -585,6 +585,8 @@ type Conflict = {
   /** True when the incoming package is the same artefact — a new version. */
   sameSource: boolean
   suggestedAlias: string
+  /** Non-namespaced registrations another plugin holds; non-empty = coexistence is impossible. */
+  blockedBy?: Array<{ what: string; name: string; owner: string }>
   source?: string
   installedAt?: string
 }
@@ -794,6 +796,30 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
                 the new code, and anything whose strategy the new version dropped is left marked broken rather than deleted.
               </span>
             </>
+          ) : conflict.blockedBy && conflict.blockedBy.length > 0 ? (
+            /* A different plugin of the same name, but the two claim something
+               that is not namespaced — a venue's adapter cell, a credential
+               type. No namespace can separate those, so the honest answer is
+               that only one of them can be installed, and the choice is which. */
+            <>
+              <span className="font-medium">
+                These two cannot both be installed. This package and the one installed as{' '}
+                <span className="font-mono">{conflict.plugin}</span> both provide:
+              </span>
+              <ul className="flex flex-col gap-0.5 pl-4 list-disc">
+                {conflict.blockedBy.map(c => (
+                  <li key={`${c.what}:${c.name}`}>
+                    {c.what} <span className="font-mono">{c.name}</span>
+                    <span className="opacity-70"> — held by <span className="font-mono">{c.owner}</span></span>
+                  </li>
+                ))}
+              </ul>
+              <span className="opacity-70">
+                Those are addressed without a plugin name — that is how an account finds its venue — so exactly one plugin
+                can provide each, and a separate namespace would not change it. Overwrite the installed one if this is
+                meant to take its place, or uninstall it first.
+              </span>
+            </>
           ) : (
             <>
               <span className="font-medium">
@@ -821,7 +847,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
         </div>
       )}
       <div className="flex gap-2 self-end">
-        {conflict && !conflict.sameSource && (
+        {conflict && !conflict.sameSource && !(conflict.blockedBy && conflict.blockedBy.length > 0) && (
           <button
             type="button"
             onClick={() => void run(false, alias.trim() || conflict.suggestedAlias)}
@@ -836,8 +862,8 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
             type="button"
             onClick={() => void run(true)}
             disabled={installing}
-            className={`btn ${conflict.sameSource ? 'btn-danger-solid' : 'btn-danger'}`}
-            title={conflict.sameSource ? undefined : 'Only if this really is the same plugin, moved to a new source'}
+            className={`btn ${conflict.sameSource || conflict.blockedBy?.length ? 'btn-danger-solid' : 'btn-danger'}`}
+            title={conflict.sameSource ? undefined : 'Replaces the installed plugin — its strategies stop being available'}
           >
             {installing ? 'Overwriting…' : `Overwrite ${conflict.plugin}`}
           </button>

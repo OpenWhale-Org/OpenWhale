@@ -54,6 +54,12 @@ export class AdapterRegistry implements AdapterResolver {
     this.cells.set(key, { registration: { ...registration, venue }, owner })
   }
 
+  /** Which plugin holds this cell, if any — asked before an install, to say
+   *  whether two plugins can coexist rather than finding out mid-registration. */
+  ownerOfCell(kind: NamespacedKind, venue: string): string | undefined {
+    return this.cells.get(cellKey(kind, venue))?.owner
+  }
+
   /** Remove a plugin's cells and close their cached instances. */
   async unregisterOwner(owner: string): Promise<void> {
     for (const [key, cell] of this.cells) {

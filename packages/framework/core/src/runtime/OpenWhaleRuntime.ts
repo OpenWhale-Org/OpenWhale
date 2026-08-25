@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'url'
 import type { StrategyInstance, StrategyInstanceView } from '../types/instance.js'
 import type { ExecutionQueue } from '../types/executor.js'
-import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult } from '../types/runtime.js'
+import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from '../types/runtime.js'
 import { PluginAlreadyLoadedError } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
 import type { Trigger } from '../types/trigger.js'
@@ -1000,8 +1000,39 @@ export class OpenWhaleRuntime implements IRuntime {
   loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig, opts?: PluginLoadOptions): string {
     const plugin = this.buildPlugin(factory, config)
     const ns = resolveNamespace(plugin, opts)
-    if (this.loadedPlugins.has(ns)) throw new PluginAlreadyLoadedError(ns, plugin.name)
+    if (this.loadedPlugins.has(ns)) {
+      throw new PluginAlreadyLoadedError(ns, plugin.name, this.conflictingGlobals(plugin))
+    }
     return this.registerPlugin(plugin, ns)
+  }
+
+  /**
+   * This plugin's non-namespaced registrations that another plugin already
+   * holds — the answer to "could these two be installed side by side?".
+   *
+   * Asked BEFORE the namespace question is put to the user, because it decides
+   * whether that question has two answers or one. Offering a fresh namespace
+   * to a venue plugin whose cells are taken is offering something that cannot
+   * work: it would be accepted, run, and fail on the first cell it registers.
+   *
+   * Nothing is excluded for the incumbent, deliberately. The question is
+   * whether the newcomer can live ALONGSIDE what is installed, so what the
+   * incumbent holds is exactly what blocks it. (Overwriting is unaffected —
+   * that unloads the incumbent first, releasing everything it held.)
+   */
+  private conflictingGlobals(plugin: OpenWhalePlugin): PluginGlobalConflict[] {
+    const found: PluginGlobalConflict[] = []
+    for (const cell of plugin.adapters ?? []) {
+      const venue = cellVenue(cell)
+      if (venue === undefined) continue
+      const owner = this.adapterRegistry.ownerOfCell(cell.kind as NamespacedKind, venue)
+      if (owner !== undefined) found.push({ what: 'adapter cell', name: `(${cell.kind}, ${venue})`, owner })
+    }
+    for (const type of plugin.credentialTypes ?? []) {
+      const owner = this.credentialTypeOwners.get(type.type)
+      if (owner !== undefined) found.push({ what: 'credential type', name: type.type, owner })
+    }
+    return found
   }
 
   /**

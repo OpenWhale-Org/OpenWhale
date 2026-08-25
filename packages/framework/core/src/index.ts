@@ -97,6 +97,7 @@ export type {
   LoadedPluginInfo,
   PluginDependents,
   PluginReplaceResult,
+  PluginGlobalConflict,
   MonitorDefinition,
   ExecutorDefinition,
   StrategyDefinition,

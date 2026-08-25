@@ -66,6 +66,25 @@ export interface LoadedPluginInfo {
 }
 
 /**
+ * A registration that is NOT namespaced and is already held by someone else.
+ *
+ * These decide whether two plugins can coexist at all. A strategy is
+ * addressed as `<namespace>/<id>`, so a second copy under another namespace
+ * is simply a second strategy — but an adapter cell is addressed by
+ * (kind, venue), and a credential type by its bare name, because both are
+ * meant to be found without knowing which plugin provides them. Only one
+ * plugin can hold each, whatever it is called.
+ */
+export interface PluginGlobalConflict {
+  /** 'adapter cell' | 'credential type' — what kind of registration collided. */
+  what: string
+  /** '(pendle/rates, boros)' or 'pendle/boros-agent'. */
+  name: string
+  /** The plugin holding it. */
+  owner: string
+}
+
+/**
  * Thrown when the namespace a plugin wants is taken — the signal to ask
  * whether this is a new version of what is there, or a different plugin that
  * happens to share a name and needs one of its own.
@@ -76,6 +95,15 @@ export class PluginAlreadyLoadedError extends Error {
     public readonly pluginName: string,
     /** What the incoming package calls itself, when it differs from the namespace. */
     public readonly declaredName?: string,
+    /**
+     * Non-namespaced registrations already held by another plugin.
+     *
+     * Empty means a namespace of its own would work. Non-empty means it would
+     * not, and there is no point offering it: the two plugins both claim
+     * something that can only have one holder, so the choice is which of them
+     * is installed.
+     */
+    public readonly blockedBy: PluginGlobalConflict[] = [],
   ) {
     super(`Plugin namespace "${pluginName}" is already in use — unload it first, or install under another namespace`)
     this.name = 'PluginAlreadyLoadedError'

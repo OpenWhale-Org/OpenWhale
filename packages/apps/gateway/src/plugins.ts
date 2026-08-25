@@ -17,7 +17,7 @@ import path from 'path'
 import os from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import type { OpenWhaleRuntime, LoadedPluginInfo, PluginReplaceResult } from '@openwhaleorg/core'
+import type { OpenWhaleRuntime, LoadedPluginInfo, PluginReplaceResult, PluginGlobalConflict } from '@openwhaleorg/core'
 import { getLogger, PluginAlreadyLoadedError } from '@openwhaleorg/core'
 
 const execFileAsync = promisify(execFile)
@@ -84,14 +84,24 @@ export class PluginConflictError extends Error {
     readonly sameSource: boolean,
     /** A free namespace to offer when it is a different plugin. */
     readonly suggestedAlias: string,
+    /**
+     * Non-namespaced registrations another plugin already holds. When this is
+     * non-empty a fresh namespace is not an option, so it must not be offered:
+     * both plugins claim something only one can have.
+     */
+    readonly blockedBy: PluginGlobalConflict[] = [],
   ) {
     super(
       sameSource
         ? `"${plugin}" is already installed from the same source${existing ? ` (${describeSource(existing.source)})` : ''}` +
             ' — install again with overwrite to replace it.'
-        : `The namespace "${plugin}" is taken${existing ? ` by an install from ${describeSource(existing.source)}` : ''}.` +
-            ` This package came from somewhere else, so it is a different plugin sharing a name — install it as "${suggestedAlias}",` +
-            ' or overwrite if it really is the same plugin that moved.',
+        : blockedBy.length > 0
+          ? `"${plugin}" and the plugin already installed under that name both provide ` +
+              `${blockedBy.map(c => `${c.what} ${c.name}`).join(', ')}, which only one plugin can hold. ` +
+              'They cannot both be installed — overwrite the installed one, or uninstall it first.'
+          : `The namespace "${plugin}" is taken${existing ? ` by an install from ${describeSource(existing.source)}` : ''}.` +
+              ` This package came from somewhere else, so it is a different plugin sharing a name — install it as "${suggestedAlias}",` +
+              ' or overwrite if it really is the same plugin that moved.',
     )
     this.name = 'PluginConflictError'
   }
@@ -422,6 +432,7 @@ async function loadOrReplace(
         existing,
         existing !== undefined && sourceIdentity(existing.source) === sourceIdentity(ctx.source),
         suggestAlias(declared, ctx.source, runtime.listLoadedPlugins().map(p => p.name)),
+        err.blockedBy,
       )
     }
     throw err

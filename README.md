@@ -172,7 +172,9 @@ Install from the dashboard's Plugins page — a built `.js`/`.mjs` bundle, a **G
 
 A GitHub install is cloned and built by npm, so a repo shipping only TypeScript sources needs a `prepare` script in its package.json (`"prepare": "npm run build"`); private repos need `OPENWHALE_GITHUB_TOKEN` set on the engine.
 
-A plugin's declared name is its default **namespace** — the `my-plugin/` every id it registers is prefixed with — but names are not globally unique, so the namespace is decided at install. When one is already taken, the source decides what is being asked: the same npm package or repo is a new version, offered as an overwrite; anything else is a different plugin sharing a name, offered its own namespace (`alice-funding-arb`, suggested from the publisher). A namespace is fixed once chosen — instances are saved as `<namespace>/<strategy>`.
+A plugin's declared name is its default **namespace** — the `my-plugin/` every id it registers is prefixed with — but names are not globally unique, so the namespace is decided at install. When one is already taken, the package name decides what is being asked — a local checkout and its published release are one plugin, offered as an overwrite; a different package is a stranger sharing a name, offered its own namespace (`alice-funding-arb`, suggested from the publisher). A namespace is fixed once chosen — instances are saved as `<namespace>/<strategy>`.
+
+Not everything is namespaced, and that decides whether two same-named plugins can coexist at all: adapter cells (addressed by kind and venue) and credential types (shared by name) can have exactly one provider each, so two venue plugins for the same venue are an either/or no namespace can separate. That is checked before the namespace is offered, and registration is all-or-nothing, so a refused install leaves nothing behind.
 
 Overwriting replaces the code and keeps instances, accounts and credentials: anything running restarts on the new code, and anything whose strategy the new version dropped is marked broken on the Instances page instead of deleted — reinstalling the version that has it brings those back running.
 

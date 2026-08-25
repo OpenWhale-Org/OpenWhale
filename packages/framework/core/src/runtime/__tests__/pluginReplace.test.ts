@@ -233,6 +233,57 @@ describe('replacing a plugin in place', () => {
       .toThrow(/Credential type "demo\/key" is already registered by plugin "venue"/)
   })
 
+  /* Whether a same-named stranger can be installed alongside depends on what
+     it registers, and the answer is knowable BEFORE asking the user to pick a
+     namespace. Offering one to a venue plugin whose cells are taken offers
+     something that cannot work — accepted, run, and failed on the first cell. */
+  it('says up front whether a namespace of its own would even work', () => {
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'run-'))
+    const runtime = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
+
+    runtime.loadPlugin((): OpenWhalePlugin => ({
+      name: 'pendle', version: '1',
+      adapters: [{ kind: 'demo/rates', venue: 'boros', create: () => ({}) }],
+      credentialTypes: [{ type: 'demo/agent', raw: true }],
+    }), {})
+
+    // Somebody else's `pendle`, also a venue plugin for the same venue
+    try {
+      runtime.loadPlugin((): OpenWhalePlugin => ({
+        name: 'pendle', version: '9',
+        adapters: [{ kind: 'demo/rates', venue: 'boros', create: () => ({}) }],
+        credentialTypes: [{ type: 'demo/agent', raw: true }],
+      }), {})
+      expect.unreachable()
+    } catch (err) {
+      const e = err as PluginAlreadyLoadedError
+      expect(e.blockedBy.map(c => `${c.what} ${c.name} <- ${c.owner}`)).toEqual([
+        'adapter cell (demo/rates, boros) <- pendle',
+        'credential type demo/agent <- pendle',
+      ])
+    }
+
+    // Somebody else's `pendle` that is only strategies — nothing global, so a
+    // namespace of its own is a real option and is reported as one
+    const strategyOnly = (): OpenWhalePlugin => {
+      const now = new Date().toISOString()
+      const Cls = strategyClass('alpha')
+      return {
+        name: 'pendle', version: '9',
+        strategies: [{ definition: { id: 'alpha', name: 'alpha', source: 'plugin', createdAt: now, updatedAt: now }, factory: () => new Cls() }],
+      }
+    }
+    try {
+      runtime.loadPlugin(strategyOnly, {})
+      expect.unreachable()
+    } catch (err) {
+      expect((err as PluginAlreadyLoadedError).blockedBy).toEqual([])
+    }
+    // …and taking that option works
+    expect(runtime.loadPlugin(strategyOnly, {}, { as: 'alice-pendle' })).toBe('alice-pendle')
+    expect(runtime.listStrategies().map(s => s.id)).toContain('alice-pendle/alpha')
+  })
+
   /* A refused registration must leave nothing behind. Half of a plugin used to
      stay registered with no loadedPlugins entry to find it by, so unloadPlugin
      answered "Plugin not loaded" and the next attempt failed on the wreckage
