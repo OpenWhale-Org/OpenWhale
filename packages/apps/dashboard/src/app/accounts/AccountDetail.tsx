@@ -15,7 +15,10 @@ interface DetailPayload {
 
 type Tab = 'positions' | 'balance' | 'orders'
 
-function usd(v: number): string {
+function usd(v: number | undefined): string {
+  // A read view that doesn't speak the perp convention leaves fields out —
+  // show a dash rather than crash the pane.
+  if (typeof v !== 'number' || Number.isNaN(v)) return '—'
   return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 }
 
