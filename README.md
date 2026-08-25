@@ -172,7 +172,9 @@ Install from the dashboard's Plugins page — a built `.js`/`.mjs` bundle, a **G
 
 A GitHub install is cloned and built by npm, so a repo shipping only TypeScript sources needs a `prepare` script in its package.json (`"prepare": "npm run build"`); private repos need `OPENWHALE_GITHUB_TOKEN` set on the engine.
 
-Uninstalling refuses while any strategy instance, account or credential still belongs to the plugin — each holds something you configured — and names them. The plugin's monitor instances are deleted with it. Each install is loaded from its own copy under `plugins/staged/`, so reinstalling runs the new code without restarting the engine: Node's ESM registry is keyed by resolved URL and cannot be evicted, so a fixed path would keep executing the first version loaded.
+Installing a plugin that is already loaded is offered as an overwrite rather than refused: the code is replaced, instances/accounts/credentials are kept, anything running restarts on the new code, and anything whose strategy the new version dropped is marked broken on the Instances page instead of deleted — reinstalling the version that has it brings those back running.
+
+Uninstalling, by contrast, refuses while any strategy instance, account or credential still belongs to the plugin — each holds something you configured — and names them. The plugin's monitor instances are deleted with it. Each install is loaded from its own copy under `plugins/staged/`, so reinstalling runs the new code without restarting the engine: Node's ESM registry is keyed by resolved URL and cannot be evicted, so a fixed path would keep executing the first version loaded.
 
 ### Writing plugins with Claude
 

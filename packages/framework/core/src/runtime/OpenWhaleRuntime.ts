@@ -1,7 +1,8 @@
 import { pathToFileURL } from 'url'
 import type { StrategyInstance, StrategyInstanceView } from '../types/instance.js'
 import type { ExecutionQueue } from '../types/executor.js'
-import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents } from '../types/runtime.js'
+import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult } from '../types/runtime.js'
+import { PluginAlreadyLoadedError } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
 import type { Trigger } from '../types/trigger.js'
 import type { PlotOption } from '../types/monitor.js'
@@ -38,7 +39,7 @@ import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry }
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
 import { StrategyInstanceStore } from '../bundle/StrategyInstanceStore.js'
 import { DBStrategyInstanceStore } from '../bundle/DBStrategyInstanceStore.js'
-import type { PluginManager, PluginFactory } from '../plugin/PluginManager.js'
+import type { PluginManager, PluginFactory, OpenWhalePlugin } from '../plugin/PluginManager.js'
 import { lowerAccountEntry, lowerMonitorEntry } from '../plugin/definePlugin.js'
 import { CompiledLoader } from '../compiled/CompiledLoader.js'
 import { llmCredentialTypes } from '../credentials/llmCredentialTypes.js'
@@ -105,6 +106,17 @@ function assertNamespacedKind(kind: string): void {
   if (!/^[^/]+\/[^/]+$/.test(kind)) {
     throw new Error(`Invalid kind "${kind}" — every kind must be namespaced as 'ns/name' (e.g. 'exchange/perp')`)
   }
+}
+
+/** Import a built plugin module and hand back its default-exported factory. */
+async function importPluginFactory(filePath: string): Promise<PluginFactory<unknown>> {
+  // webpackIgnore: true — keep bundlers from trying to resolve the dynamic path
+  const mod = await import(/* webpackIgnore: true */ pathToFileURL(filePath).href) as { default?: PluginFactory<unknown> }
+  const factory = mod.default
+  if (typeof factory !== 'function') {
+    throw new Error(`Plugin module at "${filePath}" must default-export a plugin factory function`)
+  }
+  return factory
 }
 
 export class OpenWhaleRuntime implements IRuntime {
@@ -940,14 +952,28 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   loadPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): string {
+    const plugin = this.buildPlugin(factory, config)
+    if (this.loadedPlugins.has(plugin.name)) throw new PluginAlreadyLoadedError(plugin.name)
+    return this.registerPlugin(plugin)
+  }
+
+  /**
+   * Call a plugin factory without registering what it returns.
+   *
+   * Split out because replacing a plugin has to know its name BEFORE it can
+   * unload the one being replaced, and the name only exists once the factory
+   * has run. Calling the factory twice instead would mean running a plugin's
+   * setup twice per replace, which is not a factory's contract.
+   */
+  private buildPlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): OpenWhalePlugin {
     if (!this.credentialStore) {
       throw new Error('loadPlugin() requires a CredentialStore — pass one in RuntimeOptions')
     }
-    const plugin = factory({ credentials: this.credentialStore, config, adapters: this.adapterRegistry, publicSessions: this.publicSessions })
+    return factory({ credentials: this.credentialStore, config, adapters: this.adapterRegistry, publicSessions: this.publicSessions })
+  }
+
+  private registerPlugin(plugin: OpenWhalePlugin): string {
     const ns = plugin.name  // e.g. 'hyperliquid'
-    if (this.loadedPlugins.has(ns)) {
-      throw new Error(`Plugin "${ns}" is already loaded — unload it first`)
-    }
     const p = (id: string) => `${ns}/${id}`
 
     for (const cell of plugin.adapters ?? []) {
@@ -1018,13 +1044,76 @@ export class OpenWhaleRuntime implements IRuntime {
    * a PluginFactory. Same namespacing and registration as loadPlugin().
    */
   async loadPluginFromPath(filePath: string, config: unknown): Promise<string> {
-    // webpackIgnore: true — keep bundlers from trying to resolve the dynamic path
-    const mod = await import(/* webpackIgnore: true */ pathToFileURL(filePath).href) as { default?: PluginFactory<unknown> }
-    const factory = mod.default
-    if (typeof factory !== 'function') {
-      throw new Error(`Plugin module at "${filePath}" must default-export a plugin factory function`)
+    return this.loadPlugin(await importPluginFactory(filePath), config)
+  }
+
+  /**
+   * Load a plugin over one already loaded under the same name, keeping
+   * everything the user built on it.
+   *
+   * The opposite trade from uninstall. Uninstall means "this plugin is going
+   * away", so an instance or credential left pointing at nothing is a loss and
+   * it refuses. A replace means "same plugin, different code": the new version
+   * almost certainly still has the strategy an instance names, so deleting the
+   * instance to swap the code would destroy the very thing the swap is for.
+   * Persisted rows are therefore never touched — the ones whose strategy
+   * survived come back running, and any that do not are left for the user to
+   * see and decide about. Reinstalling the old code makes them whole again,
+   * because nothing was thrown away.
+   *
+   * Running instances are stopped with `releaseInstance`, not `deactivate`:
+   * deactivate would persist enabled=false, which would silently turn "I
+   * upgraded a plugin" into "my strategies are off after the next reboot".
+   */
+  async replacePluginFromPath(filePath: string, config: unknown): Promise<PluginReplaceResult> {
+    return this.replacePlugin(await importPluginFactory(filePath), config)
+  }
+
+  /** replacePluginFromPath for a factory already in hand. */
+  async replacePlugin<TConfig>(factory: PluginFactory<TConfig>, config: TConfig): Promise<PluginReplaceResult> {
+    const plugin = this.buildPlugin(factory, config)
+    const ns = plugin.name
+    const existing = this.loadedPlugins.get(ns)
+
+    if (existing) {
+      const strategies = new Set(existing.strategies)
+      const live = Array.from(this.instances.values()).filter(i => strategies.has(i.strategyId)).map(i => i.id)
+      for (const id of live) await this.releaseInstance(id)
+      // Nothing of the plugin's is live now, so the ordinary guard is satisfied
+      this.unloadPlugin(ns)
     }
-    return this.loadPlugin(factory, config)
+    this.registerPlugin(plugin)
+
+    /* Start everything of this plugin's that is marked enabled and is not
+       already running — boot's exact rule, `enabled` meaning "should be
+       running". Applying it here is what makes putting the old version back
+       whole again: an instance orphaned by an earlier swap was left enabled,
+       so reinstalling the code that has its strategy starts it, without the
+       user having to remember which ones to switch on. */
+    const provided = new Set(this.loadedPlugins.get(ns)?.strategies ?? [])
+    const resumed: string[] = []
+    const orphaned: string[] = []
+    for (const row of await this.instanceStore.loadAll()) {
+      if (!row.strategyId.startsWith(`${ns}/`)) continue    // another plugin's business
+      if (!row.enabled || this.instances.has(row.id)) continue
+      if (!provided.has(row.strategyId)) {
+        // The row stays; listInstanceViews reports the strategy as missing
+        orphaned.push(row.id)
+        continue
+      }
+      try {
+        await this.activateInstance(row, { persist: false })
+        resumed.push(row.id)
+      } catch (err) {
+        orphaned.push(row.id)
+        log.warn({ plugin: ns, instance: row.id, err }, 'Instance did not survive the plugin replacement')
+      }
+    }
+    log.info(
+      { plugin: ns, replaced: existing !== undefined, resumed: resumed.length, orphaned: orphaned.length },
+      existing ? 'Plugin replaced' : 'Plugin loaded',
+    )
+    return { name: ns, replaced: existing !== undefined, resumed, orphaned }
   }
 
   /**
@@ -1436,13 +1525,25 @@ export class OpenWhaleRuntime implements IRuntime {
     const views: StrategyInstanceView[] = []
     for (const row of persisted) {
       const live = this.instances.get(row.id)
-      views.push({ ...(live ?? row), active: live !== undefined })
+      views.push({ ...(live ?? row), active: live !== undefined, ...this.instanceProblem(row.strategyId) })
       seen.add(row.id)
     }
     for (const [id, live] of this.instances) {
       if (!seen.has(id)) views.push({ ...live, active: true })
     }
     return views
+  }
+
+  /** A missing strategy is the visible half of an uninstalled or replaced plugin. */
+  private instanceProblem(strategyId: string): { problem?: string } {
+    if (this.strategyRegistry.getDefinition(strategyId) !== undefined) return {}
+    const [ns] = strategyId.split('/')
+    const pluginGone = ns !== undefined && !this.loadedPlugins.has(ns)
+    return {
+      problem: `strategy "${strategyId}" is not registered${
+        pluginGone ? ` — plugin "${ns}" is not installed` : ' — its plugin no longer provides it'
+      }`,
+    }
   }
 
   /**

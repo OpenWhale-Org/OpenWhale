@@ -53,6 +53,25 @@ export interface LoadedPluginInfo {
   cells: Array<{ kind: string; venue: string }>
 }
 
+/** Thrown when a plugin with this name is already loaded — the signal to offer a replace. */
+export class PluginAlreadyLoadedError extends Error {
+  constructor(public readonly pluginName: string) {
+    super(`Plugin "${pluginName}" is already loaded — unload it first`)
+    this.name = 'PluginAlreadyLoadedError'
+  }
+}
+
+/** Outcome of loading a plugin over one already loaded. */
+export interface PluginReplaceResult {
+  name: string
+  /** False when nothing was loaded under this name and it was a plain load. */
+  replaced: boolean
+  /** Instances that were running before and are running again. */
+  resumed: string[]
+  /** Instances that were running and could not restart — their strategy is gone. */
+  orphaned: string[]
+}
+
 /**
  * What a plugin still owns, asked before removing it.
  *

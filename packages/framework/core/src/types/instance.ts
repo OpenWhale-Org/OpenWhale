@@ -33,4 +33,17 @@ export interface StrategyInstance {
 }
 
 /** Persisted instance + live activation state, as dashboards see it. */
-export type StrategyInstanceView = StrategyInstance & { active: boolean }
+export type StrategyInstanceView = StrategyInstance & {
+  active: boolean
+  /**
+   * Set when the instance names a strategy no longer in the registry — its
+   * plugin was uninstalled, or replaced by a version that dropped it.
+   *
+   * The row is deliberately kept rather than cleaned up: it still holds the
+   * params someone tuned and the accounts they bound, and reinstalling the
+   * plugin makes it whole again. Reported so the instance reads as broken
+   * instead of merely stopped, which is the difference between "I turned this
+   * off" and "the code this ran on is gone".
+   */
+  problem?: string
+}

@@ -17,8 +17,8 @@ import path from 'path'
 import os from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import type { OpenWhaleRuntime, LoadedPluginInfo } from '@openwhaleorg/core'
-import { getLogger } from '@openwhaleorg/core'
+import type { OpenWhaleRuntime, LoadedPluginInfo, PluginReplaceResult } from '@openwhaleorg/core'
+import { getLogger, PluginAlreadyLoadedError } from '@openwhaleorg/core'
 
 const execFileAsync = promisify(execFile)
 const log = () => getLogger().child({ module: 'PluginService' })
@@ -46,6 +46,50 @@ export interface InstalledPluginView extends LoadedPluginInfo {
   installedAt?: string
   /** True when the manifest entry failed to load on boot. */
   loadError?: string
+  /** Set on an install response that overwrote an already-loaded plugin. */
+  replace?: PluginReplaceResult
+}
+
+/**
+ * Raised when an install turns out to be a second copy of a plugin already
+ * loaded — carrying the entry it collides with, so the answer can be "this is
+ * already installed from npm, overwrite it?" rather than a refusal.
+ *
+ * The collision is on the plugin's NAME, which only exists once its factory
+ * has run, so this is discovered after acquisition rather than before. That
+ * costs nothing: the running plugin executes from its own staged copy, so
+ * whatever npm did to node_modules on the way here left it untouched.
+ */
+export class PluginConflictError extends Error {
+  constructor(
+    readonly plugin: string,
+    readonly existing: PluginManifestEntry | undefined,
+  ) {
+    super(
+      `"${plugin}" is already installed${existing ? ` (${describeSource(existing.source)})` : ''}` +
+        ' — install again with overwrite to replace it.',
+    )
+    this.name = 'PluginConflictError'
+  }
+}
+
+export function describeSource(source: PluginSource): string {
+  switch (source.kind) {
+    case 'npm': return `npm: ${source.package}`
+    case 'github': return `github: ${source.repo}${source.ref !== undefined ? `#${source.ref}` : ''}`
+    case 'local': return `local: ${source.path}`
+    case 'file': return `file: ${source.originalName}`
+  }
+}
+
+/** The npm package a source installed, if it went through npm at all. */
+function packageNameOf(source: PluginSource): string | undefined {
+  switch (source.kind) {
+    case 'npm': return parsePackageSpec(source.package).packageName
+    case 'github':
+    case 'local': return source.packageName
+    case 'file': return undefined
+  }
 }
 
 function getDataDir(): string {
@@ -251,22 +295,90 @@ async function stageLoadAndRecord(
   packageName: string,
   source: PluginSource,
   config: unknown,
+  overwrite: boolean,
   hint?: string,
 ): Promise<InstalledPluginView> {
+  const before = await readManifest()
   const { entryPath, dir } = await stage(packageName, hint)
-  let name: string
+  let loaded: { name: string; replace?: PluginReplaceResult }
   try {
-    name = await runtime.loadPluginFromPath(entryPath, config)
+    loaded = await loadOrReplace(runtime, entryPath, config, overwrite, before)
   } catch (err) {
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     throw err
   }
+  return record(runtime, loaded, source, entryPath, config, before, { packageName, dir })
+}
+
+/**
+ * Load, or load over what is already there.
+ *
+ * Without `overwrite` a name collision is a question, not a failure — the
+ * caller gets the entry it collided with so the user can answer it.
+ */
+async function loadOrReplace(
+  runtime: OpenWhaleRuntime,
+  entryPath: string,
+  config: unknown,
+  overwrite: boolean,
+  manifest: PluginManifestEntry[],
+): Promise<{ name: string; replace?: PluginReplaceResult }> {
+  if (overwrite) {
+    const replace = await runtime.replacePluginFromPath(entryPath, config)
+    return { name: replace.name, replace }
+  }
+  try {
+    return { name: await runtime.loadPluginFromPath(entryPath, config) }
+  } catch (err) {
+    if (err instanceof PluginAlreadyLoadedError) {
+      throw new PluginConflictError(err.pluginName, manifest.find(e => e.name === err.pluginName))
+    }
+    throw err
+  }
+}
+
+/** Write the manifest and clear away whatever the install replaced. */
+async function record(
+  runtime: OpenWhaleRuntime,
+  loaded: { name: string; replace?: PluginReplaceResult },
+  source: PluginSource,
+  entryPath: string,
+  config: unknown,
+  before: PluginManifestEntry[],
+  staged?: { packageName: string; dir: string },
+): Promise<InstalledPluginView> {
+  const { name } = loaded
   await upsertManifest({ name, source, entryPath, config, installedAt: new Date().toISOString() })
   loadErrors.delete(name)
-  await pruneStaged(packageName, dir)
+  if (staged) await pruneStaged(staged.packageName, staged.dir)
+
+  /* The overwritten install's leftovers. pruneStaged only knows about copies
+     of the SAME package, and a replacement may well arrive under a different
+     package name — installing `@me/funding-arb` over the `funding-arb` that
+     declared the same plugin leaves the old package and its staged copy
+     behind unless they are named here. */
+  const previous = before.find(e => e.name === name)
+  if (previous) await discard(previous, source, staged?.dir)
 
   const info = runtime.listLoadedPlugins().find(p => p.name === name)!
-  return { ...info, source }
+  return { ...info, source, ...(loaded.replace ? { replace: loaded.replace } : {}) }
+}
+
+/** Remove an install that has just been replaced by another. */
+async function discard(previous: PluginManifestEntry, replacedBy: PluginSource, keepDir?: string): Promise<void> {
+  const staleDir = stagedDirOf(previous.entryPath)
+  if (staleDir && staleDir !== keepDir) await fs.promises.rm(staleDir, { recursive: true, force: true }).catch(() => {})
+  if (previous.source.kind === 'file' && !staleDir) {
+    await fs.promises.rm(previous.entryPath, { force: true }).catch(() => {})
+  }
+  const stale = packageNameOf(previous.source)
+  if (stale === undefined || stale === packageNameOf(replacedBy)) return
+  try {
+    const npm = npmSpawn()
+    await execFileAsync(npm.file, [...npm.args, 'uninstall', stale, '--prefix', getPluginsDir(), '--loglevel=error'], { timeout: 120_000 })
+  } catch (err) {
+    log().warn({ package: stale, err }, 'Could not remove the package this install replaced')
+  }
 }
 
 /** Read the package name from a local package dir; validates it looks like a package. */
@@ -338,6 +450,7 @@ export async function installFromNpm(
   runtime: OpenWhaleRuntime,
   spec: string,
   config: unknown,
+  overwrite = false,
 ): Promise<InstalledPluginView> {
   // Local package directory: npm symlinks it, so rebuilding the package and
   // restarting picks up changes — the dev loop for unpublished plugins.
@@ -355,7 +468,7 @@ export async function installFromNpm(
   const source: PluginSource = localPath
     ? { kind: 'local', path: localPath, packageName }
     : { kind: 'npm', package: spec }
-  return stageLoadAndRecord(runtime, packageName, source, config)
+  return stageLoadAndRecord(runtime, packageName, source, config, overwrite)
 }
 
 // ── GitHub install ────────────────────────────────────────────────────────────
@@ -498,6 +611,7 @@ export async function installFromGithub(
   repoInput: string,
   refInput: string | undefined,
   config: unknown,
+  overwrite = false,
 ): Promise<InstalledPluginView> {
   const { repo, ref, url } = parseGithubSpec(repoInput, refInput)
   const pluginsDir = getPluginsDir()
@@ -519,7 +633,7 @@ export async function installFromGithub(
 
   const packageName = installedName(before, await stubDeps(), repo)
   const source: PluginSource = { kind: 'github', repo, ...(ref !== undefined ? { ref } : {}), packageName }
-  return stageLoadAndRecord(runtime, packageName, source, config, BUILD_HINT)
+  return stageLoadAndRecord(runtime, packageName, source, config, overwrite, BUILD_HINT)
 }
 
 /**
@@ -553,6 +667,7 @@ export async function installFromFile(
   originalName: string,
   content: string,
   config: unknown,
+  overwrite = false,
 ): Promise<InstalledPluginView> {
   if (!/\.(mjs|js)$/i.test(originalName)) {
     throw new Error('Only built .js/.mjs bundles are supported for file install — for TypeScript sources or plugins with dependencies, publish to npm and install by package name')
@@ -564,25 +679,16 @@ export async function installFromFile(
   const entryPath = path.join(localDir, `${base}-${Date.now()}.mjs`)
   await fs.promises.writeFile(entryPath, content, 'utf8')
 
-  let name: string
+  const before = await readManifest()
+  let loaded: { name: string; replace?: PluginReplaceResult }
   try {
-    name = await runtime.loadPluginFromPath(entryPath, config)
+    loaded = await loadOrReplace(runtime, entryPath, config, overwrite, before)
   } catch (err) {
     await fs.promises.rm(entryPath, { force: true })
     throw err
   }
-
-  await upsertManifest({
-    name,
-    source: { kind: 'file', originalName },
-    entryPath,
-    config,
-    installedAt: new Date().toISOString(),
-  })
-  loadErrors.delete(name)
-
-  const info = runtime.listLoadedPlugins().find(p => p.name === name)!
-  return { ...info, source: { kind: 'file', originalName } }
+  // No staging: each upload already lands on a filename nothing has imported
+  return record(runtime, loaded, { kind: 'file', originalName }, entryPath, config, before)
 }
 
 // ── uninstall ─────────────────────────────────────────────────────────────────

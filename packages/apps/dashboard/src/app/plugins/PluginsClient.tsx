@@ -567,6 +567,9 @@ const MODES = [
   ['npm', 'From npm'],
 ] as const
 
+type Conflict = { plugin: string; source?: string; installedAt?: string }
+type ReplaceOutcome = { plugin: string; resumed: string[]; orphaned: string[] }
+
 function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode] = useState<'npm' | 'github' | 'file'>('file')
   const [pkg, setPkg] = useState('')
@@ -576,10 +579,33 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   const [config, setConfig] = useState('{}')
   const [error, setError] = useState('')
   const [installing, setInstalling] = useState(false)
+  /* The same plugin arriving from a second source is a question, not a
+     failure — the engine says what it collided with and waits to be told. */
+  const [conflict, setConflict] = useState<Conflict | null>(null)
+  /* A replacement is the one install worth reporting instead of just closing:
+     it may have left instances behind that the new version cannot run. */
+  const [outcome, setOutcome] = useState<ReplaceOutcome | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function post(overwrite: boolean, parsedConfig: unknown): Promise<Response> {
+    if (mode === 'npm' || mode === 'github') {
+      return fetch('/api/plugins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mode === 'npm'
+          ? { source: 'npm', package: pkg.trim(), config: parsedConfig, overwrite }
+          : { source: 'github', repo: repo.trim(), ref: ref.trim(), config: parsedConfig, overwrite }),
+      })
+    }
+    const form = new FormData()
+    form.set('file', file!)
+    form.set('config', JSON.stringify(parsedConfig))
+    if (overwrite) form.set('overwrite', 'true')
+    return fetch('/api/plugins', { method: 'POST', body: form })
+  }
+
+  async function run(overwrite: boolean) {
     setError('')
+    setConflict(null)
     let parsedConfig: unknown
     try {
       parsedConfig = config.trim() === '' ? {} : JSON.parse(config)
@@ -587,31 +613,60 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
       setError('Config must be valid JSON')
       return
     }
+    if (mode === 'file' && !file) { setError('Choose a .js/.mjs bundle file'); return }
     setInstalling(true)
     try {
-      let res: Response
-      if (mode === 'npm' || mode === 'github') {
-        res = await fetch('/api/plugins', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(mode === 'npm'
-            ? { source: 'npm', package: pkg.trim(), config: parsedConfig }
-            : { source: 'github', repo: repo.trim(), ref: ref.trim(), config: parsedConfig }),
-        })
-      } else {
-        if (!file) { setError('Choose a .js/.mjs bundle file'); setInstalling(false); return }
-        const form = new FormData()
-        form.set('file', file)
-        form.set('config', JSON.stringify(parsedConfig))
-        res = await fetch('/api/plugins', { method: 'POST', body: form })
+      const res = await post(overwrite, parsedConfig)
+      if (res.status === 409) {
+        const body = await res.json() as { conflict?: Conflict; error?: string }
+        if (body.conflict) setConflict(body.conflict)
+        else setError(body.error ?? 'Install failed')
+        return
       }
-      if (res.ok) onSuccess()
-      else setError(await res.text() || `Install failed (HTTP ${res.status})`)
+      if (!res.ok) {
+        setError(await res.text() || `Install failed (HTTP ${res.status})`)
+        return
+      }
+      const view = await res.json() as InstalledPluginView & { replace?: { replaced: boolean; resumed: string[]; orphaned: string[] } }
+      if (view.replace?.replaced) setOutcome({ plugin: view.name, resumed: view.replace.resumed, orphaned: view.replace.orphaned })
+      else onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error')
     } finally {
       setInstalling(false)
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    void run(false)
+  }
+
+  if (outcome) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="font-semibold text-base">{outcome.plugin} replaced</h2>
+        <p className="alert alert-success text-xs">
+          {outcome.resumed.length > 0
+            ? `${outcome.resumed.length} instance(s) were running on the old code and are running again.`
+            : 'Nothing was running on the old code.'}
+        </p>
+        {outcome.orphaned.length > 0 && (
+          <div className="alert alert-warning text-xs flex flex-col gap-1.5">
+            <span className="font-medium">{outcome.orphaned.length} instance(s) could not restart — the new version does not provide their strategy:</span>
+            <span className="font-mono">{outcome.orphaned.join(', ')}</span>
+            {/* Nothing was deleted, which is the point: they are on the
+                Instances page marked broken, to remove or to bring back by
+                reinstalling the version that had the strategy. */}
+            <span className="opacity-70">
+              Nothing was deleted. They are on the Instances page marked broken — delete them there, or reinstall the
+              version that has the strategy and they come back.
+            </span>
+          </div>
+        )}
+        <button type="button" onClick={onSuccess} className="btn btn-primary self-end">Done</button>
+      </div>
+    )
   }
 
   return (
@@ -673,15 +728,43 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
         ⚠️ Installing a plugin runs third-party code inside the engine process with full access to credentials and accounts. Only install packages you trust.
       </p>
       {error && <p className="alert alert-danger whitespace-pre-wrap">{error}</p>}
-      <button
-        type="submit"
-        disabled={installing || (mode === 'npm' ? !pkg.trim() : mode === 'github' ? !repo.trim() : !file)}
-        className="btn btn-primary self-end"
-      >
-        {installing
-          ? mode === 'github' ? 'Cloning and building… (may take a few minutes)' : 'Installing… (npm may take a minute)'
-          : 'Install'}
-      </button>
+      {conflict && (
+        <div className="alert alert-warning text-xs flex flex-col gap-1.5">
+          <span className="font-medium">
+            <span className="font-mono">{conflict.plugin}</span> is already installed
+            {conflict.source && <> from <span className="font-mono">{conflict.source}</span></>}
+            {conflict.installedAt && <span className="opacity-70"> ({new Date(conflict.installedAt).toLocaleString()})</span>}.
+          </span>
+          {/* Deliberately not the same bargain as uninstall: replacing keeps
+              every instance, account and credential, because the new version
+              almost certainly still has the strategies they name. */}
+          <span className="opacity-70">
+            Overwriting replaces its code. Instances, accounts and credentials are kept — anything running is restarted on
+            the new code, and anything whose strategy the new version dropped is left marked broken rather than deleted.
+          </span>
+        </div>
+      )}
+      <div className="flex gap-2 self-end">
+        {conflict && (
+          <button
+            type="button"
+            onClick={() => void run(true)}
+            disabled={installing}
+            className="btn btn-danger-solid"
+          >
+            {installing ? 'Overwriting…' : `Overwrite ${conflict.plugin}`}
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={installing || (mode === 'npm' ? !pkg.trim() : mode === 'github' ? !repo.trim() : !file)}
+          className={`btn ${conflict ? 'btn-secondary' : 'btn-primary'}`}
+        >
+          {installing && !conflict
+            ? mode === 'github' ? 'Cloning and building… (may take a few minutes)' : 'Installing… (npm may take a minute)'
+            : conflict ? 'Retry' : 'Install'}
+        </button>
+      </div>
     </form>
   )
 }

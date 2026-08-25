@@ -2300,6 +2300,31 @@ function Stat({ label, value, color, title }: { label: string; value: string; co
  * inside another menu closes its parent the moment you click it (both listen
  * for a click outside themselves), so the sections are inlined here instead.
  */
+/**
+ * An instance whose strategy is gone must not look merely stopped.
+ *
+ * "Stopped" is something the user did; this is the code underneath having
+ * disappeared — its plugin uninstalled, or replaced by a version that dropped
+ * the strategy. The row is kept on purpose (it still holds the params and
+ * bindings, and reinstalling the plugin makes it work again), so the display
+ * has to carry the difference or the two states are indistinguishable.
+ */
+function strategyChip(problem?: string): React.CSSProperties {
+  return problem
+    ? {
+        background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+        color: 'var(--danger)',
+        border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border))',
+      }
+    : { background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }
+}
+
+/** Red for broken, green for running, grey for stopped. */
+function statusDot(instance: StrategyInstanceView): string {
+  if (instance.problem) return 'var(--danger)'
+  return instance.active ? 'var(--success)' : 'var(--border)'
+}
+
 function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolder }: {
   instance: StrategyInstanceView
   folders: string[]
@@ -2396,9 +2421,9 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
           <div className="font-medium truncate" title={instance.name}>{instance.name}</div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <span className="text-xs px-1.5 py-0.5 rounded font-mono truncate"
-              style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
-              title={`${instance.strategyId} · ${instance.id}`}>
-              {strategyShort}
+              style={strategyChip(instance.problem)}
+              title={instance.problem ?? `${instance.strategyId} · ${instance.id}`}>
+              {instance.problem ? `⚠ ${strategyShort}` : strategyShort}
             </span>
             {account && (
               <span className="text-xs px-1.5 py-0.5 rounded truncate"
@@ -2413,8 +2438,8 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
           {/* Status is a dot, not a word: it is glanceable across a whole grid */}
           <span
             className="w-2 h-2 rounded-full"
-            style={{ background: instance.active ? 'var(--success)' : 'var(--border)' }}
-            title={instance.active ? 'Running' : 'Stopped'}
+            style={{ background: statusDot(instance) }}
+            title={instance.problem ?? (instance.active ? 'Running' : 'Stopped')}
           />
           <CardMenu
             instance={instance}
@@ -2594,17 +2619,17 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
       <div className="min-w-0 flex items-center gap-2">
         <span
           className="w-2 h-2 rounded-full shrink-0"
-          style={{ background: instance.active ? 'var(--success)' : 'var(--border)' }}
-          title={instance.active ? 'Running' : 'Stopped'}
+          style={{ background: statusDot(instance) }}
+          title={instance.problem ?? (instance.active ? 'Running' : 'Stopped')}
         />
         <span className="font-medium text-sm truncate" title={instance.name}>{instance.name}</span>
       </div>
 
       <div className="min-w-0 flex items-center gap-1.5">
         <span className="text-xs px-1.5 py-0.5 rounded font-mono truncate"
-          style={{ background: 'var(--background)', color: 'var(--accent)', border: '1px solid var(--border)' }}
-          title={`${instance.strategyId} · ${instance.id}`}>
-          {strategyShort}
+          style={strategyChip(instance.problem)}
+          title={instance.problem ?? `${instance.strategyId} · ${instance.id}`}>
+          {instance.problem ? `⚠ ${strategyShort}` : strategyShort}
         </span>
         {account && (
           <span className="text-xs px-1.5 py-0.5 rounded truncate"
