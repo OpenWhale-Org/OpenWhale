@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { OwAccount } from '@openwhaleorg/core'
+import { ETH_LOGO } from './brand.js'
 import type { ChainTokenBalance, EvmChainSession } from './types.js'
 
 const paramsSchema = z.object({
@@ -21,7 +22,7 @@ const paramsSchema = z.object({
  * has no price feed, and inventing valuations would be worse than omitting
  * them. snapshot() equity is therefore the stablecoin aggregate.
  */
-@OwAccount({ id: 'chain-account', kind: 'web3/chain', venue: 'evm', displayName: 'EVM Wallet', paramsSchema })
+@OwAccount({ id: 'chain-account', kind: 'web3/chain', venue: 'evm', displayName: 'EVM Wallet', paramsSchema, logo: ETH_LOGO })
 export class ChainAccount {
   static readonly kind = 'web3/chain' as const
   static readonly venueType = 'evm'

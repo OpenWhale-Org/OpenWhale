@@ -60,6 +60,9 @@ export interface AccountImplementation {
   paramsSchema?: ZodObject<ZodRawShape>
   /** Declarative detail panel (see AccountSectionDef). */
   sections?: AccountSectionDef[]
+  /** Brand mark for pickers (https URL or data: URI); `icon` is the emoji fallback. */
+  logo?: string
+  icon?: string
   /**
    * Build the structurally read-only view handed to strategies. The returned
    * object must expose NO write methods — that absence, not validation, is the
@@ -119,6 +122,8 @@ export interface AccountImplementationInfo {
   /** Credential types the pinned (kind, venue) cell accepts — the form's eligibility list. */
   credentialTypes?: string[]
   pluginName: string
+  logo?: string
+  icon?: string
   /** Schema-derived form fields (same shape monitor-instance params use). */
   paramsFields?: import('./definition.js').ParamFieldDef[]
 }

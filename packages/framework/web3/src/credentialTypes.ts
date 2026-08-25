@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ETH_LOGO } from './brand.js'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { CredentialTypeDefinition, RawCredentialData } from '@openwhaleorg/core'
 import { parseRpcEndpoints } from './chains.js'
@@ -18,6 +19,7 @@ export const evmCredentialType: CredentialTypeDefinition = {
   type: 'web3/evm',
   displayName: 'EVM Wallet',
   category: 'Web3',
+  logo: ETH_LOGO,
   icon: '⬡',
   description: 'One private key for every EVM chain — chain access and on-chain venues share it.',
   schema: z.object({

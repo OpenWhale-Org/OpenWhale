@@ -454,6 +454,8 @@ export class OpenWhaleRuntime implements IRuntime {
           kind: impl.kind,
           ...(venue !== undefined ? { type: venue } : {}),
           ...(accepted !== undefined ? { credentialTypes: accepted } : {}),
+          ...(impl.logo !== undefined ? { logo: impl.logo } : {}),
+          ...(impl.icon !== undefined ? { icon: impl.icon } : {}),
           pluginName: owner,
           ...(paramsFields !== undefined ? { paramsFields } : {}),
         }

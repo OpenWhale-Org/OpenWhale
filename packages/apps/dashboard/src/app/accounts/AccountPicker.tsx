@@ -70,9 +70,12 @@ export function AccountPicker({ implementations, credentials, credentialTypes, o
 
   const eligible = eligibleCredentialsFor(impl, credentials, credentialTypes)
   const acceptedTypes = impl ? (impl.type !== undefined ? (impl.credentialTypes ?? [impl.type]) : credentialTypes.filter(t => t.kinds.includes(impl.kind)).map(t => t.type)) : []
-  const markFor = (type: string | undefined) => {
+  // The implementation's own mark (the venue's brand) first; a credential
+  // type's mark when it has none; a letter chip last.
+  const markFor = (i: AccountImplementationInfo) => {
+    const type = i.type ?? i.credentialTypes?.[0]
     const t = type ? credentialTypes.find(x => x.type === type) : undefined
-    return <TypeMark logo={t?.logo} icon={t?.icon} label={t?.displayName ?? type ?? '?'} size={22} />
+    return <TypeMark logo={i.logo ?? t?.logo} icon={i.icon ?? t?.icon} label={i.displayName ?? i.id} size={22} />
   }
 
   function pickImpl(id: string) {
@@ -131,7 +134,7 @@ export function AccountPicker({ implementations, credentials, credentialTypes, o
                   key={i.id}
                   active={i.id === implId}
                   onClick={() => pickImpl(i.id)}
-                  mark={markFor(i.type ?? i.credentialTypes?.[0])}
+                  mark={markFor(i)}
                   title={i.displayName ?? i.id}
                   subtitle={<span className="mono">{i.kind}{i.type ? ` · ${i.type}` : ' · any venue'}</span>}
                 />

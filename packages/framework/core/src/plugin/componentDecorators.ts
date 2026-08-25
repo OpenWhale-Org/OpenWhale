@@ -75,6 +75,9 @@ export interface OwAccountMeta {
   paramsSchema?: ZodObject<ZodRawShape>
   /** Declarative detail panel — see AccountImplementation.sections. */
   sections?: AccountSectionDef[]
+  /** Brand mark for pickers — see AccountImplementation.logo. */
+  logo?: string
+  icon?: string
 }
 
 const accountMeta = new WeakMap<object, OwAccountMeta>()
