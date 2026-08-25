@@ -280,15 +280,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           </div>
           {status.description && <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{status.description}</p>}
         </div>
-      </div>
-
-      {/* Two tabs, not a stack of boxes.
-          Board is what you open this page FOR: the charts, what is being
-          collected, and what just arrived. Manage is the plumbing behind it —
-          runners and subscriptions — which you set up once and then leave
-          alone. Giving them equal billing on one screen is what made this page
-          hard to read; the charts were a band in the middle of five forms. */}
-      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
         <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
           {([['board', 'Board'], ['split', 'Split'], ['manage', 'Manage']] as const).map(([key, label]) => (
             <button
@@ -305,7 +297,15 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           ))}
         </div>
         <span className="text-xs" style={{ color: 'var(--muted)' }}>{mine.length} inst · {status.activeKeys.length} watched</span>
+        </div>
       </div>
+
+      {/* Two tabs, not a stack of boxes.
+          Board is what you open this page FOR: the charts, what is being
+          collected, and what just arrived. Manage is the plumbing behind it —
+          runners and subscriptions — which you set up once and then leave
+          alone. Giving them equal billing on one screen is what made this page
+          hard to read; the charts were a band in the middle of five forms. */}
 
       <div ref={areaRef} className="flex items-start">
       {showBoard && (
