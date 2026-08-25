@@ -1,11 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Rail, RailItem } from '../../components/Rail'
-import { ParamsFields, buildParams } from '../../components/ParamsFields'
+import { Select } from '../../components/Select'
+import { KebabMenu, MENU_ITEM } from '../../components/CardMenu'
+import { useSortable, DragHandle } from '../../components/Sortable'
 import type { AccountView, AccountImplementationInfo, AccountSnapshotRecord, CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
 import { EquityChart } from './EquityChart'
 import { AccountDetail } from './AccountDetail'
+import { AccountPicker, eligibleCredentialsFor } from './AccountPicker'
 import { CredentialMark } from '@/components/TypeMark'
 
 interface Props {
@@ -23,11 +26,52 @@ function formatUsd(v: number): string {
   return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 }
 
-const inputStyle = {
-  background: 'var(--background)',
-  color: 'var(--foreground)',
-  border: '1px solid var(--border)',
-} as const
+/* ── Roster order ─────────────────────────────────────────────────────────
+   Manual order and the chosen sort both live in localStorage: this is a
+   viewer's preference about their own screen, not a property of the account. */
+type SortMode = 'manual' | 'equity' | 'name'
+const SORT_KEY = 'ow.accounts.sort'
+const ORDER_KEY = 'ow.accounts.order'
+const SORT_LABEL: Record<SortMode, string> = { manual: 'Manual', equity: 'Equity ↓', name: 'Name A–Z' }
+
+function readSort(): SortMode {
+  try {
+    const v = localStorage.getItem(SORT_KEY)
+    return v === 'equity' || v === 'name' || v === 'manual' ? v : 'manual'
+  } catch { return 'manual' }
+}
+function readOrder(): string[] {
+  try { return JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]') as string[] } catch { return [] }
+}
+
+/* ── Sparkline ────────────────────────────────────────────────────────────
+   The last day of equity as a thumbnail in the roster row, so the list already
+   says which accounts moved before any of them is opened. */
+function Sparkline({ account, tick }: { account: string; tick: number }) {
+  const [series, setSeries] = useState<AccountSnapshotRecord[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetch(`/api/accounts/${encodeURIComponent(account)}/snapshots?hours=24`)
+      .then(r => (r.ok ? r.json() : []) as Promise<AccountSnapshotRecord[]>)
+      .then(s => { if (alive) setSeries(s) })
+      .catch(() => { if (alive) setSeries([]) })
+    return () => { alive = false }
+  }, [account, tick])
+  const W = 72, H = 20
+  if (!series || series.length < 2) return <span style={{ display: 'inline-block', width: W, height: H }} />
+  const ys = series.map(s => s.equity)
+  const min = Math.min(...ys), max = Math.max(...ys)
+  const span = max - min || 1
+  const t0 = series[0]!.ts, t1 = series[series.length - 1]!.ts, dt = t1 - t0 || 1
+  const pts = series.map(s => `${((s.ts - t0) / dt) * W},${H - 2 - ((s.equity - min) / span) * (H - 4)}`).join(' ')
+  const up = ys[ys.length - 1]! >= ys[0]!
+  const color = up ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden style={{ display: 'block' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+    </svg>
+  )
+}
 
 /**
  * Accounts — the first-class entities of economic activity.
@@ -40,22 +84,44 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
   /** Which account the right pane is showing. */
   const [expanded, setExpanded] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
-  const [name, setName] = useState('')
-  const [implId, setImplId] = useState(implementations[0]?.id ?? '')
-  const [credential, setCredential] = useState('')
-  const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  /** Bumped after a snapshot so every sparkline refetches. */
+  const [sparkTick, setSparkTick] = useState(0)
+  const [sort, setSort] = useState<SortMode>('manual')
+  const [order, setOrder] = useState<string[]>([])
+  useEffect(() => { setSort(readSort()); setOrder(readOrder()) }, [])
 
-  const impl = implementations.find(i => i.id === implId)
+  function changeSort(mode: SortMode) {
+    setSort(mode)
+    try { localStorage.setItem(SORT_KEY, mode) } catch { /* private mode */ }
+  }
+  function saveOrder(next: string[]) {
+    setOrder(next)
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(next)) } catch { /* private mode */ }
+  }
 
-  // Eligible credentials: the implementation's pinned type, or (kind-generic)
-  // any type whose adapter cells cover the implementation's kind.
-  const eligibleCredentials = credentials.filter((c) => {
-    if (!impl) return false
-    if (impl.type !== undefined) return (impl.credentialTypes ?? [impl.type]).includes(c.type)
-    const typeInfo = credentialTypes.find(t => t.type === c.type)
-    return typeInfo?.kinds.includes(impl.kind) ?? false
+  const ordered = useMemo(() => {
+    const list = [...accounts]
+    if (sort === 'equity') return list.sort((a, b) => (snapshots[b.name]?.equity ?? -Infinity) - (snapshots[a.name]?.equity ?? -Infinity))
+    if (sort === 'name') return list.sort((a, b) => a.name.localeCompare(b.name))
+    // Manual: remembered order first, newcomers after in creation order.
+    const rank = new Map(order.map((n, i) => [n, i]))
+    return list.sort((a, b) => (rank.get(a.name) ?? Infinity) - (rank.get(b.name) ?? Infinity))
+  }, [accounts, sort, order, snapshots])
+
+  // Drag rows in manual mode. Rows are "folders" to the hook: a short
+  // vertical list hit-tested by the element under the cursor.
+  const { beginDrag, folderStyle } = useSortable({
+    onReorder: () => {},
+    onRefile: () => {},
+    onFolderMove: (dragName, targetName) => {
+      const names = ordered.map(a => a.name)
+      const from = names.indexOf(dragName), to = names.indexOf(targetName)
+      if (from < 0 || to < 0) return
+      names.splice(from, 1); names.splice(to, 0, dragName)
+      saveOrder(names)
+    },
   })
 
   async function refresh() {
@@ -64,36 +130,6 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
       const data = await res.json() as { accounts: AccountView[]; snapshots: Record<string, AccountSnapshotRecord> }
       setAccounts(data.accounts)
       setSnapshots(data.snapshots)
-    }
-  }
-
-  async function create(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    setBusy(true)
-    try {
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          implementation: implId,
-          ...(credential ? { credential } : {}),
-          ...(impl?.paramsFields?.length ? { params: buildParams(impl.paramsFields, paramValues) } : {}),
-        }),
-      })
-      if (!res.ok) {
-        setError(((await res.json()) as { error?: string }).error ?? 'failed')
-        return
-      }
-      // Land on what was just created, with the form put away — otherwise the
-      // pane still shows the form and the new account is somewhere in the rail.
-      setExpanded(name)
-      setShowNew(false)
-      setName(''); setCredential(''); setParamValues({})
-      await refresh()
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -135,6 +171,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         const data = await res.json() as { accounts: AccountView[]; snapshots: Record<string, AccountSnapshotRecord> }
         setAccounts(data.accounts)
         setSnapshots(data.snapshots)
+        setSparkTick(t => t + 1)
         const failed = data.accounts.filter(a => a.snapshotError)
         if (failed.length > 0) {
           setError(failed.map(a => `${a.name}: ${a.snapshotError}`).join(' · '))
@@ -145,16 +182,10 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
     }
   }
 
-  const selected = accounts.find(a => a.name === (expanded ?? accounts[0]?.name))
+  const selected = accounts.find(a => a.name === (expanded ?? ordered[0]?.name))
   const totalEquity = accounts.reduce((sum, a) => sum + (snapshots[a.name]?.equity ?? 0), 0)
 
-  const rebindableFor = (a: AccountView) => credentials.filter((c) => {
-    const ai = implementations.find(i => i.id === a.implementation)
-    if (!ai) return false
-    if (ai.type !== undefined) return (ai.credentialTypes ?? [ai.type]).includes(c.type)
-    const typeInfo = credentialTypes.find(t => t.type === c.type)
-    return typeInfo?.kinds.includes(ai.kind) ?? false
-  })
+  const rebindableFor = (a: AccountView) => eligibleCredentialsFor(implementations.find(i => i.id === a.implementation), credentials, credentialTypes)
 
   const statusStyle = (status: AccountView['status']) => ({
     background: status === 'ready' ? 'color-mix(in srgb, var(--success, #22c55e) 15%, transparent)'
@@ -177,25 +208,61 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         </div>
       )}
 
+      {showNew && (
+        <AccountPicker
+          implementations={implementations}
+          credentials={credentials}
+          credentialTypes={credentialTypes}
+          onClose={() => setShowNew(false)}
+          onCreated={async (name) => {
+            // Land on what was just created — otherwise the new account is
+            // somewhere in the rail and the pane still shows the old one.
+            setShowNew(false)
+            setExpanded(name)
+            await refresh()
+          }}
+        />
+      )}
+
       <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
         {/* ── roster ─────────────────────────────────────────────────────── */}
         <Rail
-          width="20rem"
+          width="21rem"
           header={
-            <div className="px-3 py-2.5">
-              <div className="text-xs" style={{ color: 'var(--muted)' }}>Total equity · {accounts.length} accounts</div>
-              <div className="text-xl font-mono mt-0.5">{formatUsd(totalEquity)}</div>
+            <div className="px-3 py-2.5 flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Total equity · {accounts.length} accounts</div>
+                <div className="text-xl font-mono mt-0.5">{formatUsd(totalEquity)}</div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{SORT_LABEL[sort]}</span>
+                <KebabMenu title="Sort">
+                  {(close) => (
+                    <>
+                      <div className="px-3 pt-1.5 pb-1 text-xs" style={{ color: 'var(--muted)' }}>SORT</div>
+                      {(Object.keys(SORT_LABEL) as SortMode[]).map(m => (
+                        <button key={m} type="button" className={`${MENU_ITEM} flex items-center gap-2`} style={{ color: 'var(--foreground)' }}
+                          onClick={() => { changeSort(m); close() }}>
+                          <span style={{ color: m === sort ? 'var(--accent)' : 'var(--muted)' }}>{m === sort ? '●' : '○'}</span>
+                          {SORT_LABEL[m]}
+                          {m === 'manual' && <span className="ml-auto text-[11px]" style={{ color: 'var(--muted)' }}>drag rows</span>}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </KebabMenu>
+              </div>
             </div>
           }
           footer={
             <div className="flex gap-2 px-3 py-2.5">
               <button
                 data-tour="new-account"
-                onClick={() => setShowNew(v => !v)}
+                onClick={() => setShowNew(true)}
                 className="flex-1 h-8 rounded-md text-xs flex items-center justify-center gap-1.5"
-                style={{ background: showNew ? 'var(--background)' : 'var(--accent)', color: showNew ? 'var(--foreground)' : '#fff', border: showNew ? '1px solid var(--border)' : 'none' }}
+                style={{ background: 'var(--accent)', color: '#fff' }}
               >
-                {showNew ? 'Cancel' : '＋ New account'}
+                ＋ New account
               </button>
               <button
                 onClick={() => void sampleNow()}
@@ -214,24 +281,35 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
               No accounts yet. Strategies read accounts; executors write them.
             </p>
           )}
-          {accounts.map((a) => {
+          {ordered.map((a) => {
             const latest = snapshots[a.name]
             return (
-              <RailItem
-                key={a.name}
-                active={selected?.name === a.name}
-                onClick={() => setExpanded(a.name)}
-                mark={<CredentialMark credential={a.credential} credentials={credentials} credentialTypes={credentialTypes} size={26} />}
-                title={a.name}
-                subtitle={`${a.kind ?? '—'}${a.type ? ` · ${a.type}` : ''}`}
-                right={
-                  <span className="flex flex-col items-end gap-0.5">
-                    <span className="text-sm font-mono" style={{ color: latest ? 'var(--foreground)' : 'var(--muted)' }}>{latest ? formatUsd(latest.equity) : '—'}</span>
-                    {a.status !== 'ready' && <span className="text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>}
-                    {a.snapshotError && <span className="cursor-help" style={{ color: 'var(--danger)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>}
+              <div key={a.name} data-folder-id={a.name} style={folderStyle(a.name)} className="flex items-stretch">
+                {sort === 'manual' && (
+                  <span className="flex items-center pl-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
+                    <DragHandle title="Drag to reorder" onPointerDown={(e) => beginDrag('folder', a.name, e)} />
                   </span>
-                }
-              />
+                )}
+                <div className="flex-1 min-w-0">
+                  <RailItem
+                    active={selected?.name === a.name}
+                    onClick={() => setExpanded(a.name)}
+                    mark={<CredentialMark credential={a.credential} credentials={credentials} credentialTypes={credentialTypes} size={26} />}
+                    title={a.name}
+                    subtitle={`${a.kind ?? '—'}${a.type ? ` · ${a.type}` : ''}`}
+                    right={
+                      <span className="flex items-center gap-2">
+                        <Sparkline account={a.name} tick={sparkTick} />
+                        <span className="flex flex-col items-end gap-0.5">
+                          <span className="text-sm font-mono" style={{ color: latest ? 'var(--foreground)' : 'var(--muted)' }}>{latest ? formatUsd(latest.equity) : '—'}</span>
+                          {a.status !== 'ready' && <span className="text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>}
+                          {a.snapshotError && <span className="cursor-help" style={{ color: 'var(--danger)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>}
+                        </span>
+                      </span>
+                    }
+                  />
+                </div>
+              </div>
             )
           })}
         </Rail>
@@ -241,45 +319,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
           className="flex-1 min-w-0 rounded-lg overflow-hidden flex flex-col"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
-          {showNew ? (
-            <form data-tour="account-form" onSubmit={create} className="flex flex-col gap-3 p-4">
-              <h2 className="text-sm font-semibold">New Account</h2>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                placeholder="Account name, e.g. BN-Main-Perp"
-                className="rounded-md px-3 py-2 text-sm"
-                style={inputStyle}
-              />
-              <select value={implId} onChange={(e) => { setImplId(e.target.value); setCredential(''); setParamValues({}) }} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
-                {implementations.map(i => (
-                  <option key={i.id} value={i.id}>
-                    {i.displayName ?? i.id} — {i.kind}{i.type ? ` (${i.type})` : ' (any venue)'}
-                  </option>
-                ))}
-              </select>
-              <select value={credential} onChange={(e) => setCredential(e.target.value)} className="rounded-md px-3 py-2 text-sm" style={inputStyle}>
-                <option value="">bind credential later (inactive)</option>
-                {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
-              </select>
-              {(impl?.paramsFields?.length ?? 0) > 0 && (
-                <ParamsFields
-                  fields={impl!.paramsFields!}
-                  values={paramValues}
-                  onChange={(n, v) => setParamValues(prev => ({ ...prev, [n]: v }))}
-                />
-              )}
-              {impl && eligibleCredentials.length === 0 && (
-                <p className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
-                  No eligible credential for {impl.type ?? impl.kind} — add one on the Credentials page, or create the account unbound.
-                </p>
-              )}
-              <button type="submit" disabled={busy || !implId} className="h-9 rounded-md text-sm self-start px-4" style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.6 : 1 }}>
-                Create
-              </button>
-            </form>
-          ) : !selected ? (
+          {!selected ? (
             <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>
               Pick an account.
             </div>
@@ -318,15 +358,19 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
 
               <div className="shrink-0 flex items-center gap-2 px-4 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
                 <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>Credential</span>
-                <select
+                <Select
+                  size="sm"
+                  className="flex-1 min-w-0"
                   value={selected.credential ?? ''}
-                  onChange={(e) => rebind(selected, e.target.value)}
-                  className="rounded-md px-2 h-8 text-xs flex-1 min-w-0"
-                  style={inputStyle}
-                >
-                  <option value="">— unbound —</option>
-                  {rebindableFor(selected).map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
-                </select>
+                  onChange={(v) => void rebind(selected, v)}
+                  options={[
+                    { value: '', label: '— unbound —' },
+                    ...rebindableFor(selected).map(c => ({
+                      value: c.name, label: c.name, hint: c.type,
+                      mark: <CredentialMark credential={c.name} credentials={credentials} credentialTypes={credentialTypes} size={18} />,
+                    })),
+                  ]}
+                />
                 <button
                   onClick={() => remove(selected.name)}
                   className="h-8 px-3 rounded-md text-xs shrink-0"
