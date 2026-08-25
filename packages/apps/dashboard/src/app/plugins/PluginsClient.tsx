@@ -575,7 +575,7 @@ const MODES = [
 ] as const
 
 const MODE_HINT: Record<(typeof MODES)[number][0], string> = {
-  npm: 'Recommended — published packages install with their dependencies and update by version (e.g. @openwhaleorg/pendle). A local absolute path works too.',
+  npm: 'Published packages install with their dependencies and update by version (e.g. @openwhaleorg/pendle). A local absolute path works too.',
   github: 'For a repository that is not on npm yet: the gateway clones and builds it, which takes a few minutes and needs the build toolchain on the server.',
   file: 'A single pre-built bundle you upload by hand — for trying a plugin before it has a package or a repo.',
 }
@@ -700,11 +700,27 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <h2 className="font-semibold text-base">Install Plugin</h2>
+      {/* The hands-off path first: the Assistant knows the registry, picks the
+          package, installs it and walks through credentials and accounts. The
+          tabs below are the manual routes. */}
+      <a
+        href="/assistant"
+        className="flex items-start gap-3 rounded-md px-3 py-2.5 hoverable"
+        style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}
+      >
+        <span aria-hidden className="text-base leading-none mt-0.5">✨</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Recommended: install from AI</span>
+          <span className="block text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+            Tell the Assistant what you want to trade or which plugin you mean — it finds the package, installs it and sets up the credentials and accounts with you. The tabs below are the manual way.
+          </span>
+        </span>
+        <span className="text-xs shrink-0 mt-1" style={{ color: 'var(--accent)' }}>Open Assistant →</span>
+      </a>
       <div className="flex gap-2 items-center flex-wrap">
         {MODES.map(([m, label]) => (
           <button key={m} type="button" onClick={() => setMode(m)} className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}>
             {label}
-            {m === 'npm' && <span className="ml-1.5 text-[10px] px-1 rounded" style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)', color: 'var(--success, #22c55e)' }}>recommended</span>}
           </button>
         ))}
       </div>
