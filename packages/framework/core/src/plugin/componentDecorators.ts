@@ -1,5 +1,6 @@
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from '../types/materialization.js'
+import type { AccountSectionDef } from '../types/account.js'
 import type { MonitorContext } from '../types/monitorInstance.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 
@@ -72,6 +73,8 @@ export interface OwAccountMeta {
   displayName?: string
   /** Declared configuration schema — see AccountImplementation.paramsSchema. */
   paramsSchema?: ZodObject<ZodRawShape>
+  /** Declarative detail panel — see AccountImplementation.sections. */
+  sections?: AccountSectionDef[]
 }
 
 const accountMeta = new WeakMap<object, OwAccountMeta>()

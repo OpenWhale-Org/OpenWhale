@@ -558,7 +558,7 @@ export class OpenWhaleRuntime implements IRuntime {
    * positions / orders by convention) are called, each section failing
    * independently. Core stays domain-clean: results are opaque JSON.
    */
-  async accountDetail(name: string): Promise<{ sections: Record<string, unknown>; errors: Record<string, string> }> {
+  async accountDetail(name: string): Promise<{ sections: Record<string, unknown>; errors: Record<string, string>; layout?: import('../types/account.js').AccountSectionDef[] }> {
     const entity = await this.accountStore.get(name)
     if (!entity) throw new Error(`Unknown account "${name}"`)
     if (!entity.credential) throw new Error(`Account "${name}" has no credential bound`)
@@ -572,7 +572,10 @@ export class OpenWhaleRuntime implements IRuntime {
 
     const sections: Record<string, unknown> = {}
     const errors: Record<string, string> = {}
-    await Promise.all(['balance', 'positions', 'orders'].map(async (section) => {
+    // A declared layout names the read methods; without one, the perp/spot
+    // convention (balance / positions / orders) is what the page knows.
+    const methods = impl.sections ? Array.from(new Set(impl.sections.map(sec => sec.method))) : ['balance', 'positions', 'orders']
+    await Promise.all(methods.map(async (section) => {
       const fn = reader[section]
       if (typeof fn !== 'function') return
       try {
@@ -581,7 +584,7 @@ export class OpenWhaleRuntime implements IRuntime {
         errors[section] = err instanceof Error ? err.message : String(err)
       }
     }))
-    return { sections, errors }
+    return { sections, errors, ...(impl.sections ? { layout: impl.sections } : {}) }
   }
 
   /** Most recent snapshot per account, keyed by account name. */

@@ -75,6 +75,7 @@ export function lowerAccountEntry(entry: AccountClass | AccountImplementation, p
     ...(venue !== undefined ? { venue } : {}),
     ...(meta.displayName !== undefined ? { displayName: meta.displayName } : {}),
     ...(meta.paramsSchema !== undefined ? { paramsSchema: meta.paramsSchema } : {}),
+    ...(meta.sections !== undefined ? { sections: meta.sections } : {}),
     createReader: (session, accountName, params) => new entry(accountName, session as never, params),
   }
 }

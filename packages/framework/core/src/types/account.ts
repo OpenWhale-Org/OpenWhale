@@ -58,12 +58,50 @@ export interface AccountImplementation {
    * the dashboard; values are validated on save and handed to createReader.
    */
   paramsSchema?: ZodObject<ZodRawShape>
+  /** Declarative detail panel (see AccountSectionDef). */
+  sections?: AccountSectionDef[]
   /**
    * Build the structurally read-only view handed to strategies. The returned
    * object must expose NO write methods — that absence, not validation, is the
    * framework's safety guarantee.
    */
   createReader(session: unknown, accountName: string, params?: Record<string, unknown>): unknown
+}
+
+/**
+ * Declarative detail panel — what the Accounts page shows for accounts of
+ * this implementation, without the dashboard knowing the kind. Each section
+ * names a READ METHOD on the reader; the runtime calls it and ships the
+ * result with this layout, the dashboard renders by column format. Kinds
+ * without a declaration fall back to the perp/spot convention
+ * (balance / positions / orders).
+ */
+export type AccountColumnFormat = 'text' | 'mono' | 'number' | 'usd' | 'pct' | 'signed' | 'side' | 'time' | 'badge'
+
+export interface AccountColumnDef {
+  /** Field on each row. */
+  key: string
+  label: string
+  format?: AccountColumnFormat
+  /** Decimal places for number/usd/pct/signed. */
+  digits?: number
+  align?: 'left' | 'right'
+  /** Grows to take the remaining width (one per table). */
+  grow?: boolean
+}
+
+export interface AccountSectionDef {
+  /** Reader method to call — must return rows (table) or an object (keyvalue). */
+  method: string
+  title: string
+  kind: 'table' | 'keyvalue'
+  columns?: AccountColumnDef[]
+  /** Show the row count on the tab. */
+  count?: boolean
+  /** Open on this tab. */
+  default?: boolean
+  /** Text shown when the table is empty. */
+  empty?: string
 }
 
 /** Resolve an implementation's venue pin, tolerating the legacy `type` spelling. */
