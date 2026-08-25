@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry } from '../plugins.js'
+import { pathToFileURL } from 'url'
+import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged } from '../plugins.js'
 
 const isWin = process.platform === 'win32'
 
@@ -159,5 +160,83 @@ describe('resolveEntry', () => {
   it('names the missing entry instead of leaving it to the loader', () => {
     const dir = pkg('unbuilt', { exports: './dist/index.js' }, [])
     expect(() => resolveEntry(dir, 'needs a prepare script')).toThrow(/dist\/index\.js.*not there.*needs a prepare script/s)
+  })
+})
+
+describe('staging — what makes a reinstall load new code', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-stage-'))
+  const pkgDir = path.join(data, 'plugins', 'node_modules', 'demo-plugin')
+  const prevDb = process.env['OPENWHALE_DB_PATH']
+
+  beforeAll(() => { process.env['OPENWHALE_DB_PATH'] = path.join(data, 'openwhale.db') })
+  afterAll(() => {
+    if (prevDb === undefined) delete process.env['OPENWHALE_DB_PATH']
+    else process.env['OPENWHALE_DB_PATH'] = prevDb
+  })
+
+  /** Write the "installed" package as npm would have left it. */
+  const install = (version: string) => {
+    fs.rmSync(pkgDir, { recursive: true, force: true })
+    fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true })
+    fs.mkdirSync(path.join(pkgDir, 'node_modules', 'some-dep'), { recursive: true })
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'demo-plugin', exports: './dist/index.js' }))
+    // The entry re-exports a sibling — the case a cache-busting query cannot reach
+    fs.writeFileSync(path.join(pkgDir, 'dist', 'index.js'), "export { V } from './helper.js'\n")
+    fs.writeFileSync(path.join(pkgDir, 'dist', 'helper.js'), `export const V = '${version}'\n`)
+    fs.writeFileSync(path.join(pkgDir, 'node_modules', 'some-dep', 'index.js'), '')
+  }
+
+  it('copies the package out of node_modules, leaving its own node_modules behind', async () => {
+    install('v1')
+    const { entryPath, dir } = await stage('demo-plugin')
+    expect(stagedDirOf(entryPath)).toBe(dir)
+    expect(fs.existsSync(entryPath)).toBe(true)
+    expect(fs.existsSync(path.join(dir, 'dist', 'helper.js'))).toBe(true)
+    // Left behind on purpose: the deps live in the shared prefix, which is
+    // still an ancestor of the staging dir
+    expect(fs.existsSync(path.join(dir, 'node_modules'))).toBe(false)
+  })
+
+  /* The whole point. Node's ESM registry is keyed by resolved URL and cannot
+     be evicted, so a stable path means the first version loaded is the one
+     that runs forever — including siblings, which a ?query on the entry does
+     not refresh. */
+  it('a reinstall executes the new code, siblings included', async () => {
+    install('v1')
+    const first = await stage('demo-plugin')
+    const a = await import(pathToFileURL(first.entryPath).href)
+    expect(a.V).toBe('v1')
+
+    install('v2')                                    // uninstall + install again
+    const second = await stage('demo-plugin')
+    expect(second.dir).not.toBe(first.dir)
+    const b = await import(pathToFileURL(second.entryPath).href)
+    expect(b.V).toBe('v2')
+
+    // …and for contrast, the old path still serves the old module forever
+    expect((await import(pathToFileURL(first.entryPath).href)).V).toBe('v1')
+  })
+
+  it('prunes earlier generations but keeps the live one', async () => {
+    install('v1')
+    const older = await stage('demo-plugin')
+    const live = await stage('demo-plugin')
+    await pruneStaged('demo-plugin', live.dir)
+    expect(fs.existsSync(older.dir)).toBe(false)
+    expect(fs.existsSync(live.dir)).toBe(true)
+  })
+
+  /* stagedDirOf's answer is handed to rm -rf, so anything not inside the
+     staging root must come back undefined — manifest entries written before
+     staging existed point straight into node_modules. */
+  it('refuses to claim a path outside the staging root', () => {
+    for (const p of [
+      path.join(data, 'plugins', 'node_modules', 'demo-plugin', 'dist', 'index.js'),
+      path.join(data, 'plugins', 'local', 'bundle-123.mjs'),
+      path.join(data, 'plugins', 'staged'),
+      '/etc/passwd',
+    ]) {
+      expect(stagedDirOf(p), `path: ${p}`).toBeUndefined()
+    }
   })
 })

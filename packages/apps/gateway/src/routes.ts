@@ -1173,6 +1173,14 @@ export function buildRouter(): Router {
     }
   }))
 
+  /* What uninstalling would take with it — read before confirming, so the
+     dialog can say "this deletes 3 monitor instances" instead of the delete
+     being discovered afterwards. */
+  router.get('/api/plugins/:name/dependents', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    res.json(await runtime.pluginDependents(req.params['name']!))
+  }))
+
   router.delete('/api/plugins/:name', h(async (req, res) => {
     const runtime = await ensureStarted()
     try {

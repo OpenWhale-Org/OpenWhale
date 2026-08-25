@@ -65,7 +65,7 @@ export type {
   ExecutorCredentialSlot,
 } from './materialization.js'
 export { AdapterError, RetryableAdapterError, TerminalAdapterError } from './adapter/index.js'
-export type { RuntimeOptions, IRuntime, LoadedPluginInfo } from './runtime.js'
+export type { RuntimeOptions, IRuntime, LoadedPluginInfo, PluginDependents } from './runtime.js'
 export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamFieldDef, ParamFieldType, ParamFieldOption, ParamFieldMeta, ParamIllustration,
   ParamAvailability,
   AvailabilityVerdict,

@@ -95,6 +95,7 @@ export type {
   RuntimeOptions,
   IRuntime,
   LoadedPluginInfo,
+  PluginDependents,
   MonitorDefinition,
   ExecutorDefinition,
   StrategyDefinition,

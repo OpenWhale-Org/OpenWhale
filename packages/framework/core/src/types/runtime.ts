@@ -53,6 +53,28 @@ export interface LoadedPluginInfo {
   cells: Array<{ kind: string; venue: string }>
 }
 
+/**
+ * What a plugin still owns, asked before removing it.
+ *
+ * Split by what the answer costs the user rather than by entity type. The
+ * first three are things a person built and named — an instance's params, a
+ * credential's secret, an account's history — and deleting them as a side
+ * effect of "uninstall" would be a data loss they never asked for, so they
+ * block instead. Monitor instances are the plugin's own plumbing (a
+ * contract's runner, usually created for you), meaningless once the code is
+ * gone, so uninstall clears them itself.
+ */
+export interface PluginDependents {
+  /** Strategy instance ids running one of the plugin's strategies. */
+  instances: string[]
+  /** Account names bound to one of the plugin's account implementations. */
+  accounts: string[]
+  /** Credential names of a type this plugin registered. */
+  credentials: string[]
+  /** Monitor instance ids of the plugin's implementations — deleted, not blocking. */
+  monitorInstances: string[]
+}
+
 export interface IRuntime {
   activate(instance: StrategyInstance): Promise<void>
   deactivate(instanceId: string): Promise<void>

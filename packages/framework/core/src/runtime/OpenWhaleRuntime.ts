@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'url'
 import type { StrategyInstance, StrategyInstanceView } from '../types/instance.js'
 import type { ExecutionQueue } from '../types/executor.js'
-import type { IRuntime, RuntimeOptions, LoadedPluginInfo } from '../types/runtime.js'
+import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
 import type { Trigger } from '../types/trigger.js'
 import type { PlotOption } from '../types/monitor.js'
@@ -1070,6 +1070,43 @@ export class OpenWhaleRuntime implements IRuntime {
 
   listLoadedPlugins(): LoadedPluginInfo[] {
     return Array.from(this.loadedPlugins.values())
+  }
+
+  /**
+   * Everything still attached to a plugin — asked before uninstalling it.
+   *
+   * Reads the STORES, not the live maps: an instance the user deactivated
+   * still holds their params, and a credential still holds their secret, so
+   * both must block a removal that would orphan them. (unloadPlugin's own
+   * check looks at live instances only, which is right for a hot reload and
+   * far too weak for a delete.)
+   *
+   * A plugin that failed to load registered nothing, so nothing can be
+   * attributed to it and this comes back empty — deliberately, since refusing
+   * to enumerate would also be refusing to ever remove a broken plugin.
+   */
+  async pluginDependents(name: string): Promise<PluginDependents> {
+    const plugin = this.loadedPlugins.get(name)
+    if (!plugin) return { instances: [], accounts: [], credentials: [], monitorInstances: [] }
+
+    const strategies = new Set(plugin.strategies)
+    const accountImpls = new Set(plugin.accounts)
+    const credentialTypes = new Set(plugin.credentialTypes)
+    const monitorImpls = new Set(this.monitorInstances.implementationsOf(name))
+
+    const [instanceViews, accounts, monitors] = await Promise.all([
+      this.listInstanceViews(),
+      this.listAccounts(),
+      this.monitorInstances.listInstances(),
+    ])
+    const credentials = this.credentialStore ? await this.credentialStore.list() : []
+
+    return {
+      instances: instanceViews.filter(i => strategies.has(i.strategyId)).map(i => i.id),
+      accounts: accounts.filter(a => accountImpls.has(a.implementation)).map(a => a.name),
+      credentials: credentials.filter(c => credentialTypes.has(c.type)).map(c => c.name),
+      monitorInstances: monitors.filter(m => monitorImpls.has(m.implementation)).map(m => m.id),
+    }
   }
 
   addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {

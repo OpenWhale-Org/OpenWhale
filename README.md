@@ -172,6 +172,8 @@ Install from the dashboard's Plugins page — a built `.js`/`.mjs` bundle, a **G
 
 A GitHub install is cloned and built by npm, so a repo shipping only TypeScript sources needs a `prepare` script in its package.json (`"prepare": "npm run build"`); private repos need `OPENWHALE_GITHUB_TOKEN` set on the engine.
 
+Uninstalling refuses while any strategy instance, account or credential still belongs to the plugin — each holds something you configured — and names them. The plugin's monitor instances are deleted with it. Each install is loaded from its own copy under `plugins/staged/`, so reinstalling runs the new code without restarting the engine: Node's ESM registry is keyed by resolved URL and cannot be evicted, so a fixed path would keep executing the first version loaded.
+
 ### Writing plugins with Claude
 
 Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or reference this repo's path in Claude Code), describe the strategy you want, and Claude produces a complete plugin package — monitors, executors, strategies, tests — that installs from the Plugins page.

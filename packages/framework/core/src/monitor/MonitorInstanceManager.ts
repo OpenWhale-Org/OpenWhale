@@ -216,6 +216,17 @@ export class MonitorInstanceManager {
     return record.facade
   }
 
+  /** Implementation ids registered by this owner. */
+  implementationsOf(owner: string): string[] {
+    const ids: string[] = []
+    for (const record of this.contracts.values()) {
+      for (const [implId, rec] of record.impls) {
+        if (rec.owner === owner) ids.push(implId)
+      }
+    }
+    return ids
+  }
+
   /** Remove a plugin's implementations. Active instances of them are deactivated. */
   async unregisterOwner(owner: string): Promise<void> {
     for (const record of this.contracts.values()) {

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Rail, RailItem } from '@/components/Rail'
 import { useRouter } from 'next/navigation'
-import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo } from '@openwhaleorg/core'
+import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo, PluginDependents } from '@openwhaleorg/core'
 import type { InstalledPluginView } from '@/lib/data'
 import { Markdown } from '@/components/Markdown'
 import { TypeMark } from '@/components/TypeMark'
@@ -196,6 +196,29 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
   const [confirming, setConfirming] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [error, setError] = useState('')
+  /* Asked before confirming, not after: the gateway would refuse anyway, but
+     "you cannot, because these three instances use it" is worth knowing while
+     the choice is still open — and so is the fact that confirming deletes
+     monitor instances. */
+  const [deps, setDeps] = useState<PluginDependents | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  async function askConfirm() {
+    setConfirming(true)
+    setError('')
+    setDeps(null)
+    setChecking(true)
+    try {
+      const res = await fetch(`/api/plugins/${encodeURIComponent(plugin.name)}/dependents`)
+      if (res.ok) setDeps(await res.json() as PluginDependents)
+    } catch { /* the DELETE re-checks server-side — this is only the early warning */ }
+    setChecking(false)
+  }
+
+  const blockers: Array<[string, string[]]> = deps
+    ? ([['strategy instances', deps.instances], ['accounts', deps.accounts], ['credentials', deps.credentials]] as Array<[string, string[]]>)
+        .filter(([, ids]) => ids.length > 0)
+    : []
 
   const owns = (def: { id: string; pluginName?: string }, ids: string[]) =>
     def.pluginName === plugin.name || ids.includes(def.id)
@@ -211,7 +234,7 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
     setError('')
     const res = await fetch(`/api/plugins/${encodeURIComponent(plugin.name)}`, { method: 'DELETE' })
     setRemoving(false)
-    if (res.ok) onUninstalled()
+    if (res.ok) { setConfirming(false); setDeps(null); onUninstalled() }
     else { setConfirming(false); setError(await res.text() || `Uninstall failed (HTTP ${res.status})`) }
   }
 
@@ -245,10 +268,16 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
             {confirming ? (
               <>
                 <button onClick={() => setConfirming(false)} className="btn btn-sm btn-secondary">Cancel</button>
-                <button onClick={() => void uninstall()} disabled={removing} className="btn btn-sm btn-danger-solid">{removing ? 'Removing…' : 'Confirm'}</button>
+                <button
+                  onClick={() => void uninstall()}
+                  disabled={removing || checking || blockers.length > 0}
+                  className="btn btn-sm btn-danger-solid"
+                >
+                  {removing ? 'Removing…' : checking ? 'Checking…' : 'Confirm'}
+                </button>
               </>
             ) : (
-              <button onClick={() => setConfirming(true)} className="btn btn-sm btn-danger">Uninstall</button>
+              <button onClick={() => void askConfirm()} className="btn btn-sm btn-danger">Uninstall</button>
             )}
           </div>
         )}
@@ -257,6 +286,37 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
       <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden p-4 flex flex-col gap-5">
         {plugin.loadError && <p className="alert alert-danger text-xs">{plugin.loadError}</p>}
         {error && <p className="alert alert-danger text-xs">{error}</p>}
+
+        {confirming && (
+          <div className={`alert text-xs flex flex-col gap-1.5 ${blockers.length > 0 ? 'alert-danger' : 'alert-warning'}`}>
+            {checking ? (
+              <span>Checking what depends on {plugin.name}…</span>
+            ) : blockers.length > 0 ? (
+              <>
+                <span className="font-medium">Cannot uninstall — {plugin.name} is still in use:</span>
+                {blockers.map(([label, ids]) => (
+                  <span key={label}>
+                    <span className="opacity-70">{ids.length} {label}: </span>
+                    <span className="font-mono">{ids.slice(0, 6).join(', ')}{ids.length > 6 ? ` and ${ids.length - 6} more` : ''}</span>
+                  </span>
+                ))}
+                {/* Each of these holds something the user configured — params,
+                    a key, an equity history. Removing them is their call. */}
+                <span className="opacity-70">Delete them first. Uninstalling would leave each one pointing at code that no longer exists.</span>
+              </>
+            ) : (
+              <>
+                <span className="font-medium">Uninstall {plugin.name}?</span>
+                {deps && deps.monitorInstances.length > 0 && (
+                  <span>
+                    <span className="opacity-70">{deps.monitorInstances.length} monitor instance(s) will be deleted with it: </span>
+                    <span className="font-mono">{deps.monitorInstances.slice(0, 6).join(', ')}{deps.monitorInstances.length > 6 ? ` and ${deps.monitorInstances.length - 6} more` : ''}</span>
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {plugin.readme ? (
           <div className="rounded-md p-4" style={{ border: '1px solid var(--border)', background: 'color-mix(in srgb, var(--border) 12%, transparent)' }}>

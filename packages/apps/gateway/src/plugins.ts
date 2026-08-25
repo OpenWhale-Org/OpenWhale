@@ -162,6 +162,113 @@ async function stubDeps(): Promise<Record<string, string>> {
   }
 }
 
+/**
+ * Where a package is copied to be loaded from.
+ *
+ * Node's ESM registry is keyed by resolved URL and can never be evicted, so
+ * loading every version of a plugin from the same `node_modules/<pkg>` path
+ * means the FIRST version installed in this process is the one that runs,
+ * for good. Uninstalling and reinstalling changes the bytes on disk and
+ * changes nothing about what executes — silently, which is the worst way for
+ * a trading engine to be wrong about which code it is running.
+ *
+ * A cache-busting query on the entry URL is not enough: it refreshes the
+ * entry and leaves every sibling it imports cached, and a plugin's `dist/` is
+ * many files. Only a path the loader has never seen gives a whole fresh
+ * module graph — so each install copies the package to its own directory.
+ *
+ * `node_modules` is left behind by the copy on purpose: a plugin's own
+ * dependencies were installed into the shared prefix, which is still an
+ * ancestor of the staging dir, so resolution finds them there — and a local
+ * dev package's tree would otherwise be copied in full, every install.
+ */
+const STAGE_DIR = 'staged'
+
+/** '@scope/name' → '@scope-name', usable as one directory component. */
+function stageName(packageName: string): string {
+  return packageName.replace(/[/\\]/g, '-').replace(/[^\w.@-]/g, '_')
+}
+
+/** The staging directory an entry path sits in, or undefined if it is not staged. */
+export function stagedDirOf(entryPath: string): string | undefined {
+  const root = path.join(getPluginsDir(), STAGE_DIR)
+  const rel = path.relative(root, entryPath)
+  // Refuse anything that escapes the staging root — this path gets rm -rf'd
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return undefined
+  const first = rel.split(path.sep)[0]
+  return first ? path.join(root, first) : undefined
+}
+
+/** Copy the installed package to a directory the module loader has not seen. */
+export async function stage(packageName: string, hint?: string): Promise<{ entryPath: string; dir: string }> {
+  const pluginsDir = getPluginsDir()
+  // realpath: a local install is a symlink into the user's working copy
+  const installed = fs.realpathSync(path.join(pluginsDir, 'node_modules', packageName))
+  // Resolve against the original first, so a package that was never built
+  // fails before anything is copied
+  const rel = path.relative(installed, resolveEntry(installed, hint))
+
+  const dir = path.join(pluginsDir, STAGE_DIR, `${stageName(packageName)}-${Date.now()}`)
+  await fs.promises.mkdir(path.dirname(dir), { recursive: true })
+  await fs.promises.cp(installed, dir, {
+    recursive: true,
+    dereference: true,
+    filter: src => {
+      const base = path.basename(src)
+      return base !== 'node_modules' && base !== '.git'
+    },
+  })
+  return { entryPath: path.join(dir, rel), dir }
+}
+
+/** Drop this package's earlier staging directories, keeping the live one. */
+export async function pruneStaged(packageName: string, keep: string): Promise<void> {
+  const root = path.join(getPluginsDir(), STAGE_DIR)
+  const prefix = `${stageName(packageName)}-`
+  let entries: string[]
+  try {
+    entries = await fs.promises.readdir(root)
+  } catch {
+    return
+  }
+  for (const name of entries) {
+    const dir = path.join(root, name)
+    if (!name.startsWith(prefix) || dir === keep) continue
+    // The module graph is already in memory; the files are only disk
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+/**
+ * Stage, load, record — the tail every package-shaped install shares.
+ *
+ * Pruning happens only after the manifest is written: a failed load must
+ * leave the previous staging directory intact, or the manifest entry still
+ * pointing at it would fail to restore on the next boot.
+ */
+async function stageLoadAndRecord(
+  runtime: OpenWhaleRuntime,
+  packageName: string,
+  source: PluginSource,
+  config: unknown,
+  hint?: string,
+): Promise<InstalledPluginView> {
+  const { entryPath, dir } = await stage(packageName, hint)
+  let name: string
+  try {
+    name = await runtime.loadPluginFromPath(entryPath, config)
+  } catch (err) {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+    throw err
+  }
+  await upsertManifest({ name, source, entryPath, config, installedAt: new Date().toISOString() })
+  loadErrors.delete(name)
+  await pruneStaged(packageName, dir)
+
+  const info = runtime.listLoadedPlugins().find(p => p.name === name)!
+  return { ...info, source }
+}
+
 /** Read the package name from a local package dir; validates it looks like a package. */
 function localPackageName(dir: string): string {
   let pkg: { name?: string }
@@ -245,23 +352,10 @@ export async function installFromNpm(
     timeout: 300_000,
   })
 
-  const entryPath = resolveEntry(path.join(pluginsDir, 'node_modules', packageName))
-  const name = await runtime.loadPluginFromPath(entryPath, config)
-
   const source: PluginSource = localPath
     ? { kind: 'local', path: localPath, packageName }
     : { kind: 'npm', package: spec }
-  await upsertManifest({
-    name,
-    source,
-    entryPath,
-    config,
-    installedAt: new Date().toISOString(),
-  })
-  loadErrors.delete(name)
-
-  const info = runtime.listLoadedPlugins().find(p => p.name === name)!
-  return { ...info, source }
+  return stageLoadAndRecord(runtime, packageName, source, config)
 }
 
 // ── GitHub install ────────────────────────────────────────────────────────────
@@ -424,15 +518,8 @@ export async function installFromGithub(
   }
 
   const packageName = installedName(before, await stubDeps(), repo)
-  const entryPath = resolveEntry(path.join(pluginsDir, 'node_modules', packageName), BUILD_HINT)
-  const name = await runtime.loadPluginFromPath(entryPath, config)
-
   const source: PluginSource = { kind: 'github', repo, ...(ref !== undefined ? { ref } : {}), packageName }
-  await upsertManifest({ name, source, entryPath, config, installedAt: new Date().toISOString() })
-  loadErrors.delete(name)
-
-  const info = runtime.listLoadedPlugins().find(p => p.name === name)!
-  return { ...info, source }
+  return stageLoadAndRecord(runtime, packageName, source, config, BUILD_HINT)
 }
 
 /**
@@ -500,11 +587,44 @@ export async function installFromFile(
 
 // ── uninstall ─────────────────────────────────────────────────────────────────
 
+/** 'a, b, c and 4 more' — enough to recognise, not a wall of ids. */
+function nameList(ids: string[], show = 5): string {
+  return ids.length <= show
+    ? ids.join(', ')
+    : `${ids.slice(0, show).join(', ')} and ${ids.length - show} more`
+}
+
 export async function uninstallPlugin(runtime: OpenWhaleRuntime, name: string): Promise<void> {
-  // Throws if active instances still use the plugin's strategies.
   // A plugin that failed to load on boot has nothing registered — skip unload.
   const isLoaded = runtime.listLoadedPlugins().some(p => p.name === name)
-  if (isLoaded) runtime.unloadPlugin(name)
+  if (isLoaded) {
+    const deps = await runtime.pluginDependents(name)
+    /* Instances, accounts and credentials are the user's, not the plugin's:
+       params they tuned, a key they pasted, an equity history. Uninstall
+       removes code, and must not quietly take those with it — so it stops and
+       names them. Deleting them is a decision, and it stays the user's. */
+    const blockers = [
+      deps.instances.length > 0 ? `${deps.instances.length} strategy instance(s) — ${nameList(deps.instances)}` : '',
+      deps.accounts.length > 0 ? `${deps.accounts.length} account(s) — ${nameList(deps.accounts)}` : '',
+      deps.credentials.length > 0 ? `${deps.credentials.length} credential(s) — ${nameList(deps.credentials)}` : '',
+    ].filter(Boolean)
+    if (blockers.length > 0) {
+      throw new Error(
+        `Cannot uninstall "${name}" — it is still in use by ${blockers.join('; ')}. ` +
+          'Delete those first: each one holds something you configured, and uninstalling would leave it pointing at code that no longer exists.',
+      )
+    }
+    /* Monitor instances go with the plugin. They are its own plumbing —
+       mostly auto-created for a contract — and carry nothing a person chose,
+       so leaving them behind would only produce broken rows nobody asked for. */
+    for (const id of deps.monitorInstances) {
+      await runtime.deleteMonitorInstance(id)
+    }
+    if (deps.monitorInstances.length > 0) {
+      log().info({ plugin: name, instances: deps.monitorInstances }, 'Deleted the plugin\'s monitor instances')
+    }
+    runtime.unloadPlugin(name)
+  }
 
   const entries = await readManifest()
   const entry = entries.find(e => e.name === name)
@@ -524,6 +644,13 @@ export async function uninstallPlugin(runtime: OpenWhaleRuntime, name: string): 
     } catch (err) {
       log().warn({ name, err }, 'npm uninstall failed — manifest entry removed anyway')
     }
+    /* The staged copy too, or reinstalling would prune it as an old
+       generation anyway and the disk would hold a plugin nobody installed.
+       stagedDirOf refuses any path outside the staging root — entries written
+       before staging existed point straight into node_modules, and this must
+       never be handed one of those. */
+    const staged = stagedDirOf(entry.entryPath)
+    if (staged) await fs.promises.rm(staged, { recursive: true, force: true })
   } else {
     await fs.promises.rm(entry.entryPath, { force: true })
   }
