@@ -273,6 +273,9 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
         const zodType: string = field.type ?? ''
         const fieldType = BaseStrategy.zodTypeToParamFieldType(zodType, meta)
         const list = fieldType === 'list' ? deriveListDef(field, meta) : undefined
+        // A z.enum is a fixed choice: its values are the options unless meta names its own
+        const enumValues = zodType === 'enum' ? (field as unknown as { options?: readonly (string | number)[] }).options : undefined
+        const options = meta.options ?? enumValues?.map(v => ({ value: v, label: String(v) }))
 
         fields.push({
           name,
@@ -285,7 +288,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
           ...(meta.hint ? { hint: meta.hint } : {}),
           ...(meta.section ? { section: meta.section } : {}),
           ...(meta.placeholder ? { placeholder: meta.placeholder } : {}),
-          ...(meta.options ? { options: meta.options } : {}),
+          ...(options ? { options } : {}),
           ...(meta.displayOptions ? { displayOptions: meta.displayOptions } : {}),
           ...(meta.catalogue ? { catalogue: meta.catalogue } : {}),
           ...(meta.availability ? { availability: meta.availability } : {}),
@@ -306,6 +309,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   private static zodTypeToParamFieldType(zodType: string, meta: ParamFieldMeta): ParamFieldType {
     if (meta.options && meta.options.length > 0) return 'options'
     switch (zodType) {
+      case 'enum': return 'options'
       case 'number': return 'number'
       case 'boolean': return 'boolean'
       case 'array': return 'list'

@@ -1,5 +1,7 @@
 'use client'
 
+import { Select } from './Select'
+
 import type { ParamFieldDef } from '@openwhaleorg/core'
 
 /** Schema-derived tuning fields (numbers/booleans/strings). Values as strings; empty = use default. */
@@ -25,16 +27,28 @@ export function ParamsFields({ fields, values, onChange }: {
         <label key={f.name} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }} title={f.description}>
           <span className="opacity-80">{f.displayName}</span>
           {f.type === 'boolean' ? (
-            <select
+            <Select
+              size="sm"
+              className="w-36"
               value={values[f.name] ?? ''}
-              onChange={(e) => onChange(f.name, e.target.value)}
-              className={FIELD_CLASS}
-              style={FIELD_STYLE}
-            >
-              <option value="">default{f.default !== undefined ? ` (${String(f.default)})` : ''}</option>
-              <option value="true">true</option>
-              <option value="false">false</option>
-            </select>
+              onChange={(v) => onChange(f.name, v)}
+              options={[
+                { value: '', label: `default${f.default !== undefined ? ` (${String(f.default)})` : ''}` },
+                { value: 'true', label: 'true' },
+                { value: 'false', label: 'false' },
+              ]}
+            />
+          ) : f.type === 'options' && f.options ? (
+            <Select
+              size="sm"
+              className="w-44"
+              value={values[f.name] ?? ''}
+              onChange={(v) => onChange(f.name, v)}
+              options={[
+                { value: '', label: `default${f.default !== undefined ? ` (${String(f.default)})` : ''}` },
+                ...f.options.map(o => ({ value: String(o.value), label: o.label })),
+              ]}
+            />
           ) : (
             <input
               value={values[f.name] ?? ''}

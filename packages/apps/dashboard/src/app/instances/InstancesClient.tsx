@@ -30,6 +30,7 @@ import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
 import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ExecutionResult } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
+import { Select } from '@/components/Select'
 import { Modal, ModalMaximizeButton } from '@/components/Modal'
 import { StatsBar } from './StatsBar'
 import { StrategyBrowser } from './StrategyPicker'
@@ -574,16 +575,11 @@ export function ParamFieldsForm({
             </span>
             {field.hint && <span className="text-xs" style={{ color: 'var(--muted)' }}>— {field.hint}</span>}
           </div>
-          <select
+          <Select
             value={value}
-            onChange={(e) => set(field.name, e.target.value)}
-            required={field.required}
-            className="input"
-          >
-            {field.options.map((opt) => (
-              <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
-            ))}
-          </select>
+            onChange={(v) => set(field.name, v)}
+            options={field.options.map((opt) => ({ value: String(opt.value), label: opt.label, ...(opt.description ? { hint: opt.description } : {}) }))}
+          />
           {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
         </div>
       )
