@@ -1,11 +1,32 @@
 import pino from 'pino'
-import pretty from 'pino-pretty'
+import { createRequire } from 'module'
 
 export type LogLevel = pino.Level
 
 export type Logger = pino.Logger
 
 const isDev = process.env['NODE_ENV'] !== 'production'
+
+/**
+ * The dev-mode log prettifier, loaded only if it is both wanted and present.
+ *
+ * It used to be a top-level import declared as a devDependency — a runtime
+ * import the published package did not ask npm to install, so
+ * `@openwhaleorg/core` installed from the registry crashed on load with
+ * "Cannot find package 'pino-pretty'". It is a real dependency now, but the
+ * load stays guarded: a missing log formatter is not a reason for a trading
+ * engine to refuse to start, and JSON on stdout is a perfectly good fallback.
+ */
+function prettyStream(): NodeJS.WritableStream {
+  if (!isDev) return process.stdout
+  try {
+    const load = createRequire(import.meta.url)
+    const pretty = load('pino-pretty') as (opts: unknown) => NodeJS.WritableStream
+    return pretty({ colorize: true, ignore: 'pid,hostname' })
+  } catch {
+    return process.stdout
+  }
+}
 
 // ── In-process log bus ────────────────────────────────────────────────────────
 //
@@ -65,7 +86,7 @@ export function recentLogs(module?: string, n = 200): LogRecord[] {
 function buildRootLogger(): Logger {
   const level = process.env['LOG_LEVEL'] ?? 'info'
   const streams: pino.StreamEntry[] = [
-    { level: 'trace', stream: isDev ? pretty({ colorize: true, ignore: 'pid,hostname' }) : process.stdout },
+    { level: 'trace', stream: prettyStream() },
     { level: 'trace', stream: busStream },
   ]
   return pino({ level }, pino.multistream(streams))

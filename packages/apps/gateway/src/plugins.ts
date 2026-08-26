@@ -16,6 +16,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { execFile } from 'child_process'
+import { createRequire } from 'module'
 import { promisify } from 'util'
 import type { OpenWhaleRuntime, LoadedPluginInfo, PluginReplaceResult, PluginGlobalConflict } from '@openwhaleorg/core'
 import { getLogger, PluginAlreadyLoadedError } from '@openwhaleorg/core'
@@ -289,6 +290,110 @@ async function stubDeps(): Promise<Record<string, string>> {
     return (JSON.parse(raw) as { dependencies?: Record<string, string> }).dependencies ?? {}
   } catch {
     return {}
+  }
+}
+
+const load = createRequire(import.meta.url)
+
+/** The directory of a package as the ENGINE resolves it, if it provides one at all. */
+function enginePackageRoot(name: string): string | undefined {
+  let dir: string
+  try {
+    dir = path.dirname(load.resolve(name))
+  } catch {
+    return undefined   // not something the engine ships
+  }
+  for (let up = dir; ; up = path.dirname(up)) {
+    const manifest = path.join(up, 'package.json')
+    if (fs.existsSync(manifest)) {
+      try {
+        if ((JSON.parse(fs.readFileSync(manifest, 'utf8')) as { name?: string }).name === name) return up
+      } catch { /* keep walking */ }
+    }
+    if (path.dirname(up) === up) return undefined
+  }
+}
+
+/**
+ * Whether `^engine` would accept `fetched` — the ecosystem's own rule for "these
+ * two are interchangeable", including 0.x, where the minor acts as the major.
+ *
+ * Compared rather than demanding equality because npm picks the newest version
+ * satisfying the plugin's range, which is often a patch ahead of the engine.
+ * Refusing to link over a patch difference would leave the second copy in
+ * place, which is the very thing being prevented.
+ */
+function caretCompatible(engine: string, fetched: string): boolean {
+  const a = engine.split('.').map(Number)
+  const b = fetched.split('.').map(Number)
+  if (a.length < 3 || b.length < 3 || [...a, ...b].some(Number.isNaN)) return engine === fetched
+  if (a[0] !== b[0]) return false
+  // 0.x: a minor bump is a breaking change, so it has to match too
+  if (a[0] === 0) return a[1] === b[1]
+  return true
+}
+
+function versionAt(dir: string): string | undefined {
+  try {
+    return (JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { version?: string }).version
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Point framework packages npm dragged in back at the engine's own copies.
+ *
+ * A plugin declares `@openwhaleorg/core` as a PEER because it must share the
+ * engine's copy — the registries, definePlugin, the decorators' metadata and
+ * every base class are module-level state, and two copies are two universes: a
+ * plugin would register into tables nobody reads. But npm satisfies a missing
+ * peer by downloading one, so installing a plugin from the registry quietly
+ * produced exactly the second copy the peer declaration existed to prevent.
+ *
+ * npm cannot be told "this peer is already satisfied by the program doing the
+ * installing", so it is corrected afterwards: whatever it fetched is replaced
+ * by a link to what the engine is actually running. Node resolves a symlink to
+ * its realpath, so the plugin then imports the very module object the engine
+ * holds.
+ *
+ * A version mismatch is left alone and reported. That is a real incompatibility
+ * — the plugin asked for something this engine is not — and silently swapping
+ * in a different version would turn a legible install failure into a puzzling
+ * runtime one.
+ */
+export async function shareEnginePackages(): Promise<void> {
+  const scope = path.join(getPluginsDir(), 'node_modules', '@openwhaleorg')
+  let entries: string[]
+  try {
+    entries = await fs.promises.readdir(scope)
+  } catch {
+    return
+  }
+
+  for (const entry of entries) {
+    const installed = path.join(scope, entry)
+    const stat = await fs.promises.lstat(installed).catch(() => undefined)
+    if (!stat || stat.isSymbolicLink()) continue   // already pointing somewhere of ours
+
+    const name = `@openwhaleorg/${entry}`
+    const ours = enginePackageRoot(name)
+    if (ours === undefined) continue               // a plugin's own package, not a framework one
+
+    const engineVersion = versionAt(ours)
+    const fetched = versionAt(installed)
+    if (engineVersion === undefined || fetched === undefined) continue
+    if (!caretCompatible(engineVersion, fetched)) {
+      log().warn(
+        { package: name, engine: engineVersion, installed: fetched },
+        'A plugin wants a framework version this engine does not provide — leaving its own copy, but the two cannot share state',
+      )
+      continue
+    }
+
+    await fs.promises.rm(installed, { recursive: true, force: true })
+    await fs.promises.symlink(ours, installed, 'junction')
+    log().info({ package: name, version: engineVersion }, 'Pointed a plugin dependency at the engine\'s own copy')
   }
 }
 
@@ -571,6 +676,7 @@ export async function installFromNpm(
   await execFileAsync(npm.file, [...npm.args, 'install', localPath ?? spec, '--prefix', pluginsDir, '--no-audit', '--no-fund', '--loglevel=error'], {
     timeout: 300_000,
   })
+  await shareEnginePackages()
 
   const source: PluginSource = localPath
     ? { kind: 'local', path: localPath, packageName }
@@ -738,6 +844,7 @@ export async function installFromGithub(
   } catch (err) {
     throw cloneError(err, repo)
   }
+  await shareEnginePackages()
 
   const packageName = installedName(before, await stubDeps(), repo)
   const source: PluginSource = { kind: 'github', repo, ...(ref !== undefined ? { ref } : {}), packageName }

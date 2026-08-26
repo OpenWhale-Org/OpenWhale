@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { pathToFileURL } from 'url'
-import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged, suggestAlias } from '../plugins.js'
+import { pathToFileURL, fileURLToPath } from 'url'
+import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged, suggestAlias, shareEnginePackages } from '../plugins.js'
 
 const isWin = process.platform === 'win32'
 
@@ -271,5 +271,74 @@ describe('suggestAlias — a namespace for somebody else\'s plugin of the same n
     // `<namespace>/<strategy>` — the runtime rejects anything else
     const alias = suggestAlias('funding arb!', { kind: 'github', repo: 'Al.ice_9/x', packageName: 'x' }, [])
     expect(alias).toMatch(/^[A-Za-z0-9][\w.-]*$/)
+  })
+})
+
+describe('shareEnginePackages — one copy of the framework, not two', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-share-'))
+  const scope = path.join(data, 'plugins', 'node_modules', '@openwhaleorg')
+  const prevDb = process.env['OPENWHALE_DB_PATH']
+
+  beforeAll(() => { process.env['OPENWHALE_DB_PATH'] = path.join(data, 'openwhale.db') })
+  afterAll(() => {
+    if (prevDb === undefined) delete process.env['OPENWHALE_DB_PATH']
+    else process.env['OPENWHALE_DB_PATH'] = prevDb
+  })
+
+  const engineCoreVersion = JSON.parse(
+    fs.readFileSync(new URL('../../../../framework/core/package.json', import.meta.url), 'utf8'),
+  ).version as string
+
+  /** A package directory as npm would have left it. */
+  const fetched = (name: string, version: string) => {
+    const dir = path.join(scope, name)
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `@openwhaleorg/${name}`, version }))
+    fs.writeFileSync(path.join(dir, 'index.js'), '')
+    return dir
+  }
+
+  /* The peer declaration exists so a plugin shares the engine's core; npm
+     satisfies a missing peer by downloading one, producing the second copy the
+     declaration was meant to prevent. Two copies are two module registries. */
+  it('replaces a fetched framework package with a link to the engine\'s copy', async () => {
+    const dir = fetched('core', engineCoreVersion)
+    await shareEnginePackages()
+
+    expect(fs.lstatSync(dir).isSymbolicLink()).toBe(true)
+    // Resolving through it must land on the very file the engine runs
+    expect(fs.realpathSync(path.join(dir, 'package.json')))
+      .toBe(fs.realpathSync(fileURLToPath(new URL('../../../../framework/core/package.json', import.meta.url))))
+  })
+
+  /* A different version is a real incompatibility. Swapping silently would
+     turn a legible install failure into a puzzling runtime one. */
+  it('leaves an incompatible version alone', async () => {
+    const dir = fetched('core', '9.9.9')
+    await shareEnginePackages()
+    expect(fs.lstatSync(dir).isSymbolicLink()).toBe(false)
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version).toBe('9.9.9')
+  })
+
+  /* npm picks the newest version satisfying the plugin's range, often a patch
+     ahead of the engine. Demanding equality would leave that copy in place —
+     the exact thing this is preventing. */
+  it('links across a patch difference', async () => {
+    const [major, minor] = engineCoreVersion.split('.')
+    const dir = fetched('core', `${major}.${minor}.99`)
+    await shareEnginePackages()
+    expect(fs.lstatSync(dir).isSymbolicLink()).toBe(true)
+  })
+
+  it('does not touch a package the engine does not provide', async () => {
+    const dir = fetched('some-plugin', '1.0.0')
+    await shareEnginePackages()
+    expect(fs.lstatSync(dir).isSymbolicLink()).toBe(false)
+  })
+
+  it('is a no-op when nothing was fetched', async () => {
+    fs.rmSync(scope, { recursive: true, force: true })
+    await expect(shareEnginePackages()).resolves.toBeUndefined()
   })
 })
