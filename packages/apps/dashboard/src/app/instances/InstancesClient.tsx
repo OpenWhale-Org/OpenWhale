@@ -1890,7 +1890,8 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     for (const slot of strategy?.accountRequirements ?? []) {
       const bound = slotBindings[slot.label]
       if (!bound) continue
-      const account = accounts.find((a) => a.name === bound)
+      // Instances from before Account entities bind by credential name — match either
+      const account = accounts.find((a) => a.name === bound || a.credential === bound)
       if (!account) continue
       // A venue-pinned implementation names the venue; otherwise (CEX) the
       // credential type IS the venue. On-chain venues differ: a Boros account
