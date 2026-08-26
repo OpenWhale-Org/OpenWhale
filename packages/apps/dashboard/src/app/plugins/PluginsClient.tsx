@@ -1,10 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Rail, RailItem } from '@/components/Rail'
 import { useRouter } from 'next/navigation'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo, PluginDependents } from '@openwhaleorg/core'
-import type { InstalledPluginView } from '@/lib/data'
+import type { InstalledPluginView, PluginUpdate } from '@/lib/data'
 import { Markdown } from '@/components/Markdown'
 import { TypeMark } from '@/components/TypeMark'
 
@@ -63,6 +63,18 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
   const [tab, setTab] = useState<'builtin' | 'external'>('builtin')
   const [selected, setSelected] = useState<string | null>(initialPlugins.find(p => !p.source)?.name ?? null)
   const [installing, setInstalling] = useState(false)
+  /** name → newer registry version, from the update check (npm installs only). */
+  const [updates, setUpdates] = useState<Record<string, PluginUpdate>>({})
+
+  // The check asks npm once per installed package — a few seconds, so it runs
+  // after the page is up rather than blocking it, and again after any change.
+  async function checkUpdates() {
+    try {
+      const res = await fetch('/api/plugins/updates')
+      if (res.ok) setUpdates(Object.fromEntries((await res.json() as PluginUpdate[]).map(u => [u.name, u])))
+    } catch { /* offline registry: no badges, nothing else changes */ }
+  }
+  useEffect(() => { void checkUpdates() }, [])
 
   const builtins = plugins.filter(p => !p.source)
   const externals = plugins.filter(p => p.source)
@@ -77,6 +89,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
     const [pluginsRes, registryRes] = await Promise.all([fetch('/api/plugins'), fetch('/api/registry')])
     if (pluginsRes.ok) setPlugins(await pluginsRes.json() as InstalledPluginView[])
     if (registryRes.ok) setRegistry(await registryRes.json() as RegistryData)
+    void checkUpdates()
   }
 
   function pick(tabKey: 'builtin' | 'external', name: string | null) {
@@ -130,7 +143,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
                 onClick={() => pick(tab, p.name)}
                 mark={<TypeMark logo={mark.logo} icon={mark.icon} label={p.name} size={26} />}
                 title={<>{p.name}{p.loadError && <span className="ml-1.5 text-xs" style={{ color: 'var(--danger)' }} title={p.loadError}>⚠</span>}</>}
-                subtitle={`v${p.version}`}
+                subtitle={updates[p.name] ? <>v{p.version} <span style={{ color: 'var(--accent)' }}>→ v{updates[p.name]!.latest} available</span></> : `v${p.version}`}
                 right={<span className="font-mono">{count}</span>}
               />
             )
@@ -168,11 +181,13 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
           ) : selectedPlugin ? (
             <PluginDetail
               plugin={selectedPlugin}
+              update={updates[selectedPlugin.name]}
               registry={registry}
               credentialTypes={credentialTypes}
               scripts={scripts}
               accountImpls={accountImpls}
               onUninstalled={() => { setSelected(externals.find(p => p.name !== selectedPlugin.name)?.name ?? null); void refresh() }}
+              onUpdated={() => void refresh()}
             />
           ) : (
             <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>Pick a plugin.</div>
@@ -185,17 +200,45 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
 
 // ── Detail pane ───────────────────────────────────────────────────────────────
 
-function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls, onUninstalled }: {
+function PluginDetail({ plugin, update, registry, credentialTypes, scripts, accountImpls, onUninstalled, onUpdated }: {
   plugin: InstalledPluginView
+  /** A newer registry version, when the update check found one. */
+  update?: PluginUpdate | undefined
   registry: RegistryData
   credentialTypes: CredentialTypeInfo[]
   scripts: ScriptInfo[]
   accountImpls: AccountImplementationInfo[]
   onUninstalled: () => void
+  onUpdated: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [updateNote, setUpdateNote] = useState('')
   const [error, setError] = useState('')
+
+  async function runUpdate() {
+    if (!update) return
+    setUpdating(true)
+    setError('')
+    setUpdateNote('')
+    try {
+      const res = await fetch(`/api/plugins/${encodeURIComponent(plugin.name)}/update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: update.latest }),
+      })
+      if (!res.ok) { setError(await res.text() || `Update failed (HTTP ${res.status})`); return }
+      const out = await res.json() as { reloaded: string[]; reactivated: string[] }
+      const bits = [`updated to v${update.latest}`]
+      if (out.reloaded.length) bits.push(`reloaded ${out.reloaded.join(', ')}`)
+      if (out.reactivated.length) bits.push(`re-activated ${out.reactivated.length} instance${out.reactivated.length === 1 ? '' : 's'}`)
+      setUpdateNote(bits.join(' · '))
+      onUpdated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUpdating(false)
+    }
+  }
   /* Asked before confirming, not after: the gateway would refuse anyway, but
      "you cannot, because these three instances use it" is worth knowing while
      the choice is still open — and so is the fact that confirming deletes
@@ -272,6 +315,16 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
         </div>
         {plugin.source && (
           <div className="shrink-0 flex gap-2">
+            {update && !confirming && (
+              <button
+                onClick={() => void runUpdate()}
+                disabled={updating}
+                className="btn btn-sm btn-primary"
+                title={`Installed v${update.installed}; v${update.latest} is on npm. Updates in place, reloads dependent plugins and re-activates running instances.`}
+              >
+                {updating ? 'Updating…' : `↑ Update to v${update.latest}`}
+              </button>
+            )}
             {confirming ? (
               <>
                 <button onClick={() => setConfirming(false)} className="btn btn-sm btn-secondary">Cancel</button>
@@ -293,6 +346,7 @@ function PluginDetail({ plugin, registry, credentialTypes, scripts, accountImpls
       <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden p-4 flex flex-col gap-5">
         {plugin.loadError && <p className="alert alert-danger text-xs">{plugin.loadError}</p>}
         {error && <p className="alert alert-danger text-xs">{error}</p>}
+        {updateNote && <p className="alert alert-success text-xs">{updateNote}</p>}
 
         {confirming && (
           <div className={`alert text-xs flex flex-col gap-1.5 ${blockers.length > 0 ? 'alert-danger' : 'alert-warning'}`}>
@@ -575,7 +629,7 @@ const MODES = [
 ] as const
 
 const MODE_HINT: Record<(typeof MODES)[number][0], string> = {
-  npm: 'Published packages install with their dependencies and update by version (e.g. @openwhaleorg/pendle). A local absolute path works too.',
+  npm: 'Recommended for the manual routes — published packages install with their dependencies and get the one-click Update button when a newer version appears (e.g. @openwhaleorg/pendle). A local absolute path works too.',
   github: 'For a repository that is not on npm yet: the gateway clones and builds it, which takes a few minutes and needs the build toolchain on the server.',
   file: 'A single pre-built bundle you upload by hand — for trying a plugin before it has a package or a repo.',
 }
@@ -723,6 +777,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
         {MODES.map(([m, label]) => (
           <button key={m} type="button" onClick={() => setMode(m)} className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}>
             {label}
+            {m === 'npm' && <span className="ml-1.5 text-[10px] px-1 rounded" style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)', color: 'var(--success, #22c55e)' }}>recommended</span>}
           </button>
         ))}
       </div>

@@ -1003,6 +1003,89 @@ export async function restorePlugins(runtime: OpenWhaleRuntime): Promise<void> {
   }
 }
 
+// ── updates ──────────────────────────────────────────────────────────────────
+
+export interface PluginUpdate {
+  name: string
+  packageName: string
+  installed: string
+  latest: string
+}
+
+/**
+ * npm-installed plugins whose registry "latest" is newer than what is
+ * installed. One `npm view` per plugin, in parallel; a registry that does
+ * not answer for one package just leaves that package out.
+ */
+export async function checkPluginUpdates(): Promise<PluginUpdate[]> {
+  const manifest = await readManifest()
+  const pluginsDir = getPluginsDir()
+  const npm = npmSpawn()
+  const checks = manifest
+    .filter(e => e.source.kind === 'npm')
+    .map(async (e): Promise<PluginUpdate | undefined> => {
+      const packageName = packageNameOf(e.source)
+      if (!packageName) return undefined
+      let installed: string
+      try {
+        installed = (JSON.parse(await fs.promises.readFile(path.join(pluginsDir, 'node_modules', packageName, 'package.json'), 'utf8')) as { version: string }).version
+      } catch { return undefined }
+      try {
+        const { stdout } = await execFileAsync(npm.file, [...npm.args, 'view', packageName, 'version', '--loglevel=error'], { timeout: 20_000 })
+        const latest = stdout.trim()
+        return latest && latest !== installed ? { name: e.name, packageName, installed, latest } : undefined
+      } catch { return undefined }
+    })
+  return (await Promise.all(checks)).filter((u): u is PluginUpdate => u !== undefined)
+}
+
+/**
+ * Manifest entries that are installed but not loaded get staged and loaded
+ * again. Overwriting a plugin unloads everything that depends on it (a
+ * strategy package on its venue package), and without this the dependents
+ * stayed dark until someone reinstalled them by hand.
+ */
+export async function reloadUnloaded(runtime: OpenWhaleRuntime): Promise<string[]> {
+  const reloaded: string[] = []
+  for (const entry of await readManifest()) {
+    if (runtime.listLoadedPlugins().some(p => p.name === entry.name)) continue
+    const packageName = packageNameOf(entry.source)
+    if (!packageName) continue
+    try {
+      await stageLoadAndRecord(runtime, packageName, entry.source, entry.config, true, entry.alias)
+      loadErrors.delete(entry.name)
+      reloaded.push(entry.name)
+      log().info({ plugin: entry.name }, 'Reloaded plugin after an overwrite unloaded it')
+    } catch (err) {
+      loadErrors.set(entry.name, err instanceof Error ? err.message : String(err))
+      log().error({ plugin: entry.name, err }, 'Failed to reload plugin')
+    }
+  }
+  return reloaded
+}
+
+/**
+ * Bring an npm-installed plugin to a version (default: the registry's
+ * latest), reload whatever the overwrite unloaded, and re-activate the
+ * instances that were running before — an update should be invisible to
+ * a strategy that was busy.
+ */
+export async function updatePlugin(runtime: OpenWhaleRuntime, name: string, version?: string): Promise<{ plugin: InstalledPluginView; reloaded: string[]; reactivated: string[] }> {
+  const entry = (await readManifest()).find(e => e.name === name)
+  if (!entry) throw new Error(`Plugin "${name}" is not installed`)
+  if (entry.source.kind !== 'npm') throw new Error(`Plugin "${name}" was not installed from the npm registry — reinstall it from its source instead`)
+  const packageName = parsePackageSpec(entry.source.package).packageName
+  const wasActive = (await runtime.listInstanceViews()).filter(i => i.active).map(i => i.id)
+  const plugin = await installFromNpm(runtime, `${packageName}@${version ?? 'latest'}`, entry.config, true, entry.alias)
+  const reloaded = await reloadUnloaded(runtime)
+  const reactivated: string[] = []
+  for (const view of await runtime.listInstanceViews()) {
+    if (!wasActive.includes(view.id) || view.active) continue
+    try { await runtime.activateById(view.id); reactivated.push(view.id) } catch (err) { log().warn({ instance: view.id, err }, 'Instance did not come back after the update') }
+  }
+  return { plugin, reloaded, reactivated }
+}
+
 /** Loaded plugins merged with manifest metadata, plus manifest entries that failed to load. */
 export async function listInstalledPlugins(runtime: OpenWhaleRuntime): Promise<InstalledPluginView[]> {
   const manifest = await readManifest()

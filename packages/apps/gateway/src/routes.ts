@@ -17,7 +17,7 @@ import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance 
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
-import { installFromNpm, installFromGithub, installFromFile, uninstallPlugin, listInstalledPlugins, PluginConflictError, describeSource } from './plugins.js'
+import { installFromNpm, installFromGithub, installFromFile, uninstallPlugin, listInstalledPlugins, PluginConflictError, describeSource, checkPluginUpdates, updatePlugin, reloadUnloaded } from './plugins.js'
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
 import { sseHandler } from './events.js'
 import { activityMeter } from './activity.js'
@@ -1180,7 +1180,10 @@ export function buildRouter(): Router {
         res.status(400).send('Expected { source: "npm", package: "..." } or { source: "github", repo: "..." }')
         return
       }
-      res.status(201).json(await installFromNpm(runtime, body.package.trim(), body.config ?? {}, overwrite, alias))
+      const view = await installFromNpm(runtime, body.package.trim(), body.config ?? {}, overwrite, alias)
+      // An overwrite unloads the plugins that depend on the replaced one; bring them back
+      if (overwrite) await reloadUnloaded(runtime)
+      res.status(201).json(view)
     } catch (err) {
       /* A name collision is a question the user can answer, so it comes back
          as structured data rather than prose: 409 with what it collided with,
@@ -1203,6 +1206,23 @@ export function buildRouter(): Router {
         })
         return
       }
+      res.status(400).send(errText(err))
+    }
+  }))
+
+  /* npm-installed plugins with a newer version on the registry. */
+  router.get('/api/plugins/updates', h(async (_req, res) => {
+    res.json(await checkPluginUpdates())
+  }))
+
+  /* One-click update: overwrite-install the registry version, reload the
+     plugins that depended on it, re-activate what was running. */
+  router.post('/api/plugins/:name/update', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { version?: string }
+    try {
+      res.json(await updatePlugin(runtime, req.params['name']!, body.version?.trim() || undefined))
+    } catch (err) {
       res.status(400).send(errText(err))
     }
   }))

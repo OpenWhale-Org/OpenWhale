@@ -78,6 +78,14 @@ export interface InstalledPluginView extends LoadedPluginInfo {
   loadError?: string
 }
 
+/** An npm-installed plugin with a newer registry version. */
+export interface PluginUpdate {
+  name: string
+  packageName: string
+  installed: string
+  latest: string
+}
+
 export function fetchInstances(): Promise<StrategyInstanceView[]> {
   return gw('/api/instances', [])
 }
