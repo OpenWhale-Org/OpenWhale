@@ -240,7 +240,7 @@ export function SymbolPicker({
                     onMouseEnter={() => setHighlight(i)}
                     onMouseDown={(e) => { e.preventDefault(); commit(m.symbol) }}
                     className="w-full text-left px-3 py-1.5 text-xs font-mono flex items-baseline justify-between gap-2"
-                    style={{ background: i === highlight ? 'var(--background)' : 'transparent', color: 'var(--foreground)' }}
+                    style={{ background: i === highlight ? 'var(--selection)' : 'transparent', color: 'var(--foreground)', boxShadow: i === highlight ? 'inset 2px 0 0 var(--accent)' : 'none' }}
                   >
                     <span className="flex items-baseline gap-2">
                       {multiple && (

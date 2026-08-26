@@ -111,7 +111,8 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
                 onClick={() => pick(o)}
                 className="menu-item w-full text-left px-3 py-1.5 flex items-start gap-2"
                 style={{
-                  background: i === cursor ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+                  background: i === cursor ? 'var(--selection)' : 'transparent',
+                  boxShadow: i === cursor ? 'inset 2px 0 0 var(--accent)' : 'none',
                   color: o.disabled ? 'var(--muted)' : 'var(--foreground)',
                   opacity: o.disabled ? 0.6 : 1,
                 }}

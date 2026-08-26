@@ -138,7 +138,7 @@ export function RailItem({ title, subtitle, mark, right, active = false, onClick
       {...dataAttrs}
       className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-start gap-2.5"
       style={{
-        background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+        background: active ? 'color-mix(in srgb, var(--accent) 24%, transparent)' : 'transparent',
         borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
         borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
       }}

@@ -18,7 +18,8 @@
   /* ── Accent (exactly one hue; everything interactive) ── */
   --accent: #8267f5;
   --accent-hover: #927cff;
-  --accent-soft: rgba(130, 103, 245, 0.15);  /* selected/active fills */
+  --accent-soft: rgba(130, 103, 245, 0.15);  /* tinted fills (cards, chips) */
+  --selection: rgba(130, 103, 245, 0.42);    /* the highlighted row of a list or picker — must read at a glance */
   --ring: rgba(130, 103, 245, 0.38);         /* focus outlines */
 
   /* ── Semantics (meaning only — never decoration) ── */
@@ -80,7 +81,7 @@ body {
 .tabular { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--font-mono); }
 
-::selection { background: var(--accent-soft); }
+::selection { background: var(--selection); }
 
 /* ── Component classes — the refactor vocabulary. Pages compose these instead
    of restating inline styles; variants change COLOR ONLY, never geometry. ── */
@@ -475,7 +476,7 @@ body {
    popover you fight. */
 .menu-item { transition: background-color 120ms ease, color 120ms ease; }
 .menu-item:hover {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--selection);
 }
 
 /* ── The pod view's hover panel ────────────────────────────────────────────
