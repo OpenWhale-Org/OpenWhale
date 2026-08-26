@@ -52,6 +52,12 @@ export interface ScriptContext {
    */
   emit?: (line: string) => void
   /**
+   * Fires when the caller gives up on the run — the operator pressed Stop, or
+   * the connection went away. A script that loops over venues should check
+   * it between steps and return what it has; nothing kills the script for it.
+   */
+  signal?: AbortSignal
+  /**
    * The live OpenWhaleRuntime. Typed loosely so plugin packages don't need
    * the runtime's full type surface — cast to what the script actually uses
    * (listInstanceViews, getStrategy, …).

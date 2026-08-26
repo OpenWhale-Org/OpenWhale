@@ -240,8 +240,9 @@ export const planPreviewScript: ScriptDefinition = {
   paramOptions: async (runtime) => ({
     instanceId: (await (runtime as Rt).listInstanceViews()).map(v => ({ value: v.id, label: v.name })),
   }),
-  run: async ({ params, runtime, emit }) => {
+  run: async ({ params, runtime, emit, signal }) => {
     emit?.('scanning 40 markets…')        // streamed to the page while the run lasts (absent when not streaming)
+    if (signal?.aborted) return { text: 'stopped' }   // the operator pressed Stop — check between slow steps, return what you have
     return { text: report, json: rows,   // text = monospace report, json = collapsible
              files: [{ name: 'report.csv', mime: 'text/csv', content: csv }] }   // downloads; inline, report-sized
   },

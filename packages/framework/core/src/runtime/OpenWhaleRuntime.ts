@@ -804,13 +804,14 @@ export class OpenWhaleRuntime implements IRuntime {
     id: string,
     params: Record<string, unknown>,
     emit?: (line: string) => void,
+    signal?: AbortSignal,
   ): Promise<ScriptResult> {
     const rec = this.scriptRegistry.get(id)
     if (!rec) throw new Error(`Unknown script: "${id}"`)
     const parsed = rec.def.paramsSchema !== undefined
       ? rec.def.paramsSchema.parse(params) as Record<string, unknown>
       : {}
-    return rec.def.run({ params: parsed, runtime: this, ...(emit ? { emit } : {}) })
+    return rec.def.run({ params: parsed, runtime: this, ...(emit ? { emit } : {}), ...(signal ? { signal } : {}) })
   }
 
   /** The monitors an instance consumes and the executors it fires — its event scope. */

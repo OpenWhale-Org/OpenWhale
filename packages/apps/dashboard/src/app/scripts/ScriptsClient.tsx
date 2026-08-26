@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { ScriptInfo, ParamFieldDef } from '@openwhaleorg/core'
 import { TypeMark } from '../../components/TypeMark'
@@ -218,6 +218,8 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
 function ScriptCard({ script }: { script: ScriptInfo }) {
   const [values, setValues] = useState<Record<string, string>>(() => seedValues(script.paramsFields))
   const [running, setRunning] = useState(false)
+  /** The in-flight stream; Stop aborts it, which the gateway relays to the script. */
+  const abortRef = useRef<AbortController | null>(null)
   const [result, setResult] = useState<ScriptOutput | null>(null)
   const [runError, setRunError] = useState('')
   const [view, setView] = useState<'report' | 'html' | 'json'>('report')
@@ -262,8 +264,10 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
       }
       const [owner, ...rest] = script.id.split('/')
       const base = `/api/scripts/${encodeURIComponent(owner!)}/${encodeURIComponent(rest.join('/'))}`
+      const abort = new AbortController()
+      abortRef.current = abort
       const post = (path: string) => fetch(base + path, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }), signal: abort.signal,
       })
 
       // Stream by default. /api is proxied through Next, which severs an idle
@@ -278,8 +282,13 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         const lines: string[] = []
         let done: ScriptOutput | undefined
         let failed: string | undefined
+        let stopped = false
         for (;;) {
-          const chunk = await reader.read()
+          let chunk: ReadableStreamReadResult<Uint8Array>
+          try { chunk = await reader.read() } catch (err) {
+            if (abort.signal.aborted) { stopped = true; break }
+            throw err
+          }
           if (chunk.done) break
           buffer += decoder.decode(chunk.value, { stream: true })
           // Frames are newline-delimited; a chunk can split one in half, so the
@@ -296,6 +305,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           }
         }
         if (failed !== undefined) throw new Error(failed)
+        if (stopped) { setResult({ text: [...lines, '', '— stopped by operator —'].join('\n') }); setRanAt(new Date()); return }
         // No terminal frame means the connection died mid-run. Keep whatever
         // was streamed — it is the only record of what actually happened.
         if (done === undefined) throw new Error('connection closed before the script finished')
@@ -310,8 +320,9 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         setRanAt(new Date())
       }
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : String(err))
+      if (!(err instanceof DOMException && err.name === 'AbortError')) setRunError(err instanceof Error ? err.message : String(err))
     } finally {
+      abortRef.current = null
       setRunning(false)
     }
   }
@@ -328,6 +339,16 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           </div>
         </div>
         <div className="shrink-0 flex items-center gap-1">
+          {running && (
+            <button
+              onClick={() => abortRef.current?.abort()}
+              className="px-3 py-1.5 rounded-md text-sm"
+              style={{ border: '1px solid var(--danger, #ef4444)', color: 'var(--danger, #ef4444)' }}
+              title="Stop the run; the script keeps what it streamed so far"
+            >
+              ■ Stop
+            </button>
+          )}
           <button
             onClick={() => void run()}
             disabled={running}

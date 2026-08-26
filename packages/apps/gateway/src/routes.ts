@@ -348,11 +348,16 @@ export function buildRouter(): Router {
     // A script can be busy for a long stretch without a word (one slow venue
     // round trip). The heartbeat is what actually holds the proxy open then.
     const beat = setInterval(() => write({ type: 'ping' }), 10_000)
+    // Stop = the client closes the stream. The script sees it as an abort
+    // signal and returns early with what it has.
+    const abort = new AbortController()
+    req.on('close', () => abort.abort())
     try {
       const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
       const result = await runtime.runScript(
         `${req.params['owner']}/${req.params['sid']}`, params,
         (line) => write({ type: 'line', text: line }),
+        abort.signal,
       )
       write({ type: 'result', ...result })
     } catch (err) {
