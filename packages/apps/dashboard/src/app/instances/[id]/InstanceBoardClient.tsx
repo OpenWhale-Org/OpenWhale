@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef } from '@openwhaleorg/core'
+import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, buildParamsFromFields, fieldValuesFromParams, iconFor, patchInstanceMeta } from '../InstancesClient'
 import { InstancePnlPanel } from './InstancePnlPanel'
 
@@ -331,6 +331,11 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
 function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [open, setOpen] = useState(true)
   const [fields, setFields] = useState<ParamFieldDef[] | null>(null)
+  /* The same diagrams the create form shows. They were missing here only
+     because this panel read paramsFields off the definition and stopped —
+     and this is where params are actually TUNED, so it is the place the
+     picture of what a knob does is worth the most. */
+  const [illustrations, setIllustrations] = useState<ParamIllustration[] | undefined>(undefined)
   const [values, setValues] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -346,6 +351,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       const def = defs.find(d => d.id === instance.strategyId)
       const f = def?.paramsFields ?? []
       setFields(f)
+      setIllustrations(def?.paramsIllustrations)
       setValues(fieldValuesFromParams(f, instance.params))
       setDirty(false)
       // The pickers and availability checks need the bound account's venue —
@@ -414,6 +420,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
             onChange={(v) => { setValues(v); setDirty(true) }}
             strategyId={instance.strategyId}
             venueContext={boundVenue}
+            {...(illustrations ? { illustrations } : {})}
           />
           <div className="flex justify-end items-center gap-3 mt-3">
             {instance.active && dirty && (
