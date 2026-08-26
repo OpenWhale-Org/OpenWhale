@@ -14,7 +14,9 @@ import type { ReactNode } from 'react'
  *   <RailItem>   a row — mark | title + subtitle | right-hand meta —
  *                with one active treatment everywhere: accent tint + a 2px
  *                accent bar on the left. Multi-select rows swap the mark for
- *                a checkbox.
+ *                a checkbox. The mark and the meta centre against the text
+ *                block rather than hanging off its first line: they describe
+ *                the whole row, not the title.
  *
  * Pages stopped inventing their own row (cards with full borders, bare
  * buttons, bordered pills) — the rail is now a vocabulary, not a style.
@@ -120,7 +122,7 @@ export function RailItem({ title, subtitle, mark, right, active = false, onClick
       aria-hidden
       className="shrink-0 grid place-items-center rounded"
       style={{
-        width: 14, height: 14, marginTop: 3,
+        width: 14, height: 14,
         border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
         background: active ? 'var(--accent)' : 'transparent',
         color: '#fff', fontSize: 10, lineHeight: 1,
@@ -136,14 +138,14 @@ export function RailItem({ title, subtitle, mark, right, active = false, onClick
       onDoubleClick={onDoubleClick}
       title={title_}
       {...dataAttrs}
-      className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-start gap-2.5"
+      className="hoverable hoverable-flat w-full text-left px-3 py-2.5 flex items-center gap-2.5"
       style={{
         background: active ? 'color-mix(in srgb, var(--accent) 24%, transparent)' : 'transparent',
         borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
         borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)',
       }}
     >
-      {box || (mark !== undefined && <span className="shrink-0 mt-0.5 grid place-items-center">{mark}</span>)}
+      {box || (mark !== undefined && <span className="shrink-0 grid place-items-center">{mark}</span>)}
       <span className="min-w-0 flex-1">
         <span className="block text-sm truncate" style={{ color: 'var(--foreground)' }}>{title}</span>
         {subtitle !== undefined && subtitle !== null && subtitle !== '' && (
