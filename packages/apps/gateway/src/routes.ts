@@ -533,8 +533,13 @@ export function buildRouter(): Router {
 
   router.post('/api/instances', h(async (req, res) => {
     const runtime = await ensureStarted()
+    const instance = req.body as StrategyInstance
     try {
-      await runtime.activate(req.body as StrategyInstance)
+      /* `enabled: false` used to be accepted and ignored — every create
+         started trading, whatever the form said. Saving stopped is the whole
+         point of the option, so it is honoured here. */
+      if (instance.enabled === false) await runtime.saveInstance(instance)
+      else await runtime.activate(instance)
       res.status(201).json({ ok: true })
     } catch (err) {
       res.status(400).send(errText(err))

@@ -1731,7 +1731,6 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   // JSON fallback for strategies without paramsFields
   const [baseParams, setBaseParams] = useState(initial?.params ? JSON.stringify(initial.params.base ?? {}, null, 2) : '{}')
   const [tunableParams, setTunableParams] = useState(initial?.params ? JSON.stringify(initial.params.tunable ?? {}, null, 2) : '{}')
-  const [enabled, setEnabled] = useState(initial ? initial.enabled : true)
   const [baseError, setBaseError] = useState('')
   const [tunableError, setTunableError] = useState('')
   const [submitError, setSubmitError] = useState('')
@@ -1815,7 +1814,12 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  /* `start` is the create form's real question, and it is asked by which
+     button was pressed rather than by a toggle above them: a switch that
+     silently decides whether a strategy begins placing orders is not a
+     switch, it is a trap. On edit the answer is fixed — saving leaves a
+     stopped instance stopped and running one running. */
+  async function handleSubmit(e: React.FormEvent, start = true) {
     e.preventDefault()
     setSubmitError('')
     const params = buildParams()
@@ -1857,7 +1861,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           : {}),
         ...(Object.keys(llm).length > 0 ? { llm } : {}),
         params,
-        enabled,
+        enabled: start,
         createdAt: now,
         updatedAt: now,
       }
@@ -1872,7 +1876,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       onSuccess()
     } else {
       const body = await res.text()
-      setSubmitError(body || (initial ? 'Failed to save instance' : 'Failed to activate instance'))
+      setSubmitError(body || (initial ? 'Failed to save instance' : start ? 'Failed to activate instance' : 'Failed to save instance'))
     }
     setSubmitting(false)
   }
@@ -2105,24 +2109,6 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
             </>
           )}
 
-          {/* Enabled toggle — create only; edit saves a stopped instance, resume via Activate */}
-          {!initial && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setEnabled((v) => !v)}
-                className="relative w-10 h-5 rounded-full transition-colors"
-                style={{ background: enabled ? 'var(--accent)' : 'var(--border)' }}
-                aria-label="Toggle enabled"
-              >
-                <span
-                  className="absolute top-0.5 left-0 w-4 h-4 rounded-full bg-white transition-transform"
-                  style={{ transform: enabled ? 'translateX(1.25rem)' : 'translateX(0.125rem)' }}
-                />
-              </button>
-              <span className="text-sm">{enabled ? 'Enabled' : 'Disabled'}</span>
-            </div>
-          )}
         </div>
 
         {/* Outside the scroll area: a rejection you have to scroll to find is
@@ -2143,6 +2129,21 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           )}
           <div className="flex-1" />
           <button type="button" onClick={onCancel} className="btn btn-secondary">Cancel</button>
+          {/* Creating a strategy and running it are two decisions. Saved
+              stopped, it can be read over and started from the list; the
+              params and bindings are no longer reviewable once it is live. */}
+          {!initial && (
+            <button
+              type="button"
+              onClick={(e) => void handleSubmit(e, false)}
+              disabled={submitting || strategies.length === 0 || !selectedStrategy}
+              className="btn btn-secondary"
+              style={{ opacity: submitting ? 0.6 : 1 }}
+              title="Create it stopped — start it from the list when you are ready"
+            >
+              {submitting ? 'Saving…' : 'Save only'}
+            </button>
+          )}
           <button
             type="submit"
             disabled={submitting || (!initial && (strategies.length === 0 || !selectedStrategy))}

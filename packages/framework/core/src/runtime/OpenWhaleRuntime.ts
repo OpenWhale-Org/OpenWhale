@@ -1448,6 +1448,26 @@ export class OpenWhaleRuntime implements IRuntime {
     await this.activateInstance(instance, { persist: true })
   }
 
+  /**
+   * Persist an instance without starting it.
+   *
+   * Creating a strategy and running it are two decisions, and a strategy that
+   * places orders is not one to make by accident: the params want reading
+   * over, the accounts want checking, and none of that is possible once it is
+   * already live. Saved stopped, it starts on an explicit activateById.
+   *
+   * The strategy id is checked even though nothing runs — a row naming a
+   * strategy that does not exist is only discoverable at the moment someone
+   * tries to start it, which is the worst time to learn it.
+   */
+  async saveInstance(instance: StrategyInstance): Promise<void> {
+    if (this.strategyRegistry.getDefinition(instance.strategyId) === undefined) {
+      throw new Error(`Unknown strategy "${instance.strategyId}" — is its plugin installed?`)
+    }
+    await this.instanceStore.save({ ...instance, enabled: false, updatedAt: new Date().toISOString() })
+    log.info({ instance: instance.id, strategy: instance.strategyId }, 'Instance saved, not started')
+  }
+
   /** Activate a persisted (stopped) instance by id. Idempotent when already active. */
   async activateById(instanceId: string): Promise<void> {
     if (this.instances.has(instanceId)) return
