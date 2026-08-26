@@ -219,6 +219,19 @@ describe('staging — what makes a reinstall load new code', () => {
     expect((await import(pathToFileURL(first.entryPath).href)).V).toBe('v1')
   })
 
+  /* A package directory can pick up links from tools other than npm — a
+     deploy script's, in the case this comes from. The copy dereferences, so
+     one that dangles used to abort the whole install with an ENOENT naming a
+     path the user never typed. */
+  it('copies past a dangling symlink instead of dying on it', async () => {
+    install('v1')
+    fs.symlinkSync('../../../nowhere/at/all', path.join(pkgDir, 'stray-link'))
+    const { entryPath, dir } = await stage('demo-plugin')
+    expect(fs.existsSync(entryPath)).toBe(true)
+    expect(fs.existsSync(path.join(dir, 'stray-link'))).toBe(false)
+    fs.rmSync(path.join(pkgDir, 'stray-link'), { force: true })
+  })
+
   it('prunes earlier generations but keeps the live one', async () => {
     install('v1')
     const older = await stage('demo-plugin')

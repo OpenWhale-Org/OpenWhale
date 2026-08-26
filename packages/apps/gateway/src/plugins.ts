@@ -450,7 +450,12 @@ export async function stage(packageName: string, hint?: string): Promise<{ entry
     dereference: true,
     filter: src => {
       const base = path.basename(src)
-      return base !== 'node_modules' && base !== '.git'
+      if (base === 'node_modules' || base === '.git') return false
+      /* Skip what cannot be followed. The copy dereferences, so one dangling
+         symlink anywhere in the package aborts the whole install with an
+         ENOENT naming a path the user never chose — and a package is not
+         responsible for every link some other tool left inside its directory. */
+      return fs.existsSync(src)
     },
   })
   // The copy carries no node_modules. An npm install's dependencies sit flat
