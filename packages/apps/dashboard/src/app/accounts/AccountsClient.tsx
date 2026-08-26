@@ -193,6 +193,11 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
   }
 
   const selected = accounts.find(a => a.name === (expanded ?? ordered[0]?.name))
+  /* Holds the NAME being confirmed, not a boolean: an account carries its
+     equity history and its bindings, so arming Delete on one and then
+     switching to another must not leave the next account one click from
+     gone. Keying it by name makes changing the selection disarm it. */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const totalEquity = accounts.reduce((sum, a) => sum + (snapshots[a.name]?.equity ?? 0), 0)
 
   const rebindableFor = (a: AccountView) => eligibleCredentialsFor(implementations.find(i => i.id === a.implementation), credentials, credentialTypes)
@@ -383,11 +388,20 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                   ]}
                 />
                 <button
-                  onClick={() => remove(selected.name)}
+                  onClick={() => {
+                    if (confirmDelete !== selected.name) { setConfirmDelete(selected.name); return }
+                    setConfirmDelete(null)
+                    void remove(selected.name)
+                  }}
+                  // Armed state does not outlive the pointer — a red button
+                  // left primed is a trap for whoever comes back to the page
+                  onMouseLeave={() => setConfirmDelete(null)}
                   className="h-8 px-3 rounded-md text-xs shrink-0"
-                  style={{ color: 'var(--danger, #ef4444)', border: '1px solid var(--border)' }}
+                  style={confirmDelete === selected.name
+                    ? { color: '#fff', background: 'var(--danger, #ef4444)', border: '1px solid var(--danger, #ef4444)' }
+                    : { color: 'var(--danger, #ef4444)', border: '1px solid var(--border)' }}
                 >
-                  Delete
+                  {confirmDelete === selected.name ? 'Delete for good?' : 'Delete'}
                 </button>
               </div>
             </>
