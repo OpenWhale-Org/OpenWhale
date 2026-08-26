@@ -10,6 +10,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
+  "check:publish": "node scripts/check-publish.mjs",
     "clean": "pnpm -r clean"
   },
   "devDependencies": {

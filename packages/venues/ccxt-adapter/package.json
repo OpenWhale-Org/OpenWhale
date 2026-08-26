@@ -36,8 +36,8 @@
     "ccxt": "^4.4.87"
   },
   "peerDependencies": {
-    "@openwhaleorg/core": "workspace:*",
-    "@openwhaleorg/exchange": "workspace:*"
+    "@openwhaleorg/core": "workspace:^",
+    "@openwhaleorg/exchange": "workspace:^"
   },
   "devDependencies": {
     "@openwhaleorg/core": "workspace:*",

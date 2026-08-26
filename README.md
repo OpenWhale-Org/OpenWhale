@@ -150,6 +150,15 @@ export const planPreview: ScriptDefinition = {
 
 ---
 
+## Publishing
+
+`pnpm check:publish` before every release. Peer ranges are written as
+`workspace:^`, which is not a range but an instruction — pnpm resolves it
+against the workspace at pack time — so the number that actually ships exists
+nowhere in the repo and cannot be reviewed in a diff. The check packs each
+package and reads the peer ranges out of the tarball, which is the only place
+they exist before npm makes them permanent.
+
 ## Plugins
 
 A plugin is a package with a default-exported factory returning its registrations:

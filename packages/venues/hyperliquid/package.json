@@ -40,7 +40,7 @@
     "@openwhaleorg/exchange": "workspace:*"
   },
   "peerDependencies": {
-    "@openwhaleorg/core": "workspace:*"
+    "@openwhaleorg/core": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

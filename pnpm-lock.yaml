@@ -255,7 +255,7 @@ importers:
   packages/strategies/examples:
     dependencies:
       '@openwhaleorg/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../framework/core
       '@openwhaleorg/exchange':
         specifier: workspace:*
@@ -343,7 +343,7 @@ importers:
         specifier: workspace:*
         version: link:../ccxt-adapter
       '@openwhaleorg/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../framework/core
       '@openwhaleorg/exchange':
         specifier: workspace:*
