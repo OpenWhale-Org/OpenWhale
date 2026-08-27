@@ -10,19 +10,19 @@
 
 [English →](./README.md)
 
-OpenWhale 是一个用于构建自动化经济策略的 TypeScript 框架。Monitor、Strategy、Executor 三层完全解耦 —— 同一份策略代码可以跑在任何场地上、接任何数据源,并且能被 AI 编写、审计和演化。
+OpenWhale 是一个用于构建自动化经济策略的 TypeScript 框架。Monitor、Strategy、Executor 三层解耦，同一份策略代码可运行在不同场地、对接不同数据源，也可由 AI 编写和维护。
 
 ---
 
 ## 为什么是 OpenWhale
 
-- **彻底解耦的三层** —— Monitor 收集、Strategy 决策、Executor 执行。换掉任何一层都不用动其他两层。
-- **构造上就与场地无关** —— 策略代码里**永远不出现交易所名字**。它声明的是*账户槽位*,场地由你在激活时绑定的账户推导出来。一份策略,任意平台。
-- **适配器矩阵** —— 场地作为 *(kind × venue)* 矩阵中的格子接入(`exchange/perp × binance`、`exchange/spot × hyperliquid` …)。领域包定义词汇表,场地包填格子,数据驱动的 ccxt 名册开箱带来十二个场地。
-- **AI 作为程序员** —— 带结构化输出的 LLM 推理内建在策略层;仓库自带 `skills/openwhale-dev` skill,能把完整的框架契约教给任何一个 Claude,让它产出可直接安装、带测试的插件。
-- **深度可观测** —— 每一次策略运行都留下持久化的决策轨迹:它看到了什么、哪个闸门说了不、发出了什么指令。停用实例或重启 gateway,审计轨迹依然在。
-- **内建 PnL 归因** —— 执行器自动认领它下的订单;后台收集器把场地成交(真实的已实现盈亏和手续费)与资金费收入接回到认领它的实例上。同一账户上交易同一标的的两个实例,依然分得开。
-- **类型安全的插件架构** —— 每个组件都实现严格的 TypeScript 接口。IDE 支持、安全重构,以及编译器能验证的 AI 生成代码。
+- **三层解耦** —— Monitor 采集、Strategy 决策、Executor 执行，任一层可独立替换。
+- **与场地无关** —— 策略代码中不出现交易所名称，只声明账户槽位；实际场地由激活时绑定的账户决定。
+- **适配器矩阵** —— 场地以 *(kind × venue)* 矩阵单元的形式接入（`exchange/perp × binance`、`exchange/spot × hyperliquid` 等）。领域包定义接口，场地包提供实现，内置的 ccxt 名册覆盖十二个场地。
+- **内建 AI 能力** —— 策略层支持带结构化输出的 LLM 推理。仓库提供 `skills/openwhale-dev`，可让 Claude 按框架契约生成完整的插件包（含测试）。
+- **完整的运行轨迹** —— 每次策略运行都记录决策过程：读取的数据、触发的判断分支、发出的指令。实例停用或 gateway 重启后记录仍然保留。
+- **PnL 归因** —— 执行器自动认领所下订单，后台收集器将场地成交（已实现盈亏、手续费）与资金费收入归属到对应实例。同账户下交易同一标的的多个实例可分别统计。
+- **类型安全的插件架构** —— 各组件实现严格的 TypeScript 接口，支持 IDE 补全、安全重构，AI 生成的代码可由编译器校验。
 
 ---
 
@@ -31,12 +31,12 @@ OpenWhale 是一个用于构建自动化经济策略的 TypeScript 框架。Moni
 | 概念 | 是什么 |
 |---|---|
 | **Monitor（监控）** | 采集数据并发出带键的记录（`venue:symbol` …）。以*契约*形式声明,可有多个*实现*;用户按键创建*实例*,可选绑定凭证。发出的数据以 JSONL 持久化,并驱动触发器。 |
-| **Strategy（策略）** | 纯决策逻辑。按标签声明它依赖的 monitor / executor / account,接收触发,返回 `ExecutionInstruction[]`。参数拆成 `base`（必填）和 `tunable`（有默认值、可被 AI 优化）两套 zod schema。 |
-| **Executor（执行器）** | 通过适配器会话把指令变成场地动作:重试纪律、幂等的客户端订单号、逐单延迟与滑点采集。凭证槽位可解析成会话（按 kind）或原始凭证数据（`raw: true`,比如一个 bot token）;`optional: true` 的槽位允许实例在未绑定时也能激活,执行器优雅降级。策略保持纯粹。 |
+| **Strategy（策略）** | 决策逻辑。按标签声明依赖的 monitor / executor / account，接收触发后返回 `ExecutionInstruction[]`。参数分为 `base`（必填）与 `tunable`（有默认值，可由 AI 优化）两套 zod schema。 |
+| **Executor（执行器）** | 通过适配器会话将指令转换为场地动作，包含重试策略、幂等客户端订单号、逐单延迟与滑点采集。凭证槽位可解析为会话（按 kind）或原始凭证数据（`raw: true`，如 bot token）；`optional: true` 的槽位允许实例在未绑定时激活，由执行器降级处理。 |
 | **Instance（实例）** | 策略 + 参数 + 账户绑定,作为一个整体激活。所有可观测的东西都挂在实例上:实时事件、执行记录、运行轨迹、日志。 |
 | **Account（账户）** | 一个具名实体,把凭证绑定到某个账户实现（通用或场地特化）。策略只能通过自己绑定账户的 Reader 读取余额和仓位。 |
 | **Trigger（触发器）** | Cron 计划 + monitor 条件（时间窗内多源 AND）。订阅让 monitor 持续采集而不唤醒策略;运行中的策略可以加入它在运行时发现的新数据源（`addMonitorSource`）。 |
-| **Portfolio journal（组合日志）** | 策略拥有的、可选的实例级历史。策略提交幂等的快照、成交、决策和行情;Core 事务性地存储它们,并在不了解策略轨迹格式的前提下推导出净值、回撤和交易报告。 |
+| **Portfolio journal（组合日志）** | 可选的实例级历史记录，由策略维护。策略提交幂等的快照、成交、决策与行情数据，Core 事务性存储并据此计算净值、回撤和交易报告。 |
 
 ```
 Monitor（数据采集）
@@ -54,13 +54,13 @@ Executor（经适配器会话执行场地动作）
 
 ## 控制台
 
-- **实例** —— 卡片式,支持文件夹、拖拽排序、emoji 图标,每张卡片带实时净 PnL 徽标;每个实例四个实时页签（实时事件仅限该实例自己的 monitor、执行、运行、日志）。每个实例还有整页 **Board**,支持点击重命名、账户重绑、可编辑的参数面板和 PnL 面板。创建时会问你是哪一种 —— **仅保存**还是**激活**:停止状态的实例参数和绑定还能回头细看,一旦开始交易就不能了。
+- **实例** —— 卡片式,支持文件夹、拖拽排序、emoji 图标,每张卡片带实时净 PnL 徽标;每个实例四个实时页签（实时事件仅限该实例自己的 monitor、执行、运行、日志）。每个实例还有整页 **Board**,支持点击重命名、账户重绑、可编辑的参数面板和 PnL 面板。创建时可选择**仅保存**或**激活**，便于在启动交易前复核参数与账户绑定。
 - **实例级 PnL** —— 已实现 / 手续费 / 资金费 / 净额 / 未实现,数据来自归因账本,可下钻到按标的汇总、原始场地成交、以及由成交推导、按场地标记价计价的持仓。资金费事件按各实例在结算边界时点持有的仓位拆分。
 - **运行轨迹** —— 每次运行记录它的步骤:闸门、跳过、计量、发出的指令、捕获的日志行。有指令或有错误的运行落盘;空转的运行按心跳采样。可按结果过滤、按内容搜索。
 - **Monitor 看板** —— monitor 通过 `plots()` 约定声明面板:折线 / 柱状 / K 线,外加可排序的 `table` 类型、单选与多选选择器、记录窗口控制。
-- **参数即表单** —— zod 的 `.meta()` 驱动 UI:分组、滑块、单位后缀、条件可见性、可搜索的市场选择器（单选与多选）、针对绑定场地的逐值可用性判定、给梯度用的可编辑行表 *list* 参数,以及随输入实时重绘的**沙箱交互示意图**。
+- **参数表单** —— 由 zod 的 `.meta()` 驱动：分组、滑块、单位后缀、条件可见性、可搜索的市场选择器（单选/多选）、针对绑定场地的逐值可用性校验、用于梯度配置的行表 *list* 参数，以及随输入实时更新的沙箱交互示意图。
 - **脚本** —— 插件可以附带运维工具（`scripts: [...]`）,按需对活跃运行时执行并返回等宽报告:计划预览、拟合检查、一次性审计。参数渲染成小表单,运行时值（比如实例 id）用实时解析的下拉框。
-- **编译器与助手** —— 实验性的自然语言策略编译器;以及更推荐的路径:把 Claude 指向 `skills/openwhale-dev`,让它来写这个插件。
+- **编译器与助手** —— 实验性的自然语言策略编译器。也可以使用 `skills/openwhale-dev`，由 Claude 直接生成插件。
 
 ---
 
@@ -156,13 +156,15 @@ export const planPreview: ScriptDefinition = {
 
 每次发版前跑 `pnpm check:publish`。
 
-peer 范围写的是 `workspace:^`,而它**不是一个范围,是一条指令** —— pnpm 在打包那一刻拿它去工作区求值。所以真正上传的那个数字**在仓库里任何地方都不存在**,读 diff 也看不见。这个检查会把每个包真的打一遍,然后从 **tarball** 里读 peer 范围 —— 在 npm 把它变成永久事实之前,那是它唯一存在的地方。
+peer 范围在源码中写作 `workspace:^`，由 pnpm 在打包时解析为具体版本号。也就是说，最终发布的版本范围不存在于仓库任何文件中，无法通过代码审查发现错误。
+
+`check:publish` 会逐个打包并从生成的 tarball 中读取 peer 范围进行校验。
 
 ---
 
 ## 插件
 
-插件就是一个默认导出工厂函数、返回自身注册项的包:
+插件是一个默认导出工厂函数的包，工厂函数返回该插件的注册项：
 
 ```typescript
 export default definePlugin((ctx) => ({
@@ -178,31 +180,31 @@ export default definePlugin((ctx) => ({
 }))
 ```
 
-从控制台的 Plugins 页面安装 —— 构建好的 `.js`/`.mjs` bundle、**GitHub 仓库**（`owner/repo`,或者直接粘地址栏;分支/tag/commit 可选）、npm 包名或本地路径 —— 也可以在代码里 `runtime.loadPlugin()`。组件按命名空间注册（`my-plugin/momentum`）,支持热重载。
+可从控制台 Plugins 页面安装：构建好的 `.js`/`.mjs` bundle、GitHub 仓库（`owner/repo` 或完整地址，可指定分支/tag/commit）、npm 包名或本地路径；也可在代码中调用 `runtime.loadPlugin()`。组件按命名空间注册（`my-plugin/momentum`），支持热重载。
 
-GitHub 安装是由 npm clone 并构建的,所以只带 TypeScript 源码的仓库需要在 package.json 里有 `prepare` 脚本（`"prepare": "npm run build"`）;私有仓需要引擎侧设置 `OPENWHALE_GITHUB_TOKEN`。
+GitHub 安装通过 npm clone 并构建，仅含 TypeScript 源码的仓库需要在 package.json 中提供 `prepare` 脚本（`"prepare": "npm run build"`）；私有仓库需要在引擎侧配置 `OPENWHALE_GITHUB_TOKEN`。
 
 ### 命名空间
 
-插件声明的名字是它的默认**命名空间** —— 也就是它注册的每个 id 前面那个 `my-plugin/`。但**名字不是全局唯一的**,所以命名空间是在安装时决定的。
+插件声明的名称作为默认命名空间，即其注册的所有 id 的前缀（`my-plugin/`）。由于插件名称并非全局唯一，实际命名空间在安装时确定。
 
-当一个命名空间已被占用,**由包名决定这是在问什么**:本地 checkout 和它发布出去的版本是同一个插件,提供**覆盖**;不同的包则是一个碰巧同名的陌生插件,给它**自己的命名空间**（`alice-funding-arb`,从发布者推导）。命名空间一旦选定就固定 —— 实例是按 `<命名空间>/<策略>` 保存的。
+命名空间被占用时，根据包名判断处理方式：本地 checkout 与其发布版本视为同一插件，提供覆盖安装；不同的包视为同名的不同插件，分配独立命名空间（如 `alice-funding-arb`，由发布者名推导）。命名空间一经确定不可更改，实例按 `<命名空间>/<策略>` 保存。
 
-**不是所有东西都带命名空间**,而这决定了两个同名插件到底能不能共存:adapter cell（按 kind 和 venue 寻址）和 credential type（按名字共享）各自**只能有一个提供者**,所以同一个场地的两个 venue 插件是二选一,换名字也分不开。这一点在提供命名空间选项**之前**就检查掉了,而且注册是全有或全无 —— 被拒绝的安装不留任何残骸。
+部分注册项不带命名空间：adapter cell（按 kind 与 venue 寻址）和 credential type（按名称共享）各自只能有一个提供者。因此同一场地的两个 venue 插件无法共存，更换命名空间也不行。该检查在提供命名空间选项之前完成；注册过程为原子操作，失败的安装不会残留。
 
 ### 覆盖与卸载
 
-**覆盖**替换代码,保留实例、账户和凭证:正在运行的会在新代码上重启,而新版本删掉了对应策略的那些实例会在 Instances 页面**标记为损坏而不是删除** —— 把带有该策略的版本装回去,它们会重新跑起来。
+**覆盖安装**替换插件代码，保留实例、账户和凭证。运行中的实例会基于新代码重启；新版本不再提供对应策略的实例会在 Instances 页面标记为异常状态而非删除，重新安装含该策略的版本后可恢复运行。
 
-npm 装的插件如果注册表上有新版本,会在列表里标出来并支持一键更新 —— 走的是同一条覆盖路径,所以实例照样存活。
+npm 安装的插件如有新版本会在列表中提示，支持一键更新，走同一套覆盖流程。
 
-**卸载**则相反:只要还有任何策略实例、账户或凭证属于这个插件,它就拒绝,并把它们**列出来** —— 每一个都装着你配置过的东西。插件自己的 monitor 实例会跟着一起删掉。
+**卸载**在存在关联的策略实例、账户或凭证时会拒绝执行，并列出具体项目。插件自身的 monitor 实例会随卸载一并删除。
 
-每次安装都从 `plugins/staged/` 下**自己那份副本**加载,所以重新安装能跑上新代码而不用重启引擎:Node 的 ESM 注册表按解析后的 URL 做键且无法驱逐,固定路径会导致永远执行第一次加载的那个版本。
+每次安装从 `plugins/staged/` 下的独立副本加载，因此重新安装后无需重启引擎即可生效。Node 的 ESM 模块按解析后的 URL 缓存且无法清除，使用固定路径会导致始终执行首次加载的版本。
 
 ### 用 Claude 写插件
 
-把 `skills/openwhale-dev/` 复制到你插件项目的 `.claude/skills/`（或者在 Claude Code 里引用本仓库的路径）,描述你想要的策略,Claude 会产出一个完整的插件包 —— monitor、executor、strategy、测试 —— 可以直接从 Plugins 页面安装。
+将 `skills/openwhale-dev/` 复制到插件项目的 `.claude/skills/`（或在 Claude Code 中引用本仓库路径），描述所需策略，Claude 会生成完整的插件包（monitor、executor、strategy 及测试），可直接从 Plugins 页面安装。
 
 ---
 
@@ -237,7 +239,7 @@ cp .env.example .env           # 填 OPENWHALE_MASTER_KEY + OPENWHALE_ADMIN_USER
 pnpm dev                       # gateway 在 :3001，dashboard 在 :3000
 ```
 
-gateway 是**失败即关闭**的:既没有用户账号、又没有 `OPENWHALE_ADMIN_USER`/`OPENWHALE_ADMIN_PASSWORD` 时,它宁可拒绝启动,也不会提供一个无认证的交易 API。设一次、登录,然后把它们从环境里拿掉。
+如果既没有已创建的用户账号，也没有配置 `OPENWHALE_ADMIN_USER`/`OPENWHALE_ADMIN_PASSWORD`，gateway 会拒绝启动。配置并登录后可将其从环境变量中移除。
 
 打开 `http://localhost:3000` 管理策略实例、账户、监控、凭证、脚本和 AI 编译器。dashboard 唯一的配置项是 `OPENWHALE_GATEWAY_URL`（默认 `http://localhost:3001`）。
 
@@ -250,22 +252,26 @@ OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket，所有�
 OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # …这个除外
 ```
 
-逐场地的后缀是 **ccxt 的 exchange id** 大写 —— Binance 永续是 `BINANCEUSDM`,现货是 `BINANCE`。`off` 让某个场地保持直连,这比看上去重要:结算是按毫秒抢的,一个你**能**直连的场地,不该为了那些连不上的场地而付代理跳数。
+逐场地的后缀是 ccxt 的 exchange id 大写形式：Binance 永续为 `BINANCEUSDM`，现货为 `BINANCE`。`off` 表示该场地保持直连。结算类策略对延迟敏感，能直连的场地不必经过代理。
 
-自己 debug 之前,有两件事值得先知道。标准的 `HTTPS_PROXY` **不起作用** —— ccxt 不读它。Node 24 的 `NODE_USE_ENV_PROXY` 也不行,它只接管 undici 的**全局** fetch,而 ccxt 调的是它自己打包的那个;同一个进程里裸 `fetch()` 会成功,让这个故障看起来像任何东西,就是不像代理问题。而这个变量**故意不叫** `HTTPS_PROXY`:很多机器出于无关的原因带着那个变量,而下单流量绝不该因为意外而改变路由。
+两点说明：
+
+标准的 `HTTPS_PROXY` 对 ccxt 无效，ccxt 不读取该变量。Node 24 的 `NODE_USE_ENV_PROXY` 同样无效，它只作用于 undici 的全局 fetch，而 ccxt 使用自带的 fetch 实现——同进程中普通 `fetch()` 可以成功，容易造成误判。
+
+变量未使用 `HTTPS_PROXY` 这一名称，是为了避免机器上因其他用途设置的该变量影响下单流量的路由。
 
 ### 认证
 
-认证由 **gateway** 强制,不是 dashboard:那个进程持有解密后的场地凭证、能下单、能安装插件（也就是任意代码),所以只做在前端的登录,任何能碰到 3001 端口的人绕一下就没了。每条 `/api/*` 都要求会话,dashboard 只是把 cookie 带过去,它的路由守卫是给人看的跳转,不是安全边界。
+认证在 gateway 层实现，不在 dashboard。gateway 持有解密后的场地凭证，可以下单和安装插件（即执行第三方代码），因此所有 `/api/*` 路由都要求有效会话。dashboard 仅负责携带 cookie，其路由守卫用于页面跳转，不构成安全边界。
 
-会话是 SQLite 里的不透明 token（可吊销、7 天过期),密码用 scrypt 哈希。账号在 **Users** 页面管理 —— **没有角色划分:任何能登录的人都能动真钱。**
+会话为存储在 SQLite 中的不透明 token（可吊销，7 天过期），密码使用 scrypt 哈希。账号在 **Users** 页面管理。系统不区分角色，任何能登录的账号都有完整权限。
 
 在把 gateway 暴露到网络之前:
 
 - 在它前面终结 TLS（会话 cookie 只有在请求经由 https 到达时才带 `Secure`）
 - 如果 dashboard 已经替你转发,就把 3001 端口挡在公网之外;`OPENWHALE_ALLOWED_ORIGIN` 只给真正跨域的前端设置
 
-[DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md) 里有 nginx 配置块、systemd 单元,以及**为什么少了 `X-Forwarded-Proto` 会导致一个无限循环、且任何日志里都没有一行说明原因的登录**。
+[DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md) 提供了完整的 nginx 配置、systemd 单元文件，以及 TLS 相关的常见问题。
 
 ---
 
@@ -279,9 +285,9 @@ OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # …这个除外
 | [`@openwhaleorg/exchange`](./packages/framework/exchange) | 交易所领域包:`exchange/perp` + `exchange/spot` 两个 kind、Perp/SpotAccount 读视图、共享交易执行器、公开行情 monitor（ticker/orderbook/volume/kline/funding-rates）及其看板图表 |
 | [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | 交易所适配器接口的通用 ccxt 实现 + 数据驱动的场地名册 |
 | [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | 场地插件:凭证类型 + 适配器格子（以及场地特化账户,Binance 支持组合保证金） |
-| [`@openwhaleorg/gateway`](./packages/apps/gateway) | 常驻后端:运行时单例、认证、REST + SSE API、编译器服务、插件安装 —— **所有密钥都住在这里** |
+| [`@openwhaleorg/gateway`](./packages/apps/gateway) | 常驻后端：运行时单例、认证、REST + SSE API、编译器服务、插件安装。所有密钥均存储于此 |
 | [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js 前端:实例（文件夹/看板）、账户（净值曲线）、监控看板、执行器、凭证、插件、脚本、AI 编译器 |
-| [`@openwhaleorg/examples`](./packages/strategies/examples) | 参考策略,构造上与场地无关:动量突破、z-score 均值回归、定投（DCA）、把风控写在代码里的 LLM 分析师、跟单交易。**读它们,抄它们** |
+| [`@openwhaleorg/examples`](./packages/strategies/examples) | 参考策略，均与场地无关：动量突破、z-score 均值回归、定投（DCA）、风控逻辑写在代码中的 LLM 分析策略、跟单交易 |
 | [`@openwhaleorg/compiler`](./packages/framework/compiler) | AI 策略编译器:自然语言 → 分析 → 代码生成 → L1–L4 验证阶梯 → 人工审核 → 热加载 |
 
 ---
@@ -308,11 +314,11 @@ OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # …这个除外
 
 ## 参与贡献
 
-OpenWhale 正处于活跃的早期开发阶段。核心引擎已经能用,其余部分我们在公开地建。
+OpenWhale 处于早期开发阶段，核心引擎已可用，其余部分正在开发中。
 
 - 开 issue 讨论想法或报告 bug
 - 提 PR 修 bug、加新场地插件、或贡献策略示例
-- 觉得有用就点个 star —— 这能帮到其他人发现这个项目
+- 如果项目对你有帮助，欢迎 star
 
 ---
 
