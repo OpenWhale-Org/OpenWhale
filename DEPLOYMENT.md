@@ -3,6 +3,8 @@
 Running OpenWhale on a server you own — the layout, the rules, and the two or
 three things that will bite you if nobody tells you first.
 
+[中文版 →](./DEPLOYMENT.zh-CN.md)
+
 This describes a real deployment: one small VPS behind nginx, two systemd
 units, a SQLite data directory, and a build that happens on your laptop rather
 than on the box. It is not the only shape that works, but everything here is in
@@ -34,15 +36,84 @@ internet.** Publish the dashboard, keep the gateway on loopback.
 
 ---
 
-## Prerequisites
+## Two ways in
 
-- **Node.js ≥ 20** (22 in production here), **pnpm ≥ 9**
-- A domain and a TLS certificate. Not optional — see [TLS](#tls-is-not-optional).
-- ~2 GB RAM to run. More to *build*, which is why you should not build here.
+**Docker** if you want it running in one command and do not intend to hack on
+it. **From source** if you build the code you deploy, want the engine on the
+host rather than behind a container boundary, or already run systemd.
+
+Both end at the same place: a gateway on loopback, a dashboard behind TLS, and
+one directory holding everything the engine owns. The rules in
+[Operating it](#operating-it) apply to both.
 
 ---
 
-## 1. The data directory
+## Docker
+
+```bash
+cp .env.example .env          # OPENWHALE_MASTER_KEY + OPENWHALE_ADMIN_USER/PASSWORD
+docker compose up -d --build
+```
+
+`http://localhost:3000`. Sign in with the admin pair, then remove it from
+`.env` — it exists to create the first user, not to stand as a credential.
+
+Three things the compose file does on purpose:
+
+**The gateway is not published.** It is `expose`d to the compose network and no
+further. That process holds decrypted exchange keys, places orders, and installs
+plugins — which is to say runs arbitrary code. Publishing it would make the
+dashboard's login a formality, since auth is enforced by the gateway precisely
+because it is the process with something to protect.
+
+**The dashboard binds to loopback.** `127.0.0.1:3000`, not `0.0.0.0`. Put a TLS
+terminator in front before it is reachable from anywhere else — see
+[TLS is not optional](#tls-is-not-optional), which is the same trap by a
+different route.
+
+**The data volume is named, not bind-mounted.** `docker compose down` removes
+containers; it does not remove a named volume. A bind mount to a directory you
+later tidy up takes the credential store with it.
+
+```bash
+docker compose logs -f gateway
+docker compose exec gateway sh          # /data is everything
+docker compose up -d --build            # upgrade: rebuild, recreate, volume untouched
+```
+
+Back up the volume the way you would back up any database:
+
+```bash
+docker run --rm \
+  -v openwhale_openwhale-data:/data -v "$PWD":/out \
+  alpine tar czf /out/openwhale-backup.tgz -C /data .
+```
+
+### Docker notes
+
+The image carries `git` and `npm` because plugin installs need them — a
+GitHub install clones through npm, and the failure without git reads as a
+network problem rather than a missing binary.
+
+`HOME` is set to `/data`. The database can be moved with `OPENWHALE_DB_PATH`,
+but monitor history resolves through the home directory independently, so
+overriding one splits the state in two and leaves weeks of monitor JSONL inside
+the container. Moving `HOME` moves all of it, and one volume holds the lot.
+
+It is a large image. `node_modules` is copied whole because pnpm's store is a
+web of symlinks into `node_modules/.pnpm` — copying a subset breaks it, and
+pruning to production takes the dashboard's runtime dependencies with it.
+Correct and starts, over small and does not.
+
+---
+
+## From source
+
+Prerequisites: **Node.js ≥ 20** (22 in production here), **pnpm ≥ 9**, a domain
+with a TLS certificate, and ~2 GB of RAM to *run*. More than that to build,
+which is why you should not build here.
+
+### 1. The data directory
 
 Everything the engine owns lives in `~/.openwhale`:
 
@@ -66,7 +137,7 @@ without bound — it is the first thing to prune when the disk fills.
 
 ---
 
-## 2. Configuration
+### 2. Configuration
 
 ```bash
 cp .env.example .env
@@ -99,7 +170,7 @@ OPENWHALE_GITHUB_TOKEN=                                  # installing plugins fr
 
 ---
 
-## 3. Build somewhere else
+### 3. Build somewhere else
 
 ```bash
 pnpm install
@@ -141,7 +212,7 @@ Read it before adapting it — it encodes the operational rules below.
 
 ---
 
-## 4. systemd
+### 4. systemd
 
 `/etc/systemd/system/openwhale-gateway.service`:
 
@@ -196,7 +267,7 @@ while the process is alive.
 
 ---
 
-## 5. nginx and TLS
+### 5. nginx and TLS
 
 Publish the dashboard. Never the gateway.
 
@@ -237,7 +308,7 @@ buffering on they arrive in batches and look frozen.
 
 ---
 
-## 6. Verify
+### 6. Verify
 
 ```bash
 systemctl is-active openwhale-gateway openwhale-dashboard
@@ -333,6 +404,7 @@ first version ever loaded.
 
 ## See also
 
+- [中文部署指南](./DEPLOYMENT.zh-CN.md)
 - [README](./README.md) — what OpenWhale is, and the local development quick start
 - [`scripts/deploy.sh`](./scripts/deploy.sh) — the deployment this document describes
 - `.env.example` — every environment variable, with the reasoning

@@ -8,6 +8,8 @@
 ![TypeScript](https://img.shields.io/badge/language-TypeScript-3178c6)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
+[中文说明 →](./README.zh-CN.md)
+
 OpenWhale is a TypeScript framework for building automated economic strategies. Monitors, Strategies, and Executors are fully decoupled — the same strategy code runs on any venue, plugs into any data source, and can be written, audited, and evolved by an AI.
 
 ---
@@ -211,9 +213,12 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 
 ## Quick start
 
-This is the **local** setup. For a server — systemd, TLS, and the operational
-rules that are not obvious until they have cost you something — see
+This is the **local** setup. For a server — Docker or systemd, TLS, and the
+operational rules that are not obvious until they have cost you something — see
 **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
+In a hurry: `cp .env.example .env`, fill in the master key and admin pair, then
+`docker compose up -d --build`.
 
 ### Prerequisites
 
