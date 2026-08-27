@@ -454,11 +454,19 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
              * frame. That pairing is what makes running the script safe; adding
              * `allow-same-origin` alongside it would hand the report this
              * origin and undo the sandbox entirely.
+             *
+             * `allow-popups` lets a report link out — a market row that opens
+             * the venue's page for that market. Without it such a link is
+             * silently dropped, which is worse than not offering it. The escape
+             * clause is what makes the opened tab an ordinary page rather than
+             * another opaque-origin document, which is what the destination
+             * needs to work at all; it widens nothing here, since the popup
+             * only ever opens on a click the reader made.
              */
             <iframe
               title={htmlFile.name}
               srcDoc={htmlFile.content}
-              sandbox="allow-scripts"
+              sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
               className="w-full rounded-md"
               style={{
                 background: 'var(--background)', border: '1px solid var(--border)',
@@ -467,7 +475,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
             />
           ) : (
             <pre
-              className="text-xs p-3 rounded-md whitespace-pre-wrap"
+              className="text-xs p-3 rounded-md whitespace-pre-wrap scroll-hidden"
               style={{
                 background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)',
                 overflow: 'auto',

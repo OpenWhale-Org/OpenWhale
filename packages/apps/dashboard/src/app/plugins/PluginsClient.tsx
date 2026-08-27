@@ -174,7 +174,10 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
         >
           {installing ? (
             <div className="overflow-y-auto scroll-hidden p-5">
-              <InstallForm onSuccess={() => { setInstalling(false); setTab('external'); void refresh() }} />
+              <InstallForm
+                onInstalled={() => { setTab('external'); void refresh() }}
+                onSuccess={() => setInstalling(false)}
+              />
             </div>
           ) : selected === COMPILED_ID ? (
             <CompiledPane compiled={compiled} onChanged={() => void refresh()} />
@@ -646,7 +649,14 @@ type Conflict = {
 }
 type ReplaceOutcome = { plugin: string; resumed: string[]; orphaned: string[] }
 
-function InstallForm({ onSuccess }: { onSuccess: () => void }) {
+/*
+ * `onInstalled` fires the moment the install lands; `onSuccess` closes the
+ * form. They are the same instant on the plain path, but a replace holds the
+ * form open on an outcome panel — and the list behind it is already stale by
+ * then. Refreshing only on Done meant the plugin you just installed was
+ * missing from the list for as long as you read what happened to it.
+ */
+function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSuccess: () => void }) {
   const [mode, setMode] = useState<'npm' | 'github' | 'file'>('npm')
   const [pkg, setPkg] = useState('')
   const [repo, setRepo] = useState('')
@@ -712,6 +722,7 @@ function InstallForm({ onSuccess }: { onSuccess: () => void }) {
         return
       }
       const view = await res.json() as InstalledPluginView & { replace?: { replaced: boolean; resumed: string[]; orphaned: string[] } }
+      onInstalled()
       if (view.replace?.replaced) setOutcome({ plugin: view.name, resumed: view.replace.resumed, orphaned: view.replace.orphaned })
       else onSuccess()
     } catch (err) {
