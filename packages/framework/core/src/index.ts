@@ -116,6 +116,10 @@ export type {
   IRegistry,
 } from './types/index.js'
 export { PluginAlreadyLoadedError } from './types/index.js'
+
+// Script report shell — the house page for anything a script exports as HTML
+export { page as reportPage, esc, num, signed, cls } from './scripts/reportHtml.js'
+export type { PageOptions as ReportPageOptions, Figure as ReportFigure } from './scripts/reportHtml.js'
 export type { PluginLoadOptions } from './runtime/OpenWhaleRuntime.js'
 
 // Adapter error taxonomy (value exports)
