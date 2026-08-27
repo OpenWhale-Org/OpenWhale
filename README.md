@@ -213,12 +213,9 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 
 ## Quick start
 
-This is the **local** setup. For a server — Docker or systemd, TLS, and the
-operational rules that are not obvious until they have cost you something — see
-**[DEPLOYMENT.md](./DEPLOYMENT.md)**.
-
-In a hurry: `cp .env.example .env`, fill in the master key and admin pair, then
-`docker compose up -d --build`.
+This is the **local** setup. For a server — systemd, TLS, and the operational
+rules that are not obvious until they have cost you something — see
+**[DEPLOYMENT.md](./DEPLOYMENT.md)**. A Docker path is planned.
 
 ### Prerequisites
 

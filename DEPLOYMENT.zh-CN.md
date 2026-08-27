@@ -25,53 +25,9 @@
 
 ---
 
-## 两条路
-
-**Docker** —— 想一条命令跑起来、不打算改代码的话选它。
-**源码部署** —— 你要自己构建部署的代码、想让引擎跑在宿主机上而不是容器边界后面、或者本来就在用 systemd。
-
-两条路的终点是一样的:gateway 在回环、dashboard 在 TLS 后面、一个目录装下引擎拥有的全部状态。[运维](#运维)那一节两边都适用。
-
----
-
 ## Docker
 
-```bash
-cp .env.example .env          # 填 OPENWHALE_MASTER_KEY 和 OPENWHALE_ADMIN_USER/PASSWORD
-docker compose up -d --build
-```
-
-打开 `http://localhost:3000`,用管理员账号登录,然后**把它从 `.env` 里删掉** —— 它的用途是创建第一个用户,不是当一个长期凭证放在那。
-
-compose 里有三件事是刻意的:
-
-**gateway 不对外发布。** 它只 `expose` 到 compose 网络,再无其他。那个进程持有解密后的交易所密钥、能下单、能装插件(也就是执行任意代码)。把它发布出去,dashboard 的登录就只剩形式 —— 认证之所以做在 gateway,正是因为它才是有东西要保护的那个进程。
-
-**dashboard 绑在回环。** 是 `127.0.0.1:3000`,不是 `0.0.0.0`。在它对外可达之前先架好 TLS —— 见 [TLS 不是可选项](#tls-不是可选项),那是同一个坑的另一条路径。
-
-**数据卷是具名卷,不是 bind mount。** `docker compose down` 会删容器,但不会删具名卷。挂到一个你以后可能顺手清理掉的目录上,凭证库就跟着没了。
-
-```bash
-docker compose logs -f gateway
-docker compose exec gateway sh          # /data 就是全部
-docker compose up -d --build            # 升级:重新构建、重建容器,数据卷不动
-```
-
-像备份任何数据库一样备份这个卷:
-
-```bash
-docker run --rm \
-  -v openwhale_openwhale-data:/data -v "$PWD":/out \
-  alpine tar czf /out/openwhale-backup.tgz -C /data .
-```
-
-### Docker 的几点说明
-
-镜像里装了 `git` 和 `npm`,因为**装插件要用** —— 从 GitHub 安装是通过 npm 去 clone 的,而缺了 git 的报错看起来像网络问题,不像少了个二进制。
-
-`HOME` 被设成了 `/data`。数据库路径可以用 `OPENWHALE_DB_PATH` 改,但**monitor 历史数据是独立地通过 home 目录解析的** —— 所以只改其中一个会把状态劈成两半,挂在数据库上的卷会把几周的 monitor JSONL 悄悄留在容器里,下次 `docker rm` 就没了。改 `HOME` 是把它们一起搬走,一个卷装下全部。
-
-**镜像不小。** `node_modules` 是整个复制进去的,因为 pnpm 的存储是一张指向 `node_modules/.pnpm` 的符号链接网 —— 复制一部分就会断,而 prune 到 production 会把 dashboard 运行时要的依赖一起带走。**宁可大而能跑,不要小而起不来。**
+**计划中,尚未提供。** 一个要装插件的容器,里面得有 `npm` 和 `git`,还需要一个能挺过 `docker compose down` 的数据卷 —— 而发布一份没人端到端跑通过的 compose 文件,比不发布更糟:第一个来试的人会去 debug 部署,而不是使用它。在那之前,用下面这套。
 
 ---
 

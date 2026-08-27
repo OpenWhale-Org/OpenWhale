@@ -220,9 +220,7 @@ npm 装的插件如果注册表上有新版本,会在列表里标出来并支持
 
 ## 快速上手
 
-这里说的是**本地**环境。服务器部署 —— Docker 或 systemd、TLS,以及那些没吃过亏就不明显的运维规则 —— 见 **[DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)**。
-
-赶时间的话:`cp .env.example .env`,填好主密钥和管理员账号,然后 `docker compose up -d --build`。
+这里说的是**本地**环境。服务器部署 —— systemd、TLS,以及那些没吃过亏就不明显的运维规则 —— 见 **[DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)**。Docker 方式在计划中。
 
 ### 前置
 
