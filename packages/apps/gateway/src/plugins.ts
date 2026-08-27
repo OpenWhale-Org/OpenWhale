@@ -315,13 +315,25 @@ function enginePackageRoot(name: string): string | undefined {
 }
 
 /**
- * Whether `^engine` would accept `fetched` — the ecosystem's own rule for "these
- * two are interchangeable", including 0.x, where the minor acts as the major.
+ * Whether the engine's copy may stand in for the one npm fetched — the
+ * ecosystem's own caret rule, including 0.x where the minor acts as the major,
+ * and then one more condition the caret does not supply.
  *
- * Compared rather than demanding equality because npm picks the newest version
- * satisfying the plugin's range, which is often a patch ahead of the engine.
- * Refusing to link over a patch difference would leave the second copy in
- * place, which is the very thing being prevented.
+ * The substitution only goes one way. The engine's copy REPLACES the fetched
+ * one, so it has to be at least as new: a plugin built against 0.2.2 and
+ * importing something 0.2.2 added is caret-compatible with an engine on 0.2.1
+ * and imports nothing that engine has. Semver is a promise about what a later
+ * version keeps, not about what an earlier one already had, and reading it in
+ * the wrong direction turns a published patch into `does not provide an export
+ * named 'esc'` at load time — pointing at the plugin, which is fine, rather
+ * than at the engine, which is behind.
+ *
+ * Downward is still allowed, and has to be: npm resolves the plugin's range to
+ * the newest version there is, so the fetched copy is routinely a patch ahead
+ * of an engine that is otherwise perfectly able to serve it. Refusing those
+ * would leave a second framework copy in the tree, which is the whole thing
+ * this prevents. Only ahead-of-the-engine is refused, and it is refused loudly:
+ * the answer is to update the engine, and nothing else will do.
  */
 function caretCompatible(engine: string, fetched: string): boolean {
   const a = engine.split('.').map(Number)
@@ -329,8 +341,23 @@ function caretCompatible(engine: string, fetched: string): boolean {
   if (a.length < 3 || b.length < 3 || [...a, ...b].some(Number.isNaN)) return engine === fetched
   if (a[0] !== b[0]) return false
   // 0.x: a minor bump is a breaking change, so it has to match too
-  if (a[0] === 0) return a[1] === b[1]
-  return true
+  if (a[0] === 0 && a[1] !== b[1]) return false
+  return !engineIsOlder(engine, fetched)
+}
+
+/**
+ * Numerically, because these are versions and not strings: '0.2.10' sorts
+ * before '0.2.9' as text and after it as a version, and the whole point of the
+ * comparison is which one has the exports the other lacks.
+ */
+function engineIsOlder(engine: string, fetched: string): boolean {
+  const a = engine.split('.').map(Number)
+  const b = fetched.split('.').map(Number)
+  if (a.length < 3 || b.length < 3 || [...a, ...b].some(Number.isNaN)) return false
+  for (let i = 0; i < 3; i++) {
+    if (a[i]! !== b[i]!) return a[i]! < b[i]!
+  }
+  return false
 }
 
 function versionAt(dir: string): string | undefined {
@@ -386,7 +413,9 @@ export async function shareEnginePackages(): Promise<void> {
     if (!caretCompatible(engineVersion, fetched)) {
       log().warn(
         { package: name, engine: engineVersion, installed: fetched },
-        'A plugin wants a framework version this engine does not provide — leaving its own copy, but the two cannot share state',
+        engineIsOlder(engineVersion, fetched)
+          ? 'A plugin resolved a framework version newer than this engine — leaving its own copy, but the two cannot share state, and anything the plugin imports from the newer version will fail to load. Update the engine.'
+          : 'A plugin wants a framework version this engine does not provide — leaving its own copy, but the two cannot share state',
       )
       continue
     }
