@@ -47,7 +47,12 @@ services:
       # Loopback only. Put a TLS terminator in front before this is reachable
       # from anywhere else — the session cookie is Secure, so over plain http
       # the browser drops it and every login silently loops.
-      - "127.0.0.1:3000:3002"
+      #
+      # Overridable because `pnpm dev` also serves the dashboard on 3000, and
+      # wanting both at once is the normal case: the container is a fresh
+      # engine with no credentials and no instances, so it shares nothing with
+      # your development one except this port.
+      - "127.0.0.1:${OPENWHALE_PORT:-3000}:3002"
     depends_on:
       gateway:
         condition: service_healthy

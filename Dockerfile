@@ -4,20 +4,23 @@
 # only in the command, so they share an image rather than repeating a build
 # that takes minutes. docker-compose.yml runs both.
 #
-# Node 22 to match what this is tested on. Slim rather than alpine: the engine
+# Node 22 to match what this is tested on. Debian rather than alpine: the engine
 # links better-sqlite3 and shells out to npm to install plugins, and musl has
 # been the wrong surprise in both of those places often enough not to invite it
 # into a process that holds exchange keys.
+#
+# The full image rather than -slim, and no apt anywhere. It already carries the
+# two things this needs — a toolchain for when better-sqlite3 finds no matching
+# prebuild, and git for installing plugins from a repository. Adding them with
+# apt costs a package-index fetch on every build, from a network that is not
+# always yours to rely on: behind a corporate proxy or a VPN that intercepts
+# port 80, `apt-get update` fails and takes the whole build with it, for a
+# dependency nobody would guess was there. A bigger base that always builds
+# beats a smaller one that builds where you happen to be sitting.
 
 # ── build ─────────────────────────────────────────────────────────────────────
-FROM node:22-slim AS build
+FROM node:22 AS build
 WORKDIR /app
-
-# better-sqlite3 compiles when no prebuild matches the platform. Cheap here,
-# impossible in the runtime stage — so the toolchain lives only in this one.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ \
- && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
@@ -27,16 +30,13 @@ RUN pnpm -r --filter '!@openwhaleorg/dashboard' build
 RUN cd packages/apps/dashboard && npx next build
 
 # ── runtime ───────────────────────────────────────────────────────────────────
-FROM node:22-slim AS runtime
+FROM node:22 AS runtime
 WORKDIR /app
 
-# git is not optional: installing a plugin from a repository shells out to it
-# through npm, and its absence reads as a network failure rather than a missing
-# binary.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-
+# git comes with the base image, and it is not optional: installing a plugin
+# from a repository shells out to it through npm, and its absence reads as a
+# network failure rather than a missing binary.
+#
 # pnpm is not needed here: plugin installs shell out to `npm`, which ships with
 # node, and `next start` is invoked through the package's own .bin.
 
