@@ -21,10 +21,14 @@ production rather than imagined.
 
 Two processes, and the split is not cosmetic:
 
-| Process | Port | Holds |
+| Process | Default port | Holds |
 |---|---|---|
 | **Gateway** (`@openwhaleorg/gateway`) | 3001 | The runtime, the SQLite database, the master key, every decrypted credential. Places orders. Installs plugins, which is to say: runs arbitrary code. |
-| **Dashboard** (`@openwhaleorg/dashboard`) | 3002 | Nothing. A Next.js frontend that proxies `/api/*` to the gateway. |
+| **Dashboard** (`@openwhaleorg/dashboard`) | 3000 | Nothing. A Next.js frontend that proxies `/api/*` to the gateway. |
+
+Both are configurable — `OPENWHALE_GATEWAY_PORT` and `PORT`. The systemd unit
+below pins the dashboard to 3002 only because 3000 was already taken on that
+host; pick whatever is free and point nginx's `proxy_pass` at it.
 
 Authentication is enforced by the **gateway**, not the dashboard. A
 frontend-only login would be walked around by anyone who can reach port 3001,

@@ -222,7 +222,7 @@ npm 安装的插件如有新版本会在列表中提示，支持一键更新，�
 
 ## 快速上手
 
-这里说的是**本地**环境。服务器部署 —— systemd、TLS,以及那些没吃过亏就不明显的运维规则 —— 见 **[DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)**。Docker 方式在计划中。
+本节是**开发模式**：热重载，改代码即时生效。服务器部署（systemd、nginx、TLS）见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)。Docker 方式在计划中。
 
 ### 前置
 

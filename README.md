@@ -213,9 +213,9 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 
 ## Quick start
 
-This is the **local** setup. For a server — systemd, TLS, and the operational
-rules that are not obvious until they have cost you something — see
-**[DEPLOYMENT.md](./DEPLOYMENT.md)**. A Docker path is planned.
+This is **development mode** — hot reload, rebuilt on every save. For a server
+(systemd, nginx, TLS) see **[DEPLOYMENT.md](./DEPLOYMENT.md)**. A Docker path is
+planned.
 
 ### Prerequisites
 

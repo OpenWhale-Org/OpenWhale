@@ -12,10 +12,12 @@
 
 ## 架构
 
-| 进程 | 端口 | 职责 |
+| 进程 | 默认端口 | 职责 |
 |---|---|---|
 | **Gateway**（`@openwhaleorg/gateway`） | 3001 | 运行时、SQLite 数据库、主密钥、凭证解密、下单、插件安装 |
-| **Dashboard**（`@openwhaleorg/dashboard`） | 3002 | Next.js 前端，将 `/api/*` 转发给 gateway，不持有任何密钥 |
+| **Dashboard**（`@openwhaleorg/dashboard`） | 3000 | Next.js 前端，将 `/api/*` 转发给 gateway，不持有任何密钥 |
+
+端口均可配置：gateway 用 `OPENWHALE_GATEWAY_PORT`，dashboard 用 `PORT`。下文 systemd 示例中 dashboard 使用 3002，是因为那台机器的 3000 已被其他服务占用；按实际情况调整即可，nginx 的 `proxy_pass` 指向所选端口。
 
 认证在 gateway 层实现，不在 dashboard。所有 `/api/*` 路由都要求有效会话；dashboard 只负责携带 cookie，其路由守卫仅用于页面跳转，不构成安全边界。
 
