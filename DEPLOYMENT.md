@@ -149,8 +149,10 @@ On the server, install runtime dependencies only:
 cd ~/openwhale && pnpm install --frozen-lockfile
 ```
 
-`scripts/deploy.sh` in this repo does all of the above, plus the health check.
-Read it before adapting it — it encodes the operational rules below.
+`scripts/deploy.sh` does all of the above plus the health check. Copy
+`scripts/deploy.env.example` to `scripts/deploy.env` and fill in the host, the
+path, and optionally a key, a public URL for the health check, and any local
+plugin packages to build and ship alongside the repo.
 
 ---
 
@@ -284,20 +286,17 @@ Before starting a local gateway, check what the server is running. If you are
 migrating state between machines, disable the instances on one side *before*
 the other side comes up.
 
-### Do not deploy into a settlement window
+### Restarting interrupts what is running
 
-Restarting the gateway cuts whatever is executing in half.
+A deploy restarts the gateway, and a restart cuts whatever is mid-execution.
+For strategies that work in cycles around a fixed instant — anything that opens
+before a scheduled event and closes after it — that can leave positions opened
+with nothing left to close them, and execution records that never reached disk.
 
-For a funding-arbitrage strategy the open ladder starts around T−30s and the
-close ladder runs past T+several seconds. A restart in that window leaves
-positions opened with no close ladder to close them, and execution records that
-never reached disk. This has happened: 2026-08-10 20:59:52, 5325 contracts left
-naked for 52 seconds until a restarted engine's sweep caught them.
-
-`scripts/deploy.sh` refuses to run between **XX:54 and XX:01 UTC** for exactly
-this reason. If your strategies have their own cycle, put its window in the
-same guard. A rule that lives only in documentation is a rule that gets
-forgotten at 20:59.
+`scripts/deploy.sh` can refuse to run inside a window you name. Set
+`DEPLOY_BLACKOUT` in `scripts/deploy.env` to the minutes past the hour your
+strategies occupy, UTC, as `FROM-TO`; it wraps, so `54-01` covers `:54` through
+`:01`. `--force-window` overrides it when you know nothing is mid-cycle.
 
 ### Upgrading
 

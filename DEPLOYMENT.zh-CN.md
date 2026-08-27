@@ -113,7 +113,7 @@ rsync -az --delete --exclude cache \
 cd ~/openwhale && pnpm install --frozen-lockfile
 ```
 
-仓库中的 `scripts/deploy.sh` 已包含上述流程和部署后健康检查，可参考或直接使用。
+仓库中的 `scripts/deploy.sh` 已包含上述流程和部署后健康检查。将 `scripts/deploy.env.example` 复制为 `scripts/deploy.env` 并填写主机、路径，以及可选的密钥、用于健康检查的公网地址、需要一并构建同步的本地插件包。
 
 ### 4. systemd
 
@@ -227,13 +227,11 @@ journalctl -u openwhale-gateway -f
 
 启动本地 gateway 前请确认服务器状态。跨机器迁移状态时，先停用一侧的实例，再启动另一侧。
 
-### 避免在结算窗口部署
+### 重启会中断正在执行的策略
 
-重启 gateway 会中断正在执行的策略周期。
+部署会重启 gateway，中断正在执行的策略周期。对于围绕固定时刻分阶段执行的策略（在预定事件前开仓、事件后平仓），此时重启可能导致已开仓位没有对应的平仓流程，执行记录也可能丢失。
 
-以资金费套利为例：开仓在 T−30s 左右开始，平仓会持续到 T+若干秒。此期间重启会导致已开仓位没有对应的平仓流程，执行记录也可能丢失。2026-08-10 20:59:52 发生过一次，5325 张合约在无对冲状态下持续 52 秒，直到重启后的兜底扫单处理。
-
-`scripts/deploy.sh` 会拒绝在 UTC 每小时的 XX:54–XX:01 之间执行。如果自有策略有其他周期，建议在同一处加入对应窗口。
+`scripts/deploy.sh` 支持配置拒绝执行的时间窗：在 `scripts/deploy.env` 中设置 `DEPLOY_BLACKOUT` 为策略占用的分钟区间（UTC，格式 `FROM-TO`，可跨小时，如 `54-01` 表示 `:54` 到 `:01`）。确认没有周期在执行时可用 `--force-window` 跳过。
 
 ### 升级
 
