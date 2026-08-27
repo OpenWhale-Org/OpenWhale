@@ -52,7 +52,7 @@ Executor (venue actions via adapter sessions)
 
 ## The dashboard
 
-- **Instances** — cards with folders, drag-drop ordering, emoji icons, and a live net-PnL badge per card; four live tabs per instance (Live Events scoped to the instance's own monitors, Executions, Runs, Logs). A full-page **Board** per instance adds click-to-rename, account rebinding, an editable parameter panel, and a PnL panel.
+- **Instances** — cards with folders, drag-drop ordering, emoji icons, and a live net-PnL badge per card; four live tabs per instance (Live Events scoped to the instance's own monitors, Executions, Runs, Logs). A full-page **Board** per instance adds click-to-rename, account rebinding, an editable parameter panel, and a PnL panel. Creating one asks which you meant — **Save only** or **Activate**: params and bindings can be read over on a stopped instance, and cannot once it is trading.
 - **Per-instance PnL** — realized / fees / funding / net / unrealized cards backed by the attribution ledger, with drill-down tabs for by-symbol totals, raw venue fills, and fill-derived open positions priced at the venue mark. Funding events split across instances by the position each held at the settlement boundary.
 - **Run tracing** — every run records its steps: gates, skips, sizing, emitted instructions, captured log lines. Runs with instructions or errors persist to disk; idle runs are heartbeat-sampled. Filter by outcome, search by content.
 - **Monitor boards** — monitors declare dashboard panels via the `plots()` convention: line/bar/candles plus a sortable `table` kind, single- and multi-select pickers, record-window control.
@@ -187,6 +187,8 @@ Not everything is namespaced, and that decides whether two same-named plugins ca
 
 Overwriting replaces the code and keeps instances, accounts and credentials: anything running restarts on the new code, and anything whose strategy the new version dropped is marked broken on the Instances page instead of deleted — reinstalling the version that has it brings those back running.
 
+An npm-installed plugin whose registry version has moved on is flagged in the rail and updates in one click — the same overwrite path, so instances survive it.
+
 Uninstalling, by contrast, refuses while any strategy instance, account or credential still belongs to the plugin — each holds something you configured — and names them. The plugin's monitor instances are deleted with it. Each install is loaded from its own copy under `plugins/staged/`, so reinstalling runs the new code without restarting the engine: Node's ESM registry is keyed by resolved URL and cannot be evicted, so a fixed path would keep executing the first version loaded.
 
 ### Writing plugins with Claude
@@ -208,6 +210,10 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 ---
 
 ## Quick start
+
+This is the **local** setup. For a server — systemd, TLS, and the operational
+rules that are not obvious until they have cost you something — see
+**[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
 ### Prerequisites
 
@@ -273,6 +279,10 @@ Before exposing the gateway to a network:
   the request arrives over https)
 - keep port 3001 off the public internet if the dashboard proxies for you; set
   `OPENWHALE_ALLOWED_ORIGIN` only for genuinely cross-origin frontends
+
+[DEPLOYMENT.md](./DEPLOYMENT.md) has the nginx block, the systemd units, and the
+reason a missing `X-Forwarded-Proto` produces a login that loops for ever with
+nothing in any log.
 
 ---
 
