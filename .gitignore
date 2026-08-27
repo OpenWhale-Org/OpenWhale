@@ -18,5 +18,8 @@ packages/*/private-*/
 # Local-only: deployment config and internal design notes carry
 # machine-specific paths; typecheck build output is derived.
 /scripts/deploy.env
+# The personal deploy script: deploy.sh is the generic one the repo ships,
+# this is the one with a real host, key path and plugin list in it.
+/scripts/deploy.local.sh
 /docs/architecture.md
 .next-typecheck/
