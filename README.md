@@ -10,57 +10,52 @@
 
 [中文说明 →](./README.zh-CN.md)
 
-OpenWhale is a TypeScript framework for building automated economic strategies. Monitors, Strategies, and Executors are fully decoupled — the same strategy code runs on any venue, plugs into any data source, and can be written, audited, and evolved by an AI.
+OpenWhale is a TypeScript framework for automated trading strategies. Monitors collect, Strategies decide, Executors act; the three are decoupled, so one strategy runs on any venue and against any data source, and can be written, audited and evolved by an AI.
 
 ---
 
 ## Why OpenWhale
 
-- **Fully decoupled layers** — Monitors collect, Strategies decide, Executors act. Replace any layer without touching the others.
-- **Venue-agnostic by construction** — a strategy never names an exchange. It declares *account slots*; the venue derives from whichever account you bind at activation. One strategy, any platform.
-- **The adapter matrix** — venues plug in as cells of a *(kind × venue)* matrix (`exchange/perp × binance`, `exchange/spot × hyperliquid`, …). Domain packages define the vocabulary, venue packages fill the cells, and a data-driven ccxt roster ships twelve venues out of the box.
-- **AI as a programmer** — LLM inference with structured output is built into the strategy layer, and the repo ships a `skills/openwhale-dev` skill that teaches any Claude the full framework contract so it can produce installable plugins with tests.
-- **Deep observability** — every strategy run leaves a persistent decision trace: what it saw, which gate said no, what it emitted. Deactivate an instance or restart the gateway and the audit trail survives.
-- **PnL attribution built in** — executors auto-claim the orders they place; a background collector joins venue fills (ground-truth realized PnL and fees) and funding income back to the claiming instance. Two instances trading the same symbol on the same account stay separable.
-- **Type-safe plugin architecture** — every component implements a strict TypeScript interface. IDE support, safe refactoring, and AI-generated code the compiler validates.
+- **Decoupled layers** — Monitor → Strategy → Executor. Replace any layer without touching the others.
+- **Venue-agnostic** — strategies declare account slots; the venue is resolved from the bound account at activation.
+- **Adapter matrix** — venues are cells of a *(kind × venue)* matrix (`exchange/perp × binance`, …). Domain packages define kinds, venue packages fill cells; a data-driven ccxt roster ships twelve venues.
+- **AI as a programmer** — structured-output LLM inference inside strategies, and a `skills/openwhale-dev` skill that teaches Claude the framework contract.
+- **Run tracing** — every run persists what it saw, which gate refused, what it emitted. Survives restarts.
+- **PnL attribution** — executors claim the orders they place; fills, fees and funding are joined back to the instance. Two instances on one account stay separable.
+- **Type-safe plugins** — every component implements a strict TypeScript interface.
 
 ---
 
 ## Core concepts
 
-| Concept | What it is |
+| Concept | Definition |
 |---|---|
-| **Monitor** | Collects data and emits keyed records (`venue:symbol`, …). Declared as a *contract* with one or more *implementations*; users create per-key *instances*, optionally credential-bound. Emits persist as JSONL and drive triggers. |
-| **Strategy** | Pure decision logic. Declares monitor/executor/account dependencies by label, receives triggers, returns `ExecutionInstruction[]`. Params split into `base` (required) and `tunable` (defaulted, AI-optimizable) zod schemas. |
-| **Executor** | Turns instructions into venue actions through adapter sessions: retry discipline, idempotent client order ids, per-order latency and slippage capture. Credential slots resolve to sessions (by kind) or raw credential data (`raw: true` — e.g. a bot token); `optional: true` slots let instances activate unbound and the executor degrade gracefully. Strategies stay pure. |
-| **Instance** | A strategy + params + account bindings, activated as a unit. Everything observable hangs off the instance: live events, executions, run traces, logs. |
-| **Account** | A named entity binding a credential to an account implementation (generic or venue-specialized). Strategies read balances and positions only through their bound account's Reader. |
-| **Trigger** | Cron schedules and monitor conditions (multi-source AND within a time window). Subscriptions keep monitors collecting without waking the strategy; a live strategy can add sources it discovers at runtime (`addMonitorSource`). |
-| **Portfolio journal** | Optional instance-scoped history owned by a strategy. Strategies commit idempotent snapshots, fills, decisions, and market bars; Core stores them transactionally and derives equity, drawdown, and trade reports without knowing the strategy's trace format. |
+| **Monitor** | Collects data and emits keyed records (`venue:symbol`). A *contract* with one or more *implementations*; users create per-key *instances*. Emits persist as JSONL and drive triggers. |
+| **Strategy** | Pure decision logic. Declares monitor / executor / account dependencies by label, receives triggers, returns `ExecutionInstruction[]`. Params: `base` (required) and `tunable` (defaulted) zod schemas. |
+| **Executor** | Turns instructions into venue actions through adapter sessions — retries, idempotent client order ids, latency and slippage capture. Credential slots resolve to sessions (by kind) or raw credential data (`raw: true`); `optional: true` slots may stay unbound. |
+| **Instance** | Strategy + params + account bindings, activated as a unit. Live events, executions, runs and logs hang off it. |
+| **Account** | A named binding of a credential to an account implementation (generic or venue-specialized). Strategies read balances and positions through it. |
+| **Trigger** | Cron schedules and monitor conditions (multi-source AND within a window). Subscriptions keep monitors collecting without waking the strategy; `addMonitorSource` adds sources discovered at runtime. |
+| **Portfolio journal** | Optional instance-scoped history: idempotent snapshots, fills, decisions, market bars. Core stores them and derives equity, drawdown and trade reports. |
 
 ```
-Monitor (data collection)
-    ↓ emit(key, data)
-TriggerManager (cron + monitor conditions)
-    ↓ StrategyContext
-Strategy (rules / AI inference)  →  run trace persisted
-    ↓ ExecutionInstruction[]
-ExecutionQueue
-    ↓
-Executor (venue actions via adapter sessions)
+Monitor ──emit(key, data)──▶ TriggerManager ──StrategyContext──▶ Strategy ──ExecutionInstruction[]──▶ ExecutionQueue ──▶ Executor
+                                                                     └─ run trace persisted
 ```
 
 ---
 
-## The dashboard
+## Dashboard
 
-- **Instances** — cards with folders, drag-drop ordering, emoji icons, and a live net-PnL badge per card; four live tabs per instance (Live Events scoped to the instance's own monitors, Executions, Runs, Logs). A full-page **Board** per instance adds click-to-rename, account rebinding, an editable parameter panel, and a PnL panel. Creating one asks which you meant — **Save only** or **Activate**: params and bindings can be read over on a stopped instance, and cannot once it is trading.
-- **Per-instance PnL** — realized / fees / funding / net / unrealized cards backed by the attribution ledger, with drill-down tabs for by-symbol totals, raw venue fills, and fill-derived open positions priced at the venue mark. Funding events split across instances by the position each held at the settlement boundary.
-- **Run tracing** — every run records its steps: gates, skips, sizing, emitted instructions, captured log lines. Runs with instructions or errors persist to disk; idle runs are heartbeat-sampled. Filter by outcome, search by content.
-- **Monitor boards** — monitors declare dashboard panels via the `plots()` convention: line/bar/candles plus a sortable `table` kind, single- and multi-select pickers, record-window control.
-- **Params as forms** — zod `.meta()` drives the UI: sections, sliders, unit suffixes, conditional visibility, searchable market pickers (single and multi), per-value availability verdicts against the bound venue, editable row-table *list* params for ladders, and sandboxed interactive *illustrations* that redraw live as you edit values.
-- **Scripts** — plugins ship operator utilities (`scripts: [...]`) that run on demand against the live runtime and return a monospace report: plan previews, fit inspectors, one-off audits. Params render as a small form, with live-resolved dropdowns for runtime values such as instance ids.
-- **Compiler & Assistant** — an experimental natural-language strategy compiler, plus the recommended path: point Claude at `skills/openwhale-dev` and have it write the plugin.
+| Page | Function |
+|---|---|
+| **Instances** | Cards with folders, drag ordering, live net-PnL badge; per-instance Live Events, Executions, Runs, Logs; Board view with parameter editing, account rebinding, PnL panel. |
+| **PnL** | Realized / fees / funding / net / unrealized from the attribution ledger; by-symbol, raw fills, open positions at venue mark. Funding is split across instances by position at settlement. |
+| **Runs** | Every run's gates, skips, sizing, instructions and log lines. Runs with instructions or errors persist; idle runs are sampled. |
+| **Monitor boards** | Panels declared by `plots()`: line, bar, candles, sortable table; single/multi-select keys. |
+| **Params** | Forms generated from zod `.meta()`: sections, sliders, units, conditional fields, market pickers, availability checks, list (row-table) params, live interactive illustrations. |
+| **Scripts** | Plugin-shipped operator utilities run on demand against the runtime; monospace report, optional JSON and file attachments. |
+| **Compiler / Assistant** | Natural-language strategy compiler (experimental). Recommended path: Claude with `skills/openwhale-dev`. |
 
 ---
 
@@ -89,7 +84,7 @@ class MomentumStrategy extends BaseStrategy<typeof decls> {
   async evaluate(context: StrategyContext) {
     const { symbol, threshold } = this.baseParamsSchema.parse(this.params.base)
     const tick = context.getData('price', `${this.accountVenue('main')}:${symbol}`)
-    this.trace('tick:read', { tick })                    // lands in the run trace
+    this.trace('tick:read', { tick })                    // recorded in the run trace
     if (!tick || tick.price < threshold) return []
 
     return [
@@ -152,190 +147,108 @@ export const planPreview: ScriptDefinition = {
 
 ---
 
-## Publishing
-
-`pnpm check:publish` before every release. Peer ranges are written as
-`workspace:^`, which is not a range but an instruction — pnpm resolves it
-against the workspace at pack time — so the number that actually ships exists
-nowhere in the repo and cannot be reviewed in a diff. The check packs each
-package and reads the peer ranges out of the tarball, which is the only place
-they exist before npm makes them permanent.
-
 ## Plugins
 
-A plugin is a package with a default-exported factory returning its registrations:
+A plugin is a package whose default export is a factory returning its registrations:
 
 ```typescript
 export default definePlugin((ctx) => ({
   name: 'my-plugin',
   version: '1.0.0',
-  monitorImplementations: [ /* contract / implementation / instance model */ ],
+  monitorImplementations: [ /* contract / implementation / instance */ ],
   executors: [ /* … */ ],
   strategies: [ /* … */ ],
-  scripts: [ /* operator utilities for the Scripts page */ ],
-  credentialTypes: [ /* venue credential recipes: schema, raw opt-in, connectivity test */ ],
-  adapters: [ /* (kind × venue) matrix cells */ ],
+  scripts: [ /* operator utilities */ ],
+  credentialTypes: [ /* schema, raw opt-in, connectivity test */ ],
+  adapters: [ /* (kind × venue) cells */ ],
   accounts: [ /* account implementations */ ],
 }))
 ```
 
-Install from the dashboard's Plugins page — a built `.js`/`.mjs` bundle, a **GitHub repository** (`owner/repo`, or paste the address bar; optional branch/tag/commit), or an npm name or local path — or `runtime.loadPlugin()` in code. Components register namespaced (`my-plugin/momentum`); hot reload is supported.
+**Install** from the Plugins page — npm name, GitHub `owner/repo` (optional ref), local path, or a built `.js`/`.mjs` bundle — or `runtime.loadPlugin()` in code. A GitHub install is built by npm, so a source-only repo needs a `prepare` script; private repos need `OPENWHALE_GITHUB_TOKEN`.
 
-A GitHub install is cloned and built by npm, so a repo shipping only TypeScript sources needs a `prepare` script in its package.json (`"prepare": "npm run build"`); private repos need `OPENWHALE_GITHUB_TOKEN` set on the engine.
+**Rules:**
 
-A plugin's declared name is its default **namespace** — the `my-plugin/` every id it registers is prefixed with — but names are not globally unique, so the namespace is decided at install. When one is already taken, the package name decides what is being asked — a local checkout and its published release are one plugin, offered as an overwrite; a different package is a stranger sharing a name, offered its own namespace (`alice-funding-arb`, suggested from the publisher). A namespace is fixed once chosen — instances are saved as `<namespace>/<strategy>`.
-
-Not everything is namespaced, and that decides whether two same-named plugins can coexist at all: adapter cells (addressed by kind and venue) and credential types (shared by name) can have exactly one provider each, so two venue plugins for the same venue are an either/or no namespace can separate. That is checked before the namespace is offered, and registration is all-or-nothing, so a refused install leaves nothing behind.
-
-Overwriting replaces the code and keeps instances, accounts and credentials: anything running restarts on the new code, and anything whose strategy the new version dropped is marked broken on the Instances page instead of deleted — reinstalling the version that has it brings those back running.
-
-An npm-installed plugin whose registry version has moved on is flagged in the rail and updates in one click — the same overwrite path, so instances survive it.
-
-Uninstalling, by contrast, refuses while any strategy instance, account or credential still belongs to the plugin — each holds something you configured — and names them. The plugin's monitor instances are deleted with it. Each install is loaded from its own copy under `plugins/staged/`, so reinstalling runs the new code without restarting the engine: Node's ESM registry is keyed by resolved URL and cannot be evicted, so a fixed path would keep executing the first version loaded.
+- The plugin name is its namespace (`my-plugin/momentum`). A taken name gets a new namespace at install (`alice-funding-arb`); a namespace is fixed once instances reference it.
+- Adapter cells and credential types are global: two plugins providing the same venue cannot coexist. Registration is all-or-nothing.
+- Overwrite keeps instances, accounts and credentials; instances whose strategy the new version dropped are marked broken, not deleted.
+- npm installs show a newer registry version in the rail and update in one click (same overwrite path).
+- Uninstall is refused while an instance, account or credential references the plugin; the plugin's monitor instances are deleted with it.
+- Each install loads from its own copy under `plugins/staged/`, so reinstalling needs no restart.
 
 ### Writing plugins with Claude
 
-Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or reference this repo's path in Claude Code), describe the strategy you want, and Claude produces a complete plugin package — monitors, executors, strategies, tests — that installs from the Plugins page.
+Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or reference this repo's path), describe the strategy, and Claude produces a complete plugin package — monitors, executors, strategies, tests — installable from the Plugins page.
 
 ---
 
 ## Use cases
 
-| Scenario | Description |
-|----------|-------------|
-| **Funding / basis capture** | Cron-triggered cycles around settlement instants, sized by order-book depth, timed against fitted market microstructure |
-| **Pair / spread reversion** | Two-leg hedged ladders driven by a z-scored spread monitor, with dwell confirmation and stop discipline |
-| **Copy trading** | Monitor a target wallet, mirror its trades proportionally with position caps |
-| **AI market analysis** | LLM inference with structured output directly inside `evaluate()` |
-| **Multi-condition signals** | Combine price, volume, and rate monitors — fire only when all conditions align within a time window |
+| Scenario | Shape |
+|---|---|
+| **Funding / basis capture** | Cron-triggered cycles around settlement instants, sized by order-book depth |
+| **Pair / spread reversion** | Two-leg hedged ladders on a z-scored spread monitor, with dwell confirmation and stops |
+| **Copy trading** | Monitor a target wallet, mirror trades proportionally with position caps |
+| **AI market analysis** | Structured-output LLM inference inside `evaluate()` |
+| **Multi-condition signals** | Price, volume and rate monitors combined in one trigger window |
+| **On-chain maker rewards** | Post-only quotes at the edge of a maker-incentive band on an on-chain rate market (Boros), re-quoted as the band moves, one relayed transaction per tick via a delegated agent key |
+| **On-chain yield** | Wallet-keyed accounts on the `web3/chain` kind: PT/YT and LP positions (Pendle), balances and positions read from the chain, transactions signed locally |
 
 ---
 
 ## Quick start
 
-This is **development mode** — hot reload, rebuilt on every save. For a server
-see **[DEPLOYMENT.md](./DEPLOYMENT.md)** — `docker compose up -d --build` is the
-short version; systemd, nginx and TLS the long one.
+Development mode, with hot reload. For a server see [DEPLOYMENT.md](./DEPLOYMENT.md) (`docker compose up -d --build`, or systemd + nginx).
 
-### Prerequisites
-
-- Node.js ≥ 20, pnpm ≥ 9
-
-### Gateway + Dashboard
-
-The backend (gateway) owns the runtime and all secrets; the dashboard is a pure frontend.
+Prerequisites: Node.js ≥ 20, pnpm ≥ 9.
 
 ```bash
 pnpm install
 pnpm build
-cp .env.example .env           # fill in OPENWHALE_MASTER_KEY + OPENWHALE_ADMIN_USER/PASSWORD
-pnpm dev                       # gateway on :3001 + dashboard on :3000
+cp .env.example .env           # OPENWHALE_MASTER_KEY, OPENWHALE_ADMIN_USER, OPENWHALE_ADMIN_PASSWORD
+pnpm dev                       # gateway :3001, dashboard :3000
 ```
 
-The gateway **fails closed**: with no user account and no
-`OPENWHALE_ADMIN_USER`/`OPENWHALE_ADMIN_PASSWORD` it refuses to start rather
-than serve an unauthenticated trading API. Set them once, sign in, then remove
-them from the environment.
+The gateway holds the runtime and all secrets; the dashboard is a frontend that proxies `/api/*` to it (`OPENWHALE_GATEWAY_URL`, default `http://localhost:3001`). The gateway refuses to start without a user account or the admin variables; set them once, sign in, then remove them.
 
-Open `http://localhost:3000` to manage strategy instances, accounts, monitors, credentials, scripts, and the AI compiler. The dashboard's only setting is `OPENWHALE_GATEWAY_URL` (defaults to `http://localhost:3001`).
-
-### Behind a proxy
-
-Where the exchanges are unreachable directly, point venue traffic at a proxy:
+### Venue proxy
 
 ```bash
 OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket, every venue
-OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # …except this one
+OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # per venue: ccxt id upper-cased; `off` = direct
 ```
 
-The per-venue suffix is the **ccxt exchange id**, upper-cased — Binance perp is
-`BINANCEUSDM`, Binance spot is `BINANCE`. `off` keeps a venue direct, which
-matters more than it looks: settlements are raced by the millisecond, so a venue
-you *can* reach directly should not be paying proxy hops for a setting aimed at
-the ones you cannot.
-
-Two things are worth knowing before debugging this yourself. The standard
-`HTTPS_PROXY` does nothing — ccxt does not read it. Neither does Node 24's
-`NODE_USE_ENV_PROXY`, which only wires undici's *global* fetch while ccxt calls
-its own bundled one; a plain `fetch()` in the same process will succeed and make
-the failure look like anything but a proxy problem. And the variable is
-deliberately not named `HTTPS_PROXY`: plenty of machines carry that for
-unrelated reasons, and order traffic should never change route by accident.
+`HTTPS_PROXY` and `NODE_USE_ENV_PROXY` are not honoured — ccxt uses its own fetch. The variable is namespaced so that order traffic never changes route through an unrelated proxy setting.
 
 ### Authentication
 
-Auth is enforced by the **gateway**, not the dashboard: that process holds the
-decrypted venue credentials, can place orders, and can install plugins
-(arbitrary code), so a frontend-only login would be bypassed by anyone who can
-reach port 3001. Every `/api/*` route requires a session; the dashboard just
-carries the cookie, and its route guard is a redirect for humans rather than a
-security boundary.
-
-Sessions are opaque tokens in SQLite (revocable, 7-day expiry) and passwords are
-scrypt-hashed. Manage accounts on the **Users** page — there are no roles: anyone
-who can sign in can move real money.
-
-Before exposing the gateway to a network:
-
-- terminate TLS in front of it (the session cookie is marked `Secure` only when
-  the request arrives over https)
-- keep port 3001 off the public internet if the dashboard proxies for you; set
-  `OPENWHALE_ALLOWED_ORIGIN` only for genuinely cross-origin frontends
-
-[DEPLOYMENT.md](./DEPLOYMENT.md) has the nginx block, the systemd units, and the
-reason a missing `X-Forwarded-Proto` produces a login that loops for ever with
-nothing in any log.
+Enforced by the gateway: every `/api/*` route requires a session; the dashboard only carries the cookie. Sessions are opaque SQLite tokens (7-day expiry, revocable); passwords are scrypt-hashed; there are no roles. Before exposing the gateway: terminate TLS in front of it (the session cookie is `Secure`), keep port 3001 off the public internet, set `OPENWHALE_ALLOWED_ORIGIN` only for cross-origin frontends. Details in [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ---
 
 ## Packages
 
-Grouped by role — `framework/` (engine, domain, compiler), `venues/` (exchange
-integrations), `apps/` (gateway, dashboard), `strategies/` (reference and
-private strategy plugins).
+`framework/` engine and domains · `venues/` exchange integrations · `apps/` gateway and dashboard · `strategies/` reference plugins.
 
-| Package | Description |
-|---------|-------------|
-| [`@openwhaleorg/core`](./packages/framework/core) | Domain-agnostic engine: credential materialization, adapter matrix, first-class Accounts, monitor contract/implementation/instance model, Strategy/Executor/Trigger, run-trace persistence, PnL attribution (order claims + fill/funding collector), Scripts, `definePlugin` + `@Ow*` decorators, CompiledLoader |
-| [`@openwhaleorg/exchange`](./packages/framework/exchange) | Exchange domain package: kinds `exchange/perp` + `exchange/spot`, Perp/SpotAccount read views, shared trading executors, public market monitors (ticker/orderbook/volume/kline/funding-rates) with dashboard plots |
-| [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | Generic ccxt implementation of the exchange adapter interfaces + the data-driven venue roster |
-| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | Venue plugins: credential types + adapter cells (+ venue-specialized accounts, Portfolio Margin support on Binance) |
-| [`@openwhaleorg/gateway`](./packages/apps/gateway) | Resident backend: runtime singleton, auth, REST + SSE API, compiler service, plugin install — all secrets live here |
-| [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js frontend: instances (folders/boards), accounts (equity curves), monitor boards, executors, credentials, plugins, scripts, AI compiler |
-| [`@openwhaleorg/examples`](./packages/strategies/examples) | Reference strategies, venue-agnostic by construction: momentum breakout, z-score mean reversion, scheduled accumulation (DCA), an LLM analyst whose risk lives in code, and copy trading. Read them, copy them |
-| [`@openwhaleorg/compiler`](./packages/framework/compiler) | AI strategy compiler: NL → analyze → codegen → L1–L4 validation ladder → human review → hot load |
+| Package | Role |
+|---|---|
+| [`@openwhaleorg/core`](./packages/framework/core) | Engine: adapter matrix, accounts, monitor model, strategy/executor/trigger, run traces, PnL attribution, scripts, `definePlugin` and decorators |
+| [`@openwhaleorg/exchange`](./packages/framework/exchange) | Kinds `exchange/perp` and `exchange/spot`: account views, trading executors, market monitors |
+| [`@openwhaleorg/web3`](./packages/framework/web3) | Kind `web3/chain`: EVM session, wallet account, `web3/evm` and `web3/rpc` credential types |
+| [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | ccxt implementation of the exchange adapters and the data-driven venue roster |
+| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | Venue plugins: credential types, adapter cells, venue-specialized accounts |
+| [`@openwhaleorg/gateway`](./packages/apps/gateway) | Backend: runtime, auth, REST + SSE API, compiler service, plugin install |
+| [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js frontend |
+| [`@openwhaleorg/examples`](./packages/strategies/examples) | Reference strategies: momentum, mean reversion, DCA, LLM analyst, copy trading |
+| [`@openwhaleorg/compiler`](./packages/framework/compiler) | NL → code → validation ladder → review → hot load |
 
----
-
-## Roadmap
-
-### M1 — Compiler *(shipped)*
-
-A conversational compiler that guides users step by step to define strategy logic, then compiles Monitor / Strategy / Executor components into type-safe TypeScript. Runs a deterministic validation ladder (build → typecheck → registration probe → mock dry-run) automatically. After human review, hot-loads the result into the runtime.
-
-### M2 — Optimizer
-
-Dual-agent optimization loop: an analysis agent reads runtime performance and historical monitor data to generate an optimization plan; an execution agent adjusts parameters or rewrites strategy code and validates the result through backtesting.
-
-### M3 — Assistant
-
-A unified conversational interface for the full strategy lifecycle: create and manage instances, trigger the Compiler and Optimizer, receive proactive alerts and performance reports.
-
-### M4 — MCP Server
-
-Expose the core engine capabilities as standard MCP tools, enabling external AI agents to drive strategy creation, activation, and optimization directly.
+Release check: `pnpm check:publish` packs every package and verifies the peer ranges inside the tarballs (`workspace:^` is resolved at pack time and appears nowhere in the repo).
 
 ---
 
 ## Contributing
 
-OpenWhale is in active early development. The core engine is working, and we're building the rest in the open.
-
-- Open an issue to discuss ideas or report bugs
-- Submit a PR for fixes, new venue plugins, or strategy examples
-- Star the repo if you find it useful — it helps others discover the project
-
----
+Issues for ideas and bugs; PRs for fixes, venue plugins and strategy examples.
 
 ## License
 

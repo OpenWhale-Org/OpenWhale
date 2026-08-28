@@ -1,123 +1,59 @@
 # Deploying OpenWhale
 
-Running OpenWhale on a server you own — the layout, the rules, and the two or
-three things that will bite you if nobody tells you first.
-
 [中文版 →](./DEPLOYMENT.zh-CN.md)
 
-This describes a real deployment: one small VPS behind nginx, two systemd
-units, a SQLite data directory, and a build that happens on your laptop rather
-than on the box. It is not the only shape that works, but everything here is in
-production rather than imagined.
+Two paths: Docker (compose, one image) or from source (systemd + nginx). Both run the same two processes.
 
-> **Before anything else.** This process holds decrypted exchange credentials
-> and can place real orders. There are no roles — anyone who can sign in can
-> move money. Treat the host the way you would treat a hardware wallet with a
-> keyboard attached.
+The gateway holds decrypted exchange credentials, places orders and installs plugins (arbitrary code). There are no roles: any signed-in user can move money. Restrict host access accordingly.
 
 ---
 
-## What you are deploying
-
-Two processes, and the split is not cosmetic:
+## Processes
 
 | Process | Default port | Holds |
 |---|---|---|
-| **Gateway** (`@openwhaleorg/gateway`) | 3001 | The runtime, the SQLite database, the master key, every decrypted credential. Places orders. Installs plugins, which is to say: runs arbitrary code. |
-| **Dashboard** (`@openwhaleorg/dashboard`) | 3000 | Nothing. A Next.js frontend that proxies `/api/*` to the gateway. |
+| **Gateway** (`@openwhaleorg/gateway`) | 3001 (`OPENWHALE_GATEWAY_PORT`) | Runtime, SQLite database, master key, decrypted credentials. Places orders, installs plugins. |
+| **Dashboard** (`@openwhaleorg/dashboard`) | 3000 (`PORT`) | Next.js frontend. Proxies `/api/*` to the gateway; holds no secrets. |
 
-Both are configurable — `OPENWHALE_GATEWAY_PORT` and `PORT`. The systemd unit
-below pins the dashboard to 3002 only because 3000 was already taken on that
-host; pick whatever is free and point nginx's `proxy_pass` at it.
-
-Authentication is enforced by the **gateway**, not the dashboard. A
-frontend-only login would be walked around by anyone who can reach port 3001,
-so every `/api/*` route requires a session and the dashboard merely carries the
-cookie. Its route guard is a redirect for humans, not a security boundary.
-
-The practical consequence: **port 3001 must not be reachable from the
-internet.** Publish the dashboard, keep the gateway on loopback.
+Authentication is enforced by the gateway: every `/api/*` route requires a session, the dashboard only carries the cookie. **Publish the dashboard; keep port 3001 off the public internet.**
 
 ---
 
 ## Docker
 
-The shortest path to a server. One image, built from the repository, runs
-the gateway and the dashboard as two containers; `docker-compose.yml` wires
-them together.
-
 ```sh
-cp .env.example .env        # OPENWHALE_MASTER_KEY + the first admin login
+cp .env.example .env        # OPENWHALE_MASTER_KEY, OPENWHALE_ADMIN_USER, OPENWHALE_ADMIN_PASSWORD
 docker compose up -d --build
 open http://localhost:3000
 ```
 
-What you get:
-
-- **State in one volume.** `openwhale-data` is mounted at `/data`, which is
-  the container's home directory — so the database, credential store,
-  monitor history and installed plugins all live there (§1 applies, with
-  `/data/.openwhale` for `~/.openwhale`). `docker compose down` keeps it;
-  only `down -v` deletes it.
-- **Only the dashboard is published**, on loopback (`127.0.0.1:3000`). It
-  proxies `/api/*` to the gateway over the compose network; the gateway has
-  no public port. Put TLS in front of 3000 before it is reachable from
-  anywhere else (§5) — the session cookie is `Secure`, and over plain http
-  every login silently loops. `OPENWHALE_PORT=3010` in `.env` moves the port
-  when `pnpm dev` already owns 3000; `OPENWHALE_PUBLIC_URL` is the address
-  the gateway accepts as origin.
-- **Plugins from npm and GitHub** work as on a bare server — the image
-  carries `npm` and `git`. A plugin you are developing on the host: mount its
-  folder (the commented `./plugins` volume) and install it from the Plugins
-  page by its container path, `/plugins/<name>`.
-- **Upgrades** are `git pull && docker compose up -d --build`. The gateway
-  restarts, which interrupts whatever is mid-execution (§"Restarting") — pick
-  the moment. Configuration is read from `.env` at start, so rotating a key
-  is an edit and `docker compose up -d`, not a rebuild. The one thing baked
-  in at build time is where the dashboard proxies `/api/*` — the compose
-  service name by default; `--build-arg OPENWHALE_GATEWAY_URL=…` for any
-  other topology.
-
-The image is the full `node:22` on Debian, not `-slim`, and installs nothing
-with apt: it already carries git and a toolchain, and an `apt-get update` from
-a network that intercepts port 80 fails the whole build for a dependency
-nobody would guess was there. It is bigger than it could be, and it builds
-everywhere.
-
-Memory: give the gateway a heap limit on a small box —
-`NODE_OPTIONS=--max-old-space-size=1536` in `.env` — for the reason §3 explains.
+- One image (`node:22`, no apt — git and a toolchain come with the base) runs the gateway and the dashboard as two containers.
+- State lives in the `openwhale-data` volume, mounted at `/data` = the container's `HOME`; the layout in §1 applies under `/data/.openwhale`. `docker compose down` keeps it, `down -v` deletes it.
+- Only the dashboard is published, on `127.0.0.1:3000` (`OPENWHALE_PORT` to change). The gateway is reachable only on the compose network. Terminate TLS in front of 3000 before exposing it (§5).
+- `OPENWHALE_PUBLIC_URL` sets the origin the gateway accepts (default `http://localhost:3000`).
+- Plugins install from npm and GitHub as on a bare server. For a plugin developed on the host, mount its folder (the commented `./plugins` volume) and install by its container path `/plugins/<name>`.
+- Upgrade: `git pull && docker compose up -d --build`. `.env` is read at start; a key rotation needs no rebuild. The dashboard's `/api/*` target is baked at build time (`--build-arg OPENWHALE_GATEWAY_URL`, default `http://gateway:3001`).
+- Small hosts: `NODE_OPTIONS=--max-old-space-size=1536` in `.env` (§3).
 
 ---
 
-## Deploying from source
+## From source
 
-Prerequisites: **Node.js ≥ 20** (22 in production here), **pnpm ≥ 9**, a domain
-with a TLS certificate, and ~2 GB of RAM to *run*. More than that to build,
-which is why you should not build here.
+Prerequisites: Node.js ≥ 20, pnpm ≥ 9, a domain with TLS, ~2 GB RAM to run.
 
-### 1. The data directory
-
-Everything the engine owns lives in `~/.openwhale`:
+### 1. Data directory
 
 ```
 ~/.openwhale/
 ├── openwhale.db          instances, credentials (encrypted), accounts, runs, PnL ledger
-├── monitors/             monitor history — JSONL, the largest thing here by far
+├── monitors/             monitor history, JSONL — the largest item; regenerable
 └── plugins/
-    ├── plugins.json      the install manifest
+    ├── plugins.json      install manifest
     ├── node_modules/     npm- and GitHub-installed plugins
-    └── staged/           the copy each install is actually loaded from
+    └── staged/           the copy each install is loaded from
 ```
 
-This directory is **the server's own state**, not a copy of yours. A routine
-deploy must never overwrite it: it holds positions the engine believes it has,
-execution records not yet written anywhere else, and monitor history that took
-weeks to accumulate.
-
-Back up `openwhale.db` on a schedule. `monitors/` is regenerable and grows
-without bound — it is the first thing to prune when the disk fills.
-
----
+A deploy must never overwrite this directory. Back up `openwhale.db` on a schedule; prune `monitors/` when the disk fills.
 
 ### 2. Configuration
 
@@ -125,76 +61,41 @@ without bound — it is the first thing to prune when the disk fills.
 cp .env.example .env
 ```
 
-The two that matter on a first boot:
-
 ```bash
-OPENWHALE_MASTER_KEY=          # encrypts every stored credential
-OPENWHALE_ADMIN_USER=          # bootstrap login
+OPENWHALE_MASTER_KEY=          # encrypts stored credentials; unrecoverable — back it up off the host
+OPENWHALE_ADMIN_USER=          # creates the first user; remove both after signing in
 OPENWHALE_ADMIN_PASSWORD=
 ```
 
-**The master key is not recoverable.** Lose it and every stored credential is
-unreadable — you re-enter every API key by hand. Back it up somewhere that is
-not the server.
+The gateway refuses to start with no user account and no admin variables.
 
-The gateway **fails closed**: with no user account and no admin variables it
-refuses to start rather than serve an unauthenticated trading API. Set them
-once, sign in, then take them back out of the environment — they exist to
-create the first user, not to be a standing credential.
-
-Optional, in the same file:
+Optional:
 
 ```bash
-OPENWHALE_ALLOWED_ORIGIN=https://openwhale.example.com   # genuinely cross-origin frontends only
-OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897              # where venues are unreachable directly
-OPENWHALE_GITHUB_TOKEN=                                  # installing plugins from private repos
+OPENWHALE_ALLOWED_ORIGIN=https://openwhale.example.com   # cross-origin frontends only
+OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897              # venue traffic proxy (see README)
+OPENWHALE_GITHUB_TOKEN=                                  # plugins from private repos
 ```
 
----
+### 3. Build
 
-### 3. Build somewhere else
+Build on a workstation, not on the server: a Next.js build needs more memory than a trading host, and an OOM during the build can take the running engine with it.
 
 ```bash
 pnpm install
 pnpm -r --filter '!@openwhaleorg/dashboard' build
-cd packages/apps/dashboard && NEXT_DIST_DIR=.next-deploy npx next build
+cd packages/apps/dashboard && NEXT_DIST_DIR=.next-deploy npx next build   # keep the production build out of `next dev`'s .next
 ```
 
-Two reasons this happens on your machine and not the server.
-
-A Next.js build is the heaviest thing in the repo, and a box sized for a
-trading engine is not sized for a compiler. More importantly, the engine is
-*running* while you deploy — an OOM killer that arrives mid-build does not
-politely stop at the build.
-
-`NEXT_DIST_DIR=.next-deploy` keeps the production build out of `.next`, which
-your local `next dev` overwrites in place. Sharing one directory between them
-produces a deployment that works until the moment you run the dev server.
-
-Then sync — sources and build output, never `node_modules`, never `.env`,
-never the data directory:
+Sync sources and build output — not `node_modules`, `.env` or the data directory — then install runtime dependencies on the server:
 
 ```bash
-rsync -az --delete \
-  --exclude node_modules --exclude .git --exclude .next --exclude .next-deploy --exclude .env \
-  ./ user@host:openwhale/
-
-rsync -az --delete --exclude cache \
-  packages/apps/dashboard/.next-deploy/ user@host:openwhale/packages/apps/dashboard/.next/
+rsync -az --delete --exclude node_modules --exclude .git --exclude .next --exclude .next-deploy --exclude .env ./ user@host:openwhale/
+rsync -az --delete --exclude cache packages/apps/dashboard/.next-deploy/ user@host:openwhale/packages/apps/dashboard/.next/
+ssh user@host 'cd openwhale && pnpm install --frozen-lockfile'
 ```
 
-On the server, install runtime dependencies only:
-
-```bash
-cd ~/openwhale && pnpm install --frozen-lockfile
-```
-
-`scripts/deploy.sh` does all of the above plus the health check. Copy
-`scripts/deploy.env.example` to `scripts/deploy.env` and fill in the host, the
-path, and optionally a key, a public URL for the health check, and any local
-plugin packages to build and ship alongside the repo.
-
----
+`scripts/deploy.sh` does all of the above plus restart and health check. Configure it in `scripts/deploy.env` (copy `deploy.env.example`): host, path, key, public URL, local plugin packages, and `DEPLOY_BLACKOUT`.
 
 ### 4. systemd
 
@@ -244,16 +145,9 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now openwhale-gateway openwhale-dashboard
 ```
 
-`Restart=always` matters more than it looks. A monitor that dies takes its
-subscriptions with it, and a strategy holding a position needs the engine
-running to close it — the synthetic stops some strategies use protect only
-while the process is alive.
-
----
+`Restart=always` is required: strategies' synthetic stops exist only while the process runs.
 
 ### 5. nginx and TLS
-
-Publish the dashboard. Never the gateway.
 
 ```nginx
 server {
@@ -266,126 +160,60 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade    $http_upgrade;   # SSE: live events, log tails
+        proxy_set_header Upgrade    $http_upgrade;
         proxy_set_header Connection '';
         proxy_set_header Host       $host;
-        proxy_set_header X-Forwarded-Proto $scheme;  # see below
-        proxy_buffering off;                          # or SSE arrives in lumps
+        proxy_set_header X-Forwarded-Proto $scheme;  # required: tells the gateway the request is TLS
+        proxy_buffering off;                          # required for SSE (live events, log tails)
     }
 }
 ```
 
 `certbot --nginx -d openwhale.example.com` for the certificate.
 
-### TLS is not optional
-
-The session cookie is marked `Secure`, which the browser honours by **silently
-dropping it** over plain http. The symptom is not an error: you sign in, the
-page reloads, and you are signed out again, for ever, with nothing in any log
-to say why.
-
-`X-Forwarded-Proto` is what tells the gateway the request arrived over TLS. Get
-it wrong and you reproduce the same loop from behind a working certificate.
-
-`proxy_buffering off` is for the live-event and log-tail streams; with
-buffering on they arrive in batches and look frozen.
-
----
+TLS is required. The session cookie is `Secure`: over plain http, or with a missing `X-Forwarded-Proto`, the browser drops it and sign-in loops with nothing logged.
 
 ### 6. Verify
 
 ```bash
 systemctl is-active openwhale-gateway openwhale-dashboard
-curl -s -o /dev/null -w '%{http_code}\n' https://openwhale.example.com/login
-curl -s -o /dev/null -w '%{http_code}\n' https://openwhale.example.com/api/auth/status
-```
-
-Two 200s and both services active. The second URL goes through the dashboard's
-proxy to the gateway, so it fails differently from the first — a 200 on `/login`
-with a failure on `/api/auth/status` means the frontend is up and the engine is
-not.
-
-```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://openwhale.example.com/login             # dashboard
+curl -s -o /dev/null -w '%{http_code}\n' https://openwhale.example.com/api/auth/status   # dashboard → gateway
 journalctl -u openwhale-gateway -f
 ```
 
 ---
 
-## Operating it
+## Operations
 
-### Never run two engines against one set of credentials
+**One engine per credential set.** Two gateways holding the same API keys with the same instances enabled place duplicate orders; both log success. Disable instances on one side before the other starts.
 
-A gateway on your laptop and a gateway on the server, both holding the same API
-keys with the same instances enabled, will each place the full order at the same
-instant. The venue is happy to fill both.
+**Restarts interrupt execution.** A deploy restarts the gateway mid-cycle: positions opened before a scheduled event may be left without the leg that closes them. `DEPLOY_BLACKOUT=FROM-TO` in `scripts/deploy.env` (minutes past the hour, UTC, wrapping) makes `deploy.sh` refuse inside that window; `--force-window` overrides.
 
-This is the single easiest way to lose money with this tool, and it does not
-announce itself: both engines log a clean, successful cycle.
+**Upgrade.** Build, rsync, `pnpm install --frozen-lockfile`, restart. `~/.openwhale` is untouched. Instances marked `enabled` come back on boot; deactivated ones stay down.
 
-Before starting a local gateway, check what the server is running. If you are
-migrating state between machines, disable the instances on one side *before*
-the other side comes up.
+**Rollback.** `git checkout <sha>`, rebuild, redeploy. The database is not covered: back it up before a release that migrates the schema.
 
-### Restarting interrupts what is running
-
-A deploy restarts the gateway, and a restart cuts whatever is mid-execution.
-For strategies that work in cycles around a fixed instant — anything that opens
-before a scheduled event and closes after it — that can leave positions opened
-with nothing left to close them, and execution records that never reached disk.
-
-`scripts/deploy.sh` can refuse to run inside a window you name. Set
-`DEPLOY_BLACKOUT` in `scripts/deploy.env` to the minutes past the hour your
-strategies occupy, UTC, as `FROM-TO`; it wraps, so `54-01` covers `:54` through
-`:01`. `--force-window` overrides it when you know nothing is mid-cycle.
-
-### Upgrading
-
-A routine deploy is: build locally, rsync, `pnpm install --frozen-lockfile`,
-restart. It does not touch `~/.openwhale`, which is what makes it routine.
-
-Instances marked `enabled` come back up on their own — that is boot's rule, and
-plugin reloads follow it too. Instances you deactivated stay down.
-
-### Rolling back
-
-The code is a git checkout and the build is reproducible, so rolling back is
-`git checkout <sha>`, rebuild, redeploy. **The database is not covered by
-this.** A release that migrates the schema is a release you cannot roll back
-without a backup taken beforehand — take one.
-
-### Plugins on a server
-
-Installing a plugin runs third-party code inside the gateway, with access to
-every credential. The Plugins page says so; it is worth repeating for a machine
-that is unattended.
-
-npm-installed plugins can be updated in place from the dashboard. GitHub
-installs are cloned and built by npm, so a source-only repo needs a `prepare`
-script; private repos need `OPENWHALE_GITHUB_TOKEN` in the environment.
-
-Plugins are loaded from their own copy under `plugins/staged/`, so reinstalling
-runs the new code without a restart — Node's module registry is keyed by
-resolved URL and cannot be evicted, so a fixed path would keep executing the
-first version ever loaded.
+**Plugins.** A plugin runs inside the gateway with access to every credential. npm installs update in place from the dashboard. GitHub installs are built by npm (source-only repos need a `prepare` script; private repos need `OPENWHALE_GITHUB_TOKEN`). Each install loads from its own copy under `plugins/staged/`, so a reinstall needs no restart.
 
 ---
 
-## When something is wrong
+## Troubleshooting
 
-| Symptom | Where to look |
+| Symptom | Cause |
 |---|---|
-| Sign-in loops back to the login page | TLS. The `Secure` cookie is being dropped — check the certificate and `X-Forwarded-Proto`. |
-| Dashboard renders empty everywhere | The gateway is down or unreachable. `systemctl status openwhale-gateway`, then `OPENWHALE_GATEWAY_URL`. |
-| A venue times out, everything else is fine | Reachability. See the proxy section of the main README — `HTTPS_PROXY` does nothing here, and neither does `NODE_USE_ENV_PROXY`. |
-| An instance shows a red strategy chip | Its plugin is gone or was replaced by a version without that strategy. The row is kept on purpose; reinstalling the version that has it brings it back. |
-| Live events and log tails freeze | `proxy_buffering off` is missing. |
-| Disk filling | `~/.openwhale/monitors/`. Regenerable; prune the oldest. |
+| Sign-in loops back to the login page | `Secure` cookie dropped: no TLS, or `X-Forwarded-Proto` missing. |
+| Dashboard renders empty | Gateway down or unreachable: `systemctl status openwhale-gateway`, then `OPENWHALE_GATEWAY_URL`. |
+| One venue times out | Reachability. `OPENWHALE_HTTPS_PROXY` (README); `HTTPS_PROXY` and `NODE_USE_ENV_PROXY` are not honoured. |
+| Instance shows a red strategy chip | Its plugin is gone or the new version dropped the strategy. Reinstall the version that has it. |
+| Live events / log tails freeze | `proxy_buffering off` missing. |
+| Disk filling | `~/.openwhale/monitors/` — regenerable; prune the oldest. |
 
 ---
 
 ## See also
 
 - [中文部署指南](./DEPLOYMENT.zh-CN.md)
-- [README](./README.md) — what OpenWhale is, and the local development quick start
-- [`scripts/deploy.sh`](./scripts/deploy.sh) — the deployment this document describes
-- `.env.example` — every environment variable, with the reasoning
+- [README](./README.md) — concepts and local development
+- [`scripts/deploy.sh`](./scripts/deploy.sh) — the source deployment above, scripted
+- `.env.example` — every environment variable
