@@ -44,8 +44,11 @@ services:
     command: ["node_modules/.bin/next", "start", "-p", "3002"]
     working_dir: /app/packages/apps/dashboard
     restart: unless-stopped
-    # Where /api/* goes is baked into the image at build time (see the
-    # Dockerfile) and defaults to this service's address — nothing to set here.
+    environment:
+      # Two readers of this address: the browser's /api/* rewrite is baked in
+      # at build time (Dockerfile), but the pages render on the server and
+      # fetch the gateway themselves at request time — that one reads env.
+      OPENWHALE_GATEWAY_URL: http://gateway:3001
     ports:
       # Loopback only: put a TLS terminator in front before this is reachable
       # from elsewhere — the session cookie is Secure, and over plain http the
