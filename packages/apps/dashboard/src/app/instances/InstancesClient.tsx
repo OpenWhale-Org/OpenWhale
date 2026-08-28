@@ -1592,8 +1592,7 @@ function TopTraders({ onPick, current }: { onPick: (address: string) => void; cu
       <button
         type="button"
         onClick={load}
-        className="hoverable hoverable-flat self-start h-7 px-2.5 rounded-md text-xs flex items-center gap-1.5"
-        style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+        className="btn btn-soft btn-sm self-start flex items-center gap-1.5"
       >
         {open ? '▾' : '▸'} Suggest a trader
         <span style={{ opacity: 0.7 }}>· top of the Hyperliquid leaderboard, last 30 days</span>

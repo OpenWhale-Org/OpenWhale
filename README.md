@@ -224,6 +224,11 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 | **Grid / DCA** | Scheduled or level-triggered accumulation and distribution |
 | **Copy trading** | Mirror a target account or wallet with proportional sizing and caps |
 | **On-chain yield** | Wallet-keyed accounts on lending, LP, and yield-tokenization protocols |
+| **On-chain arbitrage** | DEX-to-DEX and DEX-to-CEX price gaps, executed from wallet accounts |
+| **Airdrop farming** | Scheduled protocol interactions across many wallets, each an account |
+| **Launch sniping / new listings** | Monitor listings and token launches, enter on the event with size caps |
+| **Meme trading** | Fast on-chain momentum with hard stops and position limits |
+| **News / social signals** | Monitors over news feeds and social posts (X, Telegram), LLM-classified, traded with limits |
 | **AI-driven signals** | Structured-output LLM inference as one input among the others, risk limits in code |
 
 ---

@@ -100,6 +100,9 @@ body {
   .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
   .btn-secondary { background: transparent; color: var(--foreground); border-color: var(--border); }
   .btn-secondary:hover:not(:disabled) { background: var(--surface-raised); }
+  /* The weak button: for a control that must read as clickable without competing with the primary action — disclosure toggles, helpers, 'suggest'. */
+  .btn-soft { background: var(--surface-raised); color: var(--foreground-soft); border-color: var(--border); }
+  .btn-soft:hover:not(:disabled) { color: var(--foreground); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised)); }
   .btn-ghost { background: transparent; color: var(--muted); }
   .btn-ghost:hover:not(:disabled) { background: var(--surface-raised); color: var(--foreground); }
   .btn-danger { background: transparent; color: var(--danger); border-color: var(--border); }
@@ -431,12 +434,13 @@ body {
 }
 .ow-tour-actions { display: flex; align-items: center; gap: .4rem; margin-top: .8rem; }
 .ow-tour-spacer { flex: 1 }
-.ow-tour-actions button {
+.ow-tour-card button {
   height: 28px; padding: 0 .7rem; border-radius: 7px; font-size: .72rem;
-  border: 1px solid var(--border); color: rgba(226,220,250,.72);
+  border: 1px solid var(--border); color: rgba(226,220,250,.72); background: rgba(255,255,255,.04);
 }
-.ow-tour-actions button:hover { color: #fff; border-color: color-mix(in srgb, var(--accent) 60%, transparent) }
-.ow-tour-actions .ow-tour-primary { background: var(--accent); color: #fff; border-color: transparent }
+.ow-tour-card button:hover { color: #fff; border-color: color-mix(in srgb, var(--accent) 60%, transparent) }
+.ow-tour-card .ow-tour-primary { background: var(--accent); color: #fff; border-color: transparent }
+.ow-tour-card a { color: var(--accent); text-decoration: underline; }
 
 /* ── Hover: the surface rises a little out of the water ───────────────────
    One class for every card and row, so a list, a grid and a dialog all answer

@@ -52,6 +52,8 @@ interface Step {
 
 interface ActionResult {
   note: string
+  /** A place to go next, rendered as a link. */
+  link?: { label: string; href: string }
   /** Shown in full with a copy button — the only time it is displayed. */
   secret?: { label: string; value: string }
 }
@@ -112,7 +114,8 @@ const STEPS: Step[] = [
           detail: { name: 'Tutorial testnet', values: { walletAddress: address, privateKey, testnet: 'true' } },
         }))
         return {
-          note: `Filled in ${address}. Fund it at app.hyperliquid-testnet.xyz/drip, then Save.`,
+          note: `Filled in ${address}. Fund it at the testnet faucet, then Save.`,
+          link: { label: 'Open the faucet (app.hyperliquid-testnet.xyz/drip)', href: 'https://app.hyperliquid-testnet.xyz/drip' },
           secret: { label: 'Private key — copy it now; it is shown only here, and the credential store never reveals it again', value: privateKey },
         }
       },
@@ -390,7 +393,12 @@ export function Tour() {
                 <button className="ow-tour-primary" onClick={() => { setActionNote(step!.action!.run()); setCopied(false) }}>{step!.action.label}</button>
               </p>
             )}
-            {actionNote && <p className="ow-tour-waiting">{actionNote.note}</p>}
+            {actionNote && (
+              <p className="ow-tour-waiting">
+                {actionNote.note}
+                {actionNote.link && <> <a href={actionNote.link.href} target="_blank" rel="noopener noreferrer">{actionNote.link.label} ↗</a></>}
+              </p>
+            )}
             {actionNote?.secret && (
               <div className="ow-tour-secret">
                 <div className="ow-tour-secret-label">{actionNote.secret.label}</div>
