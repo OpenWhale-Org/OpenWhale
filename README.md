@@ -214,8 +214,8 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 ## Quick start
 
 This is **development mode** — hot reload, rebuilt on every save. For a server
-(systemd, nginx, TLS) see **[DEPLOYMENT.md](./DEPLOYMENT.md)**. A Docker path is
-planned.
+see **[DEPLOYMENT.md](./DEPLOYMENT.md)** — `docker compose up -d --build` is the
+short version; systemd, nginx and TLS the long one.
 
 ### Prerequisites
 

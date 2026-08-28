@@ -42,10 +42,50 @@ internet.** Publish the dashboard, keep the gateway on loopback.
 
 ## Docker
 
-Planned, not shipped. A container that installs plugins needs `npm` and `git`
-inside it and a volume that survives `docker compose down`, and shipping a
-compose file nobody has run end to end is worse than shipping none — the first
-person to try it debugs the deployment instead of using it. Until then, below.
+The shortest path to a server. One image, built from the repository, runs
+the gateway and the dashboard as two containers; `docker-compose.yml` wires
+them together.
+
+```sh
+cp .env.example .env        # OPENWHALE_MASTER_KEY + the first admin login
+docker compose up -d --build
+open http://localhost:3000
+```
+
+What you get:
+
+- **State in one volume.** `openwhale-data` is mounted at `/data`, which is
+  the container's home directory — so the database, credential store,
+  monitor history and installed plugins all live there (§1 applies, with
+  `/data/.openwhale` for `~/.openwhale`). `docker compose down` keeps it;
+  only `down -v` deletes it.
+- **Only the dashboard is published**, on loopback (`127.0.0.1:3000`). It
+  proxies `/api/*` to the gateway over the compose network; the gateway has
+  no public port. Put TLS in front of 3000 before it is reachable from
+  anywhere else (§5) — the session cookie is `Secure`, and over plain http
+  every login silently loops. `OPENWHALE_PORT=3010` in `.env` moves the port
+  when `pnpm dev` already owns 3000; `OPENWHALE_PUBLIC_URL` is the address
+  the gateway accepts as origin.
+- **Plugins from npm and GitHub** work as on a bare server — the image
+  carries `npm` and `git`. A plugin you are developing on the host: mount its
+  folder (the commented `./plugins` volume) and install it from the Plugins
+  page by its container path, `/plugins/<name>`.
+- **Upgrades** are `git pull && docker compose up -d --build`. The gateway
+  restarts, which interrupts whatever is mid-execution (§"Restarting") — pick
+  the moment. Configuration is read from `.env` at start, so rotating a key
+  is an edit and `docker compose up -d`, not a rebuild. The one thing baked
+  in at build time is where the dashboard proxies `/api/*` — the compose
+  service name by default; `--build-arg OPENWHALE_GATEWAY_URL=…` for any
+  other topology.
+
+The image is the full `node:22` on Debian, not `-slim`, and installs nothing
+with apt: it already carries git and a toolchain, and an `apt-get update` from
+a network that intercepts port 80 fails the whole build for a dependency
+nobody would guess was there. It is bigger than it could be, and it builds
+everywhere.
+
+Memory: give the gateway a heap limit on a small box —
+`NODE_OPTIONS=--max-old-space-size=1536` in `.env` — for the reason §3 explains.
 
 ---
 

@@ -222,7 +222,7 @@ npm 安装的插件如有新版本会在列表中提示，支持一键更新，�
 
 ## 快速上手
 
-本节是**开发模式**：热重载，改代码即时生效。服务器部署（systemd、nginx、TLS）见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)。Docker 方式在计划中。
+本节是**开发模式**：热重载，改代码即时生效。服务器部署见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)——`docker compose up -d --build` 是短版本，systemd、nginx、TLS 是长版本。
 
 ### 前置
 

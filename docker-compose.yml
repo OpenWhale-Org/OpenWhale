@@ -1,0 +1,66 @@
+# OpenWhale — gateway + dashboard.
+#
+#   cp .env.example .env      # OPENWHALE_MASTER_KEY and the first admin login
+#   docker compose up -d --build
+#   open http://localhost:3000
+#
+# State lives in the `openwhale-data` volume — database, credentials, monitor
+# history, installed plugins. `docker compose down` keeps it; `down -v` deletes
+# it. DEPLOYMENT.md has the reasoning; this file has the short version.
+
+services:
+  gateway:
+    build: .
+    image: openwhale:local
+    command: ["node", "packages/apps/gateway/dist/index.js"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file: [.env]
+    environment:
+      # The dashboard is the only thing that talks to it, over the compose
+      # network, so the origin it accepts is the dashboard's public address.
+      OPENWHALE_ALLOWED_ORIGIN: ${OPENWHALE_PUBLIC_URL:-http://localhost:3000}
+    volumes:
+      # Named rather than bind-mounted so `docker compose down` cannot take it
+      # with the containers.
+      - openwhale-data:/data
+      # A plugin you are developing on this machine: mount its folder and
+      # install it from the Plugins page by its container path, /plugins/<name>.
+      # - ./plugins:/plugins:ro
+    # NOT published. This process holds decrypted exchange keys, places orders
+    # and installs plugins — arbitrary code. It is reached over the compose
+    # network by the dashboard and by nothing else.
+    expose: ["3001"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/auth/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  dashboard:
+    build: .
+    image: openwhale:local
+    command: ["node_modules/.bin/next", "start", "-p", "3002"]
+    working_dir: /app/packages/apps/dashboard
+    restart: unless-stopped
+    # Where /api/* goes is baked into the image at build time (see the
+    # Dockerfile) and defaults to this service's address — nothing to set here.
+    ports:
+      # Loopback only: put a TLS terminator in front before this is reachable
+      # from elsewhere — the session cookie is Secure, and over plain http the
+      # browser drops it and every login silently loops. OPENWHALE_PORT moves
+      # it when `pnpm dev` already owns 3000 on this machine.
+      - "127.0.0.1:${OPENWHALE_PORT:-3000}:3002"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  openwhale-data:

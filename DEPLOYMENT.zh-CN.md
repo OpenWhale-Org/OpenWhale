@@ -27,7 +27,24 @@
 
 ## Docker
 
-计划中，尚未提供。当前的 Dockerfile 未经完整验证，暂不随仓库发布。请使用下面的源码部署方式。
+上服务器最短的路。一个镜像从仓库构建，以两个容器分别运行网关和看板；`docker-compose.yml` 把它们接起来。
+
+```sh
+cp .env.example .env        # 填 OPENWHALE_MASTER_KEY 和首个管理员账号
+docker compose up -d --build
+open http://localhost:3000
+```
+
+你会得到：
+
+- **状态都在一个卷里。** `openwhale-data` 挂在 `/data`，也就是容器的 home 目录——数据库、凭证、监控历史、已安装插件全在里面（下文 §1 照样适用，`~/.openwhale` 对应 `/data/.openwhale`）。`docker compose down` 保留它，只有 `down -v` 会删。
+- **只发布看板**，且只绑定回环地址（`127.0.0.1:3000`）。看板把 `/api/*` 经 compose 网络反代给网关，网关没有公开端口。对外开放前先在 3000 前面加 TLS（§5）——会话 cookie 是 `Secure` 的，纯 http 下浏览器会丢弃它，登录会静默循环。`.env` 里 `OPENWHALE_PORT=3010` 可换端口（本机 `pnpm dev` 占着 3000 时用），`OPENWHALE_PUBLIC_URL` 是网关接受的来源地址。
+- **从 npm / GitHub 装插件**和裸机上一样——镜像自带 `npm` 和 `git`。本机正在开发的插件：挂载它的目录（compose 里注释掉的 `./plugins` 卷），在 Plugins 页按容器内路径 `/plugins/<name>` 安装。
+- **升级**就是 `git pull && docker compose up -d --build`。网关会重启，正在执行中的东西会被打断（见"重启"一节）——挑好时机。配置在启动时从 `.env` 读，换密钥只需改文件再 `docker compose up -d`，不用重新构建。唯一在构建时固化的是看板把 `/api/*` 反代到哪——默认是 compose 里的服务名，其它拓扑用 `--build-arg OPENWHALE_GATEWAY_URL=…`。
+
+镜像用完整的 `node:22`（Debian），不是 `-slim`，并且不用 apt 装任何东西：它自带 git 和编译工具链，而在拦截 80 端口的网络里 `apt-get update` 会让整个构建失败，还是为了一个没人想到的依赖。镜像大一点，但在哪都能构建。
+
+内存：小机器上给网关设堆上限——`.env` 里 `NODE_OPTIONS=--max-old-space-size=1536`，原因见 §3。
 
 ---
 

@@ -1,0 +1,14 @@
+# Built inside the image from source; nothing prebuilt or private comes along.
+**/node_modules
+**/dist
+**/.next
+**/.next-deploy
+.git
+.env
+.env.*
+!.env.example
+*.log
+scripts/deploy.env
+scripts/deploy.local.sh
+skills
+docs

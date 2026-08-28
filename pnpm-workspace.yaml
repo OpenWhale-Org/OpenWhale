@@ -6,3 +6,9 @@ packages:
   # Local-only private packages follow the private-* convention and never
   # enter the workspace or the lockfile.
   - '!packages/*/private-*'
+
+# pnpm 10 runs no dependency install script unless it is approved here.
+# better-sqlite3 needs its script to fetch the prebuilt binding — without it
+# the engine fails at boot with "Could not locate the bindings file".
+onlyBuiltDependencies:
+  - better-sqlite3
