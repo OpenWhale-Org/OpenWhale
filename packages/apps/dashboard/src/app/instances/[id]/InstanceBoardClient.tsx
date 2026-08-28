@@ -359,14 +359,15 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       // pin from the implementation, credential type only as CEX fallback.
       if (ra.ok) {
         const { accounts, implementations } = (await ra.json()) as {
-          accounts: Array<{ name: string; implementation?: string; type?: string }>
+          accounts: Array<{ name: string; implementation?: string; credential?: string; type?: string }>
           implementations?: Array<{ id: string; type?: string }>
         }
         const implVenues = Object.fromEntries((implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : []))
         for (const slot of def?.accountRequirements ?? []) {
           const bound = instance.credentials?.[slot.label] ?? instance.accounts?.[0]
           if (!bound) continue
-          const account = accounts.find(a => a.name === bound)
+          // Instances from before Account entities bind by credential name — match either
+          const account = accounts.find(a => a.name === bound || a.credential === bound)
           const venue = account ? implVenues[account.implementation ?? ''] ?? account.type : undefined
           if (venue) { setBoundVenue(venue); break }
         }
