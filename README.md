@@ -214,15 +214,17 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 
 ## Use cases
 
-| Scenario | Shape |
+| Category | Shape |
 |---|---|
-| **Funding / basis capture** | Cron-triggered cycles around settlement instants, sized by order-book depth |
-| **Pair / spread reversion** | Two-leg hedged ladders on a z-scored spread monitor, with dwell confirmation and stops |
-| **Copy trading** | Monitor a target wallet, mirror trades proportionally with position caps |
-| **AI market analysis** | Structured-output LLM inference inside `evaluate()` |
-| **Multi-condition signals** | Price, volume and rate monitors combined in one trigger window |
-| **On-chain maker rewards** | Post-only quotes at the edge of a maker-incentive band on an on-chain rate market (Boros), re-quoted as the band moves, one relayed transaction per tick via a delegated agent key |
-| **On-chain yield** | Wallet-keyed accounts on the `web3/chain` kind: PT/YT and LP positions (Pendle), balances and positions read from the chain, transactions signed locally |
+| **Funding / basis arbitrage** | Perp vs spot or perp vs perp, timed around settlement, hedged |
+| **Cross-venue arbitrage** | The same instrument on two venues, two accounts, one strategy |
+| **Market making** | Two-sided quotes managed against inventory and volatility; includes incentive-band quoting on DEXs |
+| **Statistical arbitrage / pairs** | Spread or z-score monitors driving hedged multi-leg positions |
+| **Trend following / mean reversion** | Indicator-driven directional strategies on any market |
+| **Grid / DCA** | Scheduled or level-triggered accumulation and distribution |
+| **Copy trading** | Mirror a target account or wallet with proportional sizing and caps |
+| **On-chain yield** | Wallet-keyed accounts on lending, LP, and yield-tokenization protocols |
+| **AI-driven signals** | Structured-output LLM inference as one input among the others, risk limits in code |
 
 ---
 
