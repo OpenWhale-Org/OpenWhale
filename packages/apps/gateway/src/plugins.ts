@@ -17,6 +17,7 @@ import path from 'path'
 import os from 'os'
 import { execFile } from 'child_process'
 import { createRequire } from 'module'
+import semver from 'semver'
 import { promisify } from 'util'
 import type { OpenWhaleRuntime, LoadedPluginInfo, PluginReplaceResult, PluginGlobalConflict } from '@openwhaleorg/core'
 import { getLogger, PluginAlreadyLoadedError } from '@openwhaleorg/core'
@@ -315,49 +316,78 @@ function enginePackageRoot(name: string): string | undefined {
 }
 
 /**
- * Whether the engine's copy may stand in for the one npm fetched — the
- * ecosystem's own caret rule, including 0.x where the minor acts as the major,
- * and then one more condition the caret does not supply.
- *
- * The substitution only goes one way. The engine's copy REPLACES the fetched
- * one, so it has to be at least as new: a plugin built against 0.2.2 and
- * importing something 0.2.2 added is caret-compatible with an engine on 0.2.1
- * and imports nothing that engine has. Semver is a promise about what a later
- * version keeps, not about what an earlier one already had, and reading it in
- * the wrong direction turns a published patch into `does not provide an export
- * named 'esc'` at load time — pointing at the plugin, which is fine, rather
- * than at the engine, which is behind.
- *
- * Downward is still allowed, and has to be: npm resolves the plugin's range to
- * the newest version there is, so the fetched copy is routinely a patch ahead
- * of an engine that is otherwise perfectly able to serve it. Refusing those
- * would leave a second framework copy in the tree, which is the whole thing
- * this prevents. Only ahead-of-the-engine is refused, and it is refused loudly:
- * the answer is to update the engine, and nothing else will do.
+ * The scope whose packages the engine owns. Only these are substituted, so
+ * only these are checked: a plugin's `zod` is its own business and resolves
+ * from its own tree, even though the engine happens to have one too.
  */
-function caretCompatible(engine: string, fetched: string): boolean {
-  const a = engine.split('.').map(Number)
-  const b = fetched.split('.').map(Number)
-  if (a.length < 3 || b.length < 3 || [...a, ...b].some(Number.isNaN)) return engine === fetched
-  if (a[0] !== b[0]) return false
-  // 0.x: a minor bump is a breaking change, so it has to match too
-  if (a[0] === 0 && a[1] !== b[1]) return false
-  return !engineIsOlder(engine, fetched)
-}
+const FRAMEWORK_SCOPE = '@openwhaleorg'
+
+/** A framework package a plugin asks for, and what this engine actually is. */
+export interface FrameworkNeed { package: string; range: string; engine: string }
 
 /**
- * Numerically, because these are versions and not strings: '0.2.10' sorts
- * before '0.2.9' as text and after it as a version, and the whole point of the
- * comparison is which one has the exports the other lacks.
+ * What a plugin declares it needs from the framework, that this engine cannot
+ * give it.
+ *
+ * The engine's framework packages are the only ones there are. A plugin does
+ * not get to run its own copy of core: `shareEnginePackages` replaces whatever
+ * npm fetched with a link to the engine's, because two copies means two
+ * registries and a plugin that registers its adapters where the engine will
+ * never look. So the engine's version is not a preference to reconcile — it is
+ * the fact, and the plugin's declared range is a claim about it that is either
+ * true or not.
+ *
+ * Checked here, at install, rather than discovered at load. The load-time
+ * symptom of a plugin built against a newer core is `does not provide an export
+ * named 'esc'`, which names the plugin and says nothing about the engine being
+ * the thing that is behind. The same mismatch, caught against the declared
+ * range, can say which package, which version, and which of the two to move.
+ *
+ * Ranges are matched with semver rather than by hand. A hand-rolled comparison
+ * is what produced the bug this exists to prevent, and the range side is
+ * strictly harder than the version side: `^0.2.2`, `>=0.2 <0.4`, `0.2.x` and
+ * `*` all have to mean what the ecosystem says they mean. A range this cannot
+ * parse — `workspace:^`, `file:`, `link:` — is a local development arrangement
+ * making no claim about released versions, and is skipped rather than guessed
+ * at.
  */
-function engineIsOlder(engine: string, fetched: string): boolean {
-  const a = engine.split('.').map(Number)
-  const b = fetched.split('.').map(Number)
-  if (a.length < 3 || b.length < 3 || [...a, ...b].some(Number.isNaN)) return false
-  for (let i = 0; i < 3; i++) {
-    if (a[i]! !== b[i]!) return a[i]! < b[i]!
+export function unmetFrameworkNeeds(pkgDir: string): FrameworkNeed[] {
+  let manifest: { peerDependencies?: Record<string, string>; dependencies?: Record<string, string> }
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')) as typeof manifest
+  } catch {
+    return []
   }
-  return false
+  const unmet: FrameworkNeed[] = []
+  const seen = new Set<string>()
+  for (const deps of [manifest.peerDependencies, manifest.dependencies]) {
+    for (const [name, range] of Object.entries(deps ?? {})) {
+      if (seen.has(name) || !name.startsWith(`${FRAMEWORK_SCOPE}/`)) continue
+      seen.add(name)
+      const ours = enginePackageRoot(name)
+      if (ours === undefined) continue                       // not a framework package
+      const engine = versionAt(ours)
+      if (engine === undefined) continue
+      if (semver.validRange(range) === null) continue        // workspace:/file:/link:
+      if (semver.satisfies(engine, range, { includePrerelease: true })) continue
+      unmet.push({ package: name, range, engine })
+    }
+  }
+  return unmet
+}
+
+/** The refusal, worded so the reader knows which of the two to move. */
+export class FrameworkVersionError extends Error {
+  constructor(readonly plugin: string, readonly needs: FrameworkNeed[]) {
+    super(
+      `${plugin} cannot run on this engine. ` +
+      needs.map(n => semver.ltr(n.engine, n.range)
+        ? `It needs ${n.package} ${n.range}, and this engine provides ${n.engine} — update OpenWhale, then install it again.`
+        : `It needs ${n.package} ${n.range}, and this engine provides ${n.engine} — the plugin has to be updated for this engine.`
+      ).join(' '),
+    )
+    this.name = 'FrameworkVersionError'
+  }
 }
 
 function versionAt(dir: string): string | undefined {
@@ -390,7 +420,7 @@ function versionAt(dir: string): string | undefined {
  * runtime one.
  */
 export async function shareEnginePackages(): Promise<void> {
-  const scope = path.join(getPluginsDir(), 'node_modules', '@openwhaleorg')
+  const scope = path.join(getPluginsDir(), 'node_modules', FRAMEWORK_SCOPE)
   let entries: string[]
   try {
     entries = await fs.promises.readdir(scope)
@@ -403,23 +433,18 @@ export async function shareEnginePackages(): Promise<void> {
     const stat = await fs.promises.lstat(installed).catch(() => undefined)
     if (!stat || stat.isSymbolicLink()) continue   // already pointing somewhere of ours
 
-    const name = `@openwhaleorg/${entry}`
+    const name = `${FRAMEWORK_SCOPE}/${entry}`
     const ours = enginePackageRoot(name)
     if (ours === undefined) continue               // a plugin's own package, not a framework one
 
+    /* Unconditionally, whatever version npm chose. There is no second opinion
+       to weigh: the engine's copy is the framework, and a plugin running any
+       other one is a plugin talking to a registry the engine does not read.
+       Whether the engine's version is one the plugin can actually work against
+       is a question with an answer — its declared range — and that question is
+       settled at install and at restore, where refusing costs nothing and can
+       say why. Here there is only the one copy, so there is nothing to decide. */
     const engineVersion = versionAt(ours)
-    const fetched = versionAt(installed)
-    if (engineVersion === undefined || fetched === undefined) continue
-    if (!caretCompatible(engineVersion, fetched)) {
-      log().warn(
-        { package: name, engine: engineVersion, installed: fetched },
-        engineIsOlder(engineVersion, fetched)
-          ? 'A plugin resolved a framework version newer than this engine — leaving its own copy, but the two cannot share state, and anything the plugin imports from the newer version will fail to load. Update the engine.'
-          : 'A plugin wants a framework version this engine does not provide — leaving its own copy, but the two cannot share state',
-      )
-      continue
-    }
-
     await fs.promises.rm(installed, { recursive: true, force: true })
     await fs.promises.symlink(ours, installed, 'junction')
     log().info({ package: name, version: engineVersion }, 'Pointed a plugin dependency at the engine\'s own copy')
@@ -531,6 +556,13 @@ async function stageLoadAndRecord(
   hint?: string,
 ): Promise<InstalledPluginView> {
   const before = await readManifest()
+
+  /* Before anything is staged or loaded. The package is on disk by now — npm
+     had to fetch it to be asked what it needs — but nothing has been copied,
+     recorded, or executed, so refusing here leaves no trace to undo. */
+  const unmet = unmetFrameworkNeeds(fs.realpathSync(path.join(getPluginsDir(), 'node_modules', packageName)))
+  if (unmet.length > 0) throw new FrameworkVersionError(packageName, unmet)
+
   const { entryPath, dir } = await stage(packageName, hint)
   let loaded: { name: string; alias?: string; replace?: PluginReplaceResult }
   try {
@@ -1020,6 +1052,20 @@ export async function restorePlugins(runtime: OpenWhaleRuntime): Promise<void> {
   const entries = await readManifest()
   for (const entry of entries) {
     if (runtime.listLoadedPlugins().some(p => p.name === entry.name)) continue
+    /* An engine can move under a plugin that was installed against an older or
+       newer one — a rollback, or a plugin installed before the engine caught
+       up. Saying so is the whole value here: without it the plugin fails deep
+       inside the module loader with a missing-export error naming the plugin,
+       and the panel shows that instead of the one sentence that identifies the
+       engine as the thing to move. */
+    const staged = stagedDirOf(entry.entryPath)
+    const unmet = staged === undefined ? [] : unmetFrameworkNeeds(staged)
+    if (unmet.length > 0) {
+      const err = new FrameworkVersionError(entry.name, unmet)
+      loadErrors.set(entry.name, err.message)
+      log().error({ plugin: entry.name, needs: unmet }, 'Not restoring a plugin this engine cannot satisfy')
+      continue
+    }
     try {
       await runtime.loadPluginFromPath(entry.entryPath, entry.config, entry.alias !== undefined ? { as: entry.alias } : undefined)
       loadErrors.delete(entry.name)
