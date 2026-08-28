@@ -1055,10 +1055,25 @@ export async function checkPluginUpdates(): Promise<PluginUpdate[]> {
     .map(async (e): Promise<PluginUpdate | undefined> => {
       const packageName = packageNameOf(e.source)
       if (!packageName) return undefined
-      let installed: string
-      try {
-        installed = (JSON.parse(await fs.promises.readFile(path.join(pluginsDir, 'node_modules', packageName, 'package.json'), 'utf8')) as { version: string }).version
-      } catch { return undefined }
+      /* The version that matters is the one RUNNING, which is the staged copy
+         the manifest points at — not whatever sits in the npm tree. npm
+         downloads before the plugin loads, so an update that fails to load
+         leaves the tree a version ahead of what is actually serving. Reading
+         the tree then reports that version as installed, finds the registry
+         agrees, and offers no update: the engine keeps running the old code
+         and the button that would fix it is gone, which is the one state where
+         it is needed most. The tree is still the fallback for an entry whose
+         staging directory has been cleaned away. */
+      let installed: string | undefined
+      const staged = stagedDirOf(e.entryPath)
+      for (const dir of [staged, path.join(pluginsDir, 'node_modules', packageName)]) {
+        if (dir === undefined) continue
+        try {
+          installed = (JSON.parse(await fs.promises.readFile(path.join(dir, 'package.json'), 'utf8')) as { version: string }).version
+          break
+        } catch { /* try the next */ }
+      }
+      if (installed === undefined) return undefined
       try {
         const { stdout } = await execFileAsync(npm.file, [...npm.args, 'view', packageName, 'version', '--loglevel=error'], { timeout: 20_000 })
         const latest = stdout.trim()
