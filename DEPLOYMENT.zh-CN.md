@@ -73,7 +73,7 @@ OPENWHALE_ADMIN_PASSWORD=
 
 ```bash
 OPENWHALE_ALLOWED_ORIGIN=https://openwhale.example.com   # 仅跨域前端需要
-OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897              # 场地流量代理（见 README）
+OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897              # 交易平台流量代理（见 README）
 OPENWHALE_GITHUB_TOKEN=                                  # 从私有仓库安装插件
 ```
 
@@ -204,7 +204,7 @@ journalctl -u openwhale-gateway -f
 |---|---|
 | 登录后跳回登录页 | `Secure` cookie 被丢弃：没有 TLS，或缺少 `X-Forwarded-Proto`。 |
 | 看板各页空白 | 网关未启动或不可达：`systemctl status openwhale-gateway`，再查 `OPENWHALE_GATEWAY_URL`。 |
-| 某个场地超时 | 网络可达性。`OPENWHALE_HTTPS_PROXY`（见 README）；`HTTPS_PROXY` 与 `NODE_USE_ENV_PROXY` 无效。 |
+| 某个平台超时 | 网络可达性。`OPENWHALE_HTTPS_PROXY`（见 README）；`HTTPS_PROXY` 与 `NODE_USE_ENV_PROXY` 无效。 |
 | 实例显示红色策略标签 | 插件已卸载或新版本删掉了该策略。重装含该策略的版本即可恢复。 |
 | 实时事件 / 日志尾随卡住 | 缺少 `proxy_buffering off`。 |
 | 磁盘占满 | `~/.openwhale/monitors/`——可再生，删除最旧的。 |

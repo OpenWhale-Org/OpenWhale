@@ -10,7 +10,7 @@
 
 [English →](./README.md)
 
-OpenWhale 是一个 TypeScript 自动化交易策略框架。Monitor 采集、Strategy 决策、Executor 执行，三层解耦：同一个策略可以运行在任何交易场地、接入任何数据源，并且可以由 AI 编写、审计和迭代。
+OpenWhale 是一个 TypeScript 自动化交易策略框架。Monitor 采集、Strategy 决策、Executor 执行，三层解耦：同一个策略可以运行在任何交易平台、接入任何数据源，并且可以由 AI 编写、审计和迭代。
 
 ---
 
@@ -29,11 +29,11 @@ pnpm dev                       # 网关 :3001，看板 :3000
 
 网关持有运行时和全部密钥；看板是纯前端，把 `/api/*` 反代到网关（`OPENWHALE_GATEWAY_URL`，默认 `http://localhost:3001`）。没有用户账号且没有管理员变量时网关拒绝启动；设置一次、登录后即可移除。
 
-### 场地代理
+### 交易平台代理
 
 ```bash
-OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket，所有场地
-OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # 按场地覆盖：ccxt id 大写；`off` = 直连
+OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket，所有平台
+OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # 按平台覆盖：ccxt id 大写；`off` = 直连
 ```
 
 `HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY` 无效——ccxt 使用自己的 fetch。变量单独命名，避免订单流量因无关的代理设置改道。
@@ -47,8 +47,8 @@ OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # 按场地覆盖：ccxt id �
 ## 为什么是 OpenWhale
 
 - **分层解耦** — Monitor → Strategy → Executor，替换任一层不影响其它层。
-- **场地无关** — 策略只声明账户槽位，场地在激活时由绑定的账户决定。
-- **适配器矩阵** — 场地是 *(kind × venue)* 矩阵中的一个格（`exchange/perp × binance` …）。领域包定义 kind，场地包填充格；数据驱动的 ccxt 名册内置十二个场地。
+- **平台无关** — 策略只声明账户槽位，平台在激活时由绑定的账户决定。
+- **适配器矩阵** — 交易平台（venue）是 *(kind × venue)* 矩阵中的一个格（`exchange/perp × binance` …）。领域包定义 kind，平台包填充格；数据驱动的 ccxt 名册内置十二个平台。
 - **AI 作为程序员** — 策略内置结构化输出的 LLM 推理；仓库自带 `skills/openwhale-dev`，让 Claude 掌握框架契约。
 - **运行追踪** — 每次运行都持久化：看到了什么、哪道门拒绝了、发出了什么。重启不丢。
 - **PnL 归因** — 执行器认领自己下的单；成交、手续费、资金费回接到实例。同一账户上的两个实例可分开核算。
@@ -62,9 +62,9 @@ OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # 按场地覆盖：ccxt id �
 |---|---|
 | **Monitor** | 采集数据并按 key 发出记录（`venue:symbol`）。一个 *contract* 对应一个或多个 *implementation*；用户按 key 创建 *instance*。记录以 JSONL 持久化并驱动触发器。 |
 | **Strategy** | 纯决策逻辑。按标签声明依赖的 monitor / executor / account，接收触发，返回 `ExecutionInstruction[]`。参数分 `base`（必填）和 `tunable`（带默认值）两个 zod schema。 |
-| **Executor** | 通过适配器会话把指令变成场地动作：重试、幂等的客户端订单 id、延迟与滑点采集。凭证槽位解析为会话（按 kind）或原始凭证数据（`raw: true`）；`optional: true` 的槽位可以不绑定。 |
+| **Executor** | 通过适配器会话把指令变成平台动作：重试、幂等的客户端订单 id、延迟与滑点采集。凭证槽位解析为会话（按 kind）或原始凭证数据（`raw: true`）；`optional: true` 的槽位可以不绑定。 |
 | **Instance** | 策略 + 参数 + 账户绑定，作为一个整体激活。实时事件、执行记录、运行和日志都挂在它上面。 |
-| **Account** | 凭证与账户实现（通用或场地特化）的具名绑定。策略通过它读取余额和仓位。 |
+| **Account** | 凭证与账户实现（通用或平台特化）的具名绑定。策略通过它读取余额和仓位。 |
 | **Trigger** | Cron 计划和 monitor 条件（多源 AND，限定时间窗）。订阅让 monitor 持续采集而不唤醒策略；`addMonitorSource` 可在运行时添加新发现的数据源。 |
 | **Portfolio journal** | 可选的实例级历史：幂等快照、成交、决策、行情 K 线。Core 负责存储并推导净值、回撤和交易报告。 |
 
@@ -80,7 +80,7 @@ Monitor ──emit(key, data)──▶ TriggerManager ──StrategyContext─�
 | 页面 | 功能 |
 |---|---|
 | **Instances** | 卡片式实例：文件夹、拖拽排序、实时净 PnL；每个实例的 Live Events、Executions、Runs、Logs；Board 视图支持参数编辑、账户重绑、PnL 面板。 |
-| **PnL** | 归因账本得出的已实现 / 手续费 / 资金费 / 净值 / 未实现；按品种、原始成交、按场地标记价的持仓。资金费按结算时刻各实例的仓位拆分。 |
+| **PnL** | 归因账本得出的已实现 / 手续费 / 资金费 / 净值 / 未实现；按品种、原始成交、按平台标记价的持仓。资金费按结算时刻各实例的仓位拆分。 |
 | **Runs** | 每次运行的门控、跳过、仓位计算、指令和日志。有指令或报错的运行持久化，空转运行抽样。 |
 | **Monitor boards** | 由 `plots()` 声明的面板：折线、柱状、K 线、可排序表格；单选 / 多选 key。 |
 | **参数表单** | 由 zod `.meta()` 生成：分节、滑块、单位、条件字段、市场选择器、可用性校验、行表格式的 list 参数、随输入实时重绘的交互示意图。 |
@@ -135,7 +135,7 @@ runtime.loadPlugin(hyperliquidPlugin, {})
 await runtime.start()
 await runtime.activate({
   strategyId: 'my-plugin/momentum',
-  credentials: { main: 'My Binance' },       // 账户绑定决定场地
+  credentials: { main: 'My Binance' },       // 账户绑定决定平台
   params: { base: { symbol: 'BTC/USDT:USDT', threshold: 60000 } },
 })
 ```
@@ -200,7 +200,7 @@ export default definePlugin((ctx) => ({
 **规则：**
 
 - 插件名即命名空间（`my-plugin/momentum`）。名字被占用时安装期分配新命名空间（`alice-funding-arb`）；一旦有实例引用，命名空间不再变更。
-- 适配器格和凭证类型是全局的：提供同一场地的两个插件不能共存。注册要么全部成功要么全部不做。
+- 适配器格和凭证类型是全局的：提供同一平台的两个插件不能共存。注册要么全部成功要么全部不做。
 - 覆盖安装保留实例、账户和凭证；新版本删掉的策略对应的实例标记为损坏，不删除。
 - npm 安装的插件在列表中显示注册表上的新版本，一键更新（同一条覆盖路径）。
 - 仍有实例、账户或凭证引用时拒绝卸载；插件的 monitor 实例随卸载删除。
@@ -235,8 +235,8 @@ export default definePlugin((ctx) => ({
 | [`@openwhaleorg/core`](./packages/framework/core) | 引擎：适配器矩阵、账户、monitor 模型、strategy/executor/trigger、运行追踪、PnL 归因、scripts、`definePlugin` 与装饰器 |
 | [`@openwhaleorg/exchange`](./packages/framework/exchange) | kind `exchange/perp` 与 `exchange/spot`：账户视图、交易执行器、行情 monitor |
 | [`@openwhaleorg/web3`](./packages/framework/web3) | kind `web3/chain`：EVM 会话、钱包账户、`web3/evm` 与 `web3/rpc` 凭证类型 |
-| [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | 交易所适配器的 ccxt 实现与数据驱动的场地名册 |
-| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | 场地插件：凭证类型、适配器格、场地特化账户 |
+| [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | 交易所适配器的 ccxt 实现与数据驱动的平台名册 |
+| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | 平台插件：凭证类型、适配器格、平台特化账户 |
 | [`@openwhaleorg/gateway`](./packages/apps/gateway) | 后端：运行时、认证、REST + SSE API、编译服务、插件安装 |
 | [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js 前端 |
 | [`@openwhaleorg/examples`](./packages/strategies/examples) | 参考策略：动量、均值回归、定投、LLM 分析、跟单 |
@@ -248,7 +248,7 @@ export default definePlugin((ctx) => ({
 
 ## 参与
 
-想法和 bug 提 issue；修复、场地插件、策略示例提 PR。
+想法和 bug 提 issue；修复、平台插件、策略示例提 PR。
 
 ## 许可证
 
