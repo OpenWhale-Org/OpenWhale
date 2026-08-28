@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { usePathname, useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 
@@ -45,6 +46,8 @@ interface Step {
   until?: string
   /** Shown while waiting, so a step that cannot self-advance is never a dead end. */
   waitingFor?: string
+  /** A button on the card that does part of the step for the operator. Returns a note to show. */
+  action?: { label: string; run: () => string | undefined }
 }
 
 /** What the tour can observe about the system, refreshed while it runs. */
@@ -91,9 +94,20 @@ const STEPS: Step[] = [
     route: '/credentials',
     target: 'credential-form',
     title: 'Fill it in, and turn Testnet ON',
-    body: 'Name it something you will recognise, paste the wallet address and private key, and switch Testnet to true. That toggle is the entire difference between this tutorial and real money. Then Save.',
+    body: 'Generate a wallet here — it fills the form with a fresh key and Testnet on — or paste your own. Fund the address at app.hyperliquid-testnet.xyz/drip (mock USDC, any address), then Save. Testnet is the entire difference between this tutorial and real money.',
     done: w => testnetCred(w) !== undefined,
     waitingFor: 'Waiting for a Hyperliquid credential with Testnet on…',
+    action: {
+      label: 'Generate a testnet wallet',
+      run: () => {
+        const privateKey = generatePrivateKey()
+        const address = privateKeyToAccount(privateKey).address
+        window.dispatchEvent(new CustomEvent('ow-tour-fill', {
+          detail: { name: 'Tutorial testnet', values: { walletAddress: address, privateKey, testnet: 'true' } },
+        }))
+        return `Filled in ${address}. Fund it at app.hyperliquid-testnet.xyz/drip, then Save. The key is stored encrypted with the credential — nowhere else.`
+      },
+    },
   },
   {
     route: '/accounts',
@@ -188,6 +202,9 @@ export function Tour() {
   const [i, setI] = useState(0)
   const [world, setWorld] = useState<World>(EMPTY)
   const [rect, setRect] = useState<DOMRect | null>(null)
+  /** What the step's action reported, cleared when the step changes. */
+  const [actionNote, setActionNote] = useState('')
+  useEffect(() => { setActionNote('') }, [i])
   const router = useRouter()
   const pathname = usePathname()
   const step = STEPS[i]
@@ -358,6 +375,12 @@ export function Tour() {
             <div className="ow-tour-step">Step {i + 1} of {STEPS.length}</div>
             <h3>{step!.title}</h3>
             <p>{step!.body}</p>
+            {step!.action && (
+              <p>
+                <button className="ow-tour-primary" onClick={() => setActionNote(step!.action!.run() ?? '')}>{step!.action.label}</button>
+              </p>
+            )}
+            {actionNote && <p className="ow-tour-waiting">{actionNote}</p>}
             {step!.done && !step!.done(world) && (
               <p className="ow-tour-waiting">{step!.waitingFor}</p>
             )}

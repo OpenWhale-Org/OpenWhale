@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Rail, RailItem } from '../../components/Rail'
 import { Modal } from '@/components/Modal'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
@@ -109,6 +109,19 @@ function SchemaCredentialForm({
     setValues((v) => ({ ...v, [field]: value }))
     setTestState('idle')
   }
+
+  // The tour can fill the form (a generated testnet wallet): name only when
+  // still empty, field values merged over what is typed.
+  useEffect(() => {
+    const onFill = (e: Event) => {
+      const d = (e as CustomEvent<{ name?: string; values?: Record<string, string> }>).detail
+      if (d?.name) setName(n => n || d.name!)
+      if (d?.values) setValues(v => ({ ...v, ...d.values }))
+      setTestState('idle')
+    }
+    window.addEventListener('ow-tour-fill', onFill)
+    return () => window.removeEventListener('ow-tour-fill', onFill)
+  }, [])
 
   function assemble(): Record<string, unknown> | null {
     const { data, error: buildError } = buildData(fields, values)
