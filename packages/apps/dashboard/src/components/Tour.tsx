@@ -22,7 +22,8 @@ import { createPortal } from 'react-dom'
 
 const KEY = 'ow:tour'
 
-export type TourState = 'idle' | 'running'
+/** `welcome` is the card shown before step 1: what the tour is, take it or skip it. */
+export type TourState = 'idle' | 'welcome' | 'running'
 
 interface Step {
   /** Page this step happens on; the tour navigates there if you are elsewhere. */
@@ -174,7 +175,7 @@ const STEPS: Step[] = [
 ]
 
 export function startTour() {
-  try { localStorage.setItem(KEY, 'running') } catch { /* private mode */ }
+  try { localStorage.setItem(KEY, 'welcome') } catch { /* private mode */ }
   window.dispatchEvent(new Event('ow-tour'))
 }
 
@@ -196,7 +197,7 @@ export function Tour() {
     const sync = () => {
       let v: string | null = null
       try { v = localStorage.getItem(KEY) } catch { /* private mode */ }
-      setState(v === 'running' ? 'running' : 'idle')
+      setState(v === 'running' ? 'running' : v === 'welcome' ? 'welcome' : 'idle')
     }
     sync()
     window.addEventListener('ow-tour', sync)
@@ -207,6 +208,12 @@ export function Tour() {
     try { localStorage.setItem(KEY, how) } catch { /* private mode */ }
     setState('idle')
     setI(0)
+  }, [])
+
+  const begin = useCallback(() => {
+    try { localStorage.setItem(KEY, 'running') } catch { /* private mode */ }
+    setI(0)
+    setState('running')
   }, [])
 
   /* Poll the world while a step is waiting on it. Two seconds, and only while
@@ -276,7 +283,37 @@ export function Tour() {
   const finished = state === 'running' && i >= STEPS.length
   const card = useMemo(() => placeCard(rect), [rect])
 
-  if (state !== 'running' || typeof document === 'undefined') return null
+  if (state === 'idle' || typeof document === 'undefined') return null
+
+  /* The welcome card: no spotlight, no navigation — a choice between the
+     guided walkthrough and getting on with it. Sits in front of everything so
+     the first thing a new operator meets is the offer, not step 1 of 15. */
+  if (state === 'welcome') {
+    return createPortal(
+      <div className="ow-tour" aria-live="polite">
+        <div className="ow-tour-dim" />
+        {blockers(null).map((b, k) => <div key={k} className="ow-tour-block" style={b} />)}
+        <div className="ow-tour-card ow-tour-welcome" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 420 }}>
+          <div className="ow-tour-step">Welcome</div>
+          <h3>Welcome to OpenWhale</h3>
+          <p>
+            An engine that runs trading strategies: a credential opens a venue, an account binds it,
+            a strategy instance trades on it.
+          </p>
+          <p>
+            The guided tour walks through that loop once, end to end, with a copy-trading strategy on
+            the Hyperliquid testnet — {STEPS.length} steps, no real funds. You can leave it at any point.
+          </p>
+          <div className="ow-tour-actions">
+            <button onClick={() => stop('skipped')}>Skip</button>
+            <span className="ow-tour-spacer" />
+            <button className="ow-tour-primary" onClick={begin}>Start the tour</button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )
+  }
 
   return createPortal(
     <div className="ow-tour" aria-live="polite">
