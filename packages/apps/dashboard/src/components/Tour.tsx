@@ -390,7 +390,7 @@ export function Tour() {
             <p>{step!.body}</p>
             {step!.action && (
               <p>
-                <button className="ow-tour-primary" onClick={() => { setActionNote(step!.action!.run()); setCopied(false) }}>{step!.action.label}</button>
+                <button className="btn btn-soft btn-sm" onClick={() => { setActionNote(step!.action!.run()); setCopied(false) }}>{step!.action.label}</button>
               </p>
             )}
             {actionNote && (
