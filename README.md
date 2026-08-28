@@ -16,18 +16,61 @@ OpenWhale is a TypeScript framework for automated trading strategies. Monitors c
 
 ## Quick start
 
-Development mode, with hot reload. For a server see [DEPLOYMENT.md](./DEPLOYMENT.md) (`docker compose up -d --build`, or systemd + nginx).
+Development mode with hot reload. For a server see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
-Prerequisites: Node.js ≥ 20, pnpm ≥ 9.
+**Prerequisites:** Node.js ≥ 20, pnpm ≥ 9 (`npm i -g pnpm`), git.
+
+**1. Clone and install**
 
 ```bash
+git clone https://github.com/OpenWhale-Org/OpenWhale.git
+cd OpenWhale
 pnpm install
-pnpm build
-cp .env.example .env           # OPENWHALE_MASTER_KEY, OPENWHALE_ADMIN_USER, OPENWHALE_ADMIN_PASSWORD
-pnpm dev                       # gateway :3001, dashboard :3000
 ```
 
-The gateway holds the runtime and all secrets; the dashboard is a frontend that proxies `/api/*` to it (`OPENWHALE_GATEWAY_URL`, default `http://localhost:3001`). The gateway refuses to start without a user account or the admin variables; set them once, sign in, then remove them.
+**2. Configure**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` — three variables are required on first boot:
+
+```bash
+OPENWHALE_MASTER_KEY=<random secret>     # encrypts stored credentials; generate with: openssl rand -hex 32
+OPENWHALE_ADMIN_USER=admin               # first dashboard account
+OPENWHALE_ADMIN_PASSWORD=<password>
+```
+
+The master key cannot be recovered — losing it means re-entering every API key. The admin variables create the first user; remove them after signing in. Everything else in `.env.example` is optional (ports, venue proxy, allowed origins).
+
+**3. Build and start**
+
+```bash
+pnpm build
+pnpm dev          # gateway on :3001, dashboard on :3000, both with hot reload
+```
+
+`pnpm dev:gateway` / `pnpm dev:dashboard` start one side only.
+
+**4. Sign in**
+
+Open `http://localhost:3000` and sign in with the admin user. The dashboard offers a guided tour on first visit: a credential on the Hyperliquid testnet, an account, a copy-trading instance — no real funds.
+
+**5. Trade**
+
+Credentials → Accounts → Strategies → New strategy. A strategy instance binds params to accounts; activate it and follow it on Instances (live events, executions, runs, PnL).
+
+**Docker instead of steps 1–3:**
+
+```bash
+cp .env.example .env         # same three variables
+docker compose up -d --build
+```
+
+State lives in the `openwhale-data` volume; details in [DEPLOYMENT.md](./DEPLOYMENT.md#docker).
+
+The gateway holds the runtime and all secrets; the dashboard is a frontend that proxies `/api/*` to it (`OPENWHALE_GATEWAY_URL`, default `http://localhost:3001`).
 
 ### Venue proxy
 

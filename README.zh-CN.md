@@ -16,18 +16,61 @@ OpenWhale 是一个 TypeScript 自动化交易策略框架。Monitor 采集、St
 
 ## 快速开始
 
-开发模式，热重载。服务器部署见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)（`docker compose up -d --build`，或 systemd + nginx）。
+开发模式，热重载。服务器部署见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)。
 
-前置条件：Node.js ≥ 20，pnpm ≥ 9。
+**前置条件：** Node.js ≥ 20，pnpm ≥ 9（`npm i -g pnpm`），git。
+
+**1. 克隆并安装依赖**
 
 ```bash
+git clone https://github.com/OpenWhale-Org/OpenWhale.git
+cd OpenWhale
 pnpm install
-pnpm build
-cp .env.example .env           # OPENWHALE_MASTER_KEY、OPENWHALE_ADMIN_USER、OPENWHALE_ADMIN_PASSWORD
-pnpm dev                       # 网关 :3001，看板 :3000
 ```
 
-网关持有运行时和全部密钥；看板是纯前端，把 `/api/*` 反代到网关（`OPENWHALE_GATEWAY_URL`，默认 `http://localhost:3001`）。没有用户账号且没有管理员变量时网关拒绝启动；设置一次、登录后即可移除。
+**2. 配置**
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，首次启动必须填三项：
+
+```bash
+OPENWHALE_MASTER_KEY=<随机密钥>          # 加密存储的凭证；生成：openssl rand -hex 32
+OPENWHALE_ADMIN_USER=admin               # 首个看板账号
+OPENWHALE_ADMIN_PASSWORD=<密码>
+```
+
+主密钥不可恢复——丢失后所有 API key 需要重新录入。管理员变量只用于创建首个用户，登录后可移除。`.env.example` 里的其余项都是可选的（端口、交易平台代理、允许的来源）。
+
+**3. 构建并启动**
+
+```bash
+pnpm build
+pnpm dev          # 网关 :3001，看板 :3000，均热重载
+```
+
+`pnpm dev:gateway` / `pnpm dev:dashboard` 可只启动一侧。
+
+**4. 登录**
+
+打开 `http://localhost:3000`，用管理员账号登录。首次进入看板会提供新手引导：在 Hyperliquid 测试网创建凭证、账户和一个跟单实例，不用真实资金。
+
+**5. 开始交易**
+
+Credentials → Accounts → Strategies → New strategy。策略实例把参数和账户绑定在一起；激活后在 Instances 页跟踪（实时事件、执行记录、运行、PnL）。
+
+**用 Docker 代替第 1–3 步：**
+
+```bash
+cp .env.example .env         # 同样三项
+docker compose up -d --build
+```
+
+状态保存在 `openwhale-data` 卷中，详见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md#docker)。
+
+网关持有运行时和全部密钥；看板是纯前端，把 `/api/*` 反代到网关（`OPENWHALE_GATEWAY_URL`，默认 `http://localhost:3001`）。
 
 ### 交易平台代理
 
