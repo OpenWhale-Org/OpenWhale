@@ -14,6 +14,36 @@ OpenWhale is a TypeScript framework for automated trading strategies. Monitors c
 
 ---
 
+## Quick start
+
+Development mode, with hot reload. For a server see [DEPLOYMENT.md](./DEPLOYMENT.md) (`docker compose up -d --build`, or systemd + nginx).
+
+Prerequisites: Node.js ≥ 20, pnpm ≥ 9.
+
+```bash
+pnpm install
+pnpm build
+cp .env.example .env           # OPENWHALE_MASTER_KEY, OPENWHALE_ADMIN_USER, OPENWHALE_ADMIN_PASSWORD
+pnpm dev                       # gateway :3001, dashboard :3000
+```
+
+The gateway holds the runtime and all secrets; the dashboard is a frontend that proxies `/api/*` to it (`OPENWHALE_GATEWAY_URL`, default `http://localhost:3001`). The gateway refuses to start without a user account or the admin variables; set them once, sign in, then remove them.
+
+### Venue proxy
+
+```bash
+OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket, every venue
+OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # per venue: ccxt id upper-cased; `off` = direct
+```
+
+`HTTPS_PROXY` and `NODE_USE_ENV_PROXY` are not honoured — ccxt uses its own fetch. The variable is namespaced so that order traffic never changes route through an unrelated proxy setting.
+
+### Authentication
+
+Enforced by the gateway: every `/api/*` route requires a session; the dashboard only carries the cookie. Sessions are opaque SQLite tokens (7-day expiry, revocable); passwords are scrypt-hashed; there are no roles. Before exposing the gateway: terminate TLS in front of it (the session cookie is `Secure`), keep port 3001 off the public internet, set `OPENWHALE_ALLOWED_ORIGIN` only for cross-origin frontends. Details in [DEPLOYMENT.md](./DEPLOYMENT.md).
+
+---
+
 ## Why OpenWhale
 
 - **Decoupled layers** — Monitor → Strategy → Executor. Replace any layer without touching the others.
@@ -193,36 +223,6 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 | **Multi-condition signals** | Price, volume and rate monitors combined in one trigger window |
 | **On-chain maker rewards** | Post-only quotes at the edge of a maker-incentive band on an on-chain rate market (Boros), re-quoted as the band moves, one relayed transaction per tick via a delegated agent key |
 | **On-chain yield** | Wallet-keyed accounts on the `web3/chain` kind: PT/YT and LP positions (Pendle), balances and positions read from the chain, transactions signed locally |
-
----
-
-## Quick start
-
-Development mode, with hot reload. For a server see [DEPLOYMENT.md](./DEPLOYMENT.md) (`docker compose up -d --build`, or systemd + nginx).
-
-Prerequisites: Node.js ≥ 20, pnpm ≥ 9.
-
-```bash
-pnpm install
-pnpm build
-cp .env.example .env           # OPENWHALE_MASTER_KEY, OPENWHALE_ADMIN_USER, OPENWHALE_ADMIN_PASSWORD
-pnpm dev                       # gateway :3001, dashboard :3000
-```
-
-The gateway holds the runtime and all secrets; the dashboard is a frontend that proxies `/api/*` to it (`OPENWHALE_GATEWAY_URL`, default `http://localhost:3001`). The gateway refuses to start without a user account or the admin variables; set them once, sign in, then remove them.
-
-### Venue proxy
-
-```bash
-OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket, every venue
-OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # per venue: ccxt id upper-cased; `off` = direct
-```
-
-`HTTPS_PROXY` and `NODE_USE_ENV_PROXY` are not honoured — ccxt uses its own fetch. The variable is namespaced so that order traffic never changes route through an unrelated proxy setting.
-
-### Authentication
-
-Enforced by the gateway: every `/api/*` route requires a session; the dashboard only carries the cookie. Sessions are opaque SQLite tokens (7-day expiry, revocable); passwords are scrypt-hashed; there are no roles. Before exposing the gateway: terminate TLS in front of it (the session cookie is `Secure`), keep port 3001 off the public internet, set `OPENWHALE_ALLOWED_ORIGIN` only for cross-origin frontends. Details in [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ---
 

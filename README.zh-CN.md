@@ -14,6 +14,36 @@ OpenWhale 是一个 TypeScript 自动化交易策略框架。Monitor 采集、St
 
 ---
 
+## 快速开始
+
+开发模式，热重载。服务器部署见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)（`docker compose up -d --build`，或 systemd + nginx）。
+
+前置条件：Node.js ≥ 20，pnpm ≥ 9。
+
+```bash
+pnpm install
+pnpm build
+cp .env.example .env           # OPENWHALE_MASTER_KEY、OPENWHALE_ADMIN_USER、OPENWHALE_ADMIN_PASSWORD
+pnpm dev                       # 网关 :3001，看板 :3000
+```
+
+网关持有运行时和全部密钥；看板是纯前端，把 `/api/*` 反代到网关（`OPENWHALE_GATEWAY_URL`，默认 `http://localhost:3001`）。没有用户账号且没有管理员变量时网关拒绝启动；设置一次、登录后即可移除。
+
+### 场地代理
+
+```bash
+OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket，所有场地
+OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # 按场地覆盖：ccxt id 大写；`off` = 直连
+```
+
+`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY` 无效——ccxt 使用自己的 fetch。变量单独命名，避免订单流量因无关的代理设置改道。
+
+### 认证
+
+由网关强制：每个 `/api/*` 路由都需要会话，看板只负责携带 cookie。会话是 SQLite 中的不透明令牌（7 天有效，可撤销）；密码 scrypt 哈希；没有角色。对外暴露网关前：在前面终止 TLS（会话 cookie 为 `Secure`）、3001 端口不上公网、仅跨域前端才设置 `OPENWHALE_ALLOWED_ORIGIN`。详见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)。
+
+---
+
 ## 为什么是 OpenWhale
 
 - **分层解耦** — Monitor → Strategy → Executor，替换任一层不影响其它层。
@@ -193,36 +223,6 @@ export default definePlugin((ctx) => ({
 | **多条件信号** | 价格、成交量、费率 monitor 在同一时间窗内组合触发 |
 | **链上挂单奖励** | 在链上利率市场（Boros）的激励带边缘挂 post-only 单，随激励带移动重挂，每 tick 通过委托 agent 密钥中继一笔交易 |
 | **链上收益** | 基于 `web3/chain` kind 的钱包账户：PT/YT 与 LP 头寸（Pendle），余额和持仓从链上读取，交易本地签名 |
-
----
-
-## 快速开始
-
-开发模式，热重载。服务器部署见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)（`docker compose up -d --build`，或 systemd + nginx）。
-
-前置条件：Node.js ≥ 20，pnpm ≥ 9。
-
-```bash
-pnpm install
-pnpm build
-cp .env.example .env           # OPENWHALE_MASTER_KEY、OPENWHALE_ADMIN_USER、OPENWHALE_ADMIN_PASSWORD
-pnpm dev                       # 网关 :3001，看板 :3000
-```
-
-网关持有运行时和全部密钥；看板是纯前端，把 `/api/*` 反代到网关（`OPENWHALE_GATEWAY_URL`，默认 `http://localhost:3001`）。没有用户账号且没有管理员变量时网关拒绝启动；设置一次、登录后即可移除。
-
-### 场地代理
-
-```bash
-OPENWHALE_HTTPS_PROXY=http://127.0.0.1:7897        # REST + WebSocket，所有场地
-OPENWHALE_HTTPS_PROXY_BINANCEUSDM=off              # 按场地覆盖：ccxt id 大写；`off` = 直连
-```
-
-`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY` 无效——ccxt 使用自己的 fetch。变量单独命名，避免订单流量因无关的代理设置改道。
-
-### 认证
-
-由网关强制：每个 `/api/*` 路由都需要会话，看板只负责携带 cookie。会话是 SQLite 中的不透明令牌（7 天有效，可撤销）；密码 scrypt 哈希；没有角色。对外暴露网关前：在前面终止 TLS（会话 cookie 为 `Secure`）、3001 端口不上公网、仅跨域前端才设置 `OPENWHALE_ALLOWED_ORIGIN`。详见 [DEPLOYMENT.zh-CN.md](./DEPLOYMENT.zh-CN.md)。
 
 ---
 
