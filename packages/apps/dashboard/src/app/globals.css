@@ -419,6 +419,10 @@ body {
   transition: left 160ms ease, top 160ms ease;
 }
 .ow-tour-step { font-size: .6rem; letter-spacing: .18em; color: var(--accent); }
+.ow-tour-secret { margin: .5rem 0; padding: .5rem .6rem; border-radius: .4rem; background: rgba(0,0,0,.35); border: 1px solid color-mix(in srgb, var(--warning, #eab308) 45%, transparent); }
+.ow-tour-secret-label { font-size: .68rem; color: var(--warning, #eab308); margin-bottom: .3rem; }
+.ow-tour-secret code { display: block; font-size: .7rem; word-break: break-all; color: #ece8fa; margin-bottom: .4rem; }
+.ow-tour-secret button { font-size: .7rem; }
 .ow-tour-card h3 { margin: .35rem 0 .4rem; font-size: .95rem; font-weight: 620; color: #ece8fa; }
 .ow-tour-card p { font-size: .78rem; line-height: 1.55; color: rgba(226,220,250,.8); }
 .ow-tour-waiting {

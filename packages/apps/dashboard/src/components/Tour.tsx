@@ -46,8 +46,14 @@ interface Step {
   until?: string
   /** Shown while waiting, so a step that cannot self-advance is never a dead end. */
   waitingFor?: string
-  /** A button on the card that does part of the step for the operator. Returns a note to show. */
-  action?: { label: string; run: () => string | undefined }
+  /** A button on the card that does part of the step for the operator. Returns what to show: a note, and a secret shown once. */
+  action?: { label: string; run: () => ActionResult }
+}
+
+interface ActionResult {
+  note: string
+  /** Shown in full with a copy button — the only time it is displayed. */
+  secret?: { label: string; value: string }
 }
 
 /** What the tour can observe about the system, refreshed while it runs. */
@@ -105,7 +111,10 @@ const STEPS: Step[] = [
         window.dispatchEvent(new CustomEvent('ow-tour-fill', {
           detail: { name: 'Tutorial testnet', values: { walletAddress: address, privateKey, testnet: 'true' } },
         }))
-        return `Filled in ${address}. Fund it at app.hyperliquid-testnet.xyz/drip, then Save. The key is stored encrypted with the credential — nowhere else.`
+        return {
+          note: `Filled in ${address}. Fund it at app.hyperliquid-testnet.xyz/drip, then Save.`,
+          secret: { label: 'Private key — copy it now; it is shown only here, and the credential store never reveals it again', value: privateKey },
+        }
       },
     },
   },
@@ -203,8 +212,9 @@ export function Tour() {
   const [world, setWorld] = useState<World>(EMPTY)
   const [rect, setRect] = useState<DOMRect | null>(null)
   /** What the step's action reported, cleared when the step changes. */
-  const [actionNote, setActionNote] = useState('')
-  useEffect(() => { setActionNote('') }, [i])
+  const [actionNote, setActionNote] = useState<ActionResult | null>(null)
+  const [copied, setCopied] = useState(false)
+  useEffect(() => { setActionNote(null); setCopied(false) }, [i])
   const router = useRouter()
   const pathname = usePathname()
   const step = STEPS[i]
@@ -377,10 +387,19 @@ export function Tour() {
             <p>{step!.body}</p>
             {step!.action && (
               <p>
-                <button className="ow-tour-primary" onClick={() => setActionNote(step!.action!.run() ?? '')}>{step!.action.label}</button>
+                <button className="ow-tour-primary" onClick={() => { setActionNote(step!.action!.run()); setCopied(false) }}>{step!.action.label}</button>
               </p>
             )}
-            {actionNote && <p className="ow-tour-waiting">{actionNote}</p>}
+            {actionNote && <p className="ow-tour-waiting">{actionNote.note}</p>}
+            {actionNote?.secret && (
+              <div className="ow-tour-secret">
+                <div className="ow-tour-secret-label">{actionNote.secret.label}</div>
+                <code>{actionNote.secret.value}</code>
+                <button onClick={() => { void navigator.clipboard.writeText(actionNote.secret!.value).then(() => setCopied(true)) }}>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            )}
             {step!.done && !step!.done(world) && (
               <p className="ow-tour-waiting">{step!.waitingFor}</p>
             )}
