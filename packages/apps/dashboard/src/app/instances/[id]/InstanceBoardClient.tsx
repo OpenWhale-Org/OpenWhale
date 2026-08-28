@@ -355,14 +355,21 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       setValues(fieldValuesFromParams(f, instance.params))
       setDirty(false)
       // The pickers and availability checks need the bound account's venue —
-      // same derivation as the create form: slot binding → account → type.
+      // same derivation as the create form: slot binding → account → venue
+      // pin from the implementation, credential type only as CEX fallback.
       if (ra.ok) {
-        const { accounts } = (await ra.json()) as { accounts: Array<{ name: string; type?: string }> }
+        const { accounts, implementations } = (await ra.json()) as {
+          accounts: Array<{ name: string; implementation?: string; credential?: string; type?: string }>
+          implementations?: Array<{ id: string; type?: string }>
+        }
+        const implVenues = Object.fromEntries((implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : []))
         for (const slot of def?.accountRequirements ?? []) {
           const bound = instance.credentials?.[slot.label] ?? instance.accounts?.[0]
           if (!bound) continue
-          const account = accounts.find(a => a.name === bound)
-          if (account?.type) { setBoundVenue(account.type); break }
+          // Instances from before Account entities bind by credential name — match either
+          const account = accounts.find(a => a.name === bound || a.credential === bound)
+          const venue = account ? implVenues[account.implementation ?? ''] ?? account.type : undefined
+          if (venue) { setBoundVenue(venue); break }
         }
       }
     })()
