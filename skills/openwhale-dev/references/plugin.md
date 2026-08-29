@@ -249,8 +249,46 @@ export const planPreviewScript: ScriptDefinition = {
 }
 ```
 
-`scripts` is not a `definePlugin` field. A plugin that ships them exports a `PluginFactory` — a
-function of the plugin context returning the manifest shape directly:
+`signal` is the page's Stop button. It only helps if the script looks at it: check between slow
+steps (each market of a scan, each page of a fetch) and return the partial result with a line
+saying it was cut short — a script that ignores it runs to completion after the operator has
+walked away.
+
+### An HTML report
+
+A `files` entry with `mime: 'text/html'` is rendered inline on the Scripts page, in a sandboxed
+iframe, next to the text. Build it with core's shell so every plugin's report is the same page:
+
+```ts
+import { reportPage, esc, num, signed, cls } from '@openwhaleorg/core'
+
+const html = reportPage({
+  title: 'Boros maker incentives — BTC',      // browser tab / file name
+  eyebrow: 'Boros · maker incentives',        // product line
+  h1: 'Where the capital earns most',
+  lede: `${plans.length} markets carry a live budget.`,
+  ident: [`capital $${num(capitalUsd)}`, new Date().toISOString().slice(0, 16) + ' UTC'],
+  figures: [                                  // above the fold; cls: 'pos' | 'neg' | 'warn' | 'dim'
+    { k: 'Best market', v: best.symbol },
+    { k: 'Per day', v: `$${num(best.usdPerDay, 2)}`, n: `${num(best.pendlePerDay, 2)} PENDLE`, cls: 'pos' },
+  ],
+  body: `<section><h2>Ranked</h2><div class="tblwrap"><table>
+    <thead><tr><th>Market</th><th class="n">$ / day</th></tr></thead>
+    <tbody>${plans.map(p => `<tr><td>${esc(p.symbol)}</td><td class="n ${cls(p.usdPerDay)}">${signed(p.usdPerDay)}</td></tr>`).join('')}</tbody>
+  </table></div></section>`,                  // the caller escapes its own content — esc() everything from data
+  footer: 'Where the numbers came from, and what they assume.',
+})
+return { text, files: [{ name: 'scan.html', mime: 'text/html', content: html }] }
+```
+
+Self-contained by design — no external CSS, fonts or scripts, so the file opens from disk the same
+as in the page. Links to the outside need `target="_blank"` (the sandbox blocks in-frame navigation).
+`.n` right-aligns a numeric cell; `.dim` mutes; `.tblwrap` scrolls a wide table instead of the page.
+
+### The raw factory form
+
+`definePlugin` accepts `scripts` directly. The raw `PluginFactory` form exists for one other reason —
+access to the plugin `context` at construction — and costs the decorator-derived definitions:
 
 ```ts
 export const myPlugin: PluginFactory<MyConfig> = (context): OpenWhalePlugin => ({
@@ -267,8 +305,8 @@ export default myPlugin
 ```
 
 That is the whole trade-off: the raw form costs you the decorator-derived definitions (you hand-write
-each `definition`, including `accountRequirements`), and buys `scripts` plus access to `context`.
-Prefer `definePlugin` until you actually need one of those.
+each `definition`, including `accountRequirements`), and buys access to `context`. Prefer `definePlugin`
+until you actually need it.
 
 ## Packaging
 
@@ -282,10 +320,23 @@ Prefer `definePlugin` until you actually need one of those.
   "types": "dist/index.d.ts",
   "files": ["dist"],
   "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run" },
-  "peerDependencies": { "@openwhaleorg/core": "*" },
+  "peerDependencies": { "@openwhaleorg/core": "^0.2.2" },   // a REAL range — see below
   "dependencies": { "zod": "^4.0.0" }       // + @openwhaleorg/exchange etc. as needed
 }
 ```
+
+The peer range is a contract the engine enforces at install. It is checked against the running
+engine's own core before anything is staged; a mismatch is refused with both versions and which
+side to move. So:
+
+- **Declare the version you actually built against**, caret (`^0.2.2`). In 0.x the minor is the
+  major, so `^0.2.2` means ≥ 0.2.2 < 0.3 — exactly the engines your imports exist on.
+- **Never `*`.** It is satisfied by an engine that lacks the exports you import, and the failure
+  then surfaces at load as `does not provide an export named 'x'` — an error that names your plugin
+  and says nothing about the engine being behind.
+- The engine's framework copy is the only one. Whatever npm fetches for `@openwhaleorg/*` is
+  replaced by a link to the engine's own; a plugin never runs its own core. Framework packages go
+  in `peerDependencies`, not `dependencies`.
 
 ```jsonc
 // tsconfig.json — ES2022+, NodeNext, NO experimentalDecorators
@@ -314,11 +365,17 @@ export * from './plugin.js'
 
 ## Install & iterate
 
-- Dashboard → Plugins → Install: enter the package's **absolute local path** or an npm spec.
-  Local installs are npm-symlinked: `pnpm build` in your package, then uninstall+reinstall (or
-  restart the gateway) to pick up changes.
-- API: `POST /api/plugins {"source":"npm","package":"/abs/path"}`;
-  `DELETE /api/plugins/{name}` to uninstall.
+- Dashboard → Plugins → Install: an npm spec, a GitHub `owner/repo` (optional `#ref`; source-only
+  repos need a `prepare` script, private ones `OPENWHALE_GITHUB_TOKEN`), or the package's
+  **absolute local path**. Every install loads from its own staged copy, so `pnpm build` then
+  install again over the same name picks up changes without a restart — an install over an
+  installed plugin is an overwrite that keeps instances, accounts and credentials.
+- API: `POST /api/plugins {"source":"npm","package":"/abs/path"}` or
+  `{"source":"github","repo":"owner/repo","ref":"main"}`; `DELETE /api/plugins/{name}` to uninstall —
+  refused while an instance, account or credential references the plugin.
+- A name another plugin already holds gets a namespace at install (`alice-funding-arb`); adapter
+  cells and credential types are global, so two plugins providing the same venue cannot coexist.
+  The README's §Plugins is the full rule list.
 - Entry resolution reads `exports`/`module`/`main` from your package.json.
-- Load-time failures (bad keySchema narrowing, unknown kind, duplicate ids) surface in the
-  install response — read the error text, it names the exact rule violated.
+- Refusals come with their reason: `cannot run on this engine` is the peer range (§Packaging);
+  load-time failures (bad keySchema narrowing, unknown kind, duplicate ids) name the exact rule.

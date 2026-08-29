@@ -5,8 +5,9 @@ description: Write runnable OpenWhale components — strategies, monitors, execu
 
 # OpenWhale Plugin Development
 
-> **Calibrated against `@openwhaleorg/core` v0.1.1 on main (re-verified 2026-08-25).** If the installed core is newer,
-> verify signatures against the framework source before trusting a template verbatim.
+> **Calibrated against `@openwhaleorg/core` v0.2.2 on main (re-verified 2026-08-29: every template signature
+> checked against `packages/framework/core/src`).** If the installed core is newer, verify signatures against
+> the framework source before trusting a template verbatim.
 
 OpenWhale is an AI-native trading framework: **Monitor → Trigger → Strategy → Queue → Executor**.
 You are writing a **plugin package** — an npm package whose default export is a `definePlugin({...})`
@@ -33,8 +34,13 @@ specializations claim a cell, specialization wins. `type` is the deprecated spel
 
 ## What are you being asked to write?
 
-- **A trading strategy** → `references/strategy.md`. Usually also needs an executor if the action
-  isn't covered by the shared `exchange/perp-trading` / `exchange/spot-trading` executors.
+- **A trading strategy from a description** → `references/spec.md` FIRST. A description leaves a
+  dozen decisions unsaid — fills, restarts, sizing base, idempotency — and each one you guess is a
+  rebuild or a loss. Interview the user in rounds until nothing is assumed, write the spec, get it
+  confirmed, then `references/strategy.md` for the class. Skip the interview only when the user
+  hands you a spec in that shape already.
+- **A trading strategy, spec in hand** → `references/strategy.md`. Usually also needs an executor if
+  the action isn't covered by the shared `exchange/perp-trading` / `exchange/spot-trading` executors.
 - **A data feed / market watcher** → `references/monitor.md`.
 - **An order-execution service** → `references/executor.md`.
 - **Support for a new exchange/venue** → `references/plugin.md` §Venue plugin (credential type +
@@ -43,8 +49,8 @@ specializations claim a cell, specialization wins. `type` is the deprecated spel
   generic Account).
 - **Packaging / install / project scaffold** → `references/plugin.md` §Packaging.
 - **An operator utility for the Scripts page** → a `ScriptDefinition` in the plugin's `scripts: []`
-  array — see `references/plugin.md` §Scripts. `definePlugin` does NOT accept `scripts`; a plugin
-  that ships them must use the raw `PluginFactory` form.
+  array — see `references/plugin.md` §Scripts. `definePlugin` accepts `scripts` directly; a report
+  that wants a page rather than a text block uses core's `reportPage` shell.
 - **Tests** → `references/testing.md`. Always write them; every template there runs offline.
 
 Working code to copy from: `packages/strategies/examples` (`@openwhaleorg/examples`) — five
@@ -53,7 +59,32 @@ LLM-driven analyst, copy-trading) over a tested `indicators.ts`. Read the one cl
 before writing: they show the account-slot / `accountVenue` idiom, `store`-based idempotency, and
 the discipline that risk limits live in code even when a model produces the signal.
 
-## Since 2026-08-06 (newest first)
+## Since 2026-08-26 (newest first)
+
+- **The framework version is settled at install.** A plugin's `peerDependencies` range for
+  `@openwhaleorg/*` is checked against the running engine before anything is staged; a mismatch is
+  refused with both versions and which side to move. Declare a real range (`^0.2.2`), never `*` —
+  `*` is satisfied by an engine missing the exports you import, and the failure then surfaces at
+  load as `does not provide an export named …`. The engine's framework copy is the only one: what
+  npm fetches for the plugin is replaced by a link to it. (`references/plugin.md` §Packaging)
+- **`reportPage` — the HTML report shell** (core ≥ 0.2.2). `reportPage({ title, eyebrow, h1, lede?,
+  ident?, figures?, body, footer? })` returns a self-contained page; `esc` / `num` / `signed` / `cls`
+  are its helpers. Return it as a `ScriptResult.files` entry with `mime: 'text/html'` and the
+  Scripts page renders it inline in a sandboxed iframe (external links need `target="_blank"`).
+  (`references/plugin.md` §Scripts)
+- **Scripts can be stopped.** The page's Stop button reaches `run()` as `ctx.signal` (an
+  `AbortSignal`); check it between slow steps and return what you have. (`references/plugin.md` §Scripts)
+- **Install sources and rules** — npm, GitHub `owner/repo[#ref]`, a local path, or a built bundle;
+  a taken name gets a namespace at install; installing over an installed plugin is an overwrite
+  that keeps instances/accounts/credentials; uninstall is refused while anything references the
+  plugin. The full rule list is the README's §Plugins — this skill does not restate it.
+- **`this.trace(step, data?)` in a strategy** records one decision step of the current run; the
+  Dashboard shows the trace per run, and it survives restarts. Use it at every gate, so a run that
+  emitted nothing still says which condition refused. (`references/strategy.md`)
+- **`z.enum` params render as a dropdown**; `availabilityCheckers` on a strategy validate a symbol
+  param against the venue's live market list. (`references/strategy.md`)
+
+## Since 2026-08-06
 
 - **`venue` replaces `type` on cells and account implementations** — `{ kind, venue, credentialTypes?,
   create }`. On-chain venues list a shared key family (`credentialTypes: ['web3/evm']`) instead of a
@@ -72,7 +103,7 @@ the discipline that risk limits live in code even when a model produces the sign
   credential types `'web3/evm'` (wallet key) and `'web3/rpc'`. On-chain venue packages depend on it for
   the wallet key family and never ship their own chain client.
 
-## Since v0.1.0
+## Since 2026-07
 
 - **Optional executor credential slots** — `{ label, type, raw: true, optional: true }`: activation
   proceeds with the slot unbound; read with `this.rawIfBound(label)` (undefined = unbound) and
@@ -122,13 +153,19 @@ verified against the framework source — copy their shape exactly.
 
 ## Workflow
 
+0. For a strategy: interview → spec → confirmation (`references/spec.md`). The spec's Tests section
+   is the test file's outline; its Evaluate section is `evaluate()` in order, one `trace` per gate.
 1. Scaffold the package (see `references/plugin.md` §Packaging — package.json, tsconfig, vitest).
 2. Write component classes with their `@Ow*` decorators.
 3. List them in `definePlugin({...})` — the default export of the entry module.
 4. `pnpm build && pnpm test` — both must be green. Fix decorator/ESM issues per rule 1/10.
-5. Install: Dashboard → Plugins → Install, enter the package's **absolute path** (npm symlinks it;
-   rebuild + reinstall picks up changes), or publish and enter the npm spec.
-   API equivalent: `POST /api/plugins {"source":"npm","package":"/abs/path/or/spec"}`.
+5. Install: Dashboard → Plugins → Install — an npm spec, a GitHub `owner/repo`, or the package's
+   **absolute path**. Reinstalling over the same name is an overwrite; each install loads from its
+   own staged copy, so no gateway restart is needed. If the install is refused with
+   `cannot run on this engine`, the plugin's peer range and the engine's core version disagree —
+   the message says which to update.
+   API equivalent: `POST /api/plugins {"source":"npm","package":"/abs/path/or/spec"}` or
+   `{"source":"github","repo":"owner/repo","ref":"main"}`.
 6. Wire up in the Dashboard: create Credentials → Accounts → Monitor instances (credential-less
    monitors auto-create a default instance) → Strategy instance (one form binds params + slots).
 
@@ -139,5 +176,8 @@ verified against the framework source — copy their shape exactly.
 - Monitor data: Dashboard → Monitor page (BOARDS render `plots()`), or read
   `~/.openwhale/monitors/{contract}/{key}.jsonl` directly.
 - Strategy state: the KV store is the `strategy_store` table in `~/.openwhale/openwhale.db`.
-- Reinstall cycle: `DELETE /api/plugins/{name}` then re-POST. A restart of the gateway reloads
-  all installed plugins.
+- Reinstall cycle: re-POST the same source — it overwrites in place and reloads dependents.
+  `DELETE /api/plugins/{name}` is refused while an instance, account or credential references
+  the plugin. A restart of the gateway reloads all installed plugins.
+- Strategy decisions: Dashboard → the instance's board shows each run's trace (`this.trace`
+  steps); `GET /api/instances/{id}/runs` returns them.

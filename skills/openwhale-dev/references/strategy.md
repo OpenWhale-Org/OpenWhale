@@ -82,8 +82,9 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 
     // Idempotency via the per-instance KV store (persisted in SQLite).
     const actedKey = `acted:${venue}:${snapshot.timestamp}`
-    if (await this.store.has(actedKey)) return []
+    if (await this.store.has(actedKey)) { this.trace('already-acted', { actedKey }); return [] }
     await this.store.set(actedKey, Date.now())
+    this.trace('signal', { venue, contracts: snapshot.rates.length })   // every gate leaves a step; a silent run is a bug
 
     void capitalUsd; void t; void balance
     log.info({ venue }, 'Emitting instruction')
@@ -112,6 +113,9 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 | `this.llm(...)` / `llms` declaration | LLM slots — declare `{ label, model: 'provider:model', credentialName?, settings? }` in `decls.llms`; call `this.llm('label', { messages, schema? })` (a `schema` returns the parsed object, no schema returns text; the label is omissible with exactly one slot). Config merges declaration ← instance binding ← call options. `this.llmModel('label')` hands you the raw AI-SDK model for anything the wrapper doesn't cover |
 | `context.getData(label, key)` | The emitted record that fired this trigger (undefined for other labels/keys) |
 | `this.addMonitorSource(label, key, { trigger? })` | Start collecting a monitor key discovered at RUNTIME (e.g. an auto-detected pair's feed); `trigger: true` also wakes `evaluate` on its pushes. Returns false on runtimes without dynamic-source support; idempotence is your job |
+| `this.trace(step, data?)` | Record one decision step of the current run. The Dashboard shows the trace per run and it survives restarts; `GET /api/instances/{id}/runs` returns them. Call it at EVERY gate — `this.trace('rate-below-min', { rate, min })` before `return []` — so a run that emitted nothing still says which condition refused. No-op outside `run()` |
+| `this.rule(cond, instructions)` / `this.parallel(sets)` | `rule` returns the instructions only when `cond` holds (else `[]`); `parallel` flattens several instruction sets. Sugar for readable `evaluate` bodies |
+| `availabilityCheckers` | `Readonly<Record<name, AvailabilityChecker>>` — pure functions over the venue's market list, named from a param's `.meta({ availability: { checker } })`. The built-in `availability: { source: 'market', kind? }` needs no checker: every value must be a listed market |
 
 ## Trigger shapes
 
