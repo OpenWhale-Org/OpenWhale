@@ -53,6 +53,32 @@ export const BUILDER_TENTHS_BP = 10
 /** Ceiling requested in the on-chain approval; must cover BUILDER_TENTHS_BP. */
 export const BUILDER_MAX_FEE_RATE = '0.01%'
 
+/**
+ * How many HIP-3 (builder-deployed) dexes ccxt is allowed to load markets for.
+ *
+ * ccxt defaults this to 10 and walks the venue's `perpDexs` list as
+ * `for (let i = 1; i < limit; i++)` — index 0 is the main universe — so the
+ * default reaches only NINE builder dexes. As of 2026-08-30 the live list is
+ * `[xyz, flx, vntl, hyna, km, abcd, cash, para, mkts, io]`: ten of them, and
+ * `io` already falls off the end.
+ *
+ * That truncation is not a missing-data problem, it is a broken-order problem.
+ * `fetchFundingRates` and `fetchPositions` below query each dex explicitly and
+ * so DO see `io`, but the market map every symbol must resolve against is the
+ * truncated one — so `fetchTicker`/`fetchOHLCV`/`fetchOrderBook`/`createOrder`
+ * on `IO-SNDK/USDC:USDC` throw `hyperliquid does not have market symbol ...`.
+ * The failure lands at order time, on a symbol the rest of the adapter has
+ * been happily reporting funding for, rather than at load time.
+ *
+ * And the list is SERVER-ordered and grows: a dex that fits inside the window
+ * today can be pushed out of it tomorrow by a new deployment, with no change
+ * on our side. So the limit is set well past the current count rather than
+ * just past it. Raising it is free — ccxt breaks out of the loop as soon as
+ * `i` passes the end of the actual list, so a limit of 64 against 10 live
+ * dexes costs exactly the same 10 requests.
+ */
+export const HIP3_DEX_LIMIT = 64
+
 export interface HyperliquidCredentials {
   walletAddress: string
   privateKey?: string
@@ -114,9 +140,20 @@ export class HyperliquidAdapter extends CcxtAdapter {
       // `exchange.options`. ccxt would otherwise apply its own address and
       // rate here — see BUILDER_ADDRESS.
       ccxtOptions: {
-        options: builder === false
-          ? { builderFee: false }
-          : { builderFee: true, builder, feeInt: BUILDER_TENTHS_BP, feeRate: BUILDER_MAX_FEE_RATE },
+        options: {
+          // ccxt deepExtends `options` over its describe() defaults, so
+          // `hip3.limit` on its own would be enough. The full shape is spelt
+          // out anyway: this is the value the venue actually loads markets
+          // with, and it is worth being able to read it here rather than
+          // half here and half in ccxt's describe().
+          fetchMarkets: {
+            types: ['spot', 'swap', 'hip3'],
+            hip3: { limit: HIP3_DEX_LIMIT, dexes: [] },
+          },
+          ...(builder === false
+            ? { builderFee: false }
+            : { builderFee: true, builder, feeInt: BUILDER_TENTHS_BP, feeRate: BUILDER_MAX_FEE_RATE }),
+        },
       },
     })
   }
@@ -129,9 +166,11 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * Quirk: ccxt's fetchFundingRates hits metaAndAssetCtxs WITHOUT a dex
    * param, so it only covers the main universe. HIP-3 (builder-deployed)
    * markets settle hourly too — aggregate every dex so funding-driven
-   * consumers see them. ccxt already loads HIP-3 markets by default and
-   * accepts `{ dex }` on the same call; each per-dex failure is non-fatal
-   * (a broken builder dex must not blind the main universe).
+   * consumers see them. ccxt loads HIP-3 markets by default but only the
+   * first nine dexes, which is why the constructor raises the ceiling to
+   * HIP3_DEX_LIMIT; it accepts `{ dex }` on the same call, and each per-dex
+   * failure is non-fatal (a broken builder dex must not blind the main
+   * universe).
    */
   override async fetchFundingRates(): Promise<FundingRateData[]> {
     // HIP-3 symbol mapping (hip3TokensByName) is built during loadMarkets —
@@ -161,6 +200,16 @@ export class HyperliquidAdapter extends CcxtAdapter {
         .map(d => d?.name)
         .filter((name): name is string => typeof name === 'string' && name.length > 0)
       this.hip3DexesFetchedAt = Date.now()
+      // Same roster ccxt walks when it builds the market map, so this is the
+      // one place that can tell us HIP3_DEX_LIMIT has been outgrown. ccxt's
+      // loop runs 1..limit-1, so it covers limit-1 dexes; past that, symbols
+      // on the overflow dexes resolve nowhere and orders on them fail.
+      if (this.hip3Dexes.length > HIP3_DEX_LIMIT - 1) {
+        this.log.warn(
+          { dexes: this.hip3Dexes.length, limit: HIP3_DEX_LIMIT },
+          'More HIP-3 dexes than the market map loads — raise HIP3_DEX_LIMIT',
+        )
+      }
     } catch {
       this.hip3Dexes = this.hip3Dexes ?? []
     }
