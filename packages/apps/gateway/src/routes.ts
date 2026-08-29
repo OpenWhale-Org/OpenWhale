@@ -12,6 +12,7 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { z } from 'zod'
+import { getAlertService, type AlertSettings } from './notify/alerts.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
@@ -1211,6 +1212,40 @@ export function buildRouter(): Router {
   }))
 
   /* npm-installed plugins with a newer version on the registry. */
+  /* ── Alerting ────────────────────────────────────────────────────────────
+     One configuration for the engine. The channels are credentials, so the
+     keys are stored encrypted with everything else and nothing here holds a
+     secret — only the NAME of a credential and where to send. */
+  router.get('/api/alerts/settings', h(async (_req, res) => {
+    const alerts = getAlertService()
+    res.json(alerts ? alerts.current() : { enabled: false, emailTo: [] })
+  }))
+
+  router.put('/api/alerts/settings', h(async (req, res) => {
+    const alerts = getAlertService()
+    if (!alerts) { res.status(503).send('Alerting is not started yet'); return }
+    res.json(await alerts.save(req.body as AlertSettings))
+  }))
+
+  /* Send one now, through whatever is configured. The only way to learn that a
+     relay accepts the key but refuses the sender, or that a bot was never
+     added to its group — both of which look like success until an alert
+     matters. Reports per channel rather than one verdict: half-working is the
+     interesting state. */
+  router.post('/api/alerts/test', h(async (_req, res) => {
+    const alerts = getAlertService()
+    if (!alerts) { res.status(503).send('Alerting is not started yet'); return }
+    const result = await alerts.dispatch(
+      'OpenWhale: test alert',
+      'This is a test from the Alerts page. If you are reading it, delivery works.',
+    )
+    if (result.sent.length === 0 && result.failed.length === 0) {
+      res.status(400).json({ error: 'Nothing is configured to send to' })
+      return
+    }
+    res.json(result)
+  }))
+
   router.get('/api/plugins/updates', h(async (_req, res) => {
     res.json(await checkPluginUpdates())
   }))

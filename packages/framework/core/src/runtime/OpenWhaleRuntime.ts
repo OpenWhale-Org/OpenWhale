@@ -1598,7 +1598,7 @@ export class OpenWhaleRuntime implements IRuntime {
    */
   async updateInstance(
     instanceId: string,
-    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'credentials' | 'accounts' | 'llm' | 'params'>>,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'credentials' | 'accounts' | 'llm' | 'params' | 'options'>>,
     { restart = false }: { restart?: boolean } = {},
   ): Promise<StrategyInstance> {
     const wasActive = this.instances.has(instanceId)
@@ -1619,6 +1619,7 @@ export class OpenWhaleRuntime implements IRuntime {
     if (patch.credentials !== undefined) persisted.credentials = patch.credentials
     if (patch.accounts !== undefined) persisted.accounts = patch.accounts
     if (patch.llm !== undefined) persisted.llm = patch.llm
+    if (patch.options !== undefined) persisted.options = patch.options
     if (patch.params !== undefined) persisted.params = patch.params
     persisted.updatedAt = new Date().toISOString()
 
@@ -1664,9 +1665,17 @@ export class OpenWhaleRuntime implements IRuntime {
    * allowed while the instance is active; an active in-memory copy is patched
    * in place so views agree without a restart.
    */
+  /**
+   * The edits allowed while an instance is RUNNING.
+   *
+   * Mostly cosmetic — but `options` belongs here rather than with the params,
+   * and deliberately: dry run is a stop switch, and a stop switch you can only
+   * reach by restarting the thing you are trying to stop is not one. The live
+   * entry is updated in the same call, so the next trigger already obeys it.
+   */
   async updateInstanceMeta(
     instanceId: string,
-    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder'>>,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder' | 'options'>>,
   ): Promise<StrategyInstance> {
     const persisted = await this.instanceStore.load(instanceId)
     if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
@@ -1685,12 +1694,14 @@ export class OpenWhaleRuntime implements IRuntime {
         else delete target.folder
       }
       if (patch.sortOrder !== undefined) target.sortOrder = patch.sortOrder
+      if (patch.options !== undefined) target.options = patch.options
     }
     apply(persisted)
     persisted.updatedAt = new Date().toISOString()
     await this.instanceStore.save(persisted)
     const live = this.instances.get(instanceId)
     if (live) apply(live)
+    if (patch.options !== undefined) this.triggerManager.setInstanceOptions(instanceId, patch.options)
     return persisted
   }
 

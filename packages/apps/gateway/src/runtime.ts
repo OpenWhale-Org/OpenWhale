@@ -12,10 +12,13 @@ import { allVenuePlugins } from '@openwhaleorg/venues'
 import path from 'path'
 import os from 'os'
 import { restorePlugins } from './plugins.js'
+import { notifyCredentialTypes } from './notify/credentialTypes.js'
+import { AlertService, setAlertService } from './notify/alerts.js'
 
 let runtimeSingleton: OpenWhaleRuntime | undefined
 /** The same SQLite file backs auth — one database, one lifecycle. */
 let databaseSingleton: SQLiteAdapter | undefined
+let credentialStoreSingleton: DBCredentialStore | undefined
 let startPromise: Promise<void> | undefined
 
 function createRuntime(): OpenWhaleRuntime {
@@ -44,6 +47,12 @@ function createRuntime(): OpenWhaleRuntime {
   const credentialStore = new DBCredentialStore(masterKey, database)
 
   const runtime = new OpenWhaleRuntime({ database, credentialStore })
+  credentialStoreSingleton = credentialStore
+
+  // Alerting keys are registered by the gateway, not by a plugin: how an
+  // operator is reached is a property of the deployment, and putting a mail
+  // library behind a framework package would charge every plugin for it.
+  for (const type of notifyCredentialTypes) runtime.registerCredentialType(type, 'core')
 
   // The exchange domain plugin must load first: it registers kind
   // 'exchange/perp' and the shared executor the venue plugins build on.
@@ -62,6 +71,12 @@ function createRuntime(): OpenWhaleRuntime {
   runtime.loadPlugin(examplesPlugin, {})
 
   return runtime
+}
+
+/** The credential store the runtime was built with — alerting reads keys through it. */
+export function getCredentialStore(): DBCredentialStore {
+  if (!credentialStoreSingleton) getRuntime()
+  return credentialStoreSingleton!
 }
 
 /** The gateway's database — created with the runtime, shared by the auth store. */
@@ -92,6 +107,13 @@ export async function ensureStarted(): Promise<OpenWhaleRuntime> {
       // reads are lazy anyway. Env-provided LLM keys (ANTHROPIC_API_KEY, …)
       // become typed credentials; idempotent — skips providers that have one.
       .then(() => importLlmKeysFromEnv(credentialStore).then(() => undefined))
+      // After start(), so the subscription attaches to a runtime whose
+      // executors are already registered and whose database exists.
+      .then(async () => {
+        const alerts = new AlertService(getDatabase(), runtime, credentialStore)
+        await alerts.initialize()
+        setAlertService(alerts)
+      })
       .catch((err) => {
         startPromise = undefined
         throw err
