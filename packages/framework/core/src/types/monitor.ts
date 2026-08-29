@@ -76,19 +76,38 @@ export interface PlotSeries {
   candles?: PlotCandle[]
 }
 
-/**
- * A shaded x-range drawn behind the series — sessions, weekends, halts.
+/* ── Declared shading ─────────────────────────────────────────────────────────
  *
- * A stretch of the x-axis that is CONTEXT for the data rather than data
- * itself: the hours the listing market was open, a maintenance window, the
- * span that came from a backfill instead of the live feed. Encoding one as an
- * extra series does not work — a series is a single path, so points that exist
- * only on weekends draw straight segments across every weekday gap.
+ * A stretch of an AXIS that is context for the data rather than data itself.
+ * `regions` shade x (the hours the listing market was open, a maintenance
+ * window, the span that came from a backfill instead of the live feed);
+ * `yRanges` shade y (a cost band, a threshold zone, the no-trade corridor
+ * either side of flat). Encoding either as an extra series does not work — a
+ * series is a single path, so points that exist only on weekends draw straight
+ * segments across every weekday gap.
+ *
+ * Both carry the same zero-extent convention: `from === to` is not an empty
+ * band but a reference LINE at that value — an instant on x (the anchor reset
+ * at 06:30 UTC), a level on y (a stop, a centre).
  */
+
+/** A shaded x-range drawn behind the series — sessions, weekends, halts. */
 export interface PlotRegion {
   /** x start, inclusive. Epoch ms on a time axis, plain number when xKind is 'value'. */
   from: number
-  /** x end, exclusive. */
+  /** x end, exclusive. `from === to` draws a vertical reference LINE at that instant. */
+  to: number
+  /** Shown on hover / in the legend. */
+  label?: string
+  /** Optional tone hint; the dashboard picks the actual colour. Default 'neutral'. */
+  tone?: 'neutral' | 'warn' | 'good'
+}
+
+/** A shaded y-range drawn behind the series — cost bands, threshold zones, no-trade corridors. */
+export interface PlotYRange {
+  /** y start, inclusive, in the panel's own unit. */
+  from: number
+  /** y end, exclusive. `from === to` draws a horizontal reference LINE at that level. */
   to: number
   /** Shown on hover / in the legend. */
   label?: string
@@ -140,6 +159,16 @@ interface PlotDefBase<TData> {
    * window it is about to render.
    */
   regions?(records: MonitorRecord<TData>[]): PlotRegion[]
+  /**
+   * Shaded y-ranges derived SERVER-side from the same record window, drawn
+   * behind the series — the horizontal mirror of `regions`.
+   *
+   * These never move the y-axis: the domain is what the SERIES span, so a ±2pp
+   * structural stop declared on a panel whose data lives inside ±0.4pp leaves
+   * the signal at full height and simply does not draw. A stop you cannot see
+   * is a stop you are nowhere near, which is the correct reading, not a bug.
+   */
+  yRanges?(records: MonitorRecord<TData>[]): PlotYRange[]
 }
 
 /**

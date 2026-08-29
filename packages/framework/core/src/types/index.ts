@@ -8,7 +8,7 @@ export type {
   InstructionSchema,
 } from './executor.js'
 export type { TriggerFilter, MonitorSource, CronCondition, MonitorCondition, TriggerCondition, Trigger } from './trigger.js'
-export type { MonitorRecord, MonitorDataReader, EmitHandler, MonitorOptions, PlotPoint, PlotCandle, PlotSeries, PlotOption, PlotRegion, MonitorPlotDef, SinglePlotDef, MultiPlotDef, MonitorPlotInfo } from './monitor.js'
+export type { MonitorRecord, MonitorDataReader, EmitHandler, MonitorOptions, PlotPoint, PlotCandle, PlotSeries, PlotOption, PlotRegion, PlotYRange, MonitorPlotDef, SinglePlotDef, MultiPlotDef, MonitorPlotInfo } from './monitor.js'
 export type {
   StrategyContext,
   StrategyMetrics,

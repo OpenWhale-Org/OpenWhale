@@ -459,6 +459,7 @@ export class OpenWhaleRuntime implements IRuntime {
     options?: import('../types/monitor.js').PlotOption[]
     option?: string | string[]
     regions?: import('../types/monitor.js').PlotRegion[]
+    yRanges?: import('../types/monitor.js').PlotYRange[]
   }> {
     const monitor = this.monitorRegistry.get(monitorId)
     if (!monitor) throw new Error(`Unknown monitor "${monitorId}"`)
@@ -479,15 +480,25 @@ export class OpenWhaleRuntime implements IRuntime {
     // (a session that scrolled out, a token no longer sampled) must not reach
     // extract — resolve every request against what exists right now.
     const selected = resolvePlotSelection(options, option, def.multi === true)
-    // Shading is CONTEXT, never the reading itself — so a regions() that
-    // throws costs the shading and nothing else. The series the operator came
-    // for still render; the reason the background is bare goes to the log.
+    // Shading is CONTEXT, never the reading itself — so a regions()/yRanges()
+    // that throws costs the shading and nothing else: the series the operator
+    // came for still render, and the reason the background is bare goes to the
+    // log rather than to the panel.
+    //
+    // ONE catch covers both axes deliberately. They are the same idea turned
+    // ninety degrees, usually derived from the same scan of the window, and a
+    // panel whose shading is broken on one axis has no claim to be trusted on
+    // the other — so the two fail together rather than leaving a half-shaded
+    // chart that reads as complete.
     let regions: import('../types/monitor.js').PlotRegion[] | undefined
+    let yRanges: import('../types/monitor.js').PlotYRange[] | undefined
     try {
       regions = def.regions?.(records)
+      yRanges = def.yRanges?.(records)
     } catch (err) {
-      log.warn({ monitorId, plotId, key, err }, 'Plot regions() threw — rendering the panel without shading')
+      log.warn({ monitorId, plotId, key, err }, 'Plot regions()/yRanges() threw — rendering the panel without shading on either axis')
       regions = undefined
+      yRanges = undefined
     }
     return {
       plot: {
@@ -504,6 +515,7 @@ export class OpenWhaleRuntime implements IRuntime {
       ...(options !== undefined ? { options } : {}),
       ...(selected !== undefined ? { option: selected } : {}),
       ...(regions !== undefined ? { regions } : {}),
+      ...(yRanges !== undefined ? { yRanges } : {}),
     }
   }
 
