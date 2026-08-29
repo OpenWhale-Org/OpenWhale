@@ -97,6 +97,29 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
     signal: AbortSignal,
   ): Promise<void>
 
+  /**
+   * REST equivalent of `feed`, for venues whose websocket says it works and
+   * then says nothing at all.
+   *
+   * `has.watchOrderBook` is the venue's claim, not a guarantee: Aster answers
+   * every REST book instantly while its stream delivers zero frames and never
+   * errors — the await simply never settles, so there is no throw to restart
+   * on, no log line, and a strategy waits on a feed that will never speak.
+   * A monitor that implements this gets a watchdog: no first emit within
+   * `watchWarmupMs` and the key moves to polling, once, with a line saying so.
+   *
+   * Left unimplemented, nothing changes — the feed is watch-only as before.
+   */
+  protected pollFeed?(
+    parsed: ParsedMarketKey,
+    session: PerpExchangeAdapter,
+    emit: (data: TData) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void>
+
+  /** How long a websocket may stay silent before the key falls back to polling. */
+  protected get watchWarmupMs(): number { return 15_000 }
+
   protected override startSubscribe(key: string): void {
     if (this.feeds.has(key)) return
     const controller = new AbortController()
@@ -120,16 +143,24 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
     // in-flight pushes can otherwise land out of order — a strategy must never
     // see an older price after a newer one.
     let chain: Promise<void> = Promise.resolve()
+    let emitted = false
     const emit = (data: TData): Promise<void> => {
+      emitted = true
       chain = chain.then(() => this.push(key, data))
       return chain
     }
     let attempt = 0
+    /** Set once the watch has been proven mute for this key; polling from then on. */
+    let polling = false
 
     while (!signal.aborted) {
       try {
         const session = await this.adapters.resolve<PerpExchangeAdapter>('exchange/perp', parsed.venue)
-        await this.feed(parsed, session, emit, signal)
+        if (polling || this.pollFeed === undefined) {
+          await (polling ? this.pollFeed!(parsed, session, emit, signal) : this.feed(parsed, session, emit, signal))
+        } else {
+          polling = !(await this.watchOrPoll(key, parsed, session, emit, signal, () => emitted))
+        }
         attempt = 0   // a clean return means the venue closed the stream — reconnect promptly
       } catch (err) {
         if (signal.aborted) return
@@ -139,6 +170,41 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
       if (signal.aborted) return
       await sleep(Math.min(1_000 * 2 ** Math.min(attempt, 5), 30_000), signal)
     }
+  }
+
+  /**
+   * Run the websocket feed under a first-emit watchdog.
+   *
+   * @returns true while the stream is worth keeping, false once it has been
+   * silent past the warmup — the caller then polls this key for good rather
+   * than re-testing a venue that has already answered the question.
+   */
+  private async watchOrPoll(
+    key: string,
+    parsed: ParsedMarketKey,
+    session: PerpExchangeAdapter,
+    emit: (data: TData) => Promise<void>,
+    signal: AbortSignal,
+    hasEmitted: () => boolean,
+  ): Promise<boolean> {
+    // A child controller so the watchdog can end the stream without ending the
+    // subscription — the outer signal still aborts both.
+    const watch = new AbortController()
+    const onOuterAbort = () => watch.abort()
+    signal.addEventListener('abort', onOuterAbort, { once: true })
+    const timer = setTimeout(() => { if (!hasEmitted()) watch.abort() }, this.watchWarmupMs)
+    try {
+      await this.feed(parsed, session, emit, watch.signal)
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onOuterAbort)
+    }
+    if (signal.aborted || hasEmitted()) return true
+    this.logger.info(
+      { key, venue: parsed.venue, warmupMs: this.watchWarmupMs },
+      'Venue websocket delivered nothing — polling this key over REST instead',
+    )
+    return false
   }
 }
 

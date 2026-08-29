@@ -2,8 +2,9 @@ import { z } from 'zod'
 import { OwMonitor } from '@openwhaleorg/core'
 import type { MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
 import type { MonitorContext } from '@openwhaleorg/core'
-import { PublicMarketMonitor, type ParsedMarketKey } from './PublicMarketMonitor.js'
+import { PublicMarketMonitor, sleep, type ParsedMarketKey } from './PublicMarketMonitor.js'
 import type { PerpExchangeAdapter } from '../types/perp.js'
+import type { OrderBook } from '../types/exchange.js'
 
 export interface OrderBookMonitorOptions {
   /** Levels to stream and aggregate over. Default 20. */
@@ -111,27 +112,53 @@ export class OrderBookMonitor extends PublicMarketMonitor<OrderBookUpdate> {
     await session.watchOrderBook(symbol, (book) => {
       const now = Date.now()
       if (now - lastEmitAt < this.minIntervalMs) return
-      const bestBid = book.bids[0]?.[0] ?? 0
-      const bestAsk = book.asks[0]?.[0] ?? 0
-      if (bestBid <= 0 || bestAsk <= 0) return   // one-sided book: nothing meaningful to derive
+      const update = this.derive(venue, symbol, book, now)
+      if (!update) return
       lastEmitAt = now
-
-      const bids = book.bids.slice(0, this.depth)
-      const asks = book.asks.slice(0, this.depth)
-      const bidVolume = bids.reduce((sum, [, amount]) => sum + amount, 0)
-      const askVolume = asks.reduce((sum, [, amount]) => sum + amount, 0)
-      const totalVolume = bidVolume + askVolume
-      const mid = (bestBid + bestAsk) / 2
-
-      void emit({
-        venue, symbol, timestamp: book.timestamp || now,
-        bestBid, bestAsk, mid,
-        spread: bestAsk - bestBid,
-        spreadBps: mid > 0 ? ((bestAsk - bestBid) / mid) * 10_000 : 0,
-        bidVolume, askVolume,
-        imbalance: totalVolume > 0 ? (bidVolume - askVolume) / totalVolume : 0,
-        bids, asks,
-      })
+      void emit(update)
     }, this.depth, signal)
+  }
+
+  /**
+   * REST fallback for venues whose stream says `has.watchOrderBook` and then
+   * delivers nothing (Aster, as of 2026-08). Same record, same throttle — the
+   * only difference is where the book came from, and a strategy cannot tell.
+   */
+  protected override async pollFeed(
+    { venue, symbol }: ParsedMarketKey,
+    session: PerpExchangeAdapter,
+    emit: (data: OrderBookUpdate) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    while (!signal.aborted) {
+      const book = await session.fetchOrderBook(symbol, this.depth)
+      const update = this.derive(venue, symbol, book, Date.now())
+      if (update) await emit(update)
+      await sleep(Math.max(this.minIntervalMs, 1_000), signal)
+    }
+  }
+
+  /** One book → one record, or undefined when the book says nothing usable. */
+  private derive(venue: string, symbol: string, book: OrderBook, now: number): OrderBookUpdate | undefined {
+    const bestBid = book.bids[0]?.[0] ?? 0
+    const bestAsk = book.asks[0]?.[0] ?? 0
+    if (bestBid <= 0 || bestAsk <= 0) return undefined   // one-sided book: nothing meaningful to derive
+
+    const bids = book.bids.slice(0, this.depth)
+    const asks = book.asks.slice(0, this.depth)
+    const bidVolume = bids.reduce((sum, [, amount]) => sum + amount, 0)
+    const askVolume = asks.reduce((sum, [, amount]) => sum + amount, 0)
+    const totalVolume = bidVolume + askVolume
+    const mid = (bestBid + bestAsk) / 2
+
+    return {
+      venue, symbol, timestamp: book.timestamp || now,
+      bestBid, bestAsk, mid,
+      spread: bestAsk - bestBid,
+      spreadBps: mid > 0 ? ((bestAsk - bestBid) / mid) * 10_000 : 0,
+      bidVolume, askVolume,
+      imbalance: totalVolume > 0 ? (bidVolume - askVolume) / totalVolume : 0,
+      bids, asks,
+    }
   }
 }

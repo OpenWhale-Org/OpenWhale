@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { OwMonitor } from '@openwhaleorg/core'
 import type { MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
 import type { MonitorContext } from '@openwhaleorg/core'
-import { PublicMarketMonitor, type ParsedMarketKey } from './PublicMarketMonitor.js'
+import { PublicMarketMonitor, sleep, type ParsedMarketKey } from './PublicMarketMonitor.js'
 import type { PerpExchangeAdapter } from '../types/perp.js'
 import type { Ticker } from '../types/exchange.js'
 
@@ -105,5 +105,31 @@ export class TickerMonitor extends PublicMarketMonitor<TickerUpdate> {
         changePct,
       })
     }, signal)
+  }
+
+  /**
+   * REST fallback for a venue whose ticker stream never speaks — see
+   * PublicMarketMonitor.pollFeed. Polls at the emit floor; the move-based
+   * emit rule has nothing to add when the sampling itself is periodic.
+   */
+  protected override async pollFeed(
+    { venue, symbol }: ParsedMarketKey,
+    session: PerpExchangeAdapter,
+    emit: (data: TickerUpdate) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let lastPrice = 0
+    while (!signal.aborted) {
+      const ticker = await session.fetchTicker(symbol)
+      const price = ticker.last || (ticker.bid + ticker.ask) / 2
+      await emit({
+        ...ticker,
+        venue,
+        mid: ticker.bid > 0 && ticker.ask > 0 ? (ticker.bid + ticker.ask) / 2 : ticker.last,
+        changePct: lastPrice > 0 ? (price - lastPrice) / lastPrice : 0,
+      })
+      lastPrice = price
+      await sleep(Math.max(this.minIntervalMs, 1_000), signal)
+    }
   }
 }
