@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { type Drawing, type Tool, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings } from './chartTools'
 
 export interface ChartCandle { x: number; o: number; h: number; l: number; c: number }
 export interface ChartSeries { label: string; points?: Array<{ x: number; y: number }>; candles?: ChartCandle[] }
@@ -13,6 +14,9 @@ export interface ChartSeries { label: string; points?: Array<{ x: number; y: num
 const SERIES_COLORS = ['var(--accent)', '#22c55e', '#eab308', '#38bdf8'] as const
 const CANDLE_UP = '#22c55e'
 const CANDLE_DOWN = '#ef4444'
+/* One hue for everything the reader drew, distinct from all four series
+   colours and from up/down — a mark must never be mistaken for data. */
+const INK = '#e879f9'
 
 const PAD = { top: 14, right: 68, bottom: 30, left: 14 }
 
@@ -76,7 +80,7 @@ let clipCounter = 0
  * rescales to what the zoomed window shows. Renders at the container's
  * native pixel width so SVG text keeps its true point size.
  */
-export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220, mode = 'line' }: {
+export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey }: {
   series: ChartSeries[]
   unit?: string
   xKind?: 'time' | 'value'
@@ -84,6 +88,8 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
   height?: number
   /** 'scatter' = point cloud + OLS trend with its 95% confidence band; connecting a cloud would invent order. */
   mode?: 'line' | 'scatter'
+  /** Identity for the reader's own drawings, which persist per chart. Absent = nothing is remembered. */
+  storageKey?: string
 }) {
   const [hoverX, setHoverX] = useState<number | null>(null)
   const [hoverY, setHoverY] = useState<number | null>(null)
@@ -96,6 +102,38 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const clipId = useMemo(() => `chart-clip-${++clipCounter}`, [])
+
+  /* ── The reader's own marks ──────────────────────────────────────────────
+     A tool takes over the drag: with one armed, dragging draws instead of
+     panning, which is the only way both gestures fit on one surface. Tools
+     disarm themselves after one use — annotating is occasional, panning is
+     constant, so the expensive state to be stuck in is the drawing one. */
+  const [tool, setTool] = useState<Tool>('cursor')
+  const [drawings, setDrawings] = useState<Drawing[]>([])
+  const [selected, setSelected] = useState<string | null>(null)
+  /** The shape under construction, in DATA coords. */
+  const [draft, setDraft] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+  const [fnOpen, setFnOpen] = useState(false)
+  const [fnText, setFnText] = useState('')
+  const loaded = useRef(false)
+  const keyRef = useRef(storageKey)
+
+  // Loaded after mount, never during render: localStorage does not exist on the
+  // server, and marks appearing between the server's HTML and the client's
+  // would be a hydration mismatch.
+  useEffect(() => {
+    keyRef.current = storageKey
+    loaded.current = true
+    setDrawings(loadDrawings(storageKey))
+  }, [storageKey])
+
+  /* Saves follow the DRAWINGS alone, and address the key through a ref.
+     Keying this effect on storageKey too would fire it in the same commit as
+     the load above — where setDrawings has not landed yet — and write the
+     previous panel's marks under the new panel's name. */
+  useEffect(() => {
+    if (loaded.current) saveDrawings(keyRef.current, drawings)
+  }, [drawings])
 
   // Native-width rendering: track the container so 1 SVG unit = 1 CSS px
   useEffect(() => {
@@ -316,8 +354,47 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, hidden, geom, mode, hoverX, hoverY, drag])
 
+  /**
+   * Each function guide, sampled across the plot at 2px steps. Sampled in
+   * PIXEL space rather than data space so the curve has the same resolution
+   * however far the chart is zoomed, and broken into separate subpaths
+   * wherever the formula stops producing a number — sqrt(x) below zero should
+   * leave a gap, not a straight line across the discontinuity.
+   */
+  const fnPaths = useMemo(() => {
+    if (!geom) return []
+    return drawings.flatMap((d) => {
+      if (d.kind !== 'fn') return []
+      const compiled = tryCompile(d.expr)
+      if ('error' in compiled) return []
+      const segs: string[] = []
+      let cur: string[] = []
+      for (let pxv = PAD.left; pxv <= W - PAD.right; pxv += 2) {
+        const y = compiled.fn(fnX(geom.xAt(pxv)))
+        if (!isFinite(y)) { if (cur.length > 1) segs.push(cur.join(' ')); cur = []; continue }
+        const yy = geom.py(y)
+        // Off-frame by a wide margin: keep the subpath, let the clip do the work
+        cur.push(`${cur.length === 0 ? 'M' : 'L'}${pxv.toFixed(1)},${Math.max(-1e4, Math.min(1e4, yy)).toFixed(1)}`)
+      }
+      if (cur.length > 1) segs.push(cur.join(' '))
+      return [{ id: d.id, d: segs.join(' ') }]
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawings, geom, W, xKind, dataDomain])
+
+  const hasCandles = series.some(s => (s.candles?.length ?? 0) > 0)
+  const fnCompiled = useMemo(() => (fnText.trim() ? tryCompile(fnText) : null), [fnText])
+  const fnError = fnCompiled && 'error' in fnCompiled ? fnCompiled.error : null
+
+  function addFn() {
+    if (!fnCompiled || 'error' in fnCompiled) return
+    setDrawings(d => [...d, { id: newId(), kind: 'fn', expr: fnText.trim() }])
+    setFnText('')
+    setFnOpen(false)
+  }
+
   let hoveredX: number | null = null
-  if (mode === 'line' && geom && hoverX !== null && drag === null && pan === null && refXs.length > 0) {
+  if (mode === 'line' && geom && hoverX !== null && drag === null && pan === null && draft === null && refXs.length > 0) {
     const inWin = refXs.filter(geom.inWindow)
     const pool = inWin.length > 0 ? inWin : refXs
     hoveredX = pool.reduce((best, x) => Math.abs(geom.px(x) - hoverX) < Math.abs(geom.px(best) - hoverX) ? x : best, pool[0]!)
@@ -328,14 +405,33 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
     return e.clientX - svgRef.current.getBoundingClientRect().left
   }
 
+  function localY(e: React.MouseEvent<SVGSVGElement>): number | null {
+    if (!svgRef.current) return null
+    return e.clientY - svgRef.current.getBoundingClientRect().top
+  }
+
+  /**
+   * What `x` means inside a formula.
+   *
+   * On a time axis the raw value is an epoch in milliseconds, which no one can
+   * write a useful formula against — `y = 100 + 0.5*x` would move by half a
+   * unit per millisecond. So x is HOURS SINCE the first sample, and a slope is
+   * a rate per hour, which is the thing a reader actually has in mind. On a
+   * value axis the raw number already is the quantity, so it passes through.
+   */
+  const fnX = (x: number): number =>
+    xKind === 'time' && dataDomain ? (x - dataDomain[0]) / 3_600_000 : x
+
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const x = localX(e)
+    const y = localY(e)
     if (x === null) return
     // While panning the crosshair would chase the cursor across a moving
     // series — all motion, no reading. Suppress it until the grab is released.
     if (pan) { setHoverX(null); setHoverY(null); return }
     setHoverX(x)
-    if (svgRef.current) setHoverY(e.clientY - svgRef.current.getBoundingClientRect().top)
+    if (y !== null) setHoverY(y)
+    if (draft && geom && y !== null) { setDraft({ ...draft, x2: geom.xAt(x), y2: geom.yAt(y) }); return }
     if (drag) setDrag({ from: drag.from, to: x })
   }
 
@@ -346,12 +442,39 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
    */
   function onDown(e: React.MouseEvent<SVGSVGElement>) {
     const x = localX(e)
-    if (x === null) return
+    const y = localY(e)
+    if (x === null || y === null) return
+
+    if (tool !== 'cursor' && geom) {
+      const dx = geom.xAt(x)
+      const dy = geom.yAt(y)
+      // A level and an instant are single-click: there is no second point to
+      // ask for, and making the reader drag a horizontal line horizontally
+      // would be a gesture that carries no information.
+      if (tool === 'hline') { setDrawings(d => [...d, { id: newId(), kind: 'hline', y: dy }]); setTool('cursor'); return }
+      if (tool === 'vline') { setDrawings(d => [...d, { id: newId(), kind: 'vline', x: dx }]); setTool('cursor'); return }
+      setDraft({ x1: dx, y1: dy, x2: dx, y2: dy })
+      return
+    }
+
+    setSelected(null)
     if (e.shiftKey) { setDrag({ from: x, to: x }); return }
     if (geom) setPan({ x0: geom.x0, x1: geom.x1, startPx: x })
   }
 
   function onUp() {
+    if (draft) {
+      // A trend line is kept; a measurement is not. The measure tool answers a
+      // question asked in the moment ("how far was that move?") and leaving its
+      // box behind would turn every answer into clutter on the next one.
+      if (tool === 'trend' && geom) {
+        const moved = Math.hypot(geom.px(draft.x2) - geom.px(draft.x1), geom.py(draft.y2) - geom.py(draft.y1))
+        if (moved >= 6) setDrawings(d => [...d, { id: newId(), kind: 'trend', ...draft }])
+      }
+      setDraft(null)
+      setTool('cursor')
+      return
+    }
     if (!drag || !geom) { setDrag(null); return }
     const [a, b] = [Math.min(drag.from, drag.to), Math.max(drag.from, drag.to)]
     setDrag(null)
@@ -376,7 +499,50 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
 
   return (
     <div ref={wrapRef} className="relative">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 min-h-[18px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 min-h-[18px]">
+        {/* ── Tools ──────────────────────────────────────────────────────
+            Guides on every chart; the freehand line and the measure box only
+            where there are candles, which is where a reader is reading price
+            action rather than a level. */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          {([
+            ['cursor', '↖', 'Cursor — drag to pan, shift-drag to select'],
+            ...(hasCandles ? [['trend', '╱', 'Trend line — drag between two points'] as const,
+                              ['measure', '⇅', 'Measure — drag over a move for its size, % and duration'] as const] : []),
+            ['hline', '─', 'Horizontal guide — click a level'],
+            ['vline', '│', 'Vertical guide — click an instant'],
+          ] as ReadonlyArray<readonly [Tool, string, string]>).map(([t, glyph, title]) => (
+            <button
+              key={t}
+              onClick={() => { setTool(tool === t ? 'cursor' : t); setFnOpen(false); setDraft(null) }}
+              title={title}
+              className="text-xs w-6 h-6 rounded cursor-pointer leading-none"
+              style={{
+                border: `1px solid ${tool === t ? INK : 'var(--border)'}`,
+                color: tool === t ? INK : 'var(--muted)',
+                background: tool === t ? 'color-mix(in srgb, var(--surface) 70%, transparent)' : 'transparent',
+              }}
+            >{glyph}</button>
+          ))}
+          <button
+            onClick={() => { setFnOpen(v => !v); setTool('cursor') }}
+            title="Function guide — a formula in x"
+            className="text-xs h-6 px-1.5 rounded cursor-pointer leading-none italic"
+            style={{
+              border: `1px solid ${fnOpen ? INK : 'var(--border)'}`,
+              color: fnOpen ? INK : 'var(--muted)',
+              background: 'transparent',
+            }}
+          >ƒ(x)</button>
+          {drawings.length > 0 && (
+            <button
+              onClick={() => { setDrawings([]); setSelected(null) }}
+              title={`Remove all ${drawings.length} drawing(s)`}
+              className="text-xs h-6 px-1.5 rounded cursor-pointer leading-none"
+              style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+            >✕ {drawings.length}</button>
+          )}
+        </div>
         {lineSeries.length >= 2 && lineSeries.map((s) => {
           const i = series.indexOf(s)
           const off = hidden.has(s.label)
@@ -412,10 +578,43 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
           // Drag-to-pan is invisible until tried, and shift-drag would never be
           // guessed at all — so the chart says so while it is fully zoomed out.
           <span className="ml-auto text-xs" style={{ color: 'var(--border)' }}>
-            scroll to zoom · drag to pan · shift-drag to select
+            {tool === 'trend' ? 'drag between two points · esc to cancel'
+              : tool === 'measure' ? 'drag over a move · the box goes when you let go'
+              : tool === 'hline' ? 'click a level'
+              : tool === 'vline' ? 'click an instant'
+              : selected ? 'delete removes the selected drawing'
+              : 'scroll to zoom · drag to pan · shift-drag to select'}
           </span>
         )}
       </div>
+
+      {/* The formula bar, open only while it is being used */}
+      {fnOpen && (
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs italic shrink-0" style={{ color: INK }}>y =</span>
+          <input
+            autoFocus
+            value={fnText}
+            onChange={(e) => setFnText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') addFn()
+              if (e.key === 'Escape') { setFnOpen(false); setFnText('') }
+            }}
+            placeholder={xKind === 'time' ? 'e.g. 100 + 0.5*x   (x = hours since the first sample)' : 'e.g. 2*x + 3'}
+            className="flex-1 min-w-0 text-xs px-2 py-1 rounded-md font-mono"
+            style={{ background: 'var(--background)', color: 'var(--foreground)', border: `1px solid ${fnError ? CANDLE_DOWN : 'var(--border)'}` }}
+          />
+          <button
+            onClick={addFn}
+            disabled={!!fnError || !fnText.trim()}
+            className="text-xs px-2 py-1 rounded-md cursor-pointer shrink-0"
+            style={{ border: `1px solid ${fnError || !fnText.trim() ? 'var(--border)' : INK}`, color: fnError || !fnText.trim() ? 'var(--border)' : INK }}
+          >Add</button>
+          {fnError && fnText.trim() && (
+            <span className="text-xs shrink-0" style={{ color: CANDLE_DOWN }}>{fnError}</span>
+          )}
+        </div>
+      )}
 
       {!geom ? (
         <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>No data in window.</p>
@@ -425,15 +624,24 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
             ref={svgRef}
             width={W}
             height={H}
-            className="block max-w-full select-none"
-            style={{ cursor: pan ? 'grabbing' : drag ? 'col-resize' : 'grab' }}
+            className="block max-w-full select-none outline-none"
+            tabIndex={0}
+            style={{ cursor: tool !== 'cursor' ? 'crosshair' : pan ? 'grabbing' : drag ? 'col-resize' : 'grab' }}
             onMouseMove={onMove}
             onMouseDown={onDown}
             onMouseUp={onUp}
             /* pan is torn down by its own window listener — clearing it here
                would drop the grab the moment the drag reaches the edge */
-            onMouseLeave={() => { setHoverX(null); setHoverY(null); setDrag(null) }}
+            onMouseLeave={() => { setHoverX(null); setHoverY(null); setDrag(null); setDraft(null) }}
             onDoubleClick={() => setView(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { setTool('cursor'); setDraft(null); setSelected(null) }
+              if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+                e.preventDefault()
+                setDrawings(d => d.filter(x => x.id !== selected))
+                setSelected(null)
+              }
+            }}
           >
             <defs>
               <clipPath id={clipId}>
@@ -532,6 +740,84 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
                   </g>
                 ))
               )}
+
+              {/* ── The reader's own marks ────────────────────────────────
+                  Drawn last, so an annotation is never buried under the data
+                  it annotates. Each shape carries an invisible fat stroke
+                  beneath it: a 1.5px line is almost impossible to click, and
+                  a mark you cannot select is a mark you cannot delete. */}
+              {drawings.map((d) => {
+                const on = selected === d.id
+                const w = on ? 2.5 : 1.5
+                const hit = (node: React.ReactNode, key: string) => (
+                  <g key={key} onMouseDown={(e) => { e.stopPropagation(); setSelected(d.id) }} style={{ cursor: 'pointer' }}>
+                    {node}
+                  </g>
+                )
+                if (d.kind === 'hline') {
+                  const y = geom.py(d.y)
+                  return hit(
+                    <>
+                      <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="transparent" strokeWidth="10" />
+                      <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke={INK} strokeWidth={w} strokeDasharray="6 4" opacity={on ? 1 : 0.85} />
+                    </>, d.id)
+                }
+                if (d.kind === 'vline') {
+                  const x = geom.px(d.x)
+                  return hit(
+                    <>
+                      <line x1={x} x2={x} y1={PAD.top} y2={H - PAD.bottom} stroke="transparent" strokeWidth="10" />
+                      <line x1={x} x2={x} y1={PAD.top} y2={H - PAD.bottom} stroke={INK} strokeWidth={w} strokeDasharray="6 4" opacity={on ? 1 : 0.85} />
+                    </>, d.id)
+                }
+                if (d.kind === 'trend') {
+                  const [x1, y1, x2, y2] = [geom.px(d.x1), geom.py(d.y1), geom.px(d.x2), geom.py(d.y2)]
+                  return hit(
+                    <>
+                      <line x1={x1} x2={x2} y1={y1} y2={y2} stroke="transparent" strokeWidth="12" />
+                      <line x1={x1} x2={x2} y1={y1} y2={y2} stroke={INK} strokeWidth={w} strokeLinecap="round" opacity={on ? 1 : 0.9} />
+                      {on && (
+                        <>
+                          <circle cx={x1} cy={y1} r="4" fill={INK} stroke="var(--surface)" strokeWidth="1.5" />
+                          <circle cx={x2} cy={y2} r="4" fill={INK} stroke="var(--surface)" strokeWidth="1.5" />
+                        </>
+                      )}
+                    </>, d.id)
+                }
+                const path = fnPaths.find(f => f.id === d.id)
+                if (!path || !path.d) return null
+                return hit(
+                  <>
+                    <path d={path.d} fill="none" stroke="transparent" strokeWidth="12" />
+                    <path d={path.d} fill="none" stroke={INK} strokeWidth={w} strokeLinejoin="round" opacity={on ? 1 : 0.9} />
+                  </>, d.id)
+              })}
+
+              {/* In progress: a trend line being drawn, or a measurement */}
+              {draft && tool === 'trend' && (
+                <line
+                  x1={geom.px(draft.x1)} y1={geom.py(draft.y1)}
+                  x2={geom.px(draft.x2)} y2={geom.py(draft.y2)}
+                  stroke={INK} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.9"
+                />
+              )}
+              {draft && tool === 'measure' && (() => {
+                const m = measure(draft.y1, draft.y2, draft.x1, draft.x2)
+                const c = m.up ? CANDLE_UP : CANDLE_DOWN
+                const [ax, bx] = [geom.px(draft.x1), geom.px(draft.x2)]
+                const [ay, by] = [geom.py(draft.y1), geom.py(draft.y2)]
+                return (
+                  <g>
+                    <rect
+                      x={Math.min(ax, bx)} y={Math.min(ay, by)}
+                      width={Math.abs(bx - ax)} height={Math.abs(by - ay)}
+                      fill={c} opacity="0.13" stroke={c} strokeWidth="1"
+                    />
+                    <line x1={ax} x2={bx} y1={ay} y2={ay} stroke={c} strokeWidth="1" strokeDasharray="3 3" opacity="0.7" />
+                    <line x1={bx} x2={bx} y1={ay} y2={by} stroke={c} strokeWidth="1.5" />
+                  </g>
+                )
+              })()}
             </g>
 
             {/* Drag selection */}
@@ -579,6 +865,34 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
               </g>
             )}
           </svg>
+
+          {/* The measurement, beside the point the drag ended on. Three numbers,
+              because "how big was that move" is asked in price, in percent and
+              in time, and answering one of the three invites the other two. */}
+          {draft && tool === 'measure' && geom && (() => {
+            const m = measure(draft.y1, draft.y2, draft.x1, draft.x2)
+            const c = m.up ? CANDLE_UP : CANDLE_DOWN
+            const ex = geom.px(draft.x2)
+            return (
+              <div
+                className="absolute pointer-events-none px-2.5 py-1.5 rounded-md text-xs whitespace-nowrap shadow-lg font-mono"
+                style={{
+                  left: `${Math.min(Math.max((ex / W) * 100, 2), 98)}%`,
+                  top: Math.max(4, Math.min(geom.py(draft.y2), H - 70)),
+                  transform: ex > W * 0.6 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)',
+                  background: 'var(--surface)', border: `1px solid ${c}`, color: 'var(--foreground)', zIndex: 11,
+                }}
+              >
+                <div style={{ color: c }}>
+                  {m.dy >= 0 ? '+' : ''}{formatValue(m.dy, unit, geom.tickDecimals)}
+                  {'  '}({m.dyPct >= 0 ? '+' : ''}{m.dyPct.toFixed(2)}%)
+                </div>
+                <div style={{ color: 'var(--muted)' }}>
+                  {xKind === 'time' ? formatSpan(m.dx) : `${m.dx.toLocaleString(undefined, { maximumFractionDigits: 2 })}${xUnit ? ` ${xUnit}` : ''}`}
+                </div>
+              </div>
+            )
+          })()}
 
           {hoverPt && geom && (
             <div

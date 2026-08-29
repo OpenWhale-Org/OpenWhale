@@ -472,6 +472,9 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
                 <SeriesChart
                   series={series[p.id] ?? []}
                   height={isExpanded ? 380 : 230}
+                  /* Monitor and panel together: the same panel of two monitors
+                     is two charts, and each keeps its own marks. */
+                  storageKey={`${monitorId}:${p.id}`}
                   {...(p.kind === 'scatter' ? { mode: 'scatter' as const } : {})}
                   {...(p.unit !== undefined ? { unit: p.unit } : {})}
                   {...(p.xKind !== undefined ? { xKind: p.xKind } : {})}
