@@ -340,7 +340,9 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
-  const [boundVenue, setBoundVenue] = useState<string | undefined>(undefined)
+  /** Venue per bound slot label; the first entry is the default for fields naming no `accountSlot`. */
+  const [slotVenues, setSlotVenues] = useState<Record<string, string>>({})
+  const boundVenue = Object.values(slotVenues)[0]
 
   useEffect(() => {
     let gone = false
@@ -363,14 +365,16 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
           implementations?: Array<{ id: string; type?: string }>
         }
         const implVenues = Object.fromEntries((implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : []))
+        const venues: Record<string, string> = {}
         for (const slot of def?.accountRequirements ?? []) {
           const bound = instance.credentials?.[slot.label] ?? instance.accounts?.[0]
           if (!bound) continue
           // Instances from before Account entities bind by credential name — match either
           const account = accounts.find(a => a.name === bound || a.credential === bound)
           const venue = account ? implVenues[account.implementation ?? ''] ?? account.type : undefined
-          if (venue) { setBoundVenue(venue); break }
+          if (venue) venues[slot.label] = venue
         }
+        if (!gone) setSlotVenues(venues)
       }
     })()
     return () => { gone = true }
@@ -427,6 +431,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
             onChange={(v) => { setValues(v); setDirty(true) }}
             strategyId={instance.strategyId}
             venueContext={boundVenue}
+            slotVenues={slotVenues}
             {...(illustrations ? { illustrations } : {})}
           />
           <div className="flex justify-end items-center gap-3 mt-3">

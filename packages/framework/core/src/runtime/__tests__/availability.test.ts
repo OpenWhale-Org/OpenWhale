@@ -42,6 +42,12 @@ class PickerStrategy extends BaseStrategy {
       availability: { checker: 'liquidity' },
     }),
     plain: z.string().default('').meta({ displayName: 'No check' }),
+    // A second venue's symbol: the form resolves the venue from THAT slot
+    other: z.string().default('').meta({
+      displayName: 'Other',
+      catalogue: { source: 'market' as const, accountSlot: 'short' },
+      availability: { source: 'market' as const, accountSlot: 'short' },
+    }),
   })
 
   override readonly availabilityCheckers: Record<string, AvailabilityChecker> = {
@@ -112,6 +118,12 @@ describe('checkParamAvailability', () => {
   it('rejects a field that declares no check, and an unknown venue', async () => {
     await expect(runtime.checkParamAvailability('picker', 'plain', ['x'], 'fake')).rejects.toThrow(/no availability check/)
     await expect(runtime.checkParamAvailability('picker', 'pairs', ['x'], 'nowhere')).rejects.toThrow(/No "exchange\/perp" adapter/)
+  })
+
+  it('carries accountSlot through to the field definition for the form to resolve', () => {
+    const field = new PickerStrategy().paramsFields?.find(f => f.name === 'other')
+    expect(field?.catalogue?.accountSlot).toBe('short')
+    expect(field?.availability?.accountSlot).toBe('short')
   })
 
   it('short-circuits an empty selection', async () => {

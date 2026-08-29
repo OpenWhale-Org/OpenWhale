@@ -238,11 +238,12 @@ function NumberCell({ value, onChange, slider, unit, placeholder }: {
  * Editor for a `list` param — an ordered table of uniform rows (ladder rungs,
  * tier tables). Value is stored as a JSON array string in the form state.
  */
-function ListParamEditor({ field, value, onChange, venueContext }: {
+function ListParamEditor({ field, value, onChange, venueFor }: {
   field: ParamFieldDef
   value: string
   onChange: (v: string) => void
-  venueContext?: string
+  /** Venue for a catalogue cell, resolved from the cell's `accountSlot` (see ParamFieldsForm). */
+  venueFor: (slot?: string) => string | undefined
 }) {
   const columns = field.list?.columns ?? []
   const rows = parseListRows(value)
@@ -297,7 +298,7 @@ function ListParamEditor({ field, value, onChange, venueContext }: {
                   key={c.name}
                   value={String(v ?? '')}
                   onChange={(nv) => setCell(i, c.name, nv)}
-                  venue={c.catalogue.venueField ? undefined : venueContext}
+                  venue={c.catalogue.venueField ? undefined : venueFor(c.catalogue.accountSlot)}
                   catalogue={c.catalogue}
                   placeholder={c.placeholder}
                   title={c.description}
@@ -367,6 +368,7 @@ export function ParamFieldsForm({
   values,
   onChange,
   venueContext,
+  slotVenues,
   strategyId,
   illustrations,
 }: {
@@ -380,10 +382,22 @@ export function ParamFieldsForm({
   /**
    * Venue for catalogue pickers whose fields declare no venueField — strategy
    * params never carry a venue (it derives from the bound account), so the
-   * form supplies it from the slot bindings.
+   * form supplies it from the slot bindings. This is the FIRST bound slot's
+   * venue — the default for fields that name no `accountSlot`.
    */
   venueContext?: string
+  /**
+   * Venue per account slot label, for fields whose catalogue/availability
+   * meta names an `accountSlot`: a two-account pair strategy picks `symbolA`
+   * on one venue and `symbolB` on another. A slot missing here (unbound, or
+   * not a slot at all) falls back to `venueContext`.
+   */
+  slotVenues?: Record<string, string>
 }) {
+  /** Venue a field's picker/check should use: its named slot's, else the first bound slot's. */
+  const venueFor = (slot?: string): string | undefined =>
+    (slot ? slotVenues?.[slot] : undefined) ?? venueContext
+
   // Which parameter groups are folded away, remembered per strategy: tuning
   // one knob in a forty-parameter form should not mean scrolling past the
   // thirty-nine others every time.
@@ -416,16 +430,20 @@ export function ParamFieldsForm({
   // Verify chosen values against the venue whenever either changes. Advisory:
   // a failure to check leaves the field unannotated rather than blocking.
   useEffect(() => {
-    if (!strategyId || !venueContext) return
+    if (!strategyId) return
     let cancelled = false
-    const checked = fields.filter(f => f.availability && (values[f.name] ?? '').length > 0)
+    // Each field checks against ITS venue: the slot its meta names, else the
+    // first bound one. A field whose venue is unresolved stays unannotated.
+    const checked = fields
+      .map(f => ({ f, venue: f.availability ? venueFor(f.availability.accountSlot) : undefined }))
+      .filter((e): e is { f: ParamFieldDef; venue: string } => !!e.venue && (values[e.f.name] ?? '').length > 0)
     if (checked.length === 0) return
-    void Promise.all(checked.map(async (f) => {
+    void Promise.all(checked.map(async ({ f, venue }) => {
       const vals = (values[f.name] ?? '').split(',').filter(Boolean)
       const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/availability`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field: f.name, values: vals, venue: venueContext }),
+        body: JSON.stringify({ field: f.name, values: vals, venue }),
       })
       if (!res.ok) return [f.name, {}] as const
       const { verdicts } = await res.json() as { verdicts: Array<{ value: string; available: boolean; reason?: string }> }
@@ -437,7 +455,7 @@ export function ParamFieldsForm({
     }).catch(() => { /* advisory */ })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategyId, venueContext, JSON.stringify(fields.map(f => [f.name, values[f.name]]))])
+  }, [strategyId, venueContext, JSON.stringify(slotVenues ?? {}), JSON.stringify(fields.map(f => [f.name, values[f.name]]))])
 
   const baseFields = fields.filter((f) => f.group === 'base')
   const tunableFields = fields.filter((f) => f.group === 'tunable')
@@ -538,7 +556,7 @@ export function ParamFieldsForm({
             </span>
             {field.hint && <span className="text-xs" style={{ color: 'var(--muted)' }}>— {field.hint}</span>}
           </div>
-          <ListParamEditor field={field} value={value} onChange={(v) => set(field.name, v)} venueContext={venueContext} />
+          <ListParamEditor field={field} value={value} onChange={(v) => set(field.name, v)} venueFor={venueFor} />
           {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
         </div>
       )
@@ -597,7 +615,7 @@ export function ParamFieldsForm({
           <SymbolPicker
             value={value}
             onChange={(v) => set(field.name, v)}
-            venue={field.catalogue.venueField ? values[field.catalogue.venueField] : venueContext}
+            venue={field.catalogue.venueField ? values[field.catalogue.venueField] : venueFor(field.catalogue.accountSlot)}
             catalogue={field.catalogue}
             placeholder={field.placeholder ?? (field.default !== undefined ? String(field.default) : undefined)}
             title={field.description}
@@ -1883,13 +1901,15 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   const strategy = strategies.find((s) => s.id === selectedStrategy)
 
   /**
-   * Venue implied by the account bindings — what symbol pickers on params
-   * query, since strategy params carry no venue field (it derives from the
-   * bound account). Takes the first bound slot in declaration order: a
-   * strategy that picks symbols has one venue in practice, and the picker is
-   * a suggestion anyway — typed symbols always remain valid.
+   * Venue implied by each account binding, keyed by slot label — what symbol
+   * pickers and availability checks on params query, since strategy params
+   * carry no venue field (it derives from the bound account). A field names
+   * the slot it belongs to via `accountSlot`; the rest use the first bound
+   * slot in declaration order. The picker is a suggestion anyway — typed
+   * symbols always remain valid.
    */
-  const boundVenue = (() => {
+  const slotVenues = (() => {
+    const out: Record<string, string> = {}
     for (const slot of strategy?.accountRequirements ?? []) {
       const bound = slotBindings[slot.label]
       if (!bound) continue
@@ -1900,10 +1920,11 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       // credential type IS the venue. On-chain venues differ: a Boros account
       // binds a pendle/boros-agent key, but the catalogue lives on 'boros'.
       const venue = implVenues[account.implementation] ?? account.type
-      if (venue) return venue
+      if (venue) out[slot.label] = venue
     }
-    return undefined
+    return out
   })()
+  const boundVenue = Object.values(slotVenues)[0]
 
   // Backing out of the browser returns to the form once a strategy is chosen;
   // with nothing chosen there is no form to return to, so it closes.
@@ -2085,6 +2106,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
               onChange={setFieldValues}
               strategyId={strategy.id}
               venueContext={boundVenue}
+              slotVenues={slotVenues}
               illustrations={strategy.paramsIllustrations}
             />
           ) : (
