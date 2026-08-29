@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'url'
 import type { StrategyInstance, StrategyInstanceView } from '../types/instance.js'
-import type { ExecutionQueue } from '../types/executor.js'
+import type { ExecutionQueue, ExecutionResult } from '../types/executor.js'
 import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from '../types/runtime.js'
 import { PluginAlreadyLoadedError } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
@@ -257,6 +257,7 @@ export class OpenWhaleRuntime implements IRuntime {
     // runtimes; executors registered earlier still pick it up. Optional call —
     // executors compiled against an older base class must keep loading.
     instance.setClaimSink?.((claim) => { void this.pnlService?.recordClaim(claim) })
+    instance.setResultSink?.((result) => { void this.notifyStrategyOfResult(result) })
     // Hot install/replace while running: boot-time startInner won't run again,
     // so the NEW executor object must take over the queue consumer here — and
     // any consumer loop still owned by a replaced object must stop first
@@ -265,6 +266,26 @@ export class OpenWhaleRuntime implements IRuntime {
     if (this.running) {
       this.queue.cancelConsumers?.(definition.id)
       void instance.run(this.queue, definition.id)
+    }
+  }
+
+  /**
+   * Hand an executor's recorded result to the live strategy instance whose
+   * instruction it answers, if that instance defines `onExecutionResult`.
+   * Isolated on purpose: the hook runs after the record is written and off
+   * the queue's path, and anything it throws is a warning here — a strategy's
+   * bookkeeping must never be able to lose an execution record.
+   */
+  private async notifyStrategyOfResult(result: ExecutionResult): Promise<void> {
+    const instanceId = result.instruction.instanceId
+    if (!instanceId) return
+    const strategy = this.triggerManager.getStrategy(instanceId)
+    if (!strategy?.onExecutionResult) return
+    try {
+      await strategy.onExecutionResult(result, { instanceId })
+    } catch (err) {
+      log.warn({ err, instanceId, executorId: result.instruction.executorId, messageId: result.instruction.messageId },
+        'Strategy onExecutionResult hook threw — ignored')
     }
   }
 

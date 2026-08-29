@@ -357,6 +357,24 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     } catch (err) {
       this.log.warn({ err }, 'PnL order-claim scan failed — those orders will show as unattributed')
     }
+    try {
+      this.resultSink?.(result)
+    } catch (err) {
+      this.log.warn({ err }, 'Execution result sink threw — the record and the queue are unaffected')
+    }
+  }
+
+  // ── Execution result fan-out ──────────────────────────────────────────────
+
+  private resultSink: ((result: ExecutionResult<TInstruction>) => void) | null = null
+
+  /**
+   * Runtime-injected: every recorded result is handed on (after the record is
+   * written and orders are claimed) so the originating strategy instance can
+   * be told. Must not throw; a throw is logged and swallowed here anyway.
+   */
+  setResultSink(sink: ((result: ExecutionResult<TInstruction>) => void) | null): void {
+    this.resultSink = sink
   }
 
   // ── PnL order claims ──────────────────────────────────────────────────────
