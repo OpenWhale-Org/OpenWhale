@@ -303,6 +303,7 @@ export class OpenWhaleRuntime implements IRuntime {
         ?? probe.llms.map(d => ({ ...d })),
       ...(definition.paramsFields || !probe.paramsFields?.length ? {} : { paramsFields: probe.paramsFields }),
       ...(definition.paramsIllustrations || !probe.paramsIllustrations?.length ? {} : { paramsIllustrations: probe.paramsIllustrations }),
+      ...(definition.paramPresets || !probe.paramPresets?.length ? {} : { paramPresets: probe.paramPresets }),
     }
     this.strategyRegistry.register(complete, factory)
   }

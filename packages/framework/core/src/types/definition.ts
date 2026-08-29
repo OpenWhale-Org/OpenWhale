@@ -271,6 +271,28 @@ export interface ParamIllustration {
   height?: number
 }
 
+/**
+ * A named starting point for an instance's params, declared by the strategy.
+ *
+ * A strategy with forty knobs usually has a handful of configurations its
+ * author considers sane — "conservative", "aggressive", "paper". A preset
+ * seeds the form with one of them; the operator then edits any field. Only
+ * the fields a preset names are set — the rest keep their current values —
+ * so a preset may be partial (tunables only, say).
+ */
+export interface ParamPreset {
+  /** Stable identifier — what the Dashboard remembers; never shown as-is. */
+  id: string
+  /** Dropdown label. */
+  label: string
+  /** One line under the label: who this preset is for. */
+  description?: string
+  /** Values for `baseParamsSchema` fields. */
+  base?: Record<string, unknown>
+  /** Values for `tunableParamsSchema` fields. */
+  tunable?: Record<string, unknown>
+}
+
 export interface StrategyDefinition {
   id: string
   name: string
@@ -299,6 +321,8 @@ export interface StrategyDefinition {
   paramsFields?: ParamFieldDef[]
   /** Interactive/illustrative docs shown inside the param form. Derived from the strategy class at registration. */
   paramsIllustrations?: ParamIllustration[]
+  /** Named parameter starting points the form offers. Derived from the strategy class at registration. */
+  paramPresets?: ParamPreset[]
   createdAt: string
   updatedAt: string
 }

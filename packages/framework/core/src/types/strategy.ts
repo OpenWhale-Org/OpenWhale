@@ -8,7 +8,7 @@ import type { Trigger, MonitorSource } from './trigger.js'
 import type { StrategyParams } from './instance.js'
 import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
-import type { AvailabilityChecker, ParamFieldDef, ParamIllustration } from './definition.js'
+import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset } from './definition.js'
 import type { IPortfolioJournal, PortfolioMode } from './portfolio.js'
 import type { PortfolioUpdate } from './portfolio.js'
 
@@ -180,6 +180,8 @@ export interface IStrategy {
   readonly paramsFields?: ParamFieldDef[]
   /** Interactive/illustrative HTML docs for the param form — see ParamIllustration. */
   readonly paramsIllustrations?: ParamIllustration[]
+  /** Named parameter starting points the form offers — see ParamPreset. */
+  readonly paramPresets?: ParamPreset[]
   /**
    * Availability checkers this strategy provides, keyed by the name a field's
    * `meta({ availability: { checker } })` refers to. Pure functions over the

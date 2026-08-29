@@ -67,7 +67,7 @@ export type {
 export { AdapterError, RetryableAdapterError, TerminalAdapterError } from './adapter/index.js'
 export type { RuntimeOptions, IRuntime, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from './runtime.js'
 export { PluginAlreadyLoadedError } from './runtime.js'
-export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamFieldDef, ParamFieldType, ParamFieldOption, ParamFieldMeta, ParamIllustration,
+export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamFieldDef, ParamFieldType, ParamFieldOption, ParamFieldMeta, ParamIllustration, ParamPreset,
   ParamAvailability,
   AvailabilityVerdict,
   AvailabilityChecker, ParamFieldCatalogue,

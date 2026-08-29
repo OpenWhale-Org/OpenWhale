@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration } from '@openwhaleorg/core'
+import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, buildParamsFromFields, fieldValuesFromParams, iconFor, patchInstanceMeta } from '../InstancesClient'
 import { InstancePnlPanel } from './InstancePnlPanel'
 
@@ -336,6 +336,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
      and this is where params are actually TUNED, so it is the place the
      picture of what a knob does is worth the most. */
   const [illustrations, setIllustrations] = useState<ParamIllustration[] | undefined>(undefined)
+  const [presets, setPresets] = useState<ParamPreset[] | undefined>(undefined)
   const [values, setValues] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -354,6 +355,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       const f = def?.paramsFields ?? []
       setFields(f)
       setIllustrations(def?.paramsIllustrations)
+      setPresets(def?.paramPresets)
       setValues(fieldValuesFromParams(f, instance.params))
       setDirty(false)
       // The pickers and availability checks need the bound account's venue —
@@ -433,6 +435,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
             venueContext={boundVenue}
             slotVenues={slotVenues}
             {...(illustrations ? { illustrations } : {})}
+            {...(presets ? { presets } : {})}
           />
           <div className="flex justify-end items-center gap-3 mt-3">
             {instance.active && dirty && (
