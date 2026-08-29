@@ -29,6 +29,7 @@ export type {
   PlotCandle,
   PlotOption,
   PlotRegion,
+  PlotYRange,
   MonitorPlotInfo,
   StrategyContext,
   StrategyMetrics,

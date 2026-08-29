@@ -240,67 +240,110 @@ export function saveDrawings(storageKey: string | undefined, drawings: Drawing[]
   } catch { /* private mode, or full — the marks are not worth an error */ }
 }
 
-/* ── Declared regions ───────────────────────────────────────────────────────
+/* ── Declared shading ───────────────────────────────────────────────────────
  *
- * A monitor can hand the panel shaded x-ranges — the hours a listing market
- * was open, a maintenance halt, the stretch that came from a backfill. They
- * arrive with the series (resolved server-side, like `options`) and are
+ * A monitor can hand the panel shaded ranges on either axis — the hours a
+ * listing market was open, a maintenance halt, a cost band, a stop level.
+ * They arrive with the series (resolved server-side, like `options`) and are
  * CONTEXT: they say what was true of the axis there, and must never be
  * mistaken for a reading.
+ *
+ * The two axes share one projector because they are one idea turned ninety
+ * degrees. `project` is the axis's data→pixel map, which on y is DECREASING;
+ * the code never assumes a direction, it just orders the projected pair.
  */
+
+export type RangeTone = 'neutral' | 'warn' | 'good'
 
 /** A shaded x-range declared by the monitor, in data coordinates. */
 export interface ChartRegion {
   /** x start, inclusive. */
   from: number
-  /** x end, exclusive. */
+  /** x end, exclusive; `from === to` is a reference line at that instant. */
   to: number
   label?: string
-  tone?: 'neutral' | 'warn' | 'good'
+  tone?: RangeTone
 }
 
-/** One region resolved to the pixels it occupies right now. */
-export interface RegionRect {
-  x: number
-  width: number
-  tone: 'neutral' | 'warn' | 'good'
+/** A shaded y-range declared by the monitor, in the panel's own unit. */
+export interface ChartYRange {
+  /** y start, inclusive. */
+  from: number
+  /** y end, exclusive; `from === to` is a reference line at that level. */
+  to: number
+  label?: string
+  tone?: RangeTone
+}
+
+/**
+ * One declared range resolved to the pixels it occupies right now, on
+ * whichever axis it came from.
+ *
+ * `kind: 'band'` spans `pos`…`pos + size`; `kind: 'line'` sits at `pos` with
+ * `size` 0. The caller knows which axis it asked about, so it knows whether
+ * `pos` is an x or a y.
+ */
+export interface RangeMark {
+  kind: 'band' | 'line'
+  pos: number
+  size: number
+  tone: RangeTone
   label?: string
 }
 
 /**
- * Project regions onto the CURRENT x-window.
+ * Project declared ranges onto the CURRENT window of one axis.
  *
- * The window is the zoom/pan state, so this runs on every view change and a
- * band stays welded to its data. Three things are dropped rather than drawn:
- * a degenerate range (`from >= to`, including NaNs, which compare false), one
- * that ends before the window starts or begins after it ends, and one that
- * survives clamping as less than a pixel — a hairline of wash reads as a
- * rendering artefact, not as a period.
+ * The window is the live zoom/pan state, so this runs on every view change and
+ * a mark stays welded to its data instead of sliding across it. On y the
+ * window is the autoscaled domain — which is computed from the SERIES alone,
+ * so declared shading can never widen the axis: a ±2pp stop band on a panel
+ * living inside ±0.4pp clips away here rather than flattening the signal. A
+ * stop you cannot see is a stop you are nowhere near.
+ *
+ * What is dropped rather than drawn:
+ *  - a non-finite or reversed range (`from > to`, NaN — which compares false);
+ *  - anything wholly outside the window, band or line;
+ *  - a band that survives clamping as less than a pixel, which reads as a
+ *    rendering artefact rather than as a period.
+ *
+ * What is NOT dropped: `from === to`. That is the zero-extent convention —
+ * a reference line at that value, on either axis.
  */
-export function regionRects(
-  regions: ChartRegion[] | undefined,
-  x0: number,
-  x1: number,
-  px: (x: number) => number,
-  leftPx: number,
-  rightPx: number,
-): RegionRect[] {
-  if (!regions?.length || !(x1 > x0)) return []
-  const out: RegionRect[] = []
-  for (const r of regions) {
-    if (!(r.from < r.to)) continue
-    if (r.to <= x0 || r.from >= x1) continue
-    // Clamp in DATA space first: px() is unbounded, and a region spanning a
-    // decade of epochs would otherwise produce a rect megapixels wide.
-    const left = Math.max(leftPx, px(Math.max(r.from, x0)))
-    const right = Math.min(rightPx, px(Math.min(r.to, x1)))
-    if (right - left < 1) continue
-    out.push({
-      x: left,
-      width: right - left,
-      tone: r.tone ?? 'neutral',
-      ...(r.label !== undefined ? { label: r.label } : {}),
-    })
+export function rangeMarks(
+  ranges: ReadonlyArray<ChartRegion | ChartYRange> | undefined,
+  lo: number,
+  hi: number,
+  project: (v: number) => number,
+  minPx: number,
+  maxPx: number,
+): RangeMark[] {
+  if (!ranges?.length || !(hi > lo)) return []
+  const out: RangeMark[] = []
+  for (const r of ranges) {
+    if (!isFinite(r.from) || !isFinite(r.to)) continue
+    if (r.from > r.to) continue
+    const tone: RangeTone = r.tone ?? 'neutral'
+    const label = r.label !== undefined ? { label: r.label } : {}
+
+    if (r.from === r.to) {
+      // A line is a single value: it is either inside the window or it is not.
+      if (r.from < lo || r.from > hi) continue
+      const at = project(r.from)
+      if (at < minPx || at > maxPx) continue
+      out.push({ kind: 'line', pos: at, size: 0, tone, ...label })
+      continue
+    }
+
+    if (r.to <= lo || r.from >= hi) continue
+    // Clamp in DATA space first: project() is unbounded, and a range spanning
+    // a decade of epochs would otherwise become a rect megapixels wide.
+    const a = project(Math.max(r.from, lo))
+    const b = project(Math.min(r.to, hi))
+    const start = Math.max(minPx, Math.min(a, b))
+    const end = Math.min(maxPx, Math.max(a, b))
+    if (end - start < 1) continue
+    out.push({ kind: 'band', pos: start, size: end - start, tone, ...label })
   }
   return out
 }
