@@ -1,4 +1,4 @@
-import type { ExecutionInstruction } from '../types/executor.js'
+import type { ExecutionInstruction, ExecutionResult } from '../types/executor.js'
 import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace, DynamicSourceHooks } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
@@ -526,6 +526,15 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   setRunSink(sink: ((run: StrategyRunTrace) => void) | null): void {
     this.runSink = sink
   }
+
+  /**
+   * Override to learn how an instruction this instance emitted ended: the
+   * executor's recorded result — fill ids, the error of a failed leg — arrives
+   * here after the execution record is written. `this.store` is the same
+   * per-instance store as in evaluate(); `this.trace` is a no-op unless a run
+   * is active at that moment. Throwing here is logged and otherwise ignored.
+   */
+  onExecutionResult?(result: ExecutionResult, ctx: { instanceId: string }): Promise<void> | void
 
   /** Record one decision step of the current run. No-op outside run(). */
   protected trace(step: string, data?: Record<string, unknown>): void {

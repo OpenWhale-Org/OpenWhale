@@ -1,4 +1,4 @@
-import type { ExecutionInstruction } from './executor.js'
+import type { ExecutionInstruction, ExecutionResult } from './executor.js'
 import type { MonitorDataReader } from './monitor.js'
 import type { CredentialStore } from './credential.js'
 import type { RetryOptions } from './executor.js'
@@ -211,6 +211,14 @@ export interface IStrategy {
   /** Complete current projection for idempotent journal recovery. */
   getPortfolioUpdate?(): Promise<PortfolioUpdate | undefined>
   run(context: StrategyContext): Promise<ExecutionInstruction[]>
+  /**
+   * Called with an executor's result for an instruction THIS instance emitted,
+   * after the result has been recorded. Fire-and-forget from the runtime's
+   * side: a throwing hook is logged and never affects the execution record or
+   * the queue. `this.store` works here; `this.trace` is a no-op unless a run
+   * happens to be active.
+   */
+  onExecutionResult?(result: ExecutionResult, ctx: { instanceId: string }): Promise<void> | void
   getMetrics(): StrategyMetrics
   setMonitorReader(label: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void
