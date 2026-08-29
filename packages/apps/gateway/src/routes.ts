@@ -609,6 +609,22 @@ export function buildRouter(): Router {
     res.json({ ok: true })
   }))
 
+  /* The strategy's own KV state: what it has written, and a way to wipe it.
+     Clearing is refused while the instance runs — see clearInstanceStore. */
+  router.get('/api/instances/:id/store', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    res.json({ keys: await runtime.instanceStoreKeys(req.params['id']!) })
+  }))
+
+  router.delete('/api/instances/:id/store', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      res.json({ cleared: await runtime.clearInstanceStore(req.params['id']!) })
+    } catch (err) {
+      res.status(400).send(errText(err))
+    }
+  }))
+
   router.get('/api/instances/:id/executions', h(async (req, res) => {
     const instanceId = req.params['id']!
     const executionsDir = path.join(dataDirFromEnv(), 'executions')

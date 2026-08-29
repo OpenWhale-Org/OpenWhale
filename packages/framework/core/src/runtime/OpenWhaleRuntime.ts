@@ -28,6 +28,7 @@ import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
 import { appendRunTrace, readRunTraces, countRunsSince } from '../strategy/runStore.js'
 import { PortfolioJournal } from '../strategy/PortfolioJournal.js'
+import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import type { PortfolioReport, PortfolioReportQuery } from '../types/portfolio.js'
 import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
@@ -1543,6 +1544,36 @@ export class OpenWhaleRuntime implements IRuntime {
   async deleteInstance(instanceId: string): Promise<void> {
     await this.releaseInstance(instanceId)
     await this.instanceStore.delete(instanceId)
+  }
+
+  /** The keys an instance's strategy has written to `this.store`. */
+  async instanceStoreKeys(instanceId: string): Promise<string[]> {
+    if (!this.database) return []
+    return new DBStrategyStore(instanceId, this.database).keys()
+  }
+
+  /**
+   * Wipe an instance's runtime state — everything the strategy wrote to
+   * `this.store`: baselines, idempotency marks, cycle bookkeeping.
+   *
+   * Refused while the instance is active, and that refusal is the point. A
+   * strategy reads its store mid-cycle; clearing it underneath one drops the
+   * marks that say "this side is already quoted" or "this settlement is
+   * already traded", and the next evaluation acts as if nothing had happened
+   * — which is how a cleared idempotency key becomes a duplicate order.
+   * Deactivate first, so whatever was in flight has finished or been let go.
+   *
+   * Returns how many keys were removed.
+   */
+  async clearInstanceStore(instanceId: string): Promise<number> {
+    if (!this.database) throw new Error('No database configured — this runtime keeps no strategy state')
+    if (this.instances.has(instanceId)) {
+      throw new Error(`Instance "${instanceId}" is active — deactivate it before clearing its state`)
+    }
+    const store = new DBStrategyStore(instanceId, this.database)
+    const keys = await store.keys()
+    await store.clear()
+    return keys.length
   }
 
   /**

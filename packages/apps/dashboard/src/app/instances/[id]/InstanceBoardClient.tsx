@@ -131,6 +131,8 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
 
           <InstanceParamsPanel instance={instance} />
 
+          <InstanceStatePanel instance={instance} />
+
           <div
             className="rounded-lg overflow-hidden"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
@@ -328,6 +330,98 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
  * saving new ones restarts it — the runtime rebuilds it from what was saved,
  * and rolls back to the previous settings if the new ones fail to activate.
  */
+/**
+ * The strategy's own KV state (`this.store`) — what it wrote, and a way to
+ * wipe it. Strategies keep their bookkeeping here: baselines, idempotency
+ * marks, cycle progress. Clearing makes an instance start over as if it had
+ * never run, which is what you want after changing params it derived state
+ * from, and never what you want mid-cycle — so the gateway refuses while the
+ * instance is active and this panel says so rather than hiding the button.
+ */
+function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
+  const [open, setOpen] = useState(false)
+  const [keys, setKeys] = useState<string[] | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  const pull = async () => {
+    try {
+      const r = await fetch(`/api/instances/${encodeURIComponent(instance.id)}/store`)
+      if (r.ok) setKeys(((await r.json()) as { keys: string[] }).keys)
+    } catch { /* the panel just shows nothing */ }
+  }
+  useEffect(() => { void pull() }, [instance.id])
+
+  async function clear() {
+    setBusy(true)
+    setNotice('')
+    try {
+      const r = await fetch(`/api/instances/${encodeURIComponent(instance.id)}/store`, { method: 'DELETE' })
+      const body = await r.text()
+      if (!r.ok) { setNotice(body || `HTTP ${r.status}`); return }
+      const { cleared } = JSON.parse(body) as { cleared: number }
+      setNotice(`Cleared ${cleared} ${cleared === 1 ? 'key' : 'keys'}`)
+      setConfirming(false)
+      await pull()
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const count = keys?.length ?? 0
+  return (
+    <div className="rounded-lg mb-4 overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
+        <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
+          <span>{open ? '▾' : '▸'}</span>
+          <span>Runtime state</span>
+          <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
+            {keys === null ? '' : count === 0 ? '(empty)' : `(${count} ${count === 1 ? 'key' : 'keys'} the strategy stored)`}
+          </span>
+        </button>
+        {notice && (
+          <span className="text-xs" style={{ color: notice.startsWith('Cleared') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>
+        )}
+        {confirming ? (
+          <>
+            <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>Clear all stored state?</span>
+            <button onClick={() => setConfirming(false)} className="btn btn-secondary btn-sm shrink-0">Cancel</button>
+            <button onClick={() => void clear()} disabled={busy} className="btn btn-danger-solid btn-sm shrink-0">
+              {busy ? '…' : 'Confirm'}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={instance.active || count === 0}
+            className="btn btn-danger btn-sm shrink-0"
+            title={instance.active ? 'Deactivate the instance first — clearing state under a running strategy loses its idempotency marks' : 'Delete everything the strategy wrote to this.store'}
+          >
+            Clear state
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="px-4 pb-4 flex flex-col gap-2">
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>
+            {instance.active
+              ? 'Active — deactivate before clearing. A strategy reads this store mid-cycle; wiping it underneath one drops the marks that say a leg is already placed, and the next run acts as if nothing had happened.'
+              : 'Everything the strategy wrote to this.store: baselines, idempotency marks, cycle bookkeeping. Clearing makes the next activation start from scratch. Params, accounts, runs and PnL are untouched.'}
+          </p>
+          {count > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {keys!.map(k => <span key={k} className="badge badge-neutral mono">{k}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [open, setOpen] = useState(true)
   const [fields, setFields] = useState<ParamFieldDef[] | null>(null)
