@@ -177,6 +177,30 @@ Free text still submits, so an unlisted symbol never blocks the form. See `refer
 (`catalogue: { source: 'market', kind: 'pendle/rates' }`) — the venue's session must implement the
 catalogue read (`fetchMarkets`) for the picker to list anything.
 
+**Two venues in one form.** By default the picker and any `availability` check use the venue of the
+FIRST bound account slot. A strategy binding two accounts on different venues (a cross-venue pair)
+names the slot each symbol belongs to with `accountSlot` — the slot's `label` from `accounts` — on
+the catalogue and the availability marker. An unbound or unknown slot falls back to the first one:
+
+```ts
+override readonly accounts = [
+  { label: 'long', kind: 'exchange/perp' },
+  { label: 'short', kind: 'exchange/perp' },
+]
+override readonly baseParamsSchema = z.object({
+  longSymbol: z.string().meta({
+    displayName: 'Long symbol',
+    catalogue: { source: 'market', kind: 'exchange/perp', marketType: 'swap', accountSlot: 'long' },
+    availability: { source: 'market', accountSlot: 'long' },
+  }),
+  shortSymbol: z.string().meta({
+    displayName: 'Short symbol',
+    catalogue: { source: 'market', kind: 'exchange/perp', marketType: 'swap', accountSlot: 'short' },
+    availability: { checker: 'liquidity', accountSlot: 'short' },
+  }),
+})
+```
+
 ## Illustrating params
 
 A param whose meaning is geometric (a band, a timeline, a ladder) is easier to set with a picture

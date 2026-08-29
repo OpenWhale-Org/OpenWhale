@@ -112,6 +112,14 @@ export interface ParamFieldCatalogue {
   source: 'market'
   /** Sibling field name holding the venue; omitted when the venue comes from form context. */
   venueField?: string
+  /**
+   * Account slot label whose bound account supplies the venue, for strategies
+   * that bind more than one venue (a two-account pair: `symbolA` lives on the
+   * account in slot 'a', `symbolB` on slot 'b'). Only meaningful without
+   * `venueField`. Omitted, or naming an unbound slot, falls back to the first
+   * bound slot in declaration order.
+   */
+  accountSlot?: string
   /** Kind whose adapter column serves the catalogue, e.g. 'exchange/perp'. */
   kind?: string
   /** Restrict to one market type ('swap' for perps, 'spot' for spot). */
@@ -143,6 +151,12 @@ export interface ParamAvailability {
    * Overrides `source`.
    */
   checker?: string
+  /**
+   * Account slot label whose bound account is the venue to check against —
+   * same rule as `ParamFieldCatalogue.accountSlot`: omitted or unbound means
+   * the first bound slot.
+   */
+  accountSlot?: string
 }
 
 /** One value's verdict. `available: true` with a reason = a warning, not a failure. */
