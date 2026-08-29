@@ -92,6 +92,11 @@ export class SimpleTradeExecutor extends BaseExecutor<MyInstruction> {
   in the result's `data` (nested is fine, depth ≤ 6) for EVERY order you place — including
   resting/protective orders — and the framework claims them for the calling instance. Venue fills
   and funding then attribute automatically; an order you forget shows up as unattributed.
+  By default every order is attributed to the instruction's FIRST account. A multi-slot executor
+  (one order per account — a pair leg on each venue) names the account on each order object:
+  `{ orderId, symbol, accountIndex: 1 }` (index into the instruction's `accountNames`, in slot
+  order) or `{ orderId, symbol, accountName: instruction.accountNames![1] }`; an object without
+  either keeps the first-account default.
 - **Return an `ExecutionResult` — always.** The framework writes it to
   `dataDir/executions/{executorName}/{date}.jsonl`, which feeds the Dashboard's execution history.
   An `execute()` that never returns (infinite retry loop) means NO record — bound the work, and

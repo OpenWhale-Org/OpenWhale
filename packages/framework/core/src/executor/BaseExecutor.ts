@@ -376,6 +376,12 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
    * every executor here already records placed orders this way, so PnL
    * attribution needs no per-executor code. Fire-and-forget — never in the
    * execution hot path.
+   *
+   * Which account an order belongs to: the object's own `accountName` if it
+   * carries one; else `accountIndex` into the instruction's `accountNames`;
+   * else the instruction's first account (or the first session-bearing slot).
+   * A multi-slot executor that places one order per account names it on
+   * each order — otherwise every fill lands on the first account.
    */
   private autoClaimOrders(result: ExecutionResult<TInstruction>): void {
     if (!this.claimSink) return
@@ -388,10 +394,9 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     const firstSession = slots !== undefined
       ? [...slots.values()].find(s => s.session !== undefined)?.credentialName
       : undefined
-    const account = instruction.accountNames?.[0] ?? firstSession
-    if (!account) return
+    const fallbackAccount = instruction.accountNames?.[0] ?? firstSession
 
-    const found: Array<{ orderId: string; symbol: string }> = []
+    const found: Array<{ orderId: string; symbol: string; account: string }> = []
     const walk = (node: unknown, depth: number): void => {
       if (depth > 6 || node === null || typeof node !== 'object') return
       if (Array.isArray(node)) { for (const item of node) walk(item, depth + 1); return }
@@ -399,7 +404,8 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
       const orderId = rec['orderId']
       const symbol = rec['symbol']
       if ((typeof orderId === 'string' || typeof orderId === 'number') && typeof symbol === 'string' && String(orderId) !== '') {
-        found.push({ orderId: String(orderId), symbol })
+        const account = this.claimAccountFor(rec, instruction.accountNames) ?? fallbackAccount
+        if (account) found.push({ orderId: String(orderId), symbol, account })
       }
       for (const value of Object.values(rec)) walk(value, depth + 1)
     }
@@ -407,8 +413,17 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
 
     const ts = result.executedAt instanceof Date ? result.executedAt.getTime() : Date.now()
     for (const f of found) {
-      this.claimSink({ instanceId, account, symbol: f.symbol, orderId: f.orderId, executor: this.executorName, ts })
+      this.claimSink({ instanceId, account: f.account, symbol: f.symbol, orderId: f.orderId, executor: this.executorName, ts })
     }
+  }
+
+  /** The account a claimed order names itself, by name or by index into the instruction's accounts. */
+  private claimAccountFor(rec: Record<string, unknown>, accountNames: string[] | undefined): string | undefined {
+    const name = rec['accountName']
+    if (typeof name === 'string' && name !== '') return name
+    const index = rec['accountIndex']
+    if (typeof index === 'number' && Number.isInteger(index) && index >= 0) return accountNames?.[index]
+    return undefined
   }
 
   protected async record(result: ExecutionResult<TInstruction>): Promise<void> {
