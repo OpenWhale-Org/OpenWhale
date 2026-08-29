@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
-type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users'
+type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts'
 
 const links: Array<{ href: string; label: string; auroraLabel?: string; group?: string; icon: IconName }> = [
   { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
@@ -17,6 +17,7 @@ const links: Array<{ href: string; label: string; auroraLabel?: string; group?: 
   { href: '/compiler', label: 'Compiler', group: 'DEVELOP', icon: 'compiler' },
   { href: '/scripts', label: 'Scripts', group: 'AUTOMATE', icon: 'scripts' },
   { href: '/assistant', label: 'Assistant', icon: 'assistant' },
+  { href: '/alerts', label: 'Alerts', group: 'SETTINGS', icon: 'alerts' },
   { href: '/users', label: 'Users', group: 'SETTINGS', icon: 'users' },
 ]
 
@@ -38,6 +39,7 @@ function Icon({ name }: { name: IconName }) {
     case 'compiler': return <svg {...common}><path d="m8 5-6 7 6 7M16 5l6 7-6 7M14 3l-4 18" /></svg>
     case 'scripts': return <svg {...common}><path d="m4 7 5 5-5 5M12 18h8" /></svg>
     case 'assistant': return <svg {...common}><path d="M12 3 13.5 8.5 19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5Z" /><path d="M19 17l.7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7Z" /></svg>
+    case 'alerts': return <svg {...common}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
     case 'users': return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.2a4 4 0 0 1 0 7.6" /></svg>
   }
 }

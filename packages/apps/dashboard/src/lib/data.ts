@@ -41,6 +41,10 @@ export function fetchCurrentUser(): Promise<{ user?: AuthUser }> {
   return gw('/api/auth/me', {})
 }
 
+export function fetchAlertSettings(): Promise<{ enabled: boolean; emailCredential?: string; emailTo: string[]; telegramCredential?: string; telegramChatId?: string }> {
+  return gw('/api/alerts/settings', { enabled: false, emailTo: [] })
+}
+
 export function fetchUsers(): Promise<AuthUser[]> {
   return gw('/api/users', [])
 }

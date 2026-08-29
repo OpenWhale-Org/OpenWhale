@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, buildParamsFromFields, fieldValuesFromParams, iconFor, patchInstanceMeta } from '../InstancesClient'
 import { InstancePnlPanel } from './InstancePnlPanel'
+import { InstanceMiscPanel } from './InstanceMiscPanel'
 
 /**
  * Full-page board for ONE instance — the same tabs as the list-page card, but
@@ -130,6 +131,8 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
           <InstanceAccountsPanel instance={instance} onSaved={pull} />
 
           <InstanceParamsPanel instance={instance} />
+
+          <InstanceMiscPanel instance={instance} onSaved={pull} />
 
           <div
             className="rounded-lg overflow-hidden"
