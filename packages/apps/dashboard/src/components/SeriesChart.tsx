@@ -1,11 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type Drawing, type Tool, type ChartRegion, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings, regionRects } from './chartTools'
+import { type Drawing, type Tool, type ChartRegion, type ChartYRange, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings, rangeMarks } from './chartTools'
 
 export interface ChartCandle { x: number; o: number; h: number; l: number; c: number }
 export interface ChartSeries { label: string; points?: Array<{ x: number; y: number }>; candles?: ChartCandle[] }
-export type { ChartRegion }
+export type { ChartRegion, ChartYRange }
 
 /**
  * Categorical hues in FIXED order — color follows the series position in the
@@ -25,6 +25,14 @@ const INK = '#e879f9'
  * saturation to compete with a curve.
  */
 const REGION_COLORS = { neutral: 'var(--muted)', warn: '#f59e0b', good: '#22c55e' } as const
+/**
+ * A band covers area, so 0.13 is plenty; a 1px reference line at that weight
+ * is invisible. Lines get 0.65 — legible as a deliberate mark, still clearly
+ * behind the 2px series strokes and dimmer than the reader's own INK guides,
+ * which are the marks that must stay loudest.
+ */
+const REGION_BAND_OPACITY = 0.13
+const REGION_LINE_OPACITY = 0.65
 
 const PAD = { top: 14, right: 68, bottom: 30, left: 14 }
 
@@ -88,7 +96,7 @@ let clipCounter = 0
  * rescales to what the zoomed window shows. Renders at the container's
  * native pixel width so SVG text keeps its true point size.
  */
-export function SeriesChart({ series, regions, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey }: {
+export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey }: {
   series: ChartSeries[]
   /**
    * Shaded x-ranges the monitor declared for this window — sessions, halts,
@@ -96,6 +104,11 @@ export function SeriesChart({ series, regions, unit, xKind = 'time', xUnit, heig
    * changes nothing about the chart.
    */
   regions?: ChartRegion[]
+  /**
+   * Shaded y-ranges — cost bands, threshold zones, no-trade corridors. Never
+   * an input to the y-domain: see `bandsY`.
+   */
+  yRanges?: ChartYRange[]
   unit?: string
   xKind?: 'time' | 'value'
   xUnit?: string
@@ -231,13 +244,24 @@ export function SeriesChart({ series, regions, unit, xKind = 'time', xUnit, heig
   }, [series, hidden, view, W, H])
 
   /**
-   * The declared regions, projected onto the window the chart is showing.
+   * The declared shading, projected onto the window the chart is showing.
    * Recomputed from `geom` like every other mark, which is what keeps a band
    * welded to its data through a zoom or a pan instead of sliding across it.
    */
-  const bands = useMemo(
-    () => (geom ? regionRects(regions, geom.x0, geom.x1, geom.px, PAD.left, W - PAD.right) : []),
+  const bandsX = useMemo(
+    () => (geom ? rangeMarks(regions, geom.x0, geom.x1, geom.px, PAD.left, W - PAD.right) : []),
     [regions, geom, W],
+  )
+  /**
+   * The y mirror — and note what it reads: geom.y0/y1, the domain the SERIES
+   * produced. yRanges is deliberately absent from the geom memo above, so a
+   * declared band can never widen the axis; one that lies outside what the
+   * data spans clips away to nothing here. That is the honest reading: a stop
+   * level off the top of the frame means the signal is nowhere near it.
+   */
+  const bandsY = useMemo(
+    () => (geom ? rangeMarks(yRanges, geom.y0, geom.y1, geom.py, PAD.top, H - PAD.bottom) : []),
+    [yRanges, geom, H],
   )
 
   // Wheel zoom needs a non-passive listener to stop the page from scrolling
@@ -677,43 +701,86 @@ export function SeriesChart({ series, regions, unit, xKind = 'time', xUnit, heig
               </linearGradient>
             </defs>
 
-            {/* ── Declared regions ──────────────────────────────────────────
-                First in the paint order, so the shading sits under the grid,
-                under the axis labels and under every series — it is what the
-                data happened AGAINST. Clipped to the plot area and projected
-                through the current x-scale, so a band holds its ground on the
-                axis while the chart is zoomed and panned. */}
-            {bands.length > 0 && (
+            {/* ── Declared shading ──────────────────────────────────────────
+                First in the paint order, so it sits under the grid, under the
+                axis labels and under every series — it is what the data
+                happened AGAINST. Clipped to the plot area and re-projected
+                through the current scales, so a mark holds its ground on its
+                axis while the chart is zoomed and panned.
+
+                A zero-extent range is a reference LINE rather than an empty
+                band: an instant on x, a level on y. Lines carry no caption —
+                a hairline with text pinned beside it would crowd the same
+                strip as the crosshair readout and the zero reference — so
+                their label rides an invisible 10px hit stroke instead, the
+                same trick that makes the reader's own guides clickable. */}
+            {(bandsX.length > 0 || bandsY.length > 0) && (
               <g clipPath={`url(#${clipId})`}>
-                {bands.map((b, bi) => (
-                  <g key={`region-${bi}`}>
-                    <rect
-                      x={b.x}
-                      y={PAD.top}
-                      width={b.width}
-                      height={H - PAD.top - PAD.bottom}
-                      fill={REGION_COLORS[b.tone]}
-                      opacity="0.13"
-                    >
-                      {b.label && <title>{b.label}</title>}
-                    </rect>
-                    {/* A caption only where one fits without crowding the
-                        curve; on a narrow band the hover title is the label. */}
-                    {b.label && b.width >= 46 && (
-                      <text
-                        x={b.x + b.width / 2}
-                        y={PAD.top + 11}
-                        fontSize="10"
-                        textAnchor="middle"
-                        fill={REGION_COLORS[b.tone]}
-                        opacity="0.75"
-                        pointerEvents="none"
-                      >
-                        {b.label}
-                      </text>
-                    )}
-                  </g>
-                ))}
+                {bandsX.map((m, i) => {
+                  const color = REGION_COLORS[m.tone]
+                  const title = m.label ? <title>{m.label}</title> : null
+                  if (m.kind === 'line') {
+                    return (
+                      <g key={`rx-${i}`}>
+                        <line x1={m.pos} x2={m.pos} y1={PAD.top} y2={H - PAD.bottom} stroke="transparent" strokeWidth="10">{title}</line>
+                        <line
+                          x1={m.pos} x2={m.pos} y1={PAD.top} y2={H - PAD.bottom}
+                          stroke={color} strokeWidth="1" strokeDasharray="5 4"
+                          opacity={REGION_LINE_OPACITY} pointerEvents="none"
+                        />
+                      </g>
+                    )
+                  }
+                  return (
+                    <g key={`rx-${i}`}>
+                      <rect
+                        x={m.pos} y={PAD.top} width={m.size} height={H - PAD.top - PAD.bottom}
+                        fill={color} opacity={REGION_BAND_OPACITY}
+                      >{title}</rect>
+                      {/* Enough width for the glyphs, or the hover title says it */}
+                      {m.label && m.size >= 46 && (
+                        <text
+                          x={m.pos + m.size / 2} y={PAD.top + 11}
+                          fontSize="10" textAnchor="middle" fill={color}
+                          opacity="0.75" pointerEvents="none"
+                        >{m.label}</text>
+                      )}
+                    </g>
+                  )
+                })}
+                {bandsY.map((m, i) => {
+                  const color = REGION_COLORS[m.tone]
+                  const title = m.label ? <title>{m.label}</title> : null
+                  if (m.kind === 'line') {
+                    return (
+                      <g key={`ry-${i}`}>
+                        <line x1={PAD.left} x2={W - PAD.right} y1={m.pos} y2={m.pos} stroke="transparent" strokeWidth="10">{title}</line>
+                        <line
+                          x1={PAD.left} x2={W - PAD.right} y1={m.pos} y2={m.pos}
+                          stroke={color} strokeWidth="1" strokeDasharray="5 4"
+                          opacity={REGION_LINE_OPACITY} pointerEvents="none"
+                        />
+                      </g>
+                    )
+                  }
+                  return (
+                    <g key={`ry-${i}`}>
+                      <rect
+                        x={PAD.left} y={m.pos} width={plotW} height={m.size}
+                        fill={color} opacity={REGION_BAND_OPACITY}
+                      >{title}</rect>
+                      {/* A y band is constrained in HEIGHT, not width: one
+                          10px line needs ~18px of band, not 46. */}
+                      {m.label && m.size >= 18 && (
+                        <text
+                          x={PAD.left + 6} y={m.pos + 12}
+                          fontSize="10" textAnchor="start" fill={color}
+                          opacity="0.75" pointerEvents="none"
+                        >{m.label}</text>
+                      )}
+                    </g>
+                  )
+                })}
               </g>
             )}
 
