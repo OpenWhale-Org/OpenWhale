@@ -1827,8 +1827,12 @@ export class OpenWhaleRuntime implements IRuntime {
     const strategy = strategyFactory()
     const parsedParams = this.parseParams(strategy, instance)
     const { readers, credentialNames, accountMetas } = await this.materializeStrategySlots(instance, strategy)
-    // BEFORE triggers(): venue-scoped subscriptions derive from the bound accounts
+    // BEFORE triggers(): venue-scoped subscriptions derive from the bound
+    // accounts, and a strategy may read its own params there. registerInstance
+    // sets both again — this only makes them available earlier, so triggers()
+    // can use `this.params` as freely as it already uses accountVenue().
     strategy.setAccountMeta(accountMetas)
+    strategy.setParams(parsedParams)
 
     // The strategy speaks in labels; resolve label → registry key here, once,
     // using the namespace recorded on the strategy's definition.
