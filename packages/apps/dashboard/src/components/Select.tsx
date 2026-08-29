@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
+import { useAnchoredPlacement } from './popover'
 
 /**
  * A select drawn in the dashboard's own list style rather than the browser's.
@@ -17,23 +18,6 @@ import type { ReactNode } from 'react'
  * parameter form's section boxes are exactly that, so a select near the bottom
  * of a section showed a sliver of its options and nothing else.
  */
-
-/** Where the portalled list sits, in viewport coordinates. */
-interface Placement { left: number; width: number; top?: number; bottom?: number; maxHeight: number }
-
-const GAP = 4
-const MARGIN = 8
-const MAX_LIST = 288   // 18rem
-
-function placeList(anchor: DOMRect): Placement {
-  const below = window.innerHeight - anchor.bottom - GAP - MARGIN
-  const above = anchor.top - GAP - MARGIN
-  // Open downwards unless there is more room the other way and below is cramped
-  const flip = below < Math.min(MAX_LIST, above) && above > below
-  return flip
-    ? { left: anchor.left, width: anchor.width, bottom: window.innerHeight - anchor.top + GAP, maxHeight: Math.min(MAX_LIST, above) }
-    : { left: anchor.left, width: anchor.width, top: anchor.bottom + GAP, maxHeight: Math.min(MAX_LIST, below) }
-}
 
 export interface SelectOption {
   value: string
@@ -57,7 +41,6 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
 }) {
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(-1)
-  const [place, setPlace] = useState<Placement | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const current = options.find(o => o.value === value)
@@ -72,23 +55,7 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
     return () => document.removeEventListener('mousedown', onAway)
   }, [open])
 
-  /* Track the anchor while open. Scroll listeners are captured so a scrolling
-     ANCESTOR moves the list too, not just the window; a resize re-decides
-     whether it opens up or down. */
-  useLayoutEffect(() => {
-    if (!open) { setPlace(null); return }
-    const sync = () => {
-      const el = boxRef.current
-      if (el) setPlace(placeList(el.getBoundingClientRect()))
-    }
-    sync()
-    window.addEventListener('scroll', sync, true)
-    window.addEventListener('resize', sync)
-    return () => {
-      window.removeEventListener('scroll', sync, true)
-      window.removeEventListener('resize', sync)
-    }
-  }, [open])
+  const place = useAnchoredPlacement(open, boxRef, { maxHeight: 288 })
 
   useEffect(() => {
     if (!open) return

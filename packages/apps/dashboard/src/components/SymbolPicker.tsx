@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ParamFieldCatalogue } from '@openwhaleorg/core'
+import { useAnchoredPlacement } from './popover'
 
 /**
  * Searchable market picker — the symbol equivalent of a select, for a
@@ -96,6 +98,7 @@ export function SymbolPicker({
   // (the CSV value) — a single text input cannot be both at once.
   const [query, setQuery] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const kind = catalogue.kind ?? 'exchange/perp'
   const chosen = useMemo(
@@ -131,11 +134,18 @@ export function SymbolPicker({
   useEffect(() => {
     if (!open) return
     function onClickAway(e: MouseEvent) {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      // The list is portalled to <body>, so it is not inside boxRef
+      if (!boxRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false)
     }
     document.addEventListener('mousedown', onClickAway)
     return () => document.removeEventListener('mousedown', onClickAway)
   }, [open])
+
+  /* Portalled and viewport-positioned: this picker is used inside modals and
+     inside the parameter form's `overflow: hidden` sections, both of which
+     clip an absolutely positioned list. */
+  const place = useAnchoredPlacement(open, boxRef, { maxHeight: 256, minWidth: 256 })
 
   const matches = useMemo(() => {
     const q = searchText.trim().toUpperCase()
@@ -210,10 +220,15 @@ export function SymbolPicker({
         className={className}
         style={style}
       />
-      {open && (
+      {open && place && createPortal(
         <div
-          className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto rounded-md shadow-lg"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: '16rem' }}
+          ref={listRef}
+          className="fixed z-[200] overflow-y-auto rounded-md shadow-lg"
+          style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            left: place.left, width: place.width, maxHeight: place.maxHeight,
+            ...(place.top !== undefined ? { top: place.top } : { bottom: place.bottom }),
+          }}
         >
           {!venue ? (
             <p className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>
@@ -258,7 +273,8 @@ export function SymbolPicker({
               ))}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
