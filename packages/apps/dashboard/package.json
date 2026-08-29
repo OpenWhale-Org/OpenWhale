@@ -14,7 +14,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@openwhaleorg/compiler": "workspace:*",
     "@openwhaleorg/core": "workspace:*",
-    "next": "15.3.2",
+    "next": "15.3.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.185.1",
