@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS strategy_instances (
   credentials TEXT,   -- JSON { slotLabel: credentialName } named bindings, nullable
   llm         TEXT,   -- JSON { llmLabel: LlmSlotBinding } overrides, nullable
   params      TEXT,   -- JSON { base, tunable }, nullable
+  options     TEXT,   -- JSON InstanceOptions (alerting, dry run), nullable
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
@@ -286,6 +287,7 @@ export const MIGRATION_SQL: string[] = [
   // 2026-07-27: named slot bindings were silently dropped on save — instances
   // restored after a restart lost their accounts and failed to activate
   `ALTER TABLE strategy_instances ADD COLUMN credentials TEXT`,
+  `ALTER TABLE strategy_instances ADD COLUMN options TEXT`,
   `ALTER TABLE strategy_instances ADD COLUMN llm TEXT`,
   `ALTER TABLE strategy_instances ADD COLUMN icon TEXT`,
   `ALTER TABLE strategy_instances ADD COLUMN folder TEXT`,

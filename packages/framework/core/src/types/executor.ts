@@ -27,7 +27,12 @@ export interface IExecutor {
 
 export interface ExecutionResult<TInstruction extends ExecutionInstruction = ExecutionInstruction> {
   instruction: TInstruction
-  status: 'success' | 'failed' | 'skipped'
+  /**
+   * 'dry-run' is written by the framework, not an executor: the instruction was
+   * held back before the queue and never reached one. It is a record of what
+   * the strategy decided, and is excluded from PnL attribution.
+   */
+  status: 'success' | 'failed' | 'skipped' | 'dry-run'
   data?: Record<string, unknown>
   error?: string
   executedAt: Date

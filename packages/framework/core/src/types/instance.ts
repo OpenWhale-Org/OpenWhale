@@ -6,6 +6,34 @@ export interface StrategyParams {
   tunable: RawCredentialData
 }
 
+/**
+ * Per-instance switches that belong to the FRAMEWORK rather than to any
+ * strategy's own params.
+ *
+ * A strategy may declare a `dryRun` param of its own, and several do — but
+ * that one is the strategy asking its executor to take the simulate branch,
+ * which still reaches the venue for prices and margin. This one is the engine
+ * declining to queue the instruction at all. Two different questions, so two
+ * different switches; this is the one an operator can trust without reading
+ * the strategy's source.
+ */
+export interface InstanceOptions {
+  /** Alert when an execution of this instance fails. Absent = on. */
+  alertOnFailure?: boolean
+  /**
+   * Alert on every execution whose action is named here — the successful ones
+   * too. Absent or empty = off, because a strategy that acts every minute
+   * would otherwise mail every minute.
+   */
+  alertOnActions?: string[]
+  /**
+   * Hold every instruction this instance emits, recording it and queueing
+   * none. Absent = off: a switch that silently stops trading must be the
+   * thing you turned on, never the default you inherited.
+   */
+  dryRun?: boolean
+}
+
 export interface StrategyInstance {
   id: string
   name: string
@@ -21,6 +49,8 @@ export interface StrategyInstance {
   /** Per-label LLM slot overrides: { [llmLabel]: { model?, credentialName?, settings? } } */
   llm?: Record<string, LlmSlotBinding>
   params?: StrategyParams
+  /** Framework-level switches: alerting, dry run. */
+  options?: InstanceOptions
   enabled: boolean
   /** Emoji shown on cards/boards. Assigned at creation (random) when absent. */
   icon?: string

@@ -48,6 +48,7 @@ export type {
   ScriptResult,
   ScriptInfo,
   StrategyInstance,
+  InstanceOptions,
   StrategyInstanceView,
   StrategyParams,
   PortfolioMode,
