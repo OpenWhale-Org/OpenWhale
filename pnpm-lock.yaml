@@ -294,6 +294,9 @@ importers:
       '@openwhaleorg/exchange':
         specifier: workspace:*
         version: link:../../framework/exchange
+      viem:
+        specifier: 2.55.10
+        version: 2.55.10(typescript@5.9.3)(zod@4.4.1)
       zod:
         specifier: ^4.4.1
         version: 4.4.1
@@ -304,6 +307,9 @@ importers:
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
   packages/venues/binance:
     dependencies:

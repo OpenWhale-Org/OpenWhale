@@ -29,11 +29,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "@openwhaleorg/ccxt-adapter": "workspace:*",
     "@openwhaleorg/exchange": "workspace:*",
+    "viem": "2.55.10",
     "zod": "^4.4.1"
   },
   "peerDependencies": {
@@ -41,6 +43,7 @@
   },
   "devDependencies": {
     "@openwhaleorg/core": "workspace:*",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "vitest": "^1.6.0"
   }
 }
