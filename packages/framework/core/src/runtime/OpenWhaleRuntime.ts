@@ -458,6 +458,7 @@ export class OpenWhaleRuntime implements IRuntime {
     series: import('../types/monitor.js').PlotSeries[]
     options?: import('../types/monitor.js').PlotOption[]
     option?: string | string[]
+    regions?: import('../types/monitor.js').PlotRegion[]
   }> {
     const monitor = this.monitorRegistry.get(monitorId)
     if (!monitor) throw new Error(`Unknown monitor "${monitorId}"`)
@@ -478,6 +479,16 @@ export class OpenWhaleRuntime implements IRuntime {
     // (a session that scrolled out, a token no longer sampled) must not reach
     // extract — resolve every request against what exists right now.
     const selected = resolvePlotSelection(options, option, def.multi === true)
+    // Shading is CONTEXT, never the reading itself — so a regions() that
+    // throws costs the shading and nothing else. The series the operator came
+    // for still render; the reason the background is bare goes to the log.
+    let regions: import('../types/monitor.js').PlotRegion[] | undefined
+    try {
+      regions = def.regions?.(records)
+    } catch (err) {
+      log.warn({ monitorId, plotId, key, err }, 'Plot regions() threw — rendering the panel without shading')
+      regions = undefined
+    }
     return {
       plot: {
         id: def.id, title: def.title, kind: def.kind,
@@ -492,6 +503,7 @@ export class OpenWhaleRuntime implements IRuntime {
       series: (def.extract as (r: typeof records, o?: string | string[]) => import('../types/monitor.js').PlotSeries[])(records, selected),
       ...(options !== undefined ? { options } : {}),
       ...(selected !== undefined ? { option: selected } : {}),
+      ...(regions !== undefined ? { regions } : {}),
     }
   }
 

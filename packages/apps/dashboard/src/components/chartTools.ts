@@ -1,10 +1,14 @@
 /**
- * Annotations a reader adds to a chart: drawn lines, reference guides, and the
- * arithmetic behind the measure tool.
+ * Everything drawn on a chart that is not a series: the annotations a reader
+ * adds (lines, reference guides, the arithmetic behind the measure tool), and
+ * the shaded x-ranges a monitor declares behind its data.
  *
  * Every shape is stored in DATA coordinates, never pixels. A drawing pinned to
  * pixels slides off the thing it marks the moment the chart is zoomed or
- * panned, which is exactly when a reader is looking hardest at it.
+ * panned, which is exactly when a reader is looking hardest at it — and a
+ * region, whose whole job is to say WHERE on the axis something held, is the
+ * same bargain: it is projected through the chart's current x-scale on every
+ * render, so zooming moves it with the data rather than under it.
  */
 
 export type Drawing =
@@ -234,4 +238,69 @@ export function saveDrawings(storageKey: string | undefined, drawings: Drawing[]
     if (drawings.length === 0) localStorage.removeItem(KEY(storageKey))
     else localStorage.setItem(KEY(storageKey), JSON.stringify(drawings))
   } catch { /* private mode, or full — the marks are not worth an error */ }
+}
+
+/* ── Declared regions ───────────────────────────────────────────────────────
+ *
+ * A monitor can hand the panel shaded x-ranges — the hours a listing market
+ * was open, a maintenance halt, the stretch that came from a backfill. They
+ * arrive with the series (resolved server-side, like `options`) and are
+ * CONTEXT: they say what was true of the axis there, and must never be
+ * mistaken for a reading.
+ */
+
+/** A shaded x-range declared by the monitor, in data coordinates. */
+export interface ChartRegion {
+  /** x start, inclusive. */
+  from: number
+  /** x end, exclusive. */
+  to: number
+  label?: string
+  tone?: 'neutral' | 'warn' | 'good'
+}
+
+/** One region resolved to the pixels it occupies right now. */
+export interface RegionRect {
+  x: number
+  width: number
+  tone: 'neutral' | 'warn' | 'good'
+  label?: string
+}
+
+/**
+ * Project regions onto the CURRENT x-window.
+ *
+ * The window is the zoom/pan state, so this runs on every view change and a
+ * band stays welded to its data. Three things are dropped rather than drawn:
+ * a degenerate range (`from >= to`, including NaNs, which compare false), one
+ * that ends before the window starts or begins after it ends, and one that
+ * survives clamping as less than a pixel — a hairline of wash reads as a
+ * rendering artefact, not as a period.
+ */
+export function regionRects(
+  regions: ChartRegion[] | undefined,
+  x0: number,
+  x1: number,
+  px: (x: number) => number,
+  leftPx: number,
+  rightPx: number,
+): RegionRect[] {
+  if (!regions?.length || !(x1 > x0)) return []
+  const out: RegionRect[] = []
+  for (const r of regions) {
+    if (!(r.from < r.to)) continue
+    if (r.to <= x0 || r.from >= x1) continue
+    // Clamp in DATA space first: px() is unbounded, and a region spanning a
+    // decade of epochs would otherwise produce a rect megapixels wide.
+    const left = Math.max(leftPx, px(Math.max(r.from, x0)))
+    const right = Math.min(rightPx, px(Math.min(r.to, x1)))
+    if (right - left < 1) continue
+    out.push({
+      x: left,
+      width: right - left,
+      tone: r.tone ?? 'neutral',
+      ...(r.label !== undefined ? { label: r.label } : {}),
+    })
+  }
+  return out
 }

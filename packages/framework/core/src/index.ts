@@ -28,6 +28,7 @@ export type {
   MultiPlotDef,
   PlotCandle,
   PlotOption,
+  PlotRegion,
   MonitorPlotInfo,
   StrategyContext,
   StrategyMetrics,

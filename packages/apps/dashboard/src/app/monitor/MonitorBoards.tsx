@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SeriesChart, type ChartSeries } from '@/components/SeriesChart'
+import { SeriesChart, type ChartSeries, type ChartRegion } from '@/components/SeriesChart'
 
 interface PlotInfo { id: string; title: string; kind: string; columns?: string[]; unit?: string; xKind?: 'time' | 'value'; xUnit?: string; description?: string; multi?: boolean }
 
@@ -320,6 +320,8 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
   const [plots, setPlots] = useState<PlotInfo[] | null>(null)
   const [selectedKey, setSelectedKey] = useState<string>(keys[0] ?? '')
   const [series, setSeries] = useState<Record<string, ChartSeries[]>>({})
+  /** Per-panel shaded x-ranges, resolved server-side over the same window as the series. */
+  const [regions, setRegions] = useState<Record<string, ChartRegion[]>>({})
   const [lastLoad, setLastLoad] = useState(0)
   /**
    * Expanded panels, by id. A SET rather than one id: comparing two curves
@@ -351,7 +353,7 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
   const load = useCallback(async () => {
     if (!plots?.length || !selectedKey) return
     setLastLoad(Date.now())
-    type PanelData = { series: ChartSeries[]; options?: PlotOption[]; option?: string | string[] }
+    type PanelData = { series: ChartSeries[]; options?: PlotOption[]; option?: string | string[]; regions?: ChartRegion[] }
     const results = await Promise.all(plots.map(async (p): Promise<readonly [string, PanelData]> => {
       // Multi-select panels repeat the param; the server resolves whatever
       // survives against the current option list.
@@ -361,6 +363,10 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
       return [p.id, await res.json() as PanelData]
     }))
     setSeries(Object.fromEntries(results.map(([id, d]) => [id, d.series])))
+    // Only panels that declared regions get an entry; the rest render as before.
+    setRegions(Object.fromEntries(results
+      .filter(([, d]) => (d.regions?.length ?? 0) > 0)
+      .map(([id, d]) => [id, d.regions!])))
     setPanelOptions(Object.fromEntries(results
       .filter(([, d]) => (d.options?.length ?? 0) > 0)
       .map(([id, d]) => {
@@ -475,6 +481,7 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
                   /* Monitor and panel together: the same panel of two monitors
                      is two charts, and each keeps its own marks. */
                   storageKey={`${monitorId}:${p.id}`}
+                  {...(regions[p.id]?.length ? { regions: regions[p.id]! } : {})}
                   {...(p.kind === 'scatter' ? { mode: 'scatter' as const } : {})}
                   {...(p.unit !== undefined ? { unit: p.unit } : {})}
                   {...(p.xKind !== undefined ? { xKind: p.xKind } : {})}

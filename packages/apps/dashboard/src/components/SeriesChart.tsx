@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type Drawing, type Tool, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings } from './chartTools'
+import { type Drawing, type Tool, type ChartRegion, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings, regionRects } from './chartTools'
 
 export interface ChartCandle { x: number; o: number; h: number; l: number; c: number }
 export interface ChartSeries { label: string; points?: Array<{ x: number; y: number }>; candles?: ChartCandle[] }
+export type { ChartRegion }
 
 /**
  * Categorical hues in FIXED order — color follows the series position in the
@@ -17,6 +18,13 @@ const CANDLE_DOWN = '#ef4444'
 /* One hue for everything the reader drew, distinct from all four series
    colours and from up/down — a mark must never be mistaken for data. */
 const INK = '#e879f9'
+/**
+ * Region washes. A region is a fact about the AXIS ("the listing market was
+ * shut here"), so it gets a background wash rather than a mark: painted before
+ * the gridlines, at the confidence band's weight, with no stroke and no
+ * saturation to compete with a curve.
+ */
+const REGION_COLORS = { neutral: 'var(--muted)', warn: '#f59e0b', good: '#22c55e' } as const
 
 const PAD = { top: 14, right: 68, bottom: 30, left: 14 }
 
@@ -80,8 +88,14 @@ let clipCounter = 0
  * rescales to what the zoomed window shows. Renders at the container's
  * native pixel width so SVG text keeps its true point size.
  */
-export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey }: {
+export function SeriesChart({ series, regions, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey }: {
   series: ChartSeries[]
+  /**
+   * Shaded x-ranges the monitor declared for this window — sessions, halts,
+   * weekends. Context, not data: drawn behind everything, and absent or empty
+   * changes nothing about the chart.
+   */
+  regions?: ChartRegion[]
   unit?: string
   xKind?: 'time' | 'value'
   xUnit?: string
@@ -215,6 +229,16 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
     return { px, py, xAt, yAt, paths, areas, gridValues, xTicks, x0, x1, y0, y1, candleW, inWindow, gridDecimals, tickDecimals }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, hidden, view, W, H])
+
+  /**
+   * The declared regions, projected onto the window the chart is showing.
+   * Recomputed from `geom` like every other mark, which is what keeps a band
+   * welded to its data through a zoom or a pan instead of sliding across it.
+   */
+  const bands = useMemo(
+    () => (geom ? regionRects(regions, geom.x0, geom.x1, geom.px, PAD.left, W - PAD.right) : []),
+    [regions, geom, W],
+  )
 
   // Wheel zoom needs a non-passive listener to stop the page from scrolling
   useEffect(() => {
@@ -652,6 +676,46 @@ export function SeriesChart({ series, unit, xKind = 'time', xUnit, height = 220,
                 <stop offset="100%" stopColor={washColor} stopOpacity="0" />
               </linearGradient>
             </defs>
+
+            {/* ── Declared regions ──────────────────────────────────────────
+                First in the paint order, so the shading sits under the grid,
+                under the axis labels and under every series — it is what the
+                data happened AGAINST. Clipped to the plot area and projected
+                through the current x-scale, so a band holds its ground on the
+                axis while the chart is zoomed and panned. */}
+            {bands.length > 0 && (
+              <g clipPath={`url(#${clipId})`}>
+                {bands.map((b, bi) => (
+                  <g key={`region-${bi}`}>
+                    <rect
+                      x={b.x}
+                      y={PAD.top}
+                      width={b.width}
+                      height={H - PAD.top - PAD.bottom}
+                      fill={REGION_COLORS[b.tone]}
+                      opacity="0.13"
+                    >
+                      {b.label && <title>{b.label}</title>}
+                    </rect>
+                    {/* A caption only where one fits without crowding the
+                        curve; on a narrow band the hover title is the label. */}
+                    {b.label && b.width >= 46 && (
+                      <text
+                        x={b.x + b.width / 2}
+                        y={PAD.top + 11}
+                        fontSize="10"
+                        textAnchor="middle"
+                        fill={REGION_COLORS[b.tone]}
+                        opacity="0.75"
+                        pointerEvents="none"
+                      >
+                        {b.label}
+                      </text>
+                    )}
+                  </g>
+                ))}
+              </g>
+            )}
 
             {/* Recessive grid + y tick labels */}
             {geom.gridValues.map((v, gi) => (

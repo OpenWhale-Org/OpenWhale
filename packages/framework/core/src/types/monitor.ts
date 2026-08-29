@@ -76,6 +76,26 @@ export interface PlotSeries {
   candles?: PlotCandle[]
 }
 
+/**
+ * A shaded x-range drawn behind the series — sessions, weekends, halts.
+ *
+ * A stretch of the x-axis that is CONTEXT for the data rather than data
+ * itself: the hours the listing market was open, a maintenance window, the
+ * span that came from a backfill instead of the live feed. Encoding one as an
+ * extra series does not work — a series is a single path, so points that exist
+ * only on weekends draw straight segments across every weekday gap.
+ */
+export interface PlotRegion {
+  /** x start, inclusive. Epoch ms on a time axis, plain number when xKind is 'value'. */
+  from: number
+  /** x end, exclusive. */
+  to: number
+  /** Shown on hover / in the legend. */
+  label?: string
+  /** Optional tone hint; the dashboard picks the actual colour. Default 'neutral'. */
+  tone?: 'neutral' | 'warn' | 'good'
+}
+
 /** A selectable variant of a panel (e.g. one captured session among many). */
 export interface PlotOption {
   value: string
@@ -114,6 +134,12 @@ interface PlotDefBase<TData> {
    * dashboard renders a picker and passes the choice to extract.
    */
   options?(records: MonitorRecord<TData>[]): PlotOption[]
+  /**
+   * Shaded x-ranges derived SERVER-side from the same record window, drawn
+   * behind the series. Same idiom as `options`: the runtime calls it with the
+   * window it is about to render.
+   */
+  regions?(records: MonitorRecord<TData>[]): PlotRegion[]
 }
 
 /**
