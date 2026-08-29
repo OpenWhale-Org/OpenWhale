@@ -106,6 +106,7 @@ export type {
   ParamFieldOption,
   ParamFieldMeta,
   ParamIllustration,
+  ParamPreset,
   ParamAvailability,
   AvailabilityVerdict,
   AvailabilityChecker,

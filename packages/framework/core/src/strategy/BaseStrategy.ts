@@ -7,7 +7,7 @@ import type { ZodType, ZodRawShape } from 'zod'
 import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { AccountSlot, ReaderClass } from '../types/materialization.js'
-import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType } from '../types/definition.js'
+import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset } from '../types/definition.js'
 import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
@@ -176,6 +176,13 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
    * fetches those and calls in.
    */
   readonly availabilityCheckers: Readonly<Record<string, AvailabilityChecker>> = {}
+
+  /**
+   * Named parameter starting points offered in the instance form. Each preset
+   * sets only the fields it names; declare one when the strategy has a few
+   * configurations worth naming ('conservative', 'paper').
+   */
+  readonly paramPresets?: ParamPreset[]
 
   /**
    * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.

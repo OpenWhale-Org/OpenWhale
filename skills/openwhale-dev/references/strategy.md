@@ -206,6 +206,26 @@ Compute layout from the iframe's real width on every draw (a fixed viewBox stret
 page dependency-free, and write it in plain string concatenation — the page is data shipped inside
 the plugin, not code with two escape layers.
 
+## Presets
+
+A strategy with many knobs usually has a few configurations worth naming. Declare them as
+`paramPresets` on the class and the instance form shows a **Preset** dropdown (placeholder
+"— custom —") above the fields. Choosing one sets every field the preset names — `base` and
+`tunable` — and leaves the rest as they are, so a preset may be partial; the operator can still edit
+any field afterwards. Presets are seeds for the form only: they are not validated at registration
+and never applied at activation.
+
+```ts
+import type { ParamPreset } from '@openwhaleorg/core'
+
+override readonly paramPresets: ParamPreset[] = [
+  { id: 'paper', label: 'Paper', description: 'Tiny size, wide stops', tunable: { sizeUsd: 10, stopPct: 5 } },
+  { id: 'live', label: 'Live', base: { symbol: 'BTC/USDT:USDT' }, tunable: { sizeUsd: 500, stopPct: 1.5 } },
+]
+```
+
+`id` is what the form remembers; `label` is what it shows; `description` appears under the label.
+
 ## Don'ts
 
 - Don't ask for a venue/exchange param — derive from the account (rule 5).

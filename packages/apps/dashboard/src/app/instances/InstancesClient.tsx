@@ -27,7 +27,7 @@ const WhaleField = dynamic(
 import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
 import Link from 'next/link'
 import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
-import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ExecutionResult } from '@openwhaleorg/core'
+import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ParamPreset, ExecutionResult } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
@@ -369,12 +369,15 @@ export function ParamFieldsForm({
   venueContext,
   strategyId,
   illustrations,
+  presets,
 }: {
   fields: ParamFieldDef[]
   values: Record<string, string>
   onChange: (v: Record<string, string>) => void
   /** Strategy-declared interactive docs, keyed into sections via their `section`. */
   illustrations?: ParamIllustration[]
+  /** Strategy-declared starting points: choosing one seeds the fields it names, the rest stay. */
+  presets?: ParamPreset[]
   /** Strategy whose availability checkers to call. */
   strategyId?: string
   /**
@@ -412,6 +415,21 @@ export function ParamFieldsForm({
   }
 
   const [availability, setAvailability] = useState<FieldAvailability>({})
+
+  // The preset last applied — a label on the dropdown, not a mode: every
+  // field stays editable afterwards, and edits do not clear it.
+  const [presetId, setPresetId] = useState('')
+  const applyPreset = (id: string) => {
+    setPresetId(id)
+    const preset = presets?.find(p => p.id === id)
+    if (!preset) return
+    const next = { ...values }
+    for (const f of fields) {
+      const v = (f.group === 'base' ? preset.base : preset.tunable)?.[f.name]
+      if (v !== undefined) next[f.name] = typeof v === 'object' ? JSON.stringify(v) : String(v)
+    }
+    onChange(next)
+  }
 
   // Verify chosen values against the venue whenever either changes. Advisory:
   // a failure to check leaves the field unannotated rather than blocking.
@@ -659,6 +677,20 @@ export function ParamFieldsForm({
 
   return (
     <div className="flex flex-col gap-3">
+      {presets && presets.length > 0 && (
+        <div className="flex flex-col gap-1.5" data-tour="field-preset">
+          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Preset</label>
+          <Select
+            value={presetId}
+            onChange={applyPreset}
+            placeholder="— custom —"
+            options={presets.map(p => ({ value: p.id, label: p.label, ...(p.description ? { hint: p.description } : {}) }))}
+          />
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>
+            Fills the fields the preset names; everything stays editable.
+          </span>
+        </div>
+      )}
       {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} />)}
       {baseFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
@@ -2086,6 +2118,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
               strategyId={strategy.id}
               venueContext={boundVenue}
               illustrations={strategy.paramsIllustrations}
+              presets={strategy.paramPresets}
             />
           ) : (
             <>
