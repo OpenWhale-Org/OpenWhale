@@ -1,10 +1,20 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
-import { InstanceDetail, IconMenu, ParamFieldsForm, buildParamsFromFields, fieldValuesFromParams, iconFor, patchInstanceMeta } from '../InstancesClient'
+import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta } from '../InstancesClient'
+import { buildParamsFromFields, fieldValuesFromParams, paramsJson, sameValues, type ParamValues } from '@/components/paramsIo'
+import { ParamsToolbar, type ParamsView } from '@/components/ParamsToolbar'
+import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { InstancePnlPanel } from './InstancePnlPanel'
+
+/** Monaco is ~1MB and this panel is often collapsed — load it when JSON is asked for. */
+const CodeEditor = dynamic(() => import('@/components/CodeEditor').then(m => m.CodeEditor), {
+  ssr: false,
+  loading: () => <div className="text-xs p-4" style={{ color: 'var(--muted)' }}>Loading editor…</div>,
+})
 
 /**
  * Full-page board for ONE instance — the same tabs as the list-page card, but
@@ -422,6 +432,8 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
   )
 }
 
+const isGroup = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v)
+
 function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [open, setOpen] = useState(true)
   const [fields, setFields] = useState<ParamFieldDef[] | null>(null)
@@ -431,8 +443,19 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
      picture of what a knob does is worth the most. */
   const [illustrations, setIllustrations] = useState<ParamIllustration[] | undefined>(undefined)
   const [presets, setPresets] = useState<ParamPreset[] | undefined>(undefined)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [dirty, setDirty] = useState(false)
+  const history = useHistory<ParamValues>({})
+  const values = history.state
+  const setValues = history.set
+  const [view, setView] = useState<ParamsView>('form')
+  /* The JSON view edits text, not values: half-typed JSON does not parse, and a
+     form that flickered back to defaults on every keystroke would be unusable.
+     The draft commits to `values` only when it parses. */
+  const [draft, setDraft] = useState<string | null>(null)
+  const [draftError, setDraftError] = useState('')
+  /* Dirty is derived, not flagged: undo back to where you started has to stop
+     claiming there is something to save. */
+  const [saved, setSaved] = useState<ParamValues>({})
+  const dirty = !sameValues(values, saved)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   /** Venue per bound slot label; the first entry is the default for fields naming no `accountSlot`. */
@@ -450,8 +473,12 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       setFields(f)
       setIllustrations(def?.paramsIllustrations)
       setPresets(def?.paramPresets)
-      setValues(fieldValuesFromParams(f, instance.params))
-      setDirty(false)
+      const seed = fieldValuesFromParams(f, instance.params)
+      history.reset(seed)
+      setSaved(seed)
+      setDraft(null)
+      setDraftError('')
+      setView('form')
       // The pickers and availability checks need the bound account's venue —
       // same derivation as the create form: slot binding → account → venue
       // pin from the implementation, credential type only as CEX fallback.
@@ -479,6 +506,37 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instance.strategyId, instance.active])
 
+  // ⌘Z belongs to the panel only while it is open and the form has focus —
+  // the JSON editor keeps Monaco's own undo.
+  useUndoShortcuts(open && view === 'form', history.undo, history.redo)
+
+  /**
+   * The JSON view edits the WHOLE document: a key left out of it goes back to
+   * its default, exactly as it would if the strategy were created from this
+   * text. That is the opposite of Import, which is deliberately partial.
+   */
+  const editJson = useCallback((text: string) => {
+    setDraft(text)
+    try {
+      const parsed: unknown = JSON.parse(text)
+      const doc = parsed as { base?: unknown; tunable?: unknown }
+      const shaped = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        && (isGroup(doc.base) || isGroup(doc.tunable))
+      if (!shaped) {
+        // Refuse rather than apply: a flat map has no group for any field, so
+        // committing it would silently reset every parameter to its default.
+        setDraftError('Expected a JSON object with "base" and/or "tunable" groups.')
+        return
+      }
+      setDraftError('')
+      setValues(fieldValuesFromParams(fields ?? [], doc as { base?: Record<string, unknown>; tunable?: Record<string, unknown> }))
+    } catch (err) {
+      setDraftError((err as Error).message)
+    }
+    // fields is stable once loaded; setValues comes from useHistory
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields])
+
   if (fields === null) return null
   if (fields.length === 0) return null
 
@@ -493,44 +551,89 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       body: JSON.stringify({ params: buildParamsFromFields(fields!, values) }),
     })
     setSaving(false)
-    if (res.ok) { setDirty(false); setNotice(instance.active ? 'Saved & restarted ✓' : 'Saved ✓') }
+    if (res.ok) { setSaved(values); setNotice(instance.active ? 'Saved & restarted ✓' : 'Saved ✓') }
     else setNotice(`Save failed: ${await res.text()}`)
   }
 
+  const jsonText = draft ?? paramsJson(fields, values)
+  const blocked = view === 'json' && draftError !== ''
+
   return (
-    <div className="rounded-lg mb-4 overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      {/* A div, not a button: the top save button must not nest inside the toggle. */}
-      <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
-        <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
+    // overflow-clip, not hidden: hidden would make this a scroll container and
+    // the sticky toolbar inside it would never stick.
+    <div className="rounded-lg mb-4 overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      {/* Sticky so Save, undo and the view switch stay reachable however far
+          down a long parameter form the user has scrolled. A div, not a button:
+          the actions must not nest inside the collapse toggle. */}
+      <div
+        className="sticky top-0 z-20 w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
+        style={{ background: 'var(--surface)', borderBottom: open ? '1px solid var(--border)' : 'none' }}
+      >
+        <button className="flex items-center gap-2 text-left py-0.5 min-w-0" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>
           <span>Parameters</span>
-          <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
+          <span className="text-xs font-normal truncate" style={{ color: 'var(--muted)' }}>
             {instance.active ? '(active: saving restarts the instance)' : '(stopped: edit and save directly)'}
           </span>
-          {dirty && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
+          {dirty && <span className="text-xs shrink-0" style={{ color: 'var(--warning)' }}>Unsaved</span>}
         </button>
-        {notice && <span className="text-xs" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        <div className="flex-1" />
+        {notice && <span className="text-xs shrink-0" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        {open && (
+          <ParamsToolbar
+            fields={fields}
+            values={values}
+            view={view}
+            onView={(v) => {
+              // Leaving JSON drops the draft: what the form shows is what the
+              // last parse produced, and a stale draft would overwrite it later.
+              if (v === 'form') { setDraft(null); setDraftError('') }
+              setView(v)
+            }}
+            history={history}
+            onImport={(next) => {
+              setValues(next, { coalesce: false })   // one undo step, not one per field
+              setDraft(null)
+              setNotice('')
+            }}
+            strategyId={instance.strategyId}
+            instanceName={instance.name}
+            disabled={blocked}
+          />
+        )}
         <button
           onClick={() => void save()}
-          disabled={saving || !dirty}
+          disabled={saving || !dirty || blocked}
           className="px-3 py-1.5 rounded-md text-xs shrink-0"
-          style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+          style={{ background: dirty && !blocked ? 'var(--accent)' : 'var(--background)', color: dirty && !blocked ? '#fff' : 'var(--muted)', border: dirty && !blocked ? 'none' : '1px solid var(--border)' }}
         >
           {saving ? 'Saving…' : instance.active ? 'Save & restart' : 'Save'}
         </button>
       </div>
       {open && (
         <div className="px-4 pb-4">
-          <ParamFieldsForm
-            fields={fields}
-            values={values}
-            onChange={(v) => { setValues(v); setDirty(true) }}
-            strategyId={instance.strategyId}
-            venueContext={boundVenue}
-            slotVenues={slotVenues}
-            {...(illustrations ? { illustrations } : {})}
-            {...(presets ? { presets } : {})}
-          />
+          {view === 'json' ? (
+            <div className="flex flex-col gap-2 pt-2">
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                The whole parameter document, exactly as Save sends it. A field left out falls back to its default.
+              </p>
+              <div className="rounded-md overflow-hidden" style={{ border: `1px solid ${draftError ? 'var(--danger)' : 'var(--border)'}` }}>
+                <CodeEditor path={`params/${instance.id}.json`} language="json" value={jsonText} onChange={editJson} height="60vh" />
+              </div>
+              {draftError && <div className="text-xs" style={{ color: 'var(--danger)' }}>{draftError}</div>}
+            </div>
+          ) : (
+            <ParamFieldsForm
+              fields={fields}
+              values={values}
+              onChange={(v) => setValues(v)}
+              strategyId={instance.strategyId}
+              venueContext={boundVenue}
+              slotVenues={slotVenues}
+              {...(illustrations ? { illustrations } : {})}
+              {...(presets ? { presets } : {})}
+            />
+          )}
           <div className="flex justify-end items-center gap-3 mt-3">
             {instance.active && dirty && (
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
@@ -539,9 +642,9 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
             )}
             <button
               onClick={() => void save()}
-              disabled={saving || !dirty}
+              disabled={saving || !dirty || blocked}
               className="px-4 py-2 rounded-md text-sm"
-              style={{ background: dirty ? 'var(--accent)' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+              style={{ background: dirty && !blocked ? 'var(--accent)' : 'var(--surface)', color: dirty && !blocked ? '#fff' : 'var(--muted)', border: dirty && !blocked ? 'none' : '1px solid var(--border)' }}
             >
               {saving ? 'Saving…' : instance.active ? 'Save & restart' : 'Save parameters'}
             </button>

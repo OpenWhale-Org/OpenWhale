@@ -84,11 +84,14 @@ export function Modal({ onClose, maxWidth = '48rem', height, maximizable, persis
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    // The page scrolls inside <main>, not the body — lock both, so a dialog
+    // over a long form does not scroll the form behind it.
+    const scrollers = [document.body, document.querySelector('.aurora-main')].filter(Boolean) as HTMLElement[]
+    const previous = scrollers.map(el => el.style.overflow)
+    for (const el of scrollers) el.style.overflow = 'hidden'
     return () => {
       window.removeEventListener('keydown', onKey)
-      document.body.style.overflow = previous
+      scrollers.forEach((el, i) => { el.style.overflow = previous[i] ?? '' })
     }
   }, [onClose])
 

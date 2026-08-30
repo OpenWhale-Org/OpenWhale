@@ -34,6 +34,7 @@ import { Select } from '@/components/Select'
 import { Modal, ModalMaximizeButton } from '@/components/Modal'
 import { StatsBar } from './StatsBar'
 import { StrategyBrowser } from './StrategyPicker'
+import { buildParamsFromFields, defaultFieldValues, fieldValuesFromParams } from '@/components/paramsIo'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -786,40 +787,7 @@ export function ParamFieldsForm({
 }
 
 /** Convert flat string values map → { base, tunable } params object */
-export function buildParamsFromFields(
-  fields: ParamFieldDef[],
-  values: Record<string, string>,
-): { base: Record<string, unknown>; tunable: Record<string, unknown> } {
-  const base: Record<string, unknown> = {}
-  const tunable: Record<string, unknown> = {}
-
-  for (const field of fields) {
-    const raw = values[field.name]
-    if (raw === undefined || raw === '') continue
-    let parsed: unknown = raw
-    if (field.type === 'number') {
-      const n = parseFloat(raw)
-      if (!isNaN(n)) parsed = n
-    } else if (field.type === 'boolean') {
-      parsed = raw === 'true'
-    } else if (field.type === 'list') {
-      try { parsed = JSON.parse(raw) } catch { continue }
-    }
-    if (field.group === 'base') base[field.name] = parsed
-    else tunable[field.name] = parsed
-  }
-
-  return { base, tunable }
-}
-
-/** Initialise string values from field defaults */
-function defaultFieldValues(fields: ParamFieldDef[]): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const f of fields) {
-    if (f.default !== undefined) out[f.name] = f.type === 'list' ? JSON.stringify(f.default) : String(f.default)
-  }
-  return out
-}
+export { buildParamsFromFields, fieldValuesFromParams }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -1745,16 +1713,6 @@ async function persistLayout(groups: Array<{ folder: string | undefined; items: 
 // ── Instance form (create + edit) ─────────────────────────────────────────────
 
 /** Stringify an instance's saved params into the field-value map the form renders. */
-export function fieldValuesFromParams(fields: ParamFieldDef[], params: StrategyInstance['params']): Record<string, string> {
-  const out = defaultFieldValues(fields)
-  for (const f of fields) {
-    const group = (f.group === 'base' ? params?.base : params?.tunable) as Record<string, unknown> | undefined
-    const v = group?.[f.name]
-    if (v !== undefined) out[f.name] = typeof v === 'object' ? JSON.stringify(v) : String(v)
-  }
-  return out
-}
-
 function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   initial?: StrategyInstance
   /** Skip the picker and land on this strategy (deep link from the Plugins page). */

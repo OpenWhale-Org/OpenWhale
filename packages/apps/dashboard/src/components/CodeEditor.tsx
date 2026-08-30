@@ -54,18 +54,20 @@ function wireMonaco(monaco: Monaco): void {
   })
 }
 
-export function CodeEditor({ path, value, onChange, readOnly, height }: {
+export function CodeEditor({ path, value, onChange, readOnly, height, language }: {
   /** Model path — one model per file, e.g. 'strategies/my-strategy.ts'. */
   path: string
   value: string
   onChange?: (code: string) => void
   readOnly?: boolean
   height?: string | number
+  /** Defaults to TypeScript; 'json' for parameter documents. */
+  language?: 'typescript' | 'json'
 }) {
   return (
     <Editor
       path={`file:///work/${path}`}
-      defaultLanguage="typescript"
+      defaultLanguage={language ?? 'typescript'}
       theme="openwhale-dark"
       value={value}
       onChange={(v) => onChange?.(v ?? '')}
