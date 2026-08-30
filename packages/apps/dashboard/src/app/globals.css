@@ -340,6 +340,17 @@ body {
 .aurora-new-strategy { display: flex; height: 42px; align-items: center; gap: 13px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 0 16px; background: rgba(5,8,17,.84); color: #fff; font-size: 13px; box-shadow: 0 12px 26px rgba(0,0,0,.2); }
 .aurora-kpi-grid { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: -1px; padding-top: 12px; }
 .aurora-kpi-card { position: relative; min-height: 112px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: linear-gradient(145deg, rgba(20,25,43,.96), rgba(13,17,30,.96)); }.aurora-kpi-card > span { display: block; color: var(--foreground-soft); font-size: 12px; }.aurora-kpi-card strong { display: block; margin-top: 8px; font-size: clamp(19px, 1.65vw, 25px); font-weight: 620; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }.aurora-kpi-card strong em { color: var(--muted); font-size: 14px; font-style: normal; font-weight: 450; }.aurora-kpi-card small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; }.is-positive { color: var(--success)!important }.is-negative { color: var(--danger)!important }.aurora-sparkline { position: absolute; right: 12px; bottom: 17px; width: 70px; height: 34px; opacity: .9; }.aurora-kpi-ring { --ring-value: 0deg; position: absolute; right: 20px; bottom: 20px; width: 42px; height: 42px; border-radius: 50%; background: conic-gradient(var(--accent) var(--ring-value), #292d3d 0); mask: radial-gradient(circle, transparent 58%, #000 60%); }
+/* The Overview's widget grid.
+   Four columns, and each widget declares how many it wants through data-span
+   rather than an inline style — the span has to yield to the media queries
+   below, and an inline grid-column would outrank them and leave a phone
+   rendering four columns of nothing. */
+.aurora-widget-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.aurora-widget-grid > [data-span="1"] { grid-column: span 1; }
+.aurora-widget-grid > [data-span="2"] { grid-column: span 2; }
+.aurora-widget-grid > [data-span="3"] { grid-column: span 3; }
+.aurora-widget-grid > [data-span="4"] { grid-column: span 4; }
+
 .aurora-overview-grid { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr); gap: 10px; margin-top: 10px; }.aurora-dashboard-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: linear-gradient(145deg, rgba(18,23,40,.97), rgba(12,16,28,.97)); }.aurora-card-header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 13px 17px; border-bottom: 1px solid rgba(220,214,255,.07); }.aurora-card-header h2 { margin: 0; font-size: 14px; font-weight: 600; }.aurora-card-header p { margin-top: 3px; color: var(--muted); font-size: 11px; }.aurora-card-header > a { color: #a993ff; font-size: 12px; }.aurora-time-tabs { display: flex; gap: 3px; }.aurora-time-tabs button { border-radius: 6px; padding: 5px 7px; color: var(--muted); font-size: 11px; }.aurora-time-tabs button.active { background: rgba(130,103,245,.18); color: #e7e1ff; }
 .aurora-equity-chart { position: relative; height: 260px; padding: 12px 17px 25px; }.aurora-equity-chart svg { position: relative; z-index: 1; width: 100%; height: 210px; }.aurora-chart-grid { position: absolute; inset: 18px 17px 36px; background: repeating-linear-gradient(to bottom, transparent 0 42px, rgba(220,214,255,.07) 43px), repeating-linear-gradient(to right, transparent 0 110px, rgba(220,214,255,.035) 111px); }.aurora-chart-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
 .aurora-portfolio-header p { font-variant-numeric: tabular-nums; }
@@ -376,11 +387,15 @@ body {
 .aurora-main h1 { letter-spacing: -.035em; }
 
 @media (max-width: 980px) {
+  .aurora-widget-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aurora-widget-grid > [data-span="3"], .aurora-widget-grid > [data-span="4"] { grid-column: span 2; }
   .aurora-login-page { grid-template-columns: 1fr; }.aurora-login-brand { min-height: 42vh; }.aurora-login-brand-content { min-height: 42vh; padding: 30px; }.aurora-login-copy { margin: auto 0 0; }.aurora-login-copy h1 { font-size: 42px; }.aurora-login-signal { display: none; }.aurora-login-panel { min-height: 58vh; padding: 30px; }
   .aurora-sidebar { width: 78px; flex-basis: 78px; }.aurora-logo-type,.aurora-beta,.aurora-nav-heading,.aurora-nav-link span { display:none }.aurora-sidebar-brand { min-height:82px;align-items:center;justify-content:center;padding:18px 5px }.aurora-nav-link { justify-content:center;padding:0 }.aurora-kpi-grid { grid-template-columns:repeat(2,1fr) }.aurora-overview-grid { grid-template-columns:1fr }.aurora-main { padding-inline:18px }.aurora-overview-hero { margin-inline:-18px }
 }
 
 @media (max-width: 620px) {
+  .aurora-widget-grid { grid-template-columns: 1fr; }
+  .aurora-widget-grid > [data-span] { grid-column: span 1; }
   .aurora-login-brand { min-height: 36vh; }.aurora-login-brand-content { min-height:36vh }.aurora-logo-lg .aurora-logo-type{font-size:27px}.aurora-login-copy p,.aurora-login-kicker{display:none}.aurora-login-copy h1{font-size:34px}.aurora-login-panel{min-height:64vh;padding:18px}.aurora-login-form{padding:24px}
   .aurora-sidebar { display:none }.aurora-topbar { padding-inline:16px }.aurora-main { padding-inline:12px }.aurora-overview-hero { margin-inline:-12px;padding-inline:18px }.aurora-overview-hero p{max-width:230px}.aurora-new-strategy{font-size:0;width:40px;padding:0;justify-content:center}.aurora-new-strategy span{font-size:17px}.aurora-kpi-grid{grid-template-columns:1fr}.aurora-overview-grid{display:block}.aurora-dashboard-card{margin-top:10px}
 }
