@@ -1,20 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import dynamic from 'next/dynamic'
 import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta } from '../InstancesClient'
-import { buildParamsFromFields, fieldValuesFromParams, paramsJson, sameValues, type ParamValues } from '@/components/paramsIo'
-import { ParamsToolbar, type ParamsView } from '@/components/ParamsToolbar'
+import { buildParamsFromFields, fieldValuesFromParams, sameValues, type ParamValues } from '@/components/paramsIo'
+import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { InstancePnlPanel } from './InstancePnlPanel'
-
-/** Monaco is ~1MB and this panel is often collapsed — load it when JSON is asked for. */
-const CodeEditor = dynamic(() => import('@/components/CodeEditor').then(m => m.CodeEditor), {
-  ssr: false,
-  loading: () => <div className="text-xs p-4" style={{ color: 'var(--muted)' }}>Loading editor…</div>,
-})
 
 /**
  * Full-page board for ONE instance — the same tabs as the list-page card, but
@@ -432,8 +425,6 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
   )
 }
 
-const isGroup = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v)
-
 function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [open, setOpen] = useState(true)
   const [fields, setFields] = useState<ParamFieldDef[] | null>(null)
@@ -447,11 +438,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const values = history.state
   const setValues = history.set
   const [view, setView] = useState<ParamsView>('form')
-  /* The JSON view edits text, not values: half-typed JSON does not parse, and a
-     form that flickered back to defaults on every keystroke would be unusable.
-     The draft commits to `values` only when it parses. */
-  const [draft, setDraft] = useState<string | null>(null)
-  const [draftError, setDraftError] = useState('')
+  const json = useParamsJson(fields ?? [], values, setValues)
   /* Dirty is derived, not flagged: undo back to where you started has to stop
      claiming there is something to save. */
   const [saved, setSaved] = useState<ParamValues>({})
@@ -476,8 +463,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       const seed = fieldValuesFromParams(f, instance.params)
       history.reset(seed)
       setSaved(seed)
-      setDraft(null)
-      setDraftError('')
+      json.reset()
       setView('form')
       // The pickers and availability checks need the bound account's venue —
       // same derivation as the create form: slot binding → account → venue
@@ -510,33 +496,6 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   // the JSON editor keeps Monaco's own undo.
   useUndoShortcuts(open && view === 'form', history.undo, history.redo)
 
-  /**
-   * The JSON view edits the WHOLE document: a key left out of it goes back to
-   * its default, exactly as it would if the strategy were created from this
-   * text. That is the opposite of Import, which is deliberately partial.
-   */
-  const editJson = useCallback((text: string) => {
-    setDraft(text)
-    try {
-      const parsed: unknown = JSON.parse(text)
-      const doc = parsed as { base?: unknown; tunable?: unknown }
-      const shaped = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        && (isGroup(doc.base) || isGroup(doc.tunable))
-      if (!shaped) {
-        // Refuse rather than apply: a flat map has no group for any field, so
-        // committing it would silently reset every parameter to its default.
-        setDraftError('Expected a JSON object with "base" and/or "tunable" groups.')
-        return
-      }
-      setDraftError('')
-      setValues(fieldValuesFromParams(fields ?? [], doc as { base?: Record<string, unknown>; tunable?: Record<string, unknown> }))
-    } catch (err) {
-      setDraftError((err as Error).message)
-    }
-    // fields is stable once loaded; setValues comes from useHistory
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fields])
-
   if (fields === null) return null
   if (fields.length === 0) return null
 
@@ -555,8 +514,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
     else setNotice(`Save failed: ${await res.text()}`)
   }
 
-  const jsonText = draft ?? paramsJson(fields, values)
-  const blocked = view === 'json' && draftError !== ''
+  const blocked = view === 'json' && json.error !== ''
 
   return (
     // overflow-clip, not hidden: hidden would make this a scroll container and
@@ -587,13 +545,13 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
             onView={(v) => {
               // Leaving JSON drops the draft: what the form shows is what the
               // last parse produced, and a stale draft would overwrite it later.
-              if (v === 'form') { setDraft(null); setDraftError('') }
+              if (v === 'form') json.reset()
               setView(v)
             }}
             history={history}
             onImport={(next) => {
               setValues(next, { coalesce: false })   // one undo step, not one per field
-              setDraft(null)
+              json.reset()
               setNotice('')
             }}
             strategyId={instance.strategyId}
@@ -613,14 +571,12 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       {open && (
         <div className="px-4 pb-4">
           {view === 'json' ? (
-            <div className="flex flex-col gap-2 pt-2">
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                The whole parameter document, exactly as Save sends it. A field left out falls back to its default.
-              </p>
-              <div className="rounded-md overflow-hidden" style={{ border: `1px solid ${draftError ? 'var(--danger)' : 'var(--border)'}` }}>
-                <CodeEditor path={`params/${instance.id}.json`} language="json" value={jsonText} onChange={editJson} height="60vh" />
-              </div>
-              {draftError && <div className="text-xs" style={{ color: 'var(--danger)' }}>{draftError}</div>}
+            <div className="pt-2">
+              <ParamsJsonView
+                json={json}
+                path={`params/${instance.id}.json`}
+                note="The whole parameter document, exactly as Save sends it. A field left out falls back to its default."
+              />
             </div>
           ) : (
             <ParamFieldsForm

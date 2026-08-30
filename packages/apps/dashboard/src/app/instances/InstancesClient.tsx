@@ -34,7 +34,9 @@ import { Select } from '@/components/Select'
 import { Modal, ModalMaximizeButton } from '@/components/Modal'
 import { StatsBar } from './StatsBar'
 import { StrategyBrowser } from './StrategyPicker'
-import { buildParamsFromFields, defaultFieldValues, fieldValuesFromParams } from '@/components/paramsIo'
+import { buildParamsFromFields, defaultFieldValues, fieldValuesFromParams, type ParamValues } from '@/components/paramsIo'
+import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
+import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -1733,8 +1735,13 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   const [implVenues, setImplVenues] = useState<Record<string, string>>({})
   // Per-label LLM slot overrides: { [label]: { model?, credentialName? } }
   const [llmBindings, setLlmBindings] = useState<Record<string, { model?: string; credentialName?: string }>>(initial?.llm ?? {})
-  // Generic field values for strategies with paramsFields
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
+  // Generic field values for strategies with paramsFields — history-backed, so
+  // the toolbar's undo covers the whole form the same way it does on the board.
+  const paramHistory = useHistory<ParamValues>({})
+  const fieldValues = paramHistory.state
+  const setFieldValues = paramHistory.set
+  const resetFieldValues = paramHistory.reset
+  const [paramsView, setParamsView] = useState<ParamsView>('form')
   // JSON fallback for strategies without paramsFields
   const [baseParams, setBaseParams] = useState(initial?.params ? JSON.stringify(initial.params.base ?? {}, null, 2) : '{}')
   const [tunableParams, setTunableParams] = useState(initial?.params ? JSON.stringify(initial.params.tunable ?? {}, null, 2) : '{}')
@@ -1761,7 +1768,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       if (initial) {
         // Edit mode: the strategy is fixed; prefill fields from the saved params
         const strat = s.find((x) => x.id === initial.strategyId)
-        if (strat?.paramsFields) setFieldValues(fieldValuesFromParams(strat.paramsFields, initial.params))
+        if (strat?.paramsFields) resetFieldValues(fieldValuesFromParams(strat.paramsFields, initial.params))
       }
       // No auto-select for a new instance: the picker opens on top and the
       // choice is explicit. Silently pre-selecting whichever strategy sorted
@@ -1771,7 +1778,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
         const strat = s.find((x) => x.id === preselectStrategyId)
         if (strat) {
           setSelectedStrategy(strat.id)
-          setFieldValues(strat.paramsFields ? defaultFieldValues(strat.paramsFields) : {})
+          resetFieldValues(strat.paramsFields ? defaultFieldValues(strat.paramsFields) : {})
         } else {
           setPickerOpen(true)
         }
@@ -1787,10 +1794,11 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     setSelectedStrategy(id)
     setSlotBindings({})
     const strat = strategies.find((s) => s.id === id)
+    setParamsView('form')
     if (strat?.paramsFields) {
-      setFieldValues(defaultFieldValues(strat.paramsFields))
+      resetFieldValues(defaultFieldValues(strat.paramsFields))
     } else {
-      setFieldValues({})
+      resetFieldValues({})
       setBaseParams('{}')
       setTunableParams('{}')
     }
@@ -1809,6 +1817,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
 
   function buildParams(): { base: Record<string, unknown>; tunable: Record<string, unknown> } | null {
     const strategy = strategies.find((s) => s.id === selectedStrategy)
+
     if (strategy?.paramsFields) {
       return buildParamsFromFields(strategy.paramsFields, fieldValues)
     }
@@ -1889,6 +1898,14 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   }
 
   const strategy = strategies.find((s) => s.id === selectedStrategy)
+
+  const paramsJsonView = useParamsJson(strategy?.paramsFields ?? [], fieldValues, setFieldValues)
+
+  useUndoShortcuts(
+    !pickerOpen && paramsView === 'form' && !!strategy?.paramsFields,
+    paramHistory.undo,
+    paramHistory.redo,
+  )
 
   /**
    * Venue implied by each account binding, keyed by slot label — what symbol
@@ -2090,16 +2107,50 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
 
           {/* Params — generic field renderer if paramsFields present, JSON editor otherwise */}
           {strategy?.paramsFields ? (
-            <ParamFieldsForm
-              fields={strategy.paramsFields}
-              values={fieldValues}
-              onChange={setFieldValues}
-              strategyId={strategy.id}
-              venueContext={boundVenue}
-              slotVenues={slotVenues}
-              illustrations={strategy.paramsIllustrations}
-              presets={strategy.paramPresets}
-            />
+            <div className="flex flex-col gap-3">
+              {/* Sticky inside the dialog's scroll body: import, undo and the
+                  view switch stay put however far down the form you are. */}
+              <div
+                className="sticky top-0 z-10 -mx-5 -mt-1 px-5 py-2 flex items-center gap-2"
+                style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
+              >
+                <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Parameters</span>
+                <div className="flex-1" />
+                <ParamsToolbar
+                  fields={strategy.paramsFields}
+                  values={fieldValues}
+                  view={paramsView}
+                  onView={(v) => {
+                    if (v === 'form') paramsJsonView.reset()
+                    setParamsView(v)
+                  }}
+                  history={paramHistory}
+                  onImport={(next) => { setFieldValues(next, { coalesce: false }); paramsJsonView.reset() }}
+                  strategyId={strategy.id}
+                  instanceName={name}
+                  disabled={paramsView === 'json' && paramsJsonView.error !== ''}
+                />
+              </div>
+              {paramsView === 'json' ? (
+                <ParamsJsonView
+                  json={paramsJsonView}
+                  path={`params/${strategy.id}.json`}
+                  height="52vh"
+                  note="The whole parameter document, exactly as this form submits it. A field left out falls back to its default."
+                />
+              ) : (
+                <ParamFieldsForm
+                  fields={strategy.paramsFields}
+                  values={fieldValues}
+                  onChange={setFieldValues}
+                  strategyId={strategy.id}
+                  venueContext={boundVenue}
+                  slotVenues={slotVenues}
+                  illustrations={strategy.paramsIllustrations}
+                  presets={strategy.paramPresets}
+                />
+              )}
+            </div>
           ) : (
             <>
               <FormField label="Base Params (JSON)" hint="Required params defined in baseParamsSchema" error={baseError}>

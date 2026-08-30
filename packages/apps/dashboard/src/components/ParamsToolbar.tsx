@@ -1,9 +1,16 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import type { ParamFieldDef } from '@openwhaleorg/core'
 import { Modal } from './Modal'
-import { planImport, paramsJson, paramsFilename, type ImportPlan, type ParamValues } from './paramsIo'
+import { fieldValuesFromParams, planImport, paramsJson, paramsFilename, type ImportPlan, type ParamValues } from './paramsIo'
+
+/** Monaco is ~1 MB and only the JSON view needs it — loaded when asked for. */
+const CodeEditor = dynamic(() => import('./CodeEditor').then(m => m.CodeEditor), {
+  ssr: false,
+  loading: () => <div className="text-xs p-4" style={{ color: 'var(--muted)' }}>Loading editor…</div>,
+})
 
 /**
  * The parameter panel's action bar: view switch, undo/redo, import/export, save.
@@ -192,5 +199,76 @@ function ImportDialog({ fields, values, onClose, onApply }: {
         </div>
       </div>
     </Modal>
+  )
+}
+
+// ── JSON view ─────────────────────────────────────────────────────────────────
+
+export interface ParamsJson {
+  /** What the editor shows: the live draft, or the current values rendered. */
+  text: string
+  /** Why the draft has not been applied. Empty while it parses. */
+  error: string
+  edit: (text: string) => void
+  /** Drop the draft — on leaving the view, or when the values are reseeded. */
+  reset: () => void
+}
+
+/**
+ * The JSON view's state.
+ *
+ * It edits TEXT, not values: half-typed JSON does not parse, and a form that
+ * flickered back to defaults on every keystroke would be unusable. The draft
+ * commits only when it parses — and only when it carries the groups, because a
+ * flat map names none and applying it would silently reset every field.
+ *
+ * Unlike Import, this document is the WHOLE thing: a field left out of it falls
+ * back to its default, exactly as it would on a freshly created instance.
+ */
+export function useParamsJson(
+  fields: ParamFieldDef[],
+  values: ParamValues,
+  setValues: (next: ParamValues) => void,
+): ParamsJson {
+  const [draft, setDraft] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const edit = useCallback((text: string) => {
+    setDraft(text)
+    try {
+      const parsed: unknown = JSON.parse(text)
+      const doc = parsed as { base?: unknown; tunable?: unknown }
+      const grouped = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v)
+      if (!(grouped(parsed) && (grouped(doc.base) || grouped(doc.tunable)))) {
+        setError('Expected a JSON object with "base" and/or "tunable" groups.')
+        return
+      }
+      setError('')
+      setValues(fieldValuesFromParams(fields, doc as { base?: Record<string, unknown>; tunable?: Record<string, unknown> }))
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }, [fields, setValues])
+
+  const reset = useCallback(() => { setDraft(null); setError('') }, [])
+
+  return { text: draft ?? paramsJson(fields, values), error, edit, reset }
+}
+
+export function ParamsJsonView({ json, path, height = '60vh', note }: {
+  json: ParamsJson
+  /** Monaco model path — one per document, so undo history does not bleed across instances. */
+  path: string
+  height?: string
+  note: string
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs" style={{ color: 'var(--muted)' }}>{note}</p>
+      <div className="rounded-md overflow-hidden" style={{ border: `1px solid ${json.error ? 'var(--danger)' : 'var(--border)'}` }}>
+        <CodeEditor path={path} language="json" value={json.text} onChange={json.edit} height={height} />
+      </div>
+      {json.error && <div className="text-xs" style={{ color: 'var(--danger)' }}>{json.error}</div>}
+    </div>
   )
 }
