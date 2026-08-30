@@ -106,8 +106,16 @@ export interface ImportPlan {
   unchanged: string[]
   /** Keys this strategy has no field for. Ignored, but named so a wrong file is obvious. */
   unknown: string[]
-  /** Values after applying: current values with only the file's keys replaced. */
-  values: ParamValues
+}
+
+/**
+ * Apply the changes the user kept — the whole plan, or what is left of it after
+ * they struck rows off. Everything not named here keeps its current value.
+ */
+export function applyChanges(current: ParamValues, changes: readonly ImportChange[]): ParamValues {
+  const next: ParamValues = { ...current }
+  for (const change of changes) next[change.name] = change.to
+  return next
 }
 
 /**
@@ -148,7 +156,6 @@ export function planImport(
 
   const incoming = flatten(parsed)
   const byName = new Map(fields.map(f => [f.name, f]))
-  const values: ParamValues = { ...current }
   const changes: ImportChange[] = []
   const unchanged: string[] = []
   const unknown: string[] = []
@@ -161,8 +168,7 @@ export function planImport(
     const from = current[key] ?? ''
     if (from === next) { unchanged.push(key); continue }
     changes.push({ name: key, label: field.displayName || key, group: field.group, from, to: next })
-    values[key] = next
   }
 
-  return { changes, unchanged, unknown, values }
+  return { changes, unchanged, unknown }
 }

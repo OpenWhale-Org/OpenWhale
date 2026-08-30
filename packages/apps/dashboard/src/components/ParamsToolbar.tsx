@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import type { ParamFieldDef } from '@openwhaleorg/core'
 import { Modal } from './Modal'
-import { fieldValuesFromParams, planImport, paramsJson, paramsFilename, type ImportPlan, type ParamValues } from './paramsIo'
+import { applyChanges, fieldValuesFromParams, planImport, paramsJson, paramsFilename, type ImportPlan, type ParamValues } from './paramsIo'
 
 /** Monaco is ~1 MB and only the JSON view needs it — loaded when asked for. */
 const CodeEditor = dynamic(() => import('./CodeEditor').then(m => m.CodeEditor), {
@@ -104,14 +104,34 @@ function ImportDialog({ fields, values, onClose, onApply }: {
   onApply: (values: ParamValues) => void
 }) {
   const [text, setText] = useState('')
+  /* Fields the user struck off this import. A file is rarely wanted whole —
+     someone copies an instance's parameters and keeps their own symbols. */
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
   const result = text.trim() ? planImport(fields, values, text) : null
   const plan = result && !('error' in result) ? (result as ImportPlan) : null
   const error = result && 'error' in result ? result.error : ''
+  const taken = plan ? plan.changes.filter(c => !skipped.has(c.name)) : []
+
+  const toggle = (name: string) => setSkipped(prev => {
+    const next = new Set(prev)
+    if (!next.delete(name)) next.add(name)
+    return next
+  })
+
+  /** A new document is a new decision — nothing carries over from the last one. */
+  function load(next: string) {
+    setText(next)
+    setSkipped(new Set())
+  }
+
+  function apply() {
+    if (plan) onApply(applyChanges(values, taken))
+  }
 
   async function pickFile(file: File | undefined) {
     if (!file) return
-    setText(await file.text())
+    load(await file.text())
   }
 
   return (
@@ -138,7 +158,7 @@ function ImportDialog({ fields, values, onClose, onApply }: {
 
         <textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => load(e.target.value)}
           onDrop={(e) => { e.preventDefault(); void pickFile(e.dataTransfer.files?.[0]) }}
           rows={7}
           spellCheck={false}
@@ -157,26 +177,53 @@ function ImportDialog({ fields, values, onClose, onApply }: {
               </div>
             ) : (
               <div className="rounded-md" style={{ border: '1px solid var(--border)' }}>
-                <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-                  {plan.changes.length} field{plan.changes.length > 1 ? 's' : ''} will be overwritten
+                <div className="px-3 py-1.5 text-xs flex items-center gap-2" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+                  <span>
+                    {taken.length === plan.changes.length
+                      ? `${plan.changes.length} field${plan.changes.length > 1 ? 's' : ''} will be overwritten`
+                      : `${taken.length} of ${plan.changes.length} fields will be overwritten`}
+                  </span>
+                  {skipped.size > 0 && (
+                    <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => setSkipped(new Set())}>
+                      Restore all
+                    </button>
+                  )}
                 </div>
                 <div className="max-h-64 overflow-y-auto scroll-hidden">
-                  {plan.changes.map(c => (
-                    <div key={c.name} className="px-3 py-1.5 text-xs flex items-baseline gap-2" style={{ borderTop: '1px solid var(--border)' }}>
-                      <span className="shrink-0" style={{ color: 'var(--foreground)' }}>{c.label}</span>
-                      <span className="font-mono shrink-0" style={{ color: 'var(--muted)' }}>{c.name}</span>
-                      <span className="ml-auto font-mono flex items-baseline gap-1.5 min-w-0">
-                        <span className="truncate" style={{ color: 'var(--muted)', textDecoration: 'line-through' }}>{c.from || '—'}</span>
-                        <span style={{ color: 'var(--muted)' }}>→</span>
-                        <span className="truncate" style={{ color: 'var(--success)' }}>{c.to}</span>
-                      </span>
-                    </div>
-                  ))}
+                  {plan.changes.map(c => {
+                    const off = skipped.has(c.name)
+                    return (
+                      <div
+                        key={c.name}
+                        className="px-3 py-1.5 text-xs flex items-baseline gap-2"
+                        style={{ borderTop: '1px solid var(--border)', opacity: off ? 0.45 : 1 }}
+                      >
+                        <span className="shrink-0" style={{ color: 'var(--foreground)' }}>{c.label}</span>
+                        <span className="font-mono shrink-0" style={{ color: 'var(--muted)' }}>{c.name}</span>
+                        <span className="ml-auto font-mono flex items-baseline gap-1.5 min-w-0">
+                          <span className="truncate" style={{ color: 'var(--muted)', textDecoration: off ? 'none' : 'line-through' }}>{c.from || '—'}</span>
+                          <span style={{ color: 'var(--muted)' }}>→</span>
+                          <span className="truncate" style={{ color: off ? 'var(--muted)' : 'var(--success)', textDecoration: off ? 'line-through' : 'none' }}>{c.to}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggle(c.name)}
+                          title={off ? `Import ${c.name} after all` : `Keep the current ${c.name}`}
+                          aria-label={off ? `Restore ${c.name}` : `Skip ${c.name}`}
+                          className="btn btn-ghost btn-sm shrink-0 self-center"
+                          style={{ padding: '0 0.4rem' }}
+                        >
+                          {off ? '↺' : '×'}
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
             <div className="text-xs flex flex-wrap gap-x-4 gap-y-1" style={{ color: 'var(--muted)' }}>
               {plan.unchanged.length > 0 && <span>{plan.unchanged.length} already identical</span>}
+              {skipped.size > 0 && <span>{skipped.size} kept as {skipped.size > 1 ? 'they are' : 'it is'}</span>}
               {plan.unknown.length > 0 && (
                 <span style={{ color: 'var(--warning)' }}>
                   ignored (not a parameter here): <span className="font-mono">{plan.unknown.join(', ')}</span>
@@ -191,10 +238,10 @@ function ImportDialog({ fields, values, onClose, onApply }: {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            disabled={!plan || plan.changes.length === 0}
-            onClick={() => plan && onApply(plan.values)}
+            disabled={taken.length === 0}
+            onClick={apply}
           >
-            Apply{plan && plan.changes.length > 0 ? ` ${plan.changes.length}` : ''}
+            Apply{taken.length > 0 ? ` ${taken.length}` : ''}
           </button>
         </div>
       </div>

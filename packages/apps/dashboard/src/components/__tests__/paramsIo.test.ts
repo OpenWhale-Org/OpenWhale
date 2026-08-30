@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { ParamFieldDef } from '@openwhaleorg/core'
-import { planImport, paramsJson, fieldValuesFromParams } from '../paramsIo'
+import { applyChanges, planImport, paramsJson, fieldValuesFromParams } from '../paramsIo'
 
 /**
  * Import is the risky direction: it lands on an instance that is usually
@@ -31,9 +31,10 @@ describe('planImport', () => {
     const p = plan('{"tunable":{"entryZ":1.8}}')
     expect(p.changes.map(c => c.name)).toEqual(['entryZ'])
     expect(p.changes[0]).toMatchObject({ label: 'Entry z', group: 'tunable', from: '2', to: '1.8' })
-    expect(p.values.entryZ).toBe('1.8')
-    expect(p.values.symbolA).toBe(CURRENT.symbolA)
-    expect(p.values.notional).toBe('500')
+    const applied = applyChanges(CURRENT, p.changes)
+    expect(applied.entryZ).toBe('1.8')
+    expect(applied.symbolA).toBe(CURRENT.symbolA)
+    expect(applied.notional).toBe('500')
   })
 
   it('separates what changes, what already matches, and what this strategy has no field for', () => {
@@ -41,7 +42,7 @@ describe('planImport', () => {
     expect(p.changes.map(c => c.name)).toEqual(['notional'])
     expect(p.unchanged).toEqual(['symbolA'])
     expect(p.unknown).toEqual(['whoIsThis'])
-    expect(p.values.whoIsThis).toBeUndefined()
+    expect(applyChanges(CURRENT, p.changes).whoIsThis).toBeUndefined()
   })
 
   it('takes a flat map and a whole instance record, not just the export shape', () => {
@@ -51,12 +52,22 @@ describe('planImport', () => {
 
   it('writes a list back as JSON so the list editor can read it', () => {
     const p = plan('{"tunable":{"ladder":[[1,0.5],[2,0.5]]}}')
-    expect(p.values.ladder).toBe('[[1,0.5],[2,0.5]]')
+    expect(applyChanges(CURRENT, p.changes).ladder).toBe('[[1,0.5],[2,0.5]]')
   })
 
   it('reports unreadable input instead of applying half of it', () => {
     expect(planImport(FIELDS, CURRENT, '{oops')).toHaveProperty('error')
     expect(planImport(FIELDS, CURRENT, '[1,2]')).toHaveProperty('error')
+  })
+})
+
+describe('applyChanges', () => {
+  it('takes only the rows kept — a struck-off field holds its current value', () => {
+    const p = plan('{"base":{"notional":800},"tunable":{"entryZ":1.8}}')
+    const kept = p.changes.filter(c => c.name !== 'notional')
+    const applied = applyChanges(CURRENT, kept)
+    expect(applied.entryZ).toBe('1.8')
+    expect(applied.notional).toBe('500')
   })
 })
 
