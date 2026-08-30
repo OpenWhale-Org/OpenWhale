@@ -21,7 +21,7 @@ export type { SpotInstruction } from './executor/SpotTradingExecutor.js'
 // Monitors (venue-agnostic, over public sessions)
 export { PublicMarketMonitor, parseMarketKey, sleep } from './monitor/PublicMarketMonitor.js'
 export type { ParsedMarketKey, MarketKeyShape } from './monitor/PublicMarketMonitor.js'
-export { streamWithWarmup, DEFAULT_WATCH_WARMUP_MS } from './monitor/watchdog.js'
+export { streamWithWarmup, pollForWindow, DEFAULT_WATCH_WARMUP_MS, DEFAULT_POLL_WINDOW_MS } from './monitor/watchdog.js'
 export type { StreamWarmupOptions } from './monitor/watchdog.js'
 export { TickerMonitor } from './monitor/TickerMonitor.js'
 export type { TickerMonitorOptions, TickerUpdate } from './monitor/TickerMonitor.js'

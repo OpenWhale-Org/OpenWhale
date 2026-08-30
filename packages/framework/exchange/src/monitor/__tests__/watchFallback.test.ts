@@ -26,10 +26,11 @@ function muteWatchSession(): PerpExchangeAdapter & { fetchOrderBook: ReturnType<
   return session as unknown as PerpExchangeAdapter & { fetchOrderBook: ReturnType<typeof vi.fn> }
 }
 
-function monitorOn(session: PerpExchangeAdapter, dataDir: string) {
+function monitorOn(session: PerpExchangeAdapter, dataDir: string, pollWindowMs = 60_000) {
   const m = new OrderBookMonitor({ adapters: { resolve: async () => session } as never, dataDir }, { minIntervalMs: 0 })
   // A short warmup keeps the test honest about time without waiting 15s
   Object.defineProperty(m, 'watchWarmupMs', { get: () => 30 })
+  Object.defineProperty(m, 'pollWindowMs', { get: () => pollWindowMs })
   return m
 }
 
@@ -71,5 +72,22 @@ describe('a mute websocket falls back to REST', () => {
     m.unsubscribe('aster:SNXX/USDT:USDT')
 
     expect(fetchOrderBook).not.toHaveBeenCalled()
+  })
+
+  it('retries the stream after the poll window — a quiet market is not a broken socket', async () => {
+    // Silent at first (an out-of-hours market), talking by the second attempt.
+    let attempts = 0
+    const session = {
+      watchOrderBook: async (_s: string, cb: (b: OrderBook) => void, _d?: number, signal?: AbortSignal) => {
+        if (++attempts > 1) cb(BOOK)
+        await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true }))
+      },
+      fetchOrderBook: vi.fn(async () => BOOK),
+    } as unknown as PerpExchangeAdapter
+    const m = monitorOn(session, `/tmp/ow-test-${Date.now()}-retry`, 50)
+
+    m.subscribe('aster:SNXX/USDT:USDT')
+    await vi.waitFor(() => expect(attempts).toBeGreaterThan(1), { timeout: 3_000 })
+    m.unsubscribe('aster:SNXX/USDT:USDT')
   })
 })

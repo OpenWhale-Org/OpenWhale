@@ -41,3 +41,34 @@ export async function streamWithWarmup(options: StreamWarmupOptions): Promise<bo
   }
   return signal.aborted || hasEmitted()
 }
+
+/** How long a demoted key polls before the stream is given another chance. */
+export const DEFAULT_POLL_WINDOW_MS = 10 * 60_000
+
+/**
+ * Run a polling loop for a bounded window, then return so the caller can retry
+ * the stream.
+ *
+ * Demotion must not be permanent. A stream is also silent when the market is —
+ * an out-of-hours stock ETF ticks a few times an hour — and a key demoted
+ * during that lull would still be polling when the market opens and the stream
+ * has plenty to say. `poll` is handed a signal that ends at the window, so it
+ * must be a loop that watches it (the same one that already watches the
+ * subscription's signal).
+ */
+export async function pollForWindow(
+  poll: (signal: AbortSignal) => Promise<void>,
+  signal: AbortSignal,
+  windowMs: number = DEFAULT_POLL_WINDOW_MS,
+): Promise<void> {
+  const window = new AbortController()
+  const onOuterAbort = () => window.abort()
+  signal.addEventListener('abort', onOuterAbort, { once: true })
+  const timer = setTimeout(() => window.abort(), windowMs)
+  try {
+    await poll(window.signal)
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', onOuterAbort)
+  }
+}

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { BaseMonitor, MonitorMode, createLogger } from '@openwhaleorg/core'
 import type { AdapterResolver, MonitorContext } from '@openwhaleorg/core'
 import type { PerpExchangeAdapter } from '../types/perp.js'
-import { streamWithWarmup, DEFAULT_WATCH_WARMUP_MS } from './watchdog.js'
+import { streamWithWarmup, pollForWindow, DEFAULT_WATCH_WARMUP_MS, DEFAULT_POLL_WINDOW_MS } from './watchdog.js'
 
 /**
  * Shared machinery for venue-agnostic market-data monitors.
@@ -121,6 +121,9 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
   /** How long a websocket may stay silent before the key falls back to polling. */
   protected get watchWarmupMs(): number { return DEFAULT_WATCH_WARMUP_MS }
 
+  /** How long a demoted key polls before the stream is retried. */
+  protected get pollWindowMs(): number { return DEFAULT_POLL_WINDOW_MS }
+
   protected override startSubscribe(key: string): void {
     if (this.feeds.has(key)) return
     const controller = new AbortController()
@@ -144,23 +147,29 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
     // in-flight pushes can otherwise land out of order — a strategy must never
     // see an older price after a newer one.
     let chain: Promise<void> = Promise.resolve()
-    let emitted = false
+    let emits = 0
     const emit = (data: TData): Promise<void> => {
-      emitted = true
+      emits++
       chain = chain.then(() => this.push(key, data))
       return chain
     }
     let attempt = 0
-    /** Set once the watch has been proven mute for this key; polling from then on. */
+    /** Set when the watch has been proven mute; cleared when the poll window is up. */
     let polling = false
 
     while (!signal.aborted) {
       try {
         const session = await this.adapters.resolve<PerpExchangeAdapter>('exchange/perp', parsed.venue)
-        if (polling || this.pollFeed === undefined) {
-          await (polling ? this.pollFeed!(parsed, session, emit, signal) : this.feed(parsed, session, emit, signal))
+        if (this.pollFeed === undefined) {
+          await this.feed(parsed, session, emit, signal)
+        } else if (polling) {
+          // Bounded: when the window is up the stream gets another chance, so a
+          // key demoted during a quiet hour is not stuck polling for ever.
+          await pollForWindow(pollSignal => this.pollFeed!(parsed, session, emit, pollSignal), signal, this.pollWindowMs)
+          polling = false
         } else {
-          polling = !(await this.watchOrPoll(key, parsed, session, emit, signal, () => emitted))
+          const before = emits
+          polling = !(await this.watchOrPoll(key, parsed, session, emit, signal, () => emits > before))
         }
         attempt = 0   // a clean return means the venue closed the stream — reconnect promptly
       } catch (err) {
