@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { BaseMonitor, MonitorMode, createLogger } from '@openwhaleorg/core'
 import type { AdapterResolver, MonitorContext } from '@openwhaleorg/core'
 import type { PerpExchangeAdapter } from '../types/perp.js'
+import { streamWithWarmup, DEFAULT_WATCH_WARMUP_MS } from './watchdog.js'
 
 /**
  * Shared machinery for venue-agnostic market-data monitors.
@@ -118,7 +119,7 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
   ): Promise<void>
 
   /** How long a websocket may stay silent before the key falls back to polling. */
-  protected get watchWarmupMs(): number { return 15_000 }
+  protected get watchWarmupMs(): number { return DEFAULT_WATCH_WARMUP_MS }
 
   protected override startSubscribe(key: string): void {
     if (this.feeds.has(key)) return
@@ -187,19 +188,13 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
     signal: AbortSignal,
     hasEmitted: () => boolean,
   ): Promise<boolean> {
-    // A child controller so the watchdog can end the stream without ending the
-    // subscription — the outer signal still aborts both.
-    const watch = new AbortController()
-    const onOuterAbort = () => watch.abort()
-    signal.addEventListener('abort', onOuterAbort, { once: true })
-    const timer = setTimeout(() => { if (!hasEmitted()) watch.abort() }, this.watchWarmupMs)
-    try {
-      await this.feed(parsed, session, emit, watch.signal)
-    } finally {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', onOuterAbort)
-    }
-    if (signal.aborted || hasEmitted()) return true
+    const live = await streamWithWarmup({
+      stream: watchSignal => this.feed(parsed, session, emit, watchSignal),
+      hasEmitted,
+      signal,
+      warmupMs: this.watchWarmupMs,
+    })
+    if (live) return true
     this.logger.info(
       { key, venue: parsed.venue, warmupMs: this.watchWarmupMs },
       'Venue websocket delivered nothing — polling this key over REST instead',
