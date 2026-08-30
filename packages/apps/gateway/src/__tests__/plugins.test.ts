@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { pathToFileURL, fileURLToPath } from 'url'
-import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged, suggestAlias, shareEnginePackages } from '../plugins.js'
+import { asLocalPath, npmSpawn, parseGithubSpec, resolveEntry, stage, stagedDirOf, pruneStaged, suggestAlias, shareEnginePackages, unmetFrameworkNeeds } from '../plugins.js'
 
 const isWin = process.platform === 'win32'
 
@@ -325,13 +325,40 @@ describe('shareEnginePackages — one copy of the framework, not two', () => {
       .toBe(fs.realpathSync(fileURLToPath(new URL('../../../../framework/core/package.json', import.meta.url))))
   })
 
-  /* A different version is a real incompatibility. Swapping silently would
-     turn a legible install failure into a puzzling runtime one. */
-  it('leaves an incompatible version alone', async () => {
+  /* Not even for a version the engine cannot be: one copy of the framework is
+     not a preference to weigh here. Whether the plugin can work against the
+     engine's version has an answer — its declared range — and refusing on it
+     belongs at install, where it can say which package and which way to move
+     (unmetFrameworkNeeds). Leaving a second copy behind instead would hand the
+     plugin a module registry the engine never reads. */
+  it('links a version the engine could never satisfy, and leaves the refusing to install', async () => {
     const dir = fetched('core', '9.9.9')
     await shareEnginePackages()
-    expect(fs.lstatSync(dir).isSymbolicLink()).toBe(false)
-    expect(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version).toBe('9.9.9')
+    expect(fs.lstatSync(dir).isSymbolicLink()).toBe(true)
+    expect(fs.realpathSync(path.join(dir, 'package.json')))
+      .toBe(fs.realpathSync(fileURLToPath(new URL('../../../../framework/core/package.json', import.meta.url))))
+  })
+
+  it('names the mismatch at install time, with the range and the engine version', () => {
+    const dir = path.join(scope, '..', 'incompatible-plugin')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+      name: 'incompatible-plugin',
+      peerDependencies: { '@openwhaleorg/core': '^9.0.0' },
+    }))
+    expect(unmetFrameworkNeeds(dir)).toEqual([
+      { package: '@openwhaleorg/core', range: '^9.0.0', engine: engineCoreVersion },
+    ])
+  })
+
+  it('says nothing about a workspace range — that is a checkout, not a claim about releases', () => {
+    const dir = path.join(scope, '..', 'workspace-plugin')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+      name: 'workspace-plugin',
+      peerDependencies: { '@openwhaleorg/core': 'workspace:^' },
+    }))
+    expect(unmetFrameworkNeeds(dir)).toEqual([])
   })
 
   /* npm picks the newest version satisfying the plugin's range, often a patch

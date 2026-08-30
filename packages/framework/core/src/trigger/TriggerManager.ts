@@ -1,12 +1,12 @@
 import cron from 'node-cron'
 import { MonitorMode, type BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { EmitHandler } from '../types/monitor.js'
-import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
+import type { ExecutionInstruction, ExecutionQueue, ExecutionResult } from '../types/executor.js'
 import type { CronCondition, MonitorCondition, MonitorSource, Trigger, TriggerFilter } from '../types/trigger.js'
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
-import type { StrategyParams } from '../types/instance.js'
+import type { InstanceOptions, StrategyParams } from '../types/instance.js'
 import type { MonitorRegistry } from '../registry/Registry.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import { PortfolioJournal } from '../strategy/PortfolioJournal.js'
@@ -22,6 +22,8 @@ export interface StrategyRunEvent {
   monitorData: Record<string, Record<string, unknown>>
   instructions: ExecutionInstruction[]
   timestamp: number
+  /** The instance is in dry run: these instructions were recorded, not queued. */
+  dryRun?: boolean
 }
 
 interface InstanceEntry {
@@ -40,6 +42,8 @@ interface InstanceEntry {
    * satisfy nothing and fire nothing.
    */
   subscriptions: MonitorSource[]
+  /** Framework switches. Settable while live, so dry run is a usable kill switch. */
+  options?: InstanceOptions
 }
 
 /**
@@ -87,6 +91,30 @@ export class TriggerManager {
     this.monitorRegistry = monitorRegistry
     this.credentialStore = credentialStore
     this.database = database
+  }
+
+  /**
+   * Where held-back instructions go. The manager decides WHETHER an instruction
+   * is queued; what a record of one looks like on disk belongs to whoever owns
+   * the execution log, so it is handed out rather than written here.
+   */
+  private dryRunSink: ((results: ExecutionResult[]) => void) | null = null
+
+  setDryRunSink(sink: ((results: ExecutionResult[]) => void) | null): void {
+    this.dryRunSink = sink
+  }
+
+  /**
+   * Set (or clear) an instance's framework switches. Separate from
+   * registerInstance so dry run can be flipped on a RUNNING instance: a switch
+   * that stops an instance trading is worth nothing if reaching it costs a
+   * restart of the thing you are trying to stop.
+   */
+  setInstanceOptions(instanceId: string, options: InstanceOptions | undefined): void {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return
+    if (options === undefined) delete entry.options
+    else entry.options = options
   }
 
   addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
@@ -494,8 +522,20 @@ export class TriggerManager {
       instanceId,
       executorId: entry.executorLabelToKey.get(i.executorId) ?? i.executorId,
     }))
-    await queue.pushBatch(tagged)
-    const event: StrategyRunEvent = { instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now }
+    /* Dry run holds the instructions HERE, at the one point they would enter
+       the queue, rather than asking each executor to behave. An executor that
+       forgets to check, or a strategy whose own dryRun param only covers the
+       branch its author remembered, still places the order; nothing gets past
+       a gate that is upstream of every executor. */
+    const dryRun = entry.options?.dryRun === true
+    if (dryRun) {
+      const at = new Date()
+      this.dryRunSink?.(tagged.map(instruction => ({ instruction, status: 'dry-run' as const, executedAt: at })))
+      log.info({ instanceId, triggerId: trigger.id, held: tagged.length }, 'Dry run — instructions recorded, none queued')
+    } else {
+      await queue.pushBatch(tagged)
+    }
+    const event: StrategyRunEvent = { instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now, ...(dryRun ? { dryRun: true } : {}) }
     for (const handler of this.strategyRunHandlers) {
       try {
         handler(event)

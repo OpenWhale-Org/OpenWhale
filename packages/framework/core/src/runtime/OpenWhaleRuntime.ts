@@ -45,7 +45,9 @@ import { lowerAccountEntry, lowerMonitorEntry } from '../plugin/definePlugin.js'
 import { CompiledLoader } from '../compiled/CompiledLoader.js'
 import { llmCredentialTypes } from '../credentials/llmCredentialTypes.js'
 import { BaseStrategy as BaseStrategyClass } from '../strategy/BaseStrategy.js'
-import { getDataDir } from '../utils/paths.js'
+import fs from 'fs'
+import path from 'path'
+import { getDataDir, getExecutionPath } from '../utils/paths.js'
 import { generateId } from '../utils/id.js'
 import { createLogger } from '../utils/logger.js'
 import type { MonitorDeclaration } from '../types/strategy.js'
@@ -209,6 +211,7 @@ export class OpenWhaleRuntime implements IRuntime {
     this.executorRegistry = options?.executorRegistry ?? createExecutorRegistry()
     this.strategyRegistry = options?.strategyRegistry ?? createStrategyRegistry()
     this.triggerManager = new TriggerManager(this.monitorRegistry, options?.credentialStore, options?.database)
+    this.triggerManager.setDryRunSink((results) => { void this.recordDryRun(results) })
     this.database = options?.database
     this.instanceStore = options?.instanceStore
       ?? (this.database ? new DBStrategyInstanceStore(this.database) : new StrategyInstanceStore(this.dataDir))
@@ -258,7 +261,10 @@ export class OpenWhaleRuntime implements IRuntime {
     // runtimes; executors registered earlier still pick it up. Optional call —
     // executors compiled against an older base class must keep loading.
     instance.setClaimSink?.((claim) => { void this.pnlService?.recordClaim(claim) })
-    instance.setResultSink?.((result) => { void this.notifyStrategyOfResult(result) })
+    instance.setResultSink?.((result) => {
+      this.emitExecution(result)
+      void this.notifyStrategyOfResult(result)
+    })
     // Hot install/replace while running: boot-time startInner won't run again,
     // so the NEW executor object must take over the queue consumer here — and
     // any consumer loop still owned by a replaced object must stop first
@@ -277,6 +283,64 @@ export class OpenWhaleRuntime implements IRuntime {
    * the queue's path, and anything it throws is a warning here — a strategy's
    * bookkeeping must never be able to lose an execution record.
    */
+  /**
+   * Subscribe to every execution this engine records — the real ones an
+   * executor returned, and the dry-run ones it held back.
+   *
+   * Public because alerting is an OPERATOR concern, not a framework one: what
+   * counts as worth an email, and how it is sent, belongs to whoever runs the
+   * engine. Keeping the delivery out here also keeps a mail library out of a
+   * package every plugin installs.
+   */
+  onExecution(listener: (result: ExecutionResult) => void): () => void {
+    this.executionListeners.add(listener)
+    return () => { this.executionListeners.delete(listener) }
+  }
+
+  private readonly executionListeners = new Set<(result: ExecutionResult) => void>()
+
+  /** One listener's failure is its own; the others, and the record, still stand. */
+  private emitExecution(result: ExecutionResult): void {
+    for (const listener of this.executionListeners) {
+      try {
+        listener(result)
+      } catch (err) {
+        log.warn({ err, executorId: result.instruction.executorId }, 'Execution listener threw — ignored')
+      }
+    }
+  }
+
+  /**
+   * Write the instructions a dry-run instance held back, in the same log and
+   * the same shape an executor writes. They belong beside the real executions
+   * rather than in a channel of their own: the question "what did this
+   * instance do today" has one answer, and a run that decided to buy and was
+   * held back is part of it.
+   */
+  private async recordDryRun(results: ExecutionResult[]): Promise<void> {
+    const byExecutor = new Map<string, ExecutionResult[]>()
+    for (const r of results) {
+      const key = r.instruction.executorId
+      const list = byExecutor.get(key)
+      if (list) list.push(r)
+      else byExecutor.set(key, [r])
+    }
+    for (const [executorId, batch] of byExecutor) {
+      const filePath = getExecutionPath(this.dataDir, executorId)
+      try {
+        await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+        await fs.promises.appendFile(filePath, batch.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8')
+      } catch (err) {
+        log.warn({ err, executorId }, 'Could not record a dry-run execution')
+      }
+    }
+    // Listeners see it too — an operator watching for "what would this have
+    // done" is exactly who turns dry run on. The strategy's own
+    // onExecutionResult hook is NOT called: nothing happened, and telling a
+    // strategy its leg filled when no order was placed is a lie it will act on.
+    for (const r of results) this.emitExecution(r)
+  }
+
   private async notifyStrategyOfResult(result: ExecutionResult): Promise<void> {
     const instanceId = result.instruction.instanceId
     if (!instanceId) return
@@ -1589,7 +1653,7 @@ export class OpenWhaleRuntime implements IRuntime {
    */
   async updateInstance(
     instanceId: string,
-    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'credentials' | 'accounts' | 'llm' | 'params'>>,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'credentials' | 'accounts' | 'llm' | 'params' | 'options'>>,
     { restart = false }: { restart?: boolean } = {},
   ): Promise<StrategyInstance> {
     const wasActive = this.instances.has(instanceId)
@@ -1610,6 +1674,7 @@ export class OpenWhaleRuntime implements IRuntime {
     if (patch.credentials !== undefined) persisted.credentials = patch.credentials
     if (patch.accounts !== undefined) persisted.accounts = patch.accounts
     if (patch.llm !== undefined) persisted.llm = patch.llm
+    if (patch.options !== undefined) persisted.options = patch.options
     if (patch.params !== undefined) persisted.params = patch.params
     persisted.updatedAt = new Date().toISOString()
 
@@ -1655,9 +1720,17 @@ export class OpenWhaleRuntime implements IRuntime {
    * allowed while the instance is active; an active in-memory copy is patched
    * in place so views agree without a restart.
    */
+  /**
+   * The edits allowed while an instance is RUNNING.
+   *
+   * Mostly cosmetic — but `options` belongs here rather than with the params,
+   * and deliberately: dry run is a stop switch, and a stop switch you can only
+   * reach by restarting the thing you are trying to stop is not one. The live
+   * entry is updated in the same call, so the next trigger already obeys it.
+   */
   async updateInstanceMeta(
     instanceId: string,
-    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder'>>,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder' | 'options'>>,
   ): Promise<StrategyInstance> {
     const persisted = await this.instanceStore.load(instanceId)
     if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
@@ -1676,12 +1749,14 @@ export class OpenWhaleRuntime implements IRuntime {
         else delete target.folder
       }
       if (patch.sortOrder !== undefined) target.sortOrder = patch.sortOrder
+      if (patch.options !== undefined) target.options = patch.options
     }
     apply(persisted)
     persisted.updatedAt = new Date().toISOString()
     await this.instanceStore.save(persisted)
     const live = this.instances.get(instanceId)
     if (live) apply(live)
+    if (patch.options !== undefined) this.triggerManager.setInstanceOptions(instanceId, patch.options)
     return persisted
   }
 
@@ -1912,6 +1987,7 @@ export class OpenWhaleRuntime implements IRuntime {
     this.triggerManager.registerInstance(
       instance.id, strategy, triggers, parsedParams, readers, credentialNames, monitorLabelToKey, executorLabelToKey,
     )
+    this.triggerManager.setInstanceOptions(instance.id, instance.options)
 
     // Materialize each declared executor's credential slots (sessions / raw)
     await this.materializeExecutorSlots(instance, strategy, executorLabelToKey)

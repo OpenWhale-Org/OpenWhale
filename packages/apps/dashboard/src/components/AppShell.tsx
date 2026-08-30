@@ -27,6 +27,7 @@ const routeLabels: Record<string, string> = {
   '/compiler': 'Compiler',
   '/scripts': 'Scripts',
   '/assistant': 'Assistant',
+  '/alerts': 'Alerts',
   '/users': 'Users',
 }
 

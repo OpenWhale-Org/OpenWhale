@@ -9,6 +9,7 @@ import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { useDirtyFlag } from '@/components/unsaved'
 import { InstancePnlPanel } from './InstancePnlPanel'
+import { InstanceMiscPanel } from './InstanceMiscPanel'
 
 /**
  * Full-page board for ONE instance — the same tabs as the list-page card, but
@@ -134,6 +135,8 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
           <InstanceAccountsPanel instance={instance} onSaved={pull} />
 
           <InstanceParamsPanel instance={instance} />
+
+          <InstanceMiscPanel instance={instance} onSaved={pull} />
 
           <InstanceStatePanel instance={instance} />
 
