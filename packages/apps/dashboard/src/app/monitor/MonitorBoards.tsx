@@ -310,15 +310,25 @@ function PlotTable({ series, columns, unit }: { series: ChartSeries[]; columns: 
   )
 }
 
-export function MonitorBoards({ monitorId, keys, emitCount }: {
+export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, bare }: {
   monitorId: string
   /** Keys with data or live subscriptions — the board's key picker. */
   keys: string[]
   /** Bumps when this monitor emits (SSE) — throttled auto-refresh hook. */
   emitCount: number
+  /**
+   * Render only these panel ids. For the Overview, where one widget is one
+   * chart: a whole board dropped into a summary page fills the screen and
+   * crowds out everything it was meant to sit beside.
+   */
+  only?: string[]
+  /** Start on this key rather than the first with data. */
+  initialKey?: string
+  /** Drop the frame and the toolbar — the host card already has both. */
+  bare?: boolean
 }) {
   const [plots, setPlots] = useState<PlotInfo[] | null>(null)
-  const [selectedKey, setSelectedKey] = useState<string>(keys[0] ?? '')
+  const [selectedKey, setSelectedKey] = useState<string>(initialKey ?? keys[0] ?? '')
   const [series, setSeries] = useState<Record<string, ChartSeries[]>>({})
   /** Per-panel shaded x-ranges, resolved server-side over the same window as the series. */
   const [regions, setRegions] = useState<Record<string, ChartRegion[]>>({})
@@ -349,7 +359,7 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
   }, [monitorId])
 
   useEffect(() => {
-    if (!keys.includes(selectedKey)) setSelectedKey(keys[0] ?? '')
+    if (!keys.includes(selectedKey)) setSelectedKey((initialKey && keys.includes(initialKey) ? initialKey : keys[0]) ?? '')
   }, [keys, selectedKey])
 
   const load = useCallback(async () => {
@@ -392,11 +402,28 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emitCount])
 
+  /* `only` narrows to the named panels. Applied after the fetch rather than
+     before it, so the board still knows the full panel list — a widget naming
+     a panel that has since been renamed should say so, not silently show the
+     rest of the board. */
+  const shown = only ? (plots ?? []).filter(p => only.includes(p.id)) : plots
   if (!plots || plots.length === 0) return null
+  if (only && shown!.length === 0) {
+    return (
+      <p className="text-xs py-6 text-center" style={{ color: 'var(--muted)' }}>
+        {`This monitor no longer declares ${only.length === 1 ? 'a panel' : 'panels'} called ${only.join(', ')}.`}
+      </p>
+    )
+  }
+
+  const frame = bare
+    ? 'flex flex-col gap-3'
+    : 'rounded-lg p-4 flex flex-col gap-3'
+  const frameStyle = bare ? undefined : { background: 'var(--surface)', border: '1px solid var(--border)' }
 
   return (
-    <div className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <div className="flex items-center gap-3">
+    <div className={frame} style={frameStyle}>
+      <div className={bare ? 'hidden' : 'flex items-center gap-3'}>
         <h3 className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>BOARDS</h3>
         {keys.length > 0 ? (
           <select
@@ -425,8 +452,11 @@ export function MonitorBoards({ monitorId, keys, emitCount }: {
         <button onClick={() => void load()} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>⟳</button>
       </div>
 
-      <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))' }}>
-        {plots.map((p) => {
+      <div
+        className="grid gap-5"
+        style={{ gridTemplateColumns: bare ? '1fr' : 'repeat(auto-fit, minmax(480px, 1fr))' }}
+      >
+        {shown!.map((p) => {
           const isExpanded = expanded.has(p.id)
           return (
             <div

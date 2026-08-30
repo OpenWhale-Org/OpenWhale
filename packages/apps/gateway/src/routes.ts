@@ -12,6 +12,7 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { z } from 'zod'
+import { loadOverviewLayout, saveOverviewLayout, resetOverviewLayout } from './overviewLayout.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
@@ -805,6 +806,29 @@ export function buildRouter(): Router {
   }))
 
   // ── monitors ────────────────────────────────────────────────────────────────
+
+  /* ── Overview layout ─────────────────────────────────────────────────────
+     Which widgets the Overview shows, and in what order. One arrangement for
+     the engine: a layout is a claim about which of THIS engine's numbers
+     matter, and that claim does not change with the browser asking. */
+  router.get('/api/overview/layout', h(async (_req, res) => {
+    res.json({ layout: await loadOverviewLayout() })
+  }))
+
+  router.put('/api/overview/layout', h(async (req, res) => {
+    const body = (req.body ?? {}) as { layout?: unknown }
+    if (body.layout === undefined) { res.status(400).send('Expected { layout }'); return }
+    await saveOverviewLayout(body.layout)
+    res.json({ ok: true })
+  }))
+
+  /* Back to the built-in arrangement. A delete rather than a write of the
+     default, so an engine that later ships a better default gives it to
+     anyone who reset rather than freezing today's. */
+  router.delete('/api/overview/layout', h(async (_req, res) => {
+    await resetOverviewLayout()
+    res.json({ ok: true })
+  }))
 
   router.get('/api/monitor', h(async (_req, res) => {
     const runtime = await ensureStarted()
