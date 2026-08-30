@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { CredentialWithPublicData } from '@/lib/data'
 import { Select } from '@/components/Select'
+import { Switch } from '@/components/Switch'
 
 /**
  * Where this engine sends its alerts.
@@ -107,20 +108,14 @@ export function AlertsClient({ initialSettings, credentials }: {
         Misc on the instance — and every strategy is included until you say otherwise.
       </p>
 
-      <label className="flex items-start gap-3 mb-6 cursor-pointer">
-        <input
-          type="checkbox"
+      <div className="mb-6">
+        <Switch
           checked={s.enabled}
-          onChange={(e) => patch({ enabled: e.target.checked })}
-          className="mt-0.5"
+          onChange={(enabled) => patch({ enabled })}
+          label={<span className="font-medium">Send alerts</span>}
+          hint="The master switch. Off means nothing is sent, whatever the strategies say."
         />
-        <span>
-          <span className="text-sm font-medium">Send alerts</span>
-          <span className="block text-xs" style={{ color: 'var(--muted)' }}>
-            The master switch. Off means nothing is sent, whatever the strategies say.
-          </span>
-        </span>
-      </label>
+      </div>
 
       {/* ── Email ─────────────────────────────────────────────────────────── */}
       <section

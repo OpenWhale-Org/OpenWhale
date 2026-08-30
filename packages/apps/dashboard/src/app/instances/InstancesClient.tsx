@@ -31,6 +31,7 @@ import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustrati
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
+import { Switch } from '@/components/Switch'
 import { Modal, ModalMaximizeButton } from '@/components/Modal'
 import { StatsBar } from './StatsBar'
 import { StrategyBrowser } from './StrategyPicker'
@@ -503,17 +504,9 @@ export function ParamFieldsForm({
             </span>
             {field.hint && <span className="text-xs" style={{ color: 'var(--muted)' }}>— {field.hint}</span>}
           </div>
-          <button
-            type="button"
-            onClick={() => set(field.name, checked ? 'false' : 'true')}
-            className="relative w-10 h-5 rounded-full transition-colors self-start"
-            style={{ background: checked ? 'var(--accent)' : 'var(--border)' }}
-          >
-            <span
-              className="absolute top-0.5 left-0 w-4 h-4 rounded-full bg-white transition-transform"
-              style={{ transform: checked ? 'translateX(1.25rem)' : 'translateX(0.125rem)' }}
-            />
-          </button>
+          <div className="self-start">
+            <Switch checked={checked} onChange={(next) => set(field.name, next ? 'true' : 'false')} />
+          </div>
           {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
         </div>
       )

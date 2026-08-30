@@ -100,6 +100,16 @@ body {
   .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
   .btn-secondary { background: transparent; color: var(--foreground); border-color: var(--border); }
   .btn-secondary:hover:not(:disabled) { background: var(--surface-raised); }
+  /* A checkbox is right for choosing several of a set; for a setting that is
+     on or off, use <Switch/>. Unstyled, it renders as the OS's own control,
+     which beside these panels reads as an unfinished form. */
+  input[type="checkbox"] {
+    width: 0.875rem; height: 0.875rem; border-radius: 0.25rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  input[type="checkbox"]:disabled { cursor: default; opacity: .5; }
+
   /* The weak button: for a control that must read as clickable without competing with the primary action — disclosure toggles, helpers, 'suggest'. */
   .btn-soft { background: var(--surface-raised); color: var(--foreground-soft); border-color: var(--border); }
   .btn-soft:hover:not(:disabled) { color: var(--foreground); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised)); }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type { StrategyInstanceView, StrategyDefinition, InstanceOptions } from '@openwhaleorg/core'
+import { Switch } from '@/components/Switch'
 
 /**
  * The switches that belong to the ENGINE rather than to the strategy.
@@ -106,33 +107,20 @@ export function InstanceMiscPanel({ instance, onSaved }: {
 
       {open && (
         <div className="px-4 pb-4 flex flex-col gap-4">
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" checked={alertOnFailure} onChange={(e) => patch({ alertOnFailure: e.target.checked })} className="mt-0.5" />
-            <span>
-              <span className="text-sm">Alert when an execution fails</span>
-              <span className="block text-xs" style={{ color: 'var(--muted)' }}>
-                On by default. Repeats of the same error are sent once every 15 minutes, and one instance may send
-                at most 20 an hour — the rest are counted and reported with the next one.
-              </span>
-            </span>
-          </label>
+          <Switch
+            checked={alertOnFailure}
+            onChange={(alertOnFailure) => patch({ alertOnFailure })}
+            label="Alert when an execution fails"
+            hint="On by default. Repeats of the same error are sent once every 15 minutes, and one instance may send at most 20 an hour — the rest are counted and reported with the next one."
+          />
 
           <div>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={chosen.size > 0}
-                onChange={(e) => patch({ alertOnActions: e.target.checked ? (actions[0] ? [actions[0]] : []) : [] })}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="text-sm">Alert when these actions execute</span>
-                <span className="block text-xs" style={{ color: 'var(--muted)' }}>
-                  Off by default: the successful ones too, so a strategy that acts every minute would mail every minute.
-                  Choose the few worth hearing about.
-                </span>
-              </span>
-            </label>
+            <Switch
+              checked={chosen.size > 0}
+              onChange={(on) => patch({ alertOnActions: on ? (actions[0] ? [actions[0]] : []) : [] })}
+              label="Alert when these actions execute"
+              hint="Off by default: the successful ones too, so a strategy that acts every minute would mail every minute. Choose the few worth hearing about."
+            />
             {chosen.size > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2 ml-7">
                 {actions.length === 0 ? (
@@ -155,18 +143,17 @@ export function InstanceMiscPanel({ instance, onSaved }: {
             )}
           </div>
 
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" checked={dryRun} onChange={(e) => patch({ dryRun: e.target.checked })} className="mt-0.5" />
-            <span>
-              <span className="text-sm">Dry run</span>
-              <span className="block text-xs" style={{ color: 'var(--muted)' }}>
+          <Switch
+            checked={dryRun}
+            onChange={(dryRun) => patch({ dryRun })}
+            label="Dry run"
+            hint={<>
                 The engine records what this instance decides and queues none of it — no executor runs, nothing reaches a
                 venue. Held instructions appear under Executions marked <span className="mono">dry-run</span>. This is the
                 framework&apos;s own switch: it holds every instruction, including any a strategy&apos;s own dry-run
                 parameter does not cover.
-              </span>
-            </span>
-          </label>
+            </>}
+          />
         </div>
       )}
     </div>

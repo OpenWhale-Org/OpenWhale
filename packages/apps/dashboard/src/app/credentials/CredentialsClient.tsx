@@ -6,6 +6,7 @@ import { Modal } from '@/components/Modal'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
 import { TypeMark } from '@/components/TypeMark'
 import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
+import { Switch } from '@/components/Switch'
 
 interface Props {
   initialCredentials: CredentialInfo[]
@@ -185,16 +186,13 @@ function SchemaCredentialForm({
 
       {fields.map((field) =>
         field.type === 'boolean' ? (
-          <label key={field.name} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--foreground)' }}>
-            <input
-              type="checkbox"
-              checked={(values[field.name] ?? String(field.defaultValue ?? false)) === 'true'}
-              onChange={(e) => set(field.name, String(e.target.checked))}
-              className="accent-blue-500"
-            />
-            {field.displayName}
-            {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>— {field.description}</span>}
-          </label>
+          <Switch
+            key={field.name}
+            checked={(values[field.name] ?? String(field.defaultValue ?? false)) === 'true'}
+            onChange={(next) => set(field.name, String(next))}
+            label={field.displayName}
+            {...(field.description ? { hint: field.description } : {})}
+          />
         ) : (
           <InputField
             key={field.name}
@@ -997,15 +995,12 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
       </span>
       {fields.map((field) =>
         field.type === 'boolean' ? (
-          <label key={field.name} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--foreground)' }}>
-            <input
-              type="checkbox"
-              checked={(values[field.name] ?? String(field.defaultValue ?? false)) === 'true'}
-              onChange={(e) => setValues(v => ({ ...v, [field.name]: String(e.target.checked) }))}
-              className="accent-blue-500"
-            />
-            {field.displayName}
-          </label>
+          <Switch
+            key={field.name}
+            checked={(values[field.name] ?? String(field.defaultValue ?? false)) === 'true'}
+            onChange={(next) => setValues(v => ({ ...v, [field.name]: String(next) }))}
+            label={field.displayName}
+          />
         ) : (
           <InputField
             key={field.name}
