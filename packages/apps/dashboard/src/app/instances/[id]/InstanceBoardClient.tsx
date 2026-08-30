@@ -7,6 +7,7 @@ import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta }
 import { buildParamsFromFields, fieldValuesFromParams, sameValues, type ParamValues } from '@/components/paramsIo'
 import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
+import { useDirtyFlag } from '@/components/unsaved'
 import { InstancePnlPanel } from './InstancePnlPanel'
 
 /**
@@ -162,6 +163,7 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
   const [credentialTypes, setCredentialTypes] = useState<Array<{ type: string; kinds: string[] }>>([])
   const [bindings, setBindings] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
+  useDirtyFlag(dirty, 'Account bindings')
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
 
@@ -443,6 +445,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
      claiming there is something to save. */
   const [saved, setSaved] = useState<ParamValues>({})
   const dirty = !sameValues(values, saved)
+  useDirtyFlag(dirty, 'Parameters')
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   /** Venue per bound slot label; the first entry is the default for fields naming no `accountSlot`. */

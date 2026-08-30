@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { Nav } from './Nav'
 import { UserMenu } from './UserMenu'
 import { Tour } from './Tour'
+import { UnsavedGuard } from './unsaved'
 
 /**
  * The application shell.
@@ -53,8 +54,13 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
           </div>
           <UserMenu {...(username ? { username } : {})} />
         </header>
-        <main className="aurora-main">{children}</main>
+        <main className="aurora-main">
+          {/* The scroll container's own padding cannot be used: it would sit above
+              every sticky header inside a page. See .aurora-main-inner. */}
+          <div className="aurora-main-inner">{children}</div>
+        </main>
         <Tour />
+        <UnsavedGuard />
       </div>
     </div>
   )

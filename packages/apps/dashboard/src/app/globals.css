@@ -245,8 +245,13 @@ body {
 .aurora-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px rgba(50, 214, 160, .8); }
 /* Breathing room under the topbar. The overview hero is the one thing that
    should still sit flush against it, so it pulls this back off. */
-.aurora-main { --main-pad-top: 22px; height: calc(100vh - 54px); overflow: auto; padding: var(--main-pad-top) 28px 28px; scrollbar-width: none; }
+/* The top gap belongs to the CONTENT, not to the scrollport. Padding on a
+   scroll container sits ABOVE anything position:sticky inside it, so a pinned
+   toolbar leaves a strip of that padding uncovered and the page scrolls
+   through it in plain sight. Carried by the inner wrapper, it scrolls away. */
+.aurora-main { --main-pad-top: 22px; height: calc(100vh - 54px); overflow: auto; padding: 0 28px 28px; scrollbar-width: none; }
 .aurora-main::-webkit-scrollbar { display: none; }
+.aurora-main-inner { padding-top: var(--main-pad-top); }
 .aurora-user-menu { display: flex; align-items: center; gap: 9px; }
 .aurora-icon-button { display: grid; min-width: 34px; height: 30px; place-items: center; border: 1px solid var(--border); border-radius: 9px; color: var(--foreground-soft); background: rgba(255,255,255,.025); font-size: 12px; }
 .aurora-avatar { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid rgba(151, 127, 255, .65); border-radius: 50%; background: #192044; color: #f3efff; font-size: 12px; }
@@ -370,7 +375,7 @@ body {
 .aurora-assistant-bar { display:grid;grid-template-columns:34px 1fr auto 34px;align-items:center;gap:10px;height:54px;margin-top:10px;border:1px solid rgba(139,113,244,.28);border-radius:12px;padding:0 9px;background:linear-gradient(90deg,rgba(20,25,43,.95),rgba(28,25,51,.95));color:var(--muted);font-size:12px}.aurora-assistant-orb{width:29px;height:29px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#faa4ee,#7955ff 40%,#182c80 74%,#080b18);box-shadow:0 0 18px rgba(126,86,255,.36)}.aurora-assistant-bar kbd{border:1px solid var(--border);border-radius:5px;padding:3px 6px;font-size:10px}.aurora-assistant-bar b{display:grid;width:30px;height:30px;place-items:center;border-radius:8px;background:#2b3042;color:#a9a6b3}
 
 /* Existing pages inherit Aurora surfaces without duplicating their business UI. */
-.aurora-main > div > div:not(.aurora-overview),.aurora-main > div { color: var(--foreground); }
+.aurora-main-inner > div > div:not(.aurora-overview),.aurora-main-inner > div { color: var(--foreground); }
 .aurora-main .card { border-radius: 12px; background: linear-gradient(145deg, rgba(19,24,42,.98), rgba(13,17,30,.98)); }
 .aurora-main table { font-variant-numeric: tabular-nums; }
 .aurora-main button,.aurora-main a { transition-duration: 160ms; }

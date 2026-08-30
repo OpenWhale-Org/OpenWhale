@@ -37,6 +37,7 @@ import { StrategyBrowser } from './StrategyPicker'
 import { buildParamsFromFields, defaultFieldValues, fieldValuesFromParams, type ParamValues } from '@/components/paramsIo'
 import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
+import { useDirtyFlag } from '@/components/unsaved'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -1795,6 +1796,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     setSlotBindings({})
     const strat = strategies.find((s) => s.id === id)
     setParamsView('form')
+    setPristine(null)   // recaptured after the reseed lands
     if (strat?.paramsFields) {
       resetFieldValues(defaultFieldValues(strat.paramsFields))
     } else {
@@ -1901,6 +1903,22 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
 
   const paramsJsonView = useParamsJson(strategy?.paramsFields ?? [], fieldValues, setFieldValues)
 
+  /**
+   * Unsaved work in the dialog, by comparison rather than a flag: every input
+   * would otherwise have to remember to raise one, and the one that forgot
+   * would be the one that lost a form. Pristine is captured once the async
+   * load has settled, and again whenever the strategy changes and the fields
+   * are reseeded from its defaults.
+   */
+  const formSignature = JSON.stringify([name, description, slotBindings, llmBindings, fieldValues, baseParams, tunableParams])
+  const [pristine, setPristine] = useState<string | null>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  useEffect(() => {
+    if (pristine === null && strategies.length > 0) setPristine(formSignature)
+  }, [pristine, strategies.length, formSignature])
+  const formDirty = pristine !== null && formSignature !== pristine && !submitting
+  useDirtyFlag(formDirty, initial ? 'Instance edits' : 'New instance')
+
   useUndoShortcuts(
     !pickerOpen && paramsView === 'form' && !!strategy?.paramsFields,
     paramHistory.undo,
@@ -1936,8 +1954,11 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   // Backing out of the browser returns to the form once a strategy is chosen;
   // with nothing chosen there is no form to return to, so it closes.
   const dismiss = () => {
-    if (pickerOpen && selectedStrategy) setPickerOpen(false)
-    else onCancel()
+    // Esc reaches both dialogs; the confirmation on top answers for itself.
+    if (confirmDiscard) return
+    if (pickerOpen && selectedStrategy) { setPickerOpen(false); return }
+    if (formDirty) { setConfirmDiscard(true); return }
+    onCancel()
   }
 
   // One Modal across both steps: remounting the shell would restart the
@@ -1960,6 +1981,22 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
         />
       ) : (
       <form data-tour="instance-form" onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+        {confirmDiscard && (
+          <Modal onClose={() => setConfirmDiscard(false)} maxWidth="26rem">
+            <div className="p-4 flex flex-col gap-3">
+              <div>
+                <h3 className="text-sm font-medium">Discard this {initial ? 'edit' : 'instance'}?</h3>
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  Closing loses everything filled in here. Nothing has been saved yet.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmDiscard(false)} autoFocus>Keep editing</button>
+                <button type="button" className="btn btn-danger-solid btn-sm" onClick={() => { setConfirmDiscard(false); onCancel() }}>Discard</button>
+              </div>
+            </div>
+          </Modal>
+        )}
         {/* Which strategy this configures stays pinned above the scroll — in a
             forty-parameter form it is the one fact you must not lose track of. */}
         <div className="flex items-start gap-3 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1979,7 +2016,10 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           <ModalMaximizeButton />
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-5 py-4 flex flex-col gap-4">
+        {/* pb only, with the top gap on the first child: padding on a scroll
+            container sits above its sticky children, and the parameter toolbar
+            would leave that strip for the form to scroll through. */}
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-5 pb-4 flex flex-col gap-4 [&>*:first-child]:mt-4">
           {!initial && strategies.length === 0 && (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>No strategies registered.</p>
           )}
@@ -2111,7 +2151,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
               {/* Sticky inside the dialog's scroll body: import, undo and the
                   view switch stay put however far down the form you are. */}
               <div
-                className="sticky top-0 z-10 -mx-5 -mt-1 px-5 py-2 flex items-center gap-2"
+                className="sticky top-0 z-10 -mx-5 px-5 py-2 flex items-center gap-2"
                 style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
               >
                 <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Parameters</span>
