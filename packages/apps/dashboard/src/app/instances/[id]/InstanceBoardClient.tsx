@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta } from '../InstancesClient'
@@ -22,6 +22,20 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
   const [acting, setActing] = useState(false)
   const [actError, setActError] = useState('')
   const [confirmStop, setConfirmStop] = useState(false)
+  /* The pinned header's height, published to the page so a second sticky bar
+     (the parameter toolbar) pins below it rather than behind it. Measured
+     because the title wraps: a hardcoded offset is wrong on the first long
+     instance name. */
+  const headRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = headRef.current
+    if (!el) return
+    const publish = () => el.parentElement?.style.setProperty('--ow-sticky-top', `${el.offsetHeight}px`)
+    publish()
+    const ro = new ResizeObserver(publish)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [instance?.id, instance?.active])
 
   const pull = async () => {
     const r = await fetch('/api/instances')
@@ -70,6 +84,10 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
         <div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
       ) : (
         <>
+          {/* Pinned: on a board this long, which instance you are looking at
+              and whether it is running are the two facts you must not lose
+              track of while scrolling. */}
+          <div ref={headRef} className="aurora-page-head mb-4">
           <div className="flex items-start justify-between gap-4 mb-1">
             <h1 className="text-2xl font-semibold flex items-center gap-2">
               <IconMenu
@@ -124,10 +142,11 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
           {instance.description && (
             <div className="text-sm mb-1" style={{ color: 'var(--muted)' }}>{instance.description}</div>
           )}
-          <div className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+          <div className="text-xs" style={{ color: 'var(--muted)' }}>
             strategy: <span style={{ color: 'var(--accent)' }}>{instance.strategyId}</span>
             {' · '}id: {instance.id}
             {bindings.length > 0 && <>{' · '}accounts: {bindings.join(', ')}</>}
+          </div>
           </div>
 
           <InstancePnlPanel instanceId={instance.id} />
@@ -530,8 +549,13 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
           down a long parameter form the user has scrolled. A div, not a button:
           the actions must not nest inside the collapse toggle. */}
       <div
-        className="sticky top-0 z-20 w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
-        style={{ background: 'var(--surface)', borderBottom: open ? '1px solid var(--border)' : 'none' }}
+        className="sticky z-20 w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
+        style={{
+          // Below the page's own pinned header, not behind it.
+          top: 'var(--ow-sticky-top, 0px)',
+          background: 'var(--surface)',
+          borderBottom: open ? '1px solid var(--border)' : 'none',
+        }}
       >
         <button className="flex items-center gap-2 text-left py-0.5 min-w-0" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>

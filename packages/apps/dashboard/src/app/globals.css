@@ -262,6 +262,22 @@ body {
 .aurora-main { --main-pad-top: 22px; height: calc(100vh - 54px); overflow: auto; padding: 0 28px 28px; scrollbar-width: none; }
 .aurora-main::-webkit-scrollbar { display: none; }
 .aurora-main-inner { padding-top: var(--main-pad-top); }
+
+/* A page's own header, pinned. Frosted like the topbar rather than flat: the
+   shell paints a gradient behind it, and a solid block would show its seam.
+   `--ow-sticky-top` is what pinned things INSIDE the page stack beneath — the
+   page sets it to this header's measured height so a second sticky bar (the
+   parameter toolbar) lands under it instead of behind it. */
+.aurora-page-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin: calc(-1 * var(--main-pad-top)) -28px 0;
+  padding: var(--main-pad-top) 28px 10px;
+  background: rgba(9, 11, 20, .82);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border);
+}
 .aurora-user-menu { display: flex; align-items: center; gap: 9px; }
 .aurora-icon-button { display: grid; min-width: 34px; height: 30px; place-items: center; border: 1px solid var(--border); border-radius: 9px; color: var(--foreground-soft); background: rgba(255,255,255,.025); font-size: 12px; }
 .aurora-avatar { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid rgba(151, 127, 255, .65); border-radius: 50%; background: #192044; color: #f3efff; font-size: 12px; }
@@ -398,7 +414,7 @@ body {
 
 @media (max-width: 620px) {
   .aurora-login-brand { min-height: 36vh; }.aurora-login-brand-content { min-height:36vh }.aurora-logo-lg .aurora-logo-type{font-size:27px}.aurora-login-copy p,.aurora-login-kicker{display:none}.aurora-login-copy h1{font-size:34px}.aurora-login-panel{min-height:64vh;padding:18px}.aurora-login-form{padding:24px}
-  .aurora-sidebar { display:none }.aurora-topbar { padding-inline:16px }.aurora-main { padding-inline:12px }.aurora-overview-hero { margin-inline:-12px;padding-inline:18px }.aurora-overview-hero p{max-width:230px}.aurora-new-strategy{font-size:0;width:40px;padding:0;justify-content:center}.aurora-new-strategy span{font-size:17px}.aurora-kpi-grid{grid-template-columns:1fr}.aurora-overview-grid{display:block}.aurora-dashboard-card{margin-top:10px}
+  .aurora-sidebar { display:none }.aurora-topbar { padding-inline:16px }.aurora-main { padding-inline:12px }.aurora-overview-hero { margin-inline:-12px;padding-inline:18px }.aurora-page-head { margin-inline:-12px;padding-inline:12px }.aurora-overview-hero p{max-width:230px}.aurora-new-strategy{font-size:0;width:40px;padding:0;justify-content:center}.aurora-new-strategy span{font-size:17px}.aurora-kpi-grid{grid-template-columns:1fr}.aurora-overview-grid{display:block}.aurora-dashboard-card{margin-top:10px}
 }
 
 @media (prefers-reduced-motion: reduce) {
