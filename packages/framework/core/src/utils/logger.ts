@@ -1,5 +1,6 @@
 import pino from 'pino'
 import { createRequire } from 'module'
+import { AsyncLocalStorage } from 'async_hooks'
 
 export type LogLevel = pino.Level
 
@@ -41,6 +42,31 @@ export interface LogRecord {
   msg: string
   /** Structured fields beyond the standard ones. */
   extra: Record<string, unknown>
+  /**
+   * Which piece of work was running when this line was written — see
+   * {@link runInLogScope}. Absent for anything logged outside one.
+   */
+  scope?: string
+}
+
+/**
+ * Whose work is this line?
+ *
+ * Timestamps cannot answer that: a trading engine runs several strategies and
+ * a dozen monitor feeds at once, so "logged between the start and end of run X"
+ * catches every other component's lines too. A strategy run trace built that
+ * way showed an Aster pair reading Binance order books for symbols it has
+ * never heard of — over-inclusion that reads as a bug in the instance.
+ *
+ * AsyncLocalStorage answers it properly: a scope entered here follows the
+ * async work started inside it, and nothing else. Whoever wants their logs
+ * attributable wraps their work; everyone else logs unscoped as before.
+ */
+const logScope = new AsyncLocalStorage<string>()
+
+/** Run `fn` with every log line it causes stamped with `scope`. */
+export function runInLogScope<T>(scope: string, fn: () => T): T {
+  return logScope.run(scope, fn)
 }
 
 const LOG_BUFFER_LIMIT = 2000
@@ -60,6 +86,8 @@ const busStream = {
         msg: typeof parsed['msg'] === 'string' ? parsed['msg'] : '',
         extra: Object.fromEntries(Object.entries(parsed).filter(([k]) => !STANDARD_FIELDS.has(k))),
       }
+      const scope = logScope.getStore()
+      if (scope !== undefined) record.scope = scope
       logBuffer.push(record)
       if (logBuffer.length > LOG_BUFFER_LIMIT) logBuffer.splice(0, logBuffer.length - LOG_BUFFER_LIMIT)
       for (const listener of logListeners) {

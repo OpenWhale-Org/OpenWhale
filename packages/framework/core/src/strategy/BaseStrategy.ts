@@ -12,7 +12,7 @@ import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
 import { getDataDir } from '../utils/paths.js'
-import { createLogger , subscribeLogs } from '../utils/logger.js'
+import { createLogger, runInLogScope, subscribeLogs } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
 import type { CoreMessage, LlmCallOptions, LlmCallSettings } from './llm.js'
 import type { LanguageModel } from 'ai'
@@ -551,19 +551,23 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     this.metrics.runsTotal++
     this.metrics.lastRunAt = Date.now()
     this.stepCache.clear()
-    this.log.debug({ triggerId: context.triggerId }, 'Strategy run started')
     const startedAt = Date.now()
     this.activeTraceSteps = []
-    // Everything the process logs to the console during this run lands in the
-    // trace too — over-inclusive by design (concurrent runs of OTHER instances
-    // will interleave, each line carries its module), because a silent trace
-    // is worse than a noisy one.
+    /* Logs this run CAUSED land in the trace; logs that merely happened at the
+       same moment do not. Timestamps cannot tell those apart — a dozen monitor
+       feeds and every other instance are logging too — and the difference is
+       not cosmetic: a trace claiming an Aster pair read Binance order books for
+       symbols it has never traded is worse than no logs at all, because it is
+       read as evidence. The scope follows the async work started inside it. */
+    const scope = `run:${this.instanceId ?? 'strategy'}:${startedAt}:${this.metrics.runsTotal}`
     const unsubLogs = subscribeLogs((rec) => {
+      if (rec.scope !== scope) return
       this.activeTraceSteps?.push({
         ts: rec.ts, step: `log:${rec.level}`,
         data: { ...(rec.module !== undefined ? { module: rec.module } : {}), msg: rec.msg, ...rec.extra },
       })
     })
+    runInLogScope(scope, () => this.log.debug({ triggerId: context.triggerId }, 'Strategy run started'))
     this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
     const finish = (instructions: number, error?: string) => {
       const rec: StrategyRunTrace = {
@@ -577,18 +581,20 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
       unsubLogs()
       try { this.runSink?.(rec) } catch { /* persistence must not fail the run */ }
     }
-    try {
-      const instructions = await this.evaluate(context)
-      this.metrics.instructionsEmitted += instructions.length
-      this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
-      finish(instructions.length)
-      return instructions
-    } catch (err) {
-      this.metrics.errors++
-      this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
-      finish(0, err instanceof Error ? err.message : String(err))
-      throw err
-    }
+    return runInLogScope(scope, async () => {
+      try {
+        const instructions = await this.evaluate(context)
+        this.metrics.instructionsEmitted += instructions.length
+        this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
+        finish(instructions.length)
+        return instructions
+      } catch (err) {
+        this.metrics.errors++
+        this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
+        finish(0, err instanceof Error ? err.message : String(err))
+        throw err
+      }
+    })
   }
 
   abstract evaluate(context: StrategyContext): Promise<ExecutionInstruction[]>
