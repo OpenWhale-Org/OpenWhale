@@ -1,8 +1,7 @@
 import { z } from 'zod'
 import { definePlugin } from '@openwhaleorg/core'
 import type { RawCredentialData } from '@openwhaleorg/core'
-import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
-import { AsterAdapter } from './adapter.js'
+import { AsterAdapter, AsterPublicAdapter } from './adapter.js'
 
 // Aster settles in USDT/USDF
 const ASTER_STABLES = ['USDT', 'USDF', 'USDC', 'USD']
@@ -31,7 +30,7 @@ export const asterPlugin = definePlugin({
   adapters: [
     {
       kind: 'exchange/perp', type: 'aster',
-      create: (data?) => data ? build(data) : new CcxtAdapter({ exchangeId: 'aster' }),
+      create: (data?) => data ? build(data) : new AsterPublicAdapter(),
     },
   ],
 
