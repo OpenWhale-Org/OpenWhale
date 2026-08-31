@@ -453,15 +453,6 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     return this.exchange.has['setPositionMode'] === true
   }
 
-  /**
-   * The account's ACTUAL position mode, not the venue's capability.
-   *
-   * A Binance account sits in one-way mode by default even though the venue
-   * offers hedge mode, and there positionSide is rejected while an
-   * opposite-side order nets against the existing position instead of opening
-   * beside it. Callers that place directional orders must know which world
-   * they are in; `supportsPositionSide` alone cannot tell them.
-   */
   /** Retune ccxt's throttle on the live instance; 0 switches it off. */
   setRateLimit(ms: number): void {
     if (ms <= 0) {
@@ -494,7 +485,13 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   }
 
   /**
-   * The account's position mode — hedge (long and short at once) or one-way.
+   * The account's ACTUAL position mode, not the venue's capability.
+   *
+   * A Binance account sits in one-way mode by default even though the venue
+   * offers hedge mode, and there positionSide is rejected while an
+   * opposite-side order nets against the existing position instead of opening
+   * beside it. Callers that place directional orders must know which world
+   * they are in; `supportsPositionSide` alone cannot tell them.
    *
    * Cached, and single-flighted: two legs closing together on one account asked
    * twice, and on Aster each ask costs the rate limiter ten seconds that the
