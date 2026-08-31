@@ -39,6 +39,21 @@ const HEX_KEY = /^(0x)?[0-9a-fA-F]{64}$/
 const RATE_LIMIT_MS = 30
 
 /**
+ * Which of Aster's two account systems a call without a symbol means.
+ *
+ * ccxt ships `defaultType: 'spot'`, and this adapter is registered for the
+ * 'exchange/perp' kind — so `fetchBalance()`, which takes no symbol, read the
+ * SPOT wallet: empty, on an account whose collateral and positions are all on
+ * the futures side. The account showed $-0.03 of equity while holding $112 of
+ * positions, and the equity curve drew that zero.
+ *
+ * Calls that name a symbol were never affected — the market carries its own
+ * type — which is why positions and orders looked right beside a balance that
+ * did not.
+ */
+const PERP = 'swap'
+
+/**
  * Aster's websocket event names, as its own handlers already expect them.
  *
  * ccxt 4.5.52 dispatches aster's stream frames on `data.e` through a table
@@ -209,7 +224,7 @@ export class AsterAdapter extends CcxtAdapter {
       walletAddress,
       privateKey: key,
       rateLimitMs: RATE_LIMIT_MS,
-      ccxtOptions: { options: { signerAddress } },
+      ccxtOptions: { options: { signerAddress, defaultType: PERP } },
     })
     patchWsEventNames(this.exchange as unknown as { handleMessage: (client: unknown, message: unknown) => void })
   }
@@ -229,7 +244,7 @@ export class AsterAdapter extends CcxtAdapter {
  */
 export class AsterPublicAdapter extends CcxtAdapter {
   constructor() {
-    super({ exchangeId: 'aster', rateLimitMs: RATE_LIMIT_MS })
+    super({ exchangeId: 'aster', rateLimitMs: RATE_LIMIT_MS, ccxtOptions: { options: { defaultType: PERP } } })
     patchWsEventNames(this.exchange as unknown as { handleMessage: (client: unknown, message: unknown) => void })
   }
 

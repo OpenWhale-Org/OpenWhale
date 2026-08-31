@@ -805,6 +805,9 @@ export function InstancesClient({ initialInstances }: Props) {
   const [loading, setLoading] = useState(false)
   const [actionError, setActionError] = useState('')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+  /** The folder whose name is being edited in place, and the one asked to be deleted. */
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
+  const [deletingFolder, setDeletingFolder] = useState<string | null>(null)
 
   const [layout, setLayout] = useLayout('ow:instances-layout', INSTANCE_LAYOUTS)
   const [query, setQuery] = useState('')
@@ -876,6 +879,30 @@ export function InstancesClient({ initialInstances }: Props) {
     else if (sort === 'oldest') sorted.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     return sorted
   })()
+
+  /**
+   * A folder is not an entity — it is a name each instance carries — so
+   * renaming one is renaming it on every member, and deleting one is clearing
+   * it from every member. Both walk ALL instances rather than the visible
+   * ones: a search filter must not decide which cards keep an old folder.
+   */
+  const renameFolder = async (from: string, to: string): Promise<void> => {
+    const name = to.trim()
+    setRenamingFolder(null)
+    if (name === '' || name === from) return
+    const members = instances.filter(i => i.folder === from)
+    await Promise.all(members.map(i => patchInstanceMeta(i.id, { folder: name })))
+    await refresh()
+  }
+
+  const deleteFolder = async (name: string): Promise<void> => {
+    setDeletingFolder(null)
+    const members = instances.filter(i => i.folder === name)
+    // '' is the API's "no folder" — the same value the card menu's
+    // "Remove from folder" sends. The instances themselves are untouched.
+    await Promise.all(members.map(i => patchInstanceMeta(i.id, { folder: '' })))
+    await refresh()
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -982,6 +1009,30 @@ export function InstancesClient({ initialInstances }: Props) {
           onCancel={() => setEditing(null)}
         />
       )}
+      {deletingFolder !== null && (() => {
+        const members = instances.filter(i => i.folder === deletingFolder)
+        const running = members.filter(i => i.active).length
+        return (
+          <Modal onClose={() => setDeletingFolder(null)} maxWidth="26rem">
+            <div className="p-4 flex flex-col gap-3">
+              <div>
+                <h3 className="text-sm font-medium">Delete folder “{deletingFolder}”?</h3>
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  {members.length === 0
+                    ? 'It is empty — the heading simply goes away.'
+                    : `Its ${members.length} ${members.length > 1 ? 'instances become' : 'instance becomes'} ungrouped. Nothing is deleted, nothing stops${running > 0 ? ` — ${running} of them ${running > 1 ? 'are' : 'is'} running and stay${running > 1 ? '' : 's'} that way` : ''}.`}
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDeletingFolder(null)} autoFocus>Cancel</button>
+                <button type="button" className="btn btn-danger-solid btn-sm" onClick={() => void deleteFolder(deletingFolder)}>
+                  Delete folder
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )
+      })()}
 
       {/* The list's three money columns are unlabelled numbers without this.
           It shares ROW_COLUMNS with the rows, so it cannot drift out of
@@ -1099,22 +1150,54 @@ export function InstancesClient({ initialInstances }: Props) {
                 {folder !== undefined && (
                   <div
                     data-folder-id={folder}
-                    className="flex items-center gap-2 mt-2 select-none"
+                    className="group flex items-center gap-2 mt-2 select-none"
                     style={folderStyle(folder)}
                   >
-                    <button
-                      className="flex items-center gap-2 text-left text-sm font-medium"
-                      style={{ color: 'var(--foreground)' }}
-                      onClick={() => setCollapsedFolders(prev => {
-                        const next = new Set(prev)
-                        if (!next.delete(folder)) next.add(folder)
-                        return next
-                      })}
-                    >
-                      <span>{collapsedFolders.has(folder) ? '▸' : '▾'}</span>
-                      <span>📁 {folder}</span>
-                      <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
-                    </button>
+                    {renamingFolder === folder ? (
+                      <input
+                        autoFocus
+                        defaultValue={folder}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void renameFolder(folder, (e.target as HTMLInputElement).value)
+                          if (e.key === 'Escape') setRenamingFolder(null)
+                        }}
+                        // Blur commits, like every other rename on this page: a
+                        // click elsewhere after typing means the typing counted.
+                        onBlur={(e) => void renameFolder(folder, e.target.value)}
+                        className="rounded px-2 py-0.5 text-sm font-medium"
+                        style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--accent)' }}
+                      />
+                    ) : (
+                      <button
+                        className="flex items-center gap-2 text-left text-sm font-medium"
+                        style={{ color: 'var(--foreground)' }}
+                        onClick={() => setCollapsedFolders(prev => {
+                          const next = new Set(prev)
+                          if (!next.delete(folder)) next.add(folder)
+                          return next
+                        })}
+                        onDoubleClick={() => setRenamingFolder(folder)}
+                        title="Double-click to rename"
+                      >
+                        <span>{collapsedFolders.has(folder) ? '▸' : '▾'}</span>
+                        <span>📁 {folder}</span>
+                        <span className="text-xs" style={{ color: 'var(--muted)' }}>({items.length})</span>
+                      </button>
+                    )}
+                    {/* Appears on hover: a delete sitting permanently beside a
+                        heading is a delete someone eventually clicks. */}
+                    {renamingFolder !== folder && (
+                      <button
+                        type="button"
+                        onClick={() => setDeletingFolder(folder)}
+                        title="Delete this folder"
+                        aria-label={`Delete folder ${folder}`}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1 rounded"
+                        style={{ color: 'var(--muted)' }}
+                      >
+                        ✕
+                      </button>
+                    )}
                     {/* Hidden rather than disabled while filtered or sorted: a
                         grip you can grab but that refuses to do anything is
                         worse than no grip. */}

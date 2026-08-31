@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
-import { AsterAdapter } from '../adapter.js'
+import { AsterAdapter, AsterPublicAdapter } from '../adapter.js'
 import { asterPlugin } from '../plugin.js'
 
 /**
@@ -68,5 +68,23 @@ describe('the client-side rate limit follows the venue, not ccxt\'s default', ()
     // Still queued, though: 429 on repeat is a 418 IP ban, and this engine is
     // not the only thing on the address.
     expect(probe.exchange.enableRateLimit).toBe(true)
+  })
+})
+
+
+/**
+ * A perp adapter that reads the spot wallet reports an account with $112 of
+ * futures positions as having $-0.03 of equity — which is what the accounts
+ * page drew, because ccxt's aster ships defaultType 'spot' and nothing here
+ * said otherwise. Calls naming a symbol were fine; the balance takes none.
+ */
+describe('typeless calls mean the futures account', () => {
+  it('sets defaultType on the credentialled adapter', () => {
+    expect(ccxtOf(new AsterAdapter({ walletAddress: MASTER, privateKey: KEY })).options['defaultType']).toBe('swap')
+  })
+
+  it('sets it on the public one too', () => {
+    const e = (new AsterPublicAdapter() as unknown as { exchange: { options: Record<string, unknown> } }).exchange
+    expect(e.options['defaultType']).toBe('swap')
   })
 })
