@@ -142,8 +142,35 @@ export function canFetchPositionMode(exchangeId: string, advertised: unknown): b
   return advertised === true || exchangeId === 'okx'
 }
 
+/**
+ * How long a read of the account's position mode stands before it is read again.
+ *
+ * Long, because the mode is account state a person changes deliberately in the
+ * venue's UI — perhaps twice in the life of an account — and asking is dear:
+ * Aster prices GET /fapi/v3/positionSide/dual at weight 30, which its ccxt
+ * leaky bucket charges as ~10 seconds of budget, paid by the NEXT request in
+ * the queue. Asked before every close, that wait landed on the closing order.
+ *
+ * A short TTL would keep paying it: these strategies close every twenty or
+ * forty minutes. What makes a long one safe is that the belief is self-
+ * correcting — a mode changed underneath us is answered by the venue rejecting
+ * the order's shape, which drops the cache and lets the caller's retry read it
+ * again. Both directions are caught: positionSide on a one-way account and
+ * reduceOnly on a hedged one are each rejected.
+ */
+const POSITION_MODE_TTL_MS = 6 * 60 * 60_000
+
+/** The venue saying an order's shape does not match the account's mode. */
+function isPositionModeMismatch(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /-4061|position\s*side\s*does\s*not\s*match|posSide|position mode/i.test(msg)
+}
+
 export class CcxtAdapter implements PerpExchangeAdapter {
   protected readonly exchange: ccxt.Exchange
+  /** Cached position mode, and the in-flight read that concurrent callers share. */
+  private positionMode: { hedged: boolean; readAt: number } | undefined
+  private positionModeInFlight: Promise<{ hedged: boolean }> | undefined
 
   constructor(options: CcxtAdapterOptions) {
     // ccxt.pro holds the WebSocket-capable constructors; typed as the base Exchange
@@ -431,11 +458,37 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     }
   }
 
+  /**
+   * The account's position mode — hedge (long and short at once) or one-way.
+   *
+   * Cached, and single-flighted: two legs closing together on one account asked
+   * twice, and on Aster each ask costs the rate limiter ten seconds that the
+   * order behind it then waits out. The value is account-wide (the venue's
+   * endpoint takes no symbol), so one read answers for every symbol.
+   *
+   * The cache is dropped the moment the venue rejects an order's shape, so a
+   * mode changed underneath us costs one rejected order, not a stale belief.
+   */
   async fetchPositionMode(symbol?: string): Promise<{ hedged: boolean }> {
     if (!canFetchPositionMode(this.exchange.id, this.exchange.has['fetchPositionMode'])) return { hedged: false }
+    const cached = this.positionMode
+    if (cached && Date.now() - cached.readAt < POSITION_MODE_TTL_MS) return { hedged: cached.hedged }
+    this.positionModeInFlight ??= this.readPositionMode(symbol)
+      .finally(() => { this.positionModeInFlight = undefined })
+    return this.positionModeInFlight
+  }
+
+  private async readPositionMode(symbol?: string): Promise<{ hedged: boolean }> {
     const mode = await this.guard(() => this.exchange.fetchPositionMode(symbol))
     const raw = mode as { hedged?: boolean; info?: { posMode?: string } }
-    return { hedged: raw.hedged === true || raw.info?.posMode === 'long_short_mode' }
+    const hedged = raw.hedged === true || raw.info?.posMode === 'long_short_mode'
+    this.positionMode = { hedged, readAt: Date.now() }
+    return { hedged }
+  }
+
+  /** Forget the cached mode — after a rejection that says the account has changed it. */
+  protected forgetPositionMode(): void {
+    this.positionMode = undefined
   }
 
   async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
@@ -521,15 +574,23 @@ export class CcxtAdapter implements PerpExchangeAdapter {
       }
     }
 
-    const order = await this.guard(() => this.exchange.createOrder(
-      params.symbol,
-      params.type,
-      params.side,
-      params.amount,
-      params.price,
-      extra,
-    ))
-    return this.mapOrder(order)
+    try {
+      const order = await this.guard(() => this.exchange.createOrder(
+        params.symbol,
+        params.type,
+        params.side,
+        params.amount,
+        params.price,
+        extra,
+      ))
+      return this.mapOrder(order)
+    } catch (err) {
+      // The one answer that proves a cached position mode wrong. Drop it here,
+      // so the caller's retry — every one of them retries the other shape —
+      // asks the venue again instead of repeating the same rejected order.
+      if (isPositionModeMismatch(err)) this.forgetPositionMode()
+      throw err
+    }
   }
 
   async cancelOrder(orderId: string, symbol: string): Promise<void> {
