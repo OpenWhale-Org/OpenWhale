@@ -67,6 +67,21 @@ function decimalsFromValues(values: number[], fallback: number): number {
   return Math.min(8, Math.max(0, Math.ceil(-Math.log10(minDiff * 1.0001))))
 }
 
+/**
+ * A single instant, at the precision the data actually has.
+ *
+ * Axis ticks describe a span and round to it; a tooltip describes ONE sample,
+ * and rounding that to the minute hides which of a minute's forty samples is
+ * being read. Milliseconds appear only when the timestamp carries them, so a
+ * second-aligned series is not dressed in three zeroes it does not own.
+ */
+export function formatInstant(ts: number): string {
+  const d = new Date(ts)
+  const hms = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const ms = ts % 1000
+  return ms === 0 ? hms : `${hms}.${String(Math.abs(ms)).padStart(3, '0')}`
+}
+
 function formatTime(ts: number, spanMs: number): string {
   const d = new Date(ts)
   // Millisecond-candle territory: show HH:MM:SS.mmm once the window is tight
@@ -323,6 +338,9 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
     ? formatTime(x, geom ? geom.x1 - geom.x0 : 0)
     : xUnit ? `${x.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${xUnit}` : x.toLocaleString(undefined, { maximumFractionDigits: 2 })
 
+  /** Tooltip x: one sample, so full precision — unlike an axis tick, which labels a span. */
+  const formatXExact = (x: number) => xKind === 'time' ? formatInstant(x) : formatX(x)
+
   /**
    * The point a series contributes AT the hovered instant — or null when the
    * series simply has no data there. Nearest-match alone listed every series
@@ -338,6 +356,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
     const medianGap = gaps[Math.floor(gaps.length / 2)] ?? 0
     return Math.abs(nearest.x - x) <= medianGap / 2 + 1e-9 ? nearest : null
   }
+
 
   // Hover: nearest x across every visible series, within the window
   const refXs = useMemo(() => {
@@ -1043,7 +1062,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
                 <span style={{ color: 'var(--muted)' }}>{hoverPt.label}</span>
               </div>
               <div className="font-mono mt-0.5">{formatValue(hoverPt.y, unit, geom.tickDecimals)}</div>
-              <div style={{ color: 'var(--muted)' }}>{formatX(hoverPt.x)}</div>
+              <div style={{ color: 'var(--muted)' }}>{formatXExact(hoverPt.x)}</div>
             </div>
           )}
 
@@ -1060,7 +1079,9 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
                 zIndex: 10,
               }}
             >
-              <div className="mb-1 font-medium" style={{ color: 'var(--muted)' }}>{formatX(hoveredX)}</div>
+              {/* hoveredX is snapped to a real sample (see refXs), so this is
+                  an observation's own timestamp — worth showing in full. */}
+              <div className="mb-1 font-medium" style={{ color: 'var(--muted)' }}>{formatXExact(hoveredX)}</div>
               {visible.map((s) => {
                 if (s.candles?.length) {
                   const c = s.candles.reduce((best, cc) => Math.abs(cc.x - hoveredX!) < Math.abs(best.x - hoveredX!) ? cc : best, s.candles[0]!)
