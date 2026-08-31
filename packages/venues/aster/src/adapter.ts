@@ -20,6 +20,24 @@ export interface AsterCredentials {
 const HEX_KEY = /^(0x)?[0-9a-fA-F]{64}$/
 
 /**
+ * Milliseconds of client-side budget per unit of request weight.
+ *
+ * Aster publishes its own limits in `GET /fapi/v1/exchangeInfo`: 2400 weight a
+ * minute, which is 25ms per unit. ccxt ships 333 — thirteen times more
+ * conservative than the venue asks for — and its leaky bucket makes the NEXT
+ * request pay for the last one's weight, so a weight-30 read (the position
+ * mode) parked the order behind it for ten seconds. Measured on a live pair:
+ * opens 0.8s, closes 10s and 20s.
+ *
+ * 30ms rather than the exact 25 leaves ~17% headroom, because the limit is per
+ * IP and this process is not the only thing on it: several accounts each hold
+ * their own bucket, and none of them can see the others. Zero would remove the
+ * queue altogether and hand the venue's 429 — and, on repeat, its multi-hour
+ * 418 IP ban — to a live engine, which is a worse day than a slow order.
+ */
+const RATE_LIMIT_MS = 30
+
+/**
  * Aster perpetual DEX adapter (asterdex.com).
  *
  * Authentication is an API WALLET, not an API key. Every private v3 request is
@@ -62,6 +80,7 @@ export class AsterAdapter extends CcxtAdapter {
       exchangeId: 'aster',
       walletAddress,
       privateKey: key,
+      rateLimitMs: RATE_LIMIT_MS,
       ccxtOptions: { options: { signerAddress } },
     })
   }

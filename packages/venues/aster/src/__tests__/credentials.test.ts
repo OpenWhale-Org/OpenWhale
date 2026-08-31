@@ -51,3 +51,22 @@ describe('Aster credentials', () => {
     expect(shape).toEqual(['walletAddress', 'privateKey', 'signerAddress'])
   })
 })
+
+/**
+ * The client-side queue is ours, not the venue's, and it was thirteen times
+ * tighter than what Aster publishes for itself (2400 weight/minute in
+ * exchangeInfo — 25ms a unit). ccxt's bucket bills the NEXT request for the
+ * last one's weight, so that gap is what turned a weight-30 read into a
+ * ten-second wait on the order behind it.
+ */
+describe('the client-side rate limit follows the venue, not ccxt\'s default', () => {
+  it('paces at the published budget instead of 333ms a unit', () => {
+    const probe = new AsterAdapter({ walletAddress: MASTER, privateKey: KEY }) as unknown as {
+      exchange: { rateLimit: number; enableRateLimit: boolean }
+    }
+    expect(probe.exchange.rateLimit).toBe(30)
+    // Still queued, though: 429 on repeat is a 418 IP ban, and this engine is
+    // not the only thing on the address.
+    expect(probe.exchange.enableRateLimit).toBe(true)
+  })
+})
