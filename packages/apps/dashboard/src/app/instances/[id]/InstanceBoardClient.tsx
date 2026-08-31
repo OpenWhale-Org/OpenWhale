@@ -108,14 +108,21 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
               />
             </h1>
             <div className="flex items-center gap-2 mt-2">
+              {/* Dry run is not a third kind of stopped: it runs, and queues
+                  nothing. Amber, and it says so, because an instance that
+                  looks live while placing nothing is the expensive confusion. */}
               <span
                 className="text-xs px-2 py-0.5 rounded-full"
-                style={{
-                  background: instance.active ? '#14532d' : '#292524',
-                  color: instance.active ? 'var(--success)' : 'var(--muted)',
-                }}
+                style={
+                  !instance.active
+                    ? { background: '#292524', color: 'var(--muted)' }
+                    : instance.options?.dryRun
+                      ? { background: '#3f2d14', color: 'var(--warning)' }
+                      : { background: '#14532d', color: 'var(--success)' }
+                }
+                title={instance.options?.dryRun ? 'Instructions are recorded, none reach a venue' : undefined}
               >
-                {instance.active ? 'active' : 'stopped'}
+                {instance.active ? (instance.options?.dryRun ? 'active · dry run' : 'active') : 'stopped'}
               </span>
               {instance.active ? (
                 confirmStop ? (

@@ -31,6 +31,8 @@ import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustrati
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
+import { statusDot, statusTitle } from './status'
+import { InlineRename } from '@/components/InlineRename'
 import { Switch } from '@/components/Switch'
 import { Modal, ModalMaximizeButton } from '@/components/Modal'
 import { StatsBar } from './StatsBar'
@@ -1249,6 +1251,10 @@ export function InstancesClient({ initialInstances }: Props) {
                         await patchInstanceMeta(inst.id, { icon: emoji })
                         await refresh()
                       }}
+                      onRename={async (name) => {
+                        await patchInstanceMeta(inst.id, { name })
+                        await refresh()
+                      }}
                     />
                     })()}
                   </div>
@@ -1415,8 +1421,8 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
             </div>
             <span
               className="w-2 h-2 rounded-full shrink-0"
-              style={{ background: chosen.active ? 'var(--success)' : 'var(--border)' }}
-              title={chosen.active ? 'Running' : 'Stopped'}
+              style={{ background: statusDot(chosen) }}
+              title={statusTitle(chosen)}
             />
             <button
               type="button"
@@ -2497,10 +2503,7 @@ function strategyChip(problem?: string): React.CSSProperties {
 }
 
 /** Red for broken, green for running, grey for stopped. */
-function statusDot(instance: StrategyInstanceView): string {
-  if (instance.problem) return 'var(--danger)'
-  return instance.active ? 'var(--success)' : 'var(--border)'
-}
+
 
 function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolder }: {
   instance: StrategyInstanceView
@@ -2559,7 +2562,7 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
  * ↗ and Edit both already open, and a full detail panel unfolding inside one
  * cell of a three-column grid reflows every card beside it.
  */
-function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
+function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon, onRename }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
   folders: string[]
@@ -2571,6 +2574,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
   onDelete: () => void
   onSetFolder?: (name: string) => void
   onSetIcon?: (emoji: string) => void
+  onRename?: (name: string) => void
 }) {
   const base = instance.params?.base ?? {}
   const bindings = instance.credentials
@@ -2595,7 +2599,14 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
             </IconMenu>
           : <span className="text-2xl leading-none">{iconFor(instance)}</span>}
         <div className="min-w-0 flex-1">
-          <div className="font-medium truncate" title={instance.name}>{instance.name}</div>
+          <InlineRename
+            value={instance.name}
+            onSave={(name) => onRename?.(name)}
+            title="Double-click to rename"
+            inputClassName="px-1.5 py-0.5 rounded-md text-sm font-medium w-full"
+          >
+            <div className="font-medium truncate">{instance.name}</div>
+          </InlineRename>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <span className="text-xs px-1.5 py-0.5 rounded font-mono truncate"
               style={strategyChip(instance.problem)}
@@ -2616,7 +2627,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
           <span
             className="w-2 h-2 rounded-full"
             style={{ background: statusDot(instance) }}
-            title={instance.problem ?? (instance.active ? 'Running' : 'Stopped')}
+            title={statusTitle(instance)}
           />
           <CardMenu
             instance={instance}
@@ -2757,7 +2768,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
  */
 const ROW_COLUMNS = '1.75rem minmax(0,1.5fr) minmax(0,1.3fr) 5.5rem 5.5rem 5.5rem minmax(0,1.4fr) 15.5rem'
 
-function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon }: {
+function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon, onRename }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
   folders: string[]
@@ -2768,6 +2779,7 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
   onDelete: () => void
   onSetFolder?: (name: string) => void
   onSetIcon?: (emoji: string) => void
+  onRename?: (name: string) => void
 }) {
   const base = instance.params?.base ?? {}
   const bindings = instance.credentials
@@ -2797,9 +2809,16 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
         <span
           className="w-2 h-2 rounded-full shrink-0"
           style={{ background: statusDot(instance) }}
-          title={instance.problem ?? (instance.active ? 'Running' : 'Stopped')}
+          title={statusTitle(instance)}
         />
-        <span className="font-medium text-sm truncate" title={instance.name}>{instance.name}</span>
+        <InlineRename
+          value={instance.name}
+          onSave={(name) => onRename?.(name)}
+          title="Double-click to rename"
+          inputClassName="px-1.5 py-0.5 rounded-md text-sm font-medium w-full"
+        >
+          <span className="font-medium text-sm truncate block">{instance.name}</span>
+        </InlineRename>
       </div>
 
       <div className="min-w-0 flex items-center gap-1.5">
