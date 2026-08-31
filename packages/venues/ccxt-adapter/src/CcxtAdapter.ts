@@ -106,6 +106,38 @@ const PROXY_OFF = new Set(['off', 'none', 'direct', 'false', '0'])
  * point of it — otherwise "everything through the proxy except the venue I can
  * reach directly" has no way to be said.
  */
+/**
+ * Client-side pacing, in milliseconds of budget per unit of request weight.
+ *
+ * An operator's override, per venue or across all of them, because the right
+ * number is a property of the ACCOUNT's traffic and the venue's published
+ * limits — not of the code. It cannot sensibly live on an executor: sessions
+ * are cached per credential, so every executor, monitor and reader on that
+ * credential shares one ccxt instance and one bucket. A per-executor setting
+ * would be a global wearing a local name, decided by whoever built the session
+ * first.
+ *
+ *   OPENWHALE_RATE_LIMIT_MS_ASTER=25   one venue
+ *   OPENWHALE_RATE_LIMIT_MS=40         every venue that has no venue-specific value
+ *   …=0                                no client queue at all — the caller then
+ *                                      owns staying inside the venue's limits,
+ *                                      and a 429 repeated is an hours-long IP ban
+ */
+function resolveRateLimitMs(options: CcxtAdapterOptions): number | undefined {
+  const suffix = options.exchangeId.toUpperCase().replace(/[^A-Z0-9]/g, '_')
+  const raw = (process.env[`OPENWHALE_RATE_LIMIT_MS_${suffix}`] ?? process.env['OPENWHALE_RATE_LIMIT_MS'] ?? '').trim()
+  if (raw === '') return options.rateLimitMs
+  const ms = Number(raw)
+  if (!Number.isFinite(ms) || ms < 0) {
+    createLogger('CcxtAdapter').warn(
+      { venue: options.exchangeId, value: raw },
+      'Ignoring OPENWHALE_RATE_LIMIT_MS — expected a number of milliseconds, 0 to disable the queue',
+    )
+    return options.rateLimitMs
+  }
+  return ms
+}
+
 function resolveProxy(options: CcxtAdapterOptions): string {
   if (options.proxy !== undefined) return options.proxy.trim()
   const suffix = options.exchangeId.toUpperCase().replace(/[^A-Z0-9]/g, '_')
@@ -178,9 +210,12 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     if (!Ctor) throw new TerminalAdapterError(`Unknown ccxt exchange id: "${options.exchangeId}"`)
 
     const opts: Record<string, unknown> = { enableRateLimit: true, ...options.ccxtOptions }
-    // After the spread so an explicit setting wins over a raw ccxtOptions one
-    if (options.rateLimitMs === 0) opts.enableRateLimit = false   // no client-side queue at all
-    else if (options.rateLimitMs !== undefined && options.rateLimitMs > 0) opts.rateLimit = options.rateLimitMs
+    // After the spread so an explicit setting wins over a raw ccxtOptions one.
+    // The environment outranks the venue's own default: the operator knows what
+    // else shares this IP, and the venue package does not.
+    const rateLimitMs = resolveRateLimitMs(options)
+    if (rateLimitMs === 0) opts.enableRateLimit = false   // no client-side queue at all
+    else if (rateLimitMs !== undefined && rateLimitMs > 0) opts.rateLimit = rateLimitMs
     if (options.apiKey) opts.apiKey = options.apiKey
     if (options.secret) opts.secret = options.secret
     if (options.password) opts.password = options.password

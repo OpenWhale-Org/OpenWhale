@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { CcxtAdapter } from '../CcxtAdapter.js'
 
 /**
@@ -70,5 +70,43 @@ describe('CcxtAdapter — the account position mode', () => {
     e['has'] = { ...(e['has'] as object), fetchPositionMode: false }
     expect(await p.fetchPositionMode()).toEqual({ hedged: false })
     expect(p.calls).toBe(0)
+  })
+})
+
+/**
+ * The pacing an operator can set without a deploy. It belongs to the account's
+ * traffic and the venue's published limits, not to any one caller: sessions are
+ * cached per credential, so one bucket serves every executor and monitor on it.
+ */
+class Paced extends CcxtAdapter {
+  rate(): { rateLimit: number; enabled: boolean } {
+    const e = this.exchange as unknown as { rateLimit: number; enableRateLimit: boolean }
+    return { rateLimit: e.rateLimit, enabled: e.enableRateLimit }
+  }
+}
+
+const RATE_ENV = ['OPENWHALE_RATE_LIMIT_MS', 'OPENWHALE_RATE_LIMIT_MS_BINANCEUSDM']
+afterEach(() => { for (const k of RATE_ENV) delete process.env[k] })
+
+describe('CcxtAdapter — client-side pacing', () => {
+  it('takes the venue package default when nothing overrides it', () => {
+    expect(new Paced({ exchangeId: 'binanceusdm', rateLimitMs: 30 }).rate()).toEqual({ rateLimit: 30, enabled: true })
+  })
+
+  it('lets the environment outrank it, per venue before the blanket value', () => {
+    process.env['OPENWHALE_RATE_LIMIT_MS'] = '40'
+    expect(new Paced({ exchangeId: 'binanceusdm', rateLimitMs: 30 }).rate().rateLimit).toBe(40)
+    process.env['OPENWHALE_RATE_LIMIT_MS_BINANCEUSDM'] = '15'
+    expect(new Paced({ exchangeId: 'binanceusdm', rateLimitMs: 30 }).rate().rateLimit).toBe(15)
+  })
+
+  it('turns the queue off at 0 — the caller then owns the venue\'s limits', () => {
+    process.env['OPENWHALE_RATE_LIMIT_MS'] = '0'
+    expect(new Paced({ exchangeId: 'binanceusdm', rateLimitMs: 30 }).rate().enabled).toBe(false)
+  })
+
+  it('keeps the default when the value is not a number', () => {
+    process.env['OPENWHALE_RATE_LIMIT_MS'] = 'fast'
+    expect(new Paced({ exchangeId: 'binanceusdm', rateLimitMs: 30 }).rate().rateLimit).toBe(30)
   })
 })
