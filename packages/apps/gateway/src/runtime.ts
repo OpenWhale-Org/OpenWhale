@@ -8,7 +8,6 @@ import { hyperliquidPlugin } from '@openwhaleorg/hyperliquid'
 import { examplesPlugin } from '@openwhaleorg/examples'
 import { binancePlugin } from '@openwhaleorg/binance'
 import { asterPlugin } from '@openwhaleorg/aster'
-import { crossexPlugin } from '@openwhaleorg/crossex'
 import { allVenuePlugins } from '@openwhaleorg/venues'
 import path from 'path'
 import os from 'os'
@@ -65,9 +64,6 @@ function createRuntime(): OpenWhaleRuntime {
   runtime.loadPlugin(hyperliquidPlugin, {})
   runtime.loadPlugin(binancePlugin, {})
   runtime.loadPlugin(asterPlugin, {})
-  // CrossEx is one venue over many exchanges — its symbols name the exchange,
-  // and the margin behind all of them is a single pool.
-  runtime.loadPlugin(crossexPlugin, {})
   // Plain ccxt venues (Bybit, OKX, Bitget, Gate, Kraken, Upbit, Lighter, …):
   // key + adapter cells only, so the roster loads as data — see @openwhaleorg/venues
   for (const venue of allVenuePlugins) runtime.loadPlugin(venue, {})

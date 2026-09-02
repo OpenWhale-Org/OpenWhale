@@ -18,7 +18,6 @@
     "@openwhaleorg/ccxt-adapter": "workspace:*",
     "@openwhaleorg/compiler": "workspace:*",
     "@openwhaleorg/core": "workspace:*",
-    "@openwhaleorg/crossex": "workspace:*",
     "@openwhaleorg/examples": "workspace:*",
     "@openwhaleorg/exchange": "workspace:*",
     "@openwhaleorg/hyperliquid": "workspace:*",

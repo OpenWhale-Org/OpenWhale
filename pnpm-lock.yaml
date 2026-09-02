@@ -90,9 +90,6 @@ importers:
       '@openwhaleorg/core':
         specifier: workspace:*
         version: link:../../framework/core
-      '@openwhaleorg/crossex':
-        specifier: workspace:*
-        version: link:../../venues/crossex
       '@openwhaleorg/examples':
         specifier: workspace:*
         version: link:../../strategies/examples
@@ -360,25 +357,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@20.19.39)(lightningcss@1.32.0)
-
-  packages/venues/crossex:
-    dependencies:
-      '@openwhaleorg/exchange':
-        specifier: workspace:*
-        version: link:../../framework/exchange
-      zod:
-        specifier: ^4.4.1
-        version: 4.4.1
-    devDependencies:
-      '@openwhaleorg/core':
-        specifier: workspace:*
-        version: link:../../framework/core
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-      vitest:
-        specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
 
   packages/venues/hyperliquid:
     dependencies:
