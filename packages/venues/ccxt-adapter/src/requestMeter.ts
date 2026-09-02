@@ -35,6 +35,25 @@ function endpointKey(path: string, method: string, params: Record<string, unknow
   return typeof type === 'string' ? `${path}:${type}` : `${method} ${path}`
 }
 
+/**
+ * Name the caller of a market-map reload.
+ *
+ * `loadMarkets` on Hyperliquid is not one request: it walks every HIP-3 dex at
+ * weight 20 apiece, ~220 in total, and `perpDexs` is its fingerprint. Something
+ * triggers it several times a minute, which no tally can identify — only the
+ * stack can. Sampled, so the diagnosis cannot itself become the problem.
+ */
+const RELOAD_FINGERPRINTS = new Set(['info:perpDexs'])
+let tracedAt = 0
+function traceIfExpensive(venue: string, key: string): void {
+  if (!RELOAD_FINGERPRINTS.has(key)) return
+  const now = Date.now()
+  if (now - tracedAt < 20_000) return
+  tracedAt = now
+  const stack = (new Error().stack ?? '').split('\n').slice(2, 16).map(l => l.trim())
+  log.warn({ venue, endpoint: key, stack }, 'Market map reload — each one costs a HIP-3 fan-out')
+}
+
 function report(): void {
   for (const [venue, tallies] of byVenue) {
     const rows = [...tallies].sort((a, b) => b[1].weight - a[1].weight)
@@ -75,6 +94,7 @@ export function meterRequests<T extends {
       // The venue's own weight, as ccxt computes it for its rate limiter.
       row.weight += Number(exchange.calculateRateLimiterCost(api, method, path, params, config)) || 0
       tallies.set(key, row)
+      traceIfExpensive(venue, key)
     } catch { /* accounting must never break a request */ }
     return original(path, api, method, params, headers, body, config)
   }

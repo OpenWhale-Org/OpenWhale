@@ -1,6 +1,6 @@
 import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
 import { createLogger, TerminalAdapterError } from '@openwhaleorg/core'
-import type { ExchangeFill, ExchangeOrder, ExchangePosition, FundingRateData, PerpOrderParams } from '@openwhaleorg/exchange'
+import type { ExchangeFill, ExchangeOrder, ExchangePosition, FundingRateData, PerpOrderParams, Ticker } from '@openwhaleorg/exchange'
 import { decidePriority, isPriorityBalanceRejection, priorityP } from './priority.js'
 
 /**
@@ -100,6 +100,21 @@ const DEX_TTL_MS = 6 * 3_600_000
 const FUNDING_TTL_MS = 30_000
 let dexCache: Cached<string[]> | undefined
 let fundingCache: Cached<FundingRateData[]> | undefined
+/**
+ * Mid prices per dex, refreshed at most once a second.
+ *
+ * ccxt's `fetchTicker` builds its answer from `fetchTickers`, which rebuilds
+ * the MARKET MAP first — on Hyperliquid that walks every HIP-3 dex at weight 20
+ * apiece: 13 requests, ~260 weight, for one price, on every call, cache or no
+ * cache. Read at trigger rate that is the whole IP budget several times over,
+ * and it is what put /info into a permanent 429 while orders queued behind it
+ * (measured 2026-09-02: metaAndAssetCtxs ×62/min = 1240 of 1200 allowed).
+ *
+ * `allMids` answers the same question for a whole dex at weight 2.
+ */
+const midsByDex = new Map<string, Cached<Record<string, string>>>()
+/** Tick-rate readers collapse onto one fetch; a second is fresher than the venue's own book snapshots. */
+const MIDS_TTL_MS = 1_000
 
 /** One in-flight fetch shared by every caller, then a TTL. */
 async function shared<T>(
@@ -289,6 +304,50 @@ export class HyperliquidAdapter extends CcxtAdapter {
         return []
       }
     }, (next) => { dexCache = next })
+  }
+
+  /**
+   * One market's price, for two weight instead of two hundred and sixty.
+   *
+   * `last` carries the venue's mid, and bid/ask are left at zero: `allMids` has
+   * no book in it, and inventing a spread from a mid would be worse than
+   * admitting there is none — every caller here treats a zero bid as "no quote"
+   * and falls back to `last`. A caller that needs a real book should read one;
+   * the order-book monitor already streams it.
+   */
+  override async fetchTicker(symbol: string): Promise<Ticker> {
+    const dex = this.hip3DexOf(symbol) ?? ''
+    const mids = await this.midsFor(dex)
+    const id = this.coinIdOf(symbol)
+    const mid = Number(id !== undefined ? mids[id] : undefined)
+    if (!Number.isFinite(mid) || mid <= 0) {
+      // No mid for this coin — fall back to ccxt rather than invent a price.
+      return super.fetchTicker(symbol)
+    }
+    return {
+      symbol, timestamp: Date.now(), last: mid, bid: 0, ask: 0,
+      high: 0, low: 0, volume: 0, quoteVolume: 0,
+    }
+  }
+
+  /** The venue's own name for a market ('xyz:MU', 'BTC'), which is how allMids keys it. */
+  private coinIdOf(symbol: string): string | undefined {
+    try {
+      return (this.exchange.market(symbol) as { info?: { name?: string } }).info?.name
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Mids for one dex, shared by every adapter and every caller within the TTL. */
+  private async midsFor(dex: string): Promise<Record<string, string>> {
+    return shared(
+      midsByDex.get(dex),
+      MIDS_TTL_MS,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => this.guard(() => (this.exchange as any).publicPostInfo({ type: 'allMids', ...(dex ? { dex } : {}) })) as Promise<Record<string, string>>,
+      (next) => { midsByDex.set(dex, next) },
+    )
   }
 
   /** The builder dex a market lives on ('xyz:SKHX' → 'xyz'), undefined for the main universe. */

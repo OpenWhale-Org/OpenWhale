@@ -53,3 +53,46 @@ describe('venue-global caches', () => {
     await expect(a.fetchFundingRates()).resolves.toEqual(first)
   })
 })
+
+/**
+ * ccxt builds `fetchTicker` out of `fetchTickers`, which rebuilds the market map
+ * first — on Hyperliquid that walks every HIP-3 dex at weight 20 apiece: 13
+ * requests and ~260 weight for one price, on every call, cache or no cache.
+ * Read at trigger rate it is the IP budget several times over, which is what
+ * left /info answering 429 all day while orders queued behind the reads.
+ *
+ * `allMids` answers the same question for a whole dex at weight 2.
+ */
+describe('ticker reads', () => {
+  function tickerAdapter() {
+    const calls: Array<Record<string, unknown>> = []
+    const a = new HyperliquidAdapter({ walletAddress: '0x' + '2'.repeat(40) })
+    const ex = (a as unknown as { exchange: Record<string, unknown> }).exchange
+    ex['market'] = (symbol: string) => ({ info: { name: symbol.startsWith('XYZ-') ? `xyz:${symbol.slice(4).split('/')[0]}` : symbol.split('/')[0] } })
+    ex['publicPostInfo'] = async (req: Record<string, unknown>) => {
+      calls.push(req)
+      return req['dex'] === 'xyz' ? { 'xyz:MU': '944.27', 'xyz:SKHY': '162.845' } : { BTC: '77415.5' }
+    }
+    return { adapter: a, calls }
+  }
+
+  it('asks allMids once per dex, not the market map per call', async () => {
+    const { adapter, calls } = tickerAdapter()
+    const mu = await adapter.fetchTicker('XYZ-MU/USDC:USDC')
+    const skhy = await adapter.fetchTicker('XYZ-SKHY/USDC:USDC')
+
+    expect(mu.last).toBe(944.27)
+    expect(skhy.last).toBe(162.845)
+    // Two symbols on one dex, one request — and it is the cheap endpoint.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ type: 'allMids', dex: 'xyz' })
+  })
+
+  it('leaves bid and ask at zero rather than inventing a spread from a mid', async () => {
+    const { adapter } = tickerAdapter()
+    const t = await adapter.fetchTicker('XYZ-MU/USDC:USDC')
+    expect(t.bid).toBe(0)
+    expect(t.ask).toBe(0)
+    expect(t.last).toBeGreaterThan(0)
+  })
+})
