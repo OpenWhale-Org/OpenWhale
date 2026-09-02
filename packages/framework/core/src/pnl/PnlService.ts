@@ -123,6 +123,12 @@ const KICK_DEBOUNCE_MS = 30_000
 const MAX_FILL_LOOKBACK_MS = 6 * 24 * 3600_000
 /** Overlap kept when advancing past an empty window, for fills that land late. */
 const FILL_RECHECK_MS = 10 * 60_000
+/**
+ * Rows asked for in one account-wide fill query. Hyperliquid serves at most
+ * this many per call; a page that comes back this full was cut, and the
+ * collector treats it as such rather than as "everything since the watermark".
+ */
+const FILLS_ALL_PAGE = 2000
 const EPS = 1e-9
 
 export class PnlService {
@@ -331,12 +337,25 @@ export class PnlService {
 
     let fills
     try {
-      fills = await session.fetchFillsAll(since + 1, 2000)
+      fills = await session.fetchFillsAll(since + 1, FILLS_ALL_PAGE)
     } catch (err) {
       log.warn({ err, account }, 'fetchFillsAll failed — falling back to one query per symbol')
       for (const symbol of claimed) await this.collectSymbol(account, symbol, session)
       return
     }
+
+    /*
+     * A page that came back full is a page that was cut: the venue had more,
+     * and everything past the last row here is still unread. Two things follow.
+     * A symbol ABSENT from a cut page has not been shown to be quiet — its fills
+     * may simply sit past the cut — so it may advance only to where the page
+     * ends, never to "now". And the sweep must come back for the rest, which the
+     * hourly cadence does on its own; the cut is logged so a backlog draining at
+     * one page an hour is a known thing rather than a mystery.
+     */
+    const cut = fills.length >= FILLS_ALL_PAGE
+    const pageEnd = fills.length > 0 ? Math.max(...fills.map(f => f.timestamp)) : since
+    if (cut) log.info({ account, rows: fills.length, pageEnd: new Date(pageEnd).toISOString() }, 'Fill page was cut — the rest arrives with the next sweep')
 
     const bySymbol = new Map<string, typeof fills>()
     for (const f of fills) {
@@ -347,13 +366,18 @@ export class PnlService {
     for (const [symbol, rows] of bySymbol) {
       // A fill older than this symbol's own watermark is already recorded;
       // INSERT OR IGNORE makes replaying it harmless, so it is filed anyway
-      // rather than dropped on an off-by-one.
+      // rather than dropped on an off-by-one. The watermark never moves back:
+      // one query from the OLDEST symbol can return, for a newer symbol, only
+      // rows it already has.
       await this.recordFills(account, symbol, rows)
-      await this.setWatermark(account, `fills:${symbol}`, Math.max(...rows.map(f => f.timestamp)))
+      const newest = Math.max(...rows.map(f => f.timestamp))
+      await this.setWatermark(account, `fills:${symbol}`, Math.max(newest, sinceBySymbol.get(symbol) ?? 0))
     }
     for (const symbol of claimed) {
       if (bySymbol.has(symbol)) continue
-      await this.advanceEmpty(account, symbol, sinceBySymbol.get(symbol) ?? since)
+      const own = sinceBySymbol.get(symbol) ?? since
+      if (cut) await this.setWatermark(account, `fills:${symbol}`, Math.max(own, pageEnd))
+      else await this.advanceEmpty(account, symbol, own)
     }
   }
 

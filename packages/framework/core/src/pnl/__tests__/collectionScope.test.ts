@@ -116,6 +116,52 @@ describe('an account-scoped venue is asked once', () => {
     expect(quiet?.ts).toBeGreaterThan(Date.now() - 20 * 60_000)
   })
 
+  /* A page that comes back full was cut by the venue. A symbol absent from it
+     has not been shown to be quiet — its fills may sit past the cut — so its
+     watermark may reach the page's end, never the present. Advancing it to
+     "now" would step over every fill past the cut, silently: the same shape
+     as the COTI loss, arriving through the bulk path instead. */
+  it('does not advance an absent symbol past a page that was cut', async () => {
+    const db = await dbWithClaims(SYMBOLS)
+    const pageEnd = Date.now() - 6 * 3600_000
+    const svc = new PnlService({
+      db,
+      resolveSession: async () => ({
+        fetchFills: async () => [],
+        // Exactly the page size, all for BTC, all hours old: a full page.
+        fetchFillsAll: async (_since: number, limit: number) =>
+          Array.from({ length: limit }, (_, i) => fill('BTC/USDC:USDC', `f${i}`, pageEnd - (limit - i) * 1000)),
+      }) as never,
+    })
+
+    await svc.collect()
+
+    const eth = await db.get<{ ts: number }>(
+      `SELECT ts FROM pnl_watermarks WHERE account = 'acct' AND scope = 'fills:ETH/USDC:USDC'`)
+    expect(eth?.ts).toBeLessThanOrEqual(pageEnd)
+  })
+
+  it('never moves a symbol watermark backwards on a query that started from an older one', async () => {
+    const db = await dbWithClaims(SYMBOLS)
+    const recent = Date.now() - 60_000
+    await db.run(`INSERT INTO pnl_watermarks (account, scope, ts) VALUES ('acct', 'fills:ETH/USDC:USDC', ?)`, [recent])
+    const svc = new PnlService({
+      db,
+      resolveSession: async () => ({
+        fetchFills: async () => [],
+        // ETH's row is older than ETH's own watermark: the query began from a
+        // staler symbol and swept it up.
+        fetchFillsAll: async () => [fill('ETH/USDC:USDC', 'old', recent - 3600_000)],
+      }) as never,
+    })
+
+    await svc.collect()
+
+    const eth = await db.get<{ ts: number }>(
+      `SELECT ts FROM pnl_watermarks WHERE account = 'acct' AND scope = 'fills:ETH/USDC:USDC'`)
+    expect(eth?.ts).toBeGreaterThanOrEqual(recent)
+  })
+
   it('falls back to one query per symbol when the bulk call fails', async () => {
     const db = await dbWithClaims(SYMBOLS)
     const asked: string[] = []

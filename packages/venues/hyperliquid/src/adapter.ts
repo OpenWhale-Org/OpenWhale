@@ -115,6 +115,18 @@ let fundingCache: Cached<FundingRateData[]> | undefined
 const midsByDex = new Map<string, Cached<Record<string, string>>>()
 /** Tick-rate readers collapse onto one fetch; a second is fresher than the venue's own book snapshots. */
 const MIDS_TTL_MS = 1_000
+/** Last time a symbol was reported as missing from allMids — one warning a minute per symbol. */
+const expensiveTickerWarnedAt = new Map<string, number>()
+
+/**
+ * How long a failed refresh holds before the next attempt.
+ *
+ * Without it a refresh that fails fast — a 429 does — is retried by the very
+ * next caller, and callers arrive at tick rate. For the funding fan-out that is
+ * ~220 weight per retry, several a minute: the cache would re-create the storm
+ * it exists to prevent, on exactly the day the venue is already saying no.
+ */
+const FAILED_REFRESH_HOLD_MS = 5_000
 
 /** One in-flight fetch shared by every caller, then a TTL. */
 async function shared<T>(
@@ -131,8 +143,10 @@ async function shared<T>(
   }).catch((err) => {
     // A failed refresh must not poison the cache: serve the stale value if
     // there is one, since a rate limit is exactly when the old table is most
-    // useful, and only raise when there is nothing to serve.
-    if (cache) { store({ value: cache.value, at: cache.at }); return cache.value }
+    // useful, and only raise when there is nothing to serve. Either way the
+    // next attempt waits — see FAILED_REFRESH_HOLD_MS.
+    const at = Date.now() - ttlMs + FAILED_REFRESH_HOLD_MS
+    if (cache && cache.at > 0) { store({ value: cache.value, at }); return cache.value }
     store(undefined as never)
     throw err
   })
@@ -322,6 +336,14 @@ export class HyperliquidAdapter extends CcxtAdapter {
     const mid = Number(id !== undefined ? mids[id] : undefined)
     if (!Number.isFinite(mid) || mid <= 0) {
       // No mid for this coin — fall back to ccxt rather than invent a price.
+      // Said out loud, because the fallback is the 13-request path this exists
+      // to avoid: a symbol that lands here on every tick is the storm coming
+      // back quietly, and the meter alone cannot say which symbol.
+      const now = Date.now()
+      if (now - (expensiveTickerWarnedAt.get(symbol) ?? 0) > 60_000) {
+        expensiveTickerWarnedAt.set(symbol, now)
+        this.log.warn({ symbol, dex: dex || 'main', coin: id }, 'No mid for this market in allMids — ticker read through the full market walk instead')
+      }
       return super.fetchTicker(symbol)
     }
     return {
