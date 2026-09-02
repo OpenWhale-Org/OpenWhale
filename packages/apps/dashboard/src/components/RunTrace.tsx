@@ -33,7 +33,11 @@ export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpe
   const [open, setOpen] = useState(defaultOpen)
   const color = run.error ? 'var(--danger)' : run.instructions > 0 ? 'var(--success)' : 'var(--muted)'
   return (
-    <div className="flex flex-col gap-0.5">
+    // Typography is the component's own, not the container's: this trace is
+    // dropped into two pages whose wrappers disagree about the font, and the
+    // JSON it expands into always sets mono — so borrowing left one half of the
+    // same block in a different typeface from the other.
+    <div className="font-mono text-xs flex flex-col gap-0.5">
       <div className="flex gap-2 items-start cursor-pointer" onClick={() => setOpen(o => !o)}>
         <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'} {new Date(run.startedAt).toLocaleTimeString()}</span>
         <span className="px-1 rounded text-xs" style={{ background: color + '22', color }}>
@@ -50,7 +54,7 @@ export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpe
 /** The steps alone, for a view that has already said which run this is. */
 export function RunSteps({ run, className = 'ml-4' }: { run: RunTrace; className?: string }) {
   return (
-    <div className={`${className} flex flex-col gap-1 p-2 rounded`} style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+    <div className={`${className} font-mono text-xs flex flex-col gap-1 p-2 rounded`} style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
       {run.steps.length === 0
         ? <span className="text-xs" style={{ color: 'var(--muted)' }}>No steps recorded for this run.</span>
         : run.steps.map((s, i) => <RunStep key={i} step={s} startedAt={run.startedAt} />)}
