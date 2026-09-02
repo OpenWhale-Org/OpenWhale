@@ -699,19 +699,19 @@ export class OpenWhaleRuntime implements IRuntime {
         views.push({ ...entity, status: 'broken', problem: `implementation "${entity.implementation}" is not registered` })
         continue
       }
-      // The venue is the implementation's, always — a caller that has to
-      // reconstruct it from the credential type gets CEX accounts right and
-      // on-chain ones wrong, since only there do the two coincide.
-      const venue = implementationVenue(impl)
-      const pin = venue !== undefined ? { venue } : {}
+      // The venue is the implementation's pin when it has one; a kind-generic
+      // implementation serves every venue, and which one THIS account is on
+      // is settled by the credential it binds — the same rule the binding
+      // resolver applies, so a picker and the runtime agree on every account.
+      const pinned = implementationVenue(impl)
       if (!entity.credential) {
-        views.push({ ...entity, kind: impl.kind, ...pin, ...(venue !== undefined ? { type: venue } : {}), status: 'inactive' })
+        views.push({ ...entity, kind: impl.kind, ...(pinned !== undefined ? { venue: pinned, type: pinned } : {}), status: 'inactive' })
         continue
       }
       try {
         const { type } = await this.readCredential(entity.credential)
         const snapshotError = this.accountSnapshotErrors.get(entity.name)
-        views.push({ ...entity, kind: impl.kind, type, ...pin, status: 'ready', ...(snapshotError !== undefined ? { snapshotError } : {}) })
+        views.push({ ...entity, kind: impl.kind, type, venue: pinned ?? type, status: 'ready', ...(snapshotError !== undefined ? { snapshotError } : {}) })
       } catch {
         views.push({ ...entity, kind: impl.kind, status: 'broken', problem: `credential "${entity.credential}" not found` })
       }

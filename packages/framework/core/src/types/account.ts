@@ -141,8 +141,10 @@ export interface AccountView extends AccountEntity {
    */
   type?: string
   /**
-   * Venue the bound implementation is pinned to, resolved by the runtime.
-   * Absent on kind-generic implementations, which serve every venue.
+   * The venue this account is on: the implementation's pin, or for a
+   * kind-generic implementation the bound credential's type — the rule the
+   * binding resolver applies. Absent only while no credential is bound to a
+   * kind-generic implementation, when there is no venue to name yet.
    */
   venue?: string
   /** 'inactive' until a credential is bound. */

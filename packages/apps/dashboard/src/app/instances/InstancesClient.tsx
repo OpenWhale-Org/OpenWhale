@@ -2142,9 +2142,8 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                   const eligible = accounts.filter(a =>
                     a.status === 'ready' &&
                     (slot.kind === undefined || a.kind === slot.kind) &&
-                    // A pinned slot names a VENUE; an account's venue is its implementation's
-                    // pin or, for a kind-generic implementation, its credential's type.
-                    (slot.type === undefined || (a.venue ?? a.type) === slot.type),
+                    // A pinned slot names a venue; the view resolves every bound account's.
+                    (slot.type === undefined || a.venue === slot.type),
                   )
                   // Credentials also bind: kind slots as the legacy fallback; kindless
                   // type-pinned slots (raw executor slots) bind credentials DIRECTLY —
@@ -2178,7 +2177,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                         </option>
                         {eligible.length > 0 && (
                           <optgroup label="Accounts">
-                            {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.venue ?? a.type ?? a.kind})</option>)}
+                            {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.venue ?? a.kind})</option>)}
                           </optgroup>
                         )}
                         {legacyEligible.length > 0 && (
