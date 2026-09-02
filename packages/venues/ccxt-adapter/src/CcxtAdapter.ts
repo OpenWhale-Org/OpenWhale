@@ -6,6 +6,7 @@ import type {
   FundingRateData, OpenInterestData, PerpOrderParams,
 } from '@openwhaleorg/exchange'
 import { RetryableAdapterError, TerminalAdapterError, createLogger } from '@openwhaleorg/core'
+import { meterRequests } from './requestMeter.js'
 
 /**
  * Generic PerpExchangeAdapter over any ccxt.pro exchange.
@@ -251,6 +252,9 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     }
 
     this.exchange = new Ctor(opts)
+    // Counts what this process asks of the venue, per endpoint, per minute.
+    // Measurement only — it paces nothing and delays nothing.
+    meterRequests(this.exchange as unknown as Parameters<typeof meterRequests>[0])
     if (options.testnet) this.exchange.setSandboxMode(true)
     // Symbol-less fetchOpenOrders is a deliberate adapter capability (the
     // account detail view wants ALL open orders); ccxt otherwise throws a
