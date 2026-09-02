@@ -445,6 +445,7 @@ export class OpenWhaleRuntime implements IRuntime {
         id: contractId,
         name: impl.displayName ?? contractId,
         ...(impl.description !== undefined ? { description: impl.description } : {}),
+        ...(impl.venue !== undefined ? { venue: impl.venue } : {}),
         source: 'plugin',
         pluginName: owner,
         createdAt: now,
@@ -621,6 +622,8 @@ export class OpenWhaleRuntime implements IRuntime {
           id: impl.id,
           ...(impl.displayName !== undefined ? { displayName: impl.displayName } : {}),
           kind: impl.kind,
+          ...(venue !== undefined ? { venue } : {}),
+          /** @deprecated `venue` above says what this always meant. */
           ...(venue !== undefined ? { type: venue } : {}),
           ...(accepted !== undefined ? { credentialTypes: accepted } : {}),
           ...(impl.logo !== undefined ? { logo: impl.logo } : {}),
@@ -693,15 +696,19 @@ export class OpenWhaleRuntime implements IRuntime {
         views.push({ ...entity, status: 'broken', problem: `implementation "${entity.implementation}" is not registered` })
         continue
       }
+      // The venue is the implementation's, always — a caller that has to
+      // reconstruct it from the credential type gets CEX accounts right and
+      // on-chain ones wrong, since only there do the two coincide.
+      const venue = implementationVenue(impl)
+      const pin = venue !== undefined ? { venue } : {}
       if (!entity.credential) {
-        const implVenue = implementationVenue(impl)
-        views.push({ ...entity, kind: impl.kind, ...(implVenue !== undefined ? { type: implVenue } : {}), status: 'inactive' })
+        views.push({ ...entity, kind: impl.kind, ...pin, ...(venue !== undefined ? { type: venue } : {}), status: 'inactive' })
         continue
       }
       try {
         const { type } = await this.readCredential(entity.credential)
         const snapshotError = this.accountSnapshotErrors.get(entity.name)
-        views.push({ ...entity, kind: impl.kind, type, status: 'ready', ...(snapshotError !== undefined ? { snapshotError } : {}) })
+        views.push({ ...entity, kind: impl.kind, type, ...pin, status: 'ready', ...(snapshotError !== undefined ? { snapshotError } : {}) })
       } catch {
         views.push({ ...entity, kind: impl.kind, status: 'broken', problem: `credential "${entity.credential}" not found` })
       }

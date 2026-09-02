@@ -8,6 +8,7 @@ import { buildParamsFromFields, fieldValuesFromParams, sameValues, type ParamVal
 import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { useDirtyFlag } from '@/components/unsaved'
+import { implVenueMap, pickerVenue } from '@/components/venue'
 import { InstancePnlPanel } from './InstancePnlPanel'
 import { InstanceMiscPanel } from './InstanceMiscPanel'
 
@@ -497,22 +498,22 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       setSaved(seed)
       json.reset()
       setView('form')
-      // The pickers and availability checks need the bound account's venue —
-      // same derivation as the create form: slot binding → account → venue
-      // pin from the implementation, credential type only as CEX fallback.
+      // The pickers and availability checks need the bound account's venue:
+      // slot binding → account → pickerVenue (see components/venue.ts, the one
+      // place that knows how a venue is resolved).
       if (ra.ok) {
         const { accounts, implementations } = (await ra.json()) as {
-          accounts: Array<{ name: string; implementation?: string; credential?: string; type?: string }>
-          implementations?: Array<{ id: string; type?: string }>
+          accounts: Array<{ name: string; implementation?: string; credential?: string; type?: string; venue?: string }>
+          implementations?: Array<{ id: string; venue?: string; type?: string }>
         }
-        const implVenues = Object.fromEntries((implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : []))
+        const implVenues = implVenueMap(implementations)
         const venues: Record<string, string> = {}
         for (const slot of def?.accountRequirements ?? []) {
           const bound = instance.credentials?.[slot.label] ?? instance.accounts?.[0]
           if (!bound) continue
           // Instances from before Account entities bind by credential name — match either
           const account = accounts.find(a => a.name === bound || a.credential === bound)
-          const venue = account ? implVenues[account.implementation ?? ''] ?? account.type : undefined
+          const venue = pickerVenue(account, implVenues)
           if (venue) venues[slot.label] = venue
         }
         if (!gone) setSlotVenues(venues)

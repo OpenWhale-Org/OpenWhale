@@ -93,6 +93,7 @@ export function lowerMonitorEntry(entry: MonitorClass | MonitorImplementation, p
     ...(meta.name !== undefined ? { displayName: meta.name } : {}),
     ...(meta.description !== undefined ? { description: meta.description } : {}),
     ...(meta.credential !== undefined ? { credential: meta.credential } : {}),
+    ...(meta.venue !== undefined ? { venue: meta.venue } : {}),
     ...(meta.params !== undefined ? { params: meta.params } : {}),
     create: (ctx) => new (entry as MonitorClass)(ctx),
   }

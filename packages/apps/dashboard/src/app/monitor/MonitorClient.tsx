@@ -11,6 +11,7 @@ import { LogsPanel } from '@/components/LogsPanel'
 import { Modal } from '@/components/Modal'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
 import { SymbolPicker } from '@/components/SymbolPicker'
+import { effectiveValue } from '@/components/venue'
 
 interface SseEvent {
   type: string
@@ -27,6 +28,8 @@ interface MonitorStatus {
   mode: string
   activeKeys: Array<{ key: string; refCount: number }>
   wildcardSubscribers: number
+  /** The venue this monitor's keys live on, when it has exactly one. */
+  venue?: string
   /** This monitor reconstructs history on a key's first subscribe. */
   supportsBackfill?: boolean
   /** Keys whose history is landing right now — live collection starts after. */
@@ -568,19 +571,24 @@ function KeyStrip({ status, events, connected, subscribers }: {
  * default, then first option) — otherwise the picker looks unset while the
  * form shows a venue.
  */
+/**
+ * Which venue this key field's catalogue should list.
+ *
+ * Two sources, both definite. A monitor pinned to one venue declares it, and
+ * that is the end of it — `market-watch` lives on Boros and has no venue field
+ * to read. A multi-venue monitor carries the venue as a sibling key field, and
+ * what that field HOLDS is the answer (`effectiveValue`, the same reading the
+ * submit path uses, so the catalogue and the subscription can never disagree).
+ */
 function resolveVenue(
+  monitorVenue: string | undefined,
   catalogue: ParamFieldCatalogue,
   fields: Array<{ name: string; default?: unknown; options?: Array<{ value: unknown }> }>,
   values: Record<string, string>,
 ): string | undefined {
+  if (monitorVenue) return monitorVenue
   if (!catalogue.venueField) return undefined
-  const typed = (values[catalogue.venueField] ?? '').trim()
-  if (typed) return typed
-  const field = fields.find(f => f.name === catalogue.venueField)
-  if (!field) return undefined
-  if (field.default !== undefined) return String(field.default)
-  const first = field.options?.[0]
-  return first ? String(first.value) : undefined
+  return effectiveValue(fields.find(f => f.name === catalogue.venueField), values) || undefined
 }
 
 function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: () => void }) {
@@ -608,10 +616,9 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
     const params: Record<string, unknown> = {}
     for (const f of fields ?? []) {
       // Untouched selects display their first option while state stays '' —
-      // submit must match what the user SEES: schema default, then first option.
-      const raw = (fieldValues[f.name] ?? '').trim()
-        || (f.default !== undefined ? String(f.default) : '')
-        || (f.options?.[0] !== undefined ? String(f.options[0].value) : '')
+      // submit must match what the user SEES (effectiveValue), which is also
+      // what the catalogue pickers were listing against.
+      const raw = effectiveValue(f, fieldValues)
       if (raw === '') continue
       params[f.name] = f.type === 'number' ? Number(raw) : f.type === 'boolean' ? raw === 'true' : raw
     }
@@ -630,7 +637,7 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
                 </label>
                 {f.options && f.options.length > 0 ? (
                   <select
-                    value={fieldValues[f.name] ?? String(f.default ?? f.options[0]?.value ?? '')}
+                    value={effectiveValue(f, fieldValues)}
                     onChange={(e) => setFieldValues((v) => ({ ...v, [f.name]: e.target.value }))}
                     title={f.description}
                     className="rounded-md px-2 py-1.5 text-xs font-mono"
@@ -642,9 +649,9 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
                   <SymbolPicker
                     value={fieldValues[f.name] ?? ''}
                     onChange={(v) => setFieldValues((prev) => ({ ...prev, [f.name]: v }))}
-                    // The venue lives in a sibling key field; until it is
-                    // picked the dropdown says so instead of guessing.
-                    venue={resolveVenue(f.catalogue, fields ?? [], fieldValues)}
+                    // The monitor's own pin, else the sibling venue field.
+                    // With neither, the dropdown says so instead of guessing.
+                    venue={resolveVenue(status.venue, f.catalogue, fields ?? [], fieldValues)}
                     catalogue={f.catalogue}
                     placeholder={f.placeholder ?? f.name}
                     title={f.description}

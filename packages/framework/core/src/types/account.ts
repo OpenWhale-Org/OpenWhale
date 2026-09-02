@@ -131,8 +131,20 @@ export interface AccountImplementationInfo {
 /** Serializable account view with derived facts (dashboard Accounts page). */
 export interface AccountView extends AccountEntity {
   kind?: NamespacedKind
-  /** Concrete credential type once a credential is bound. */
+  /**
+   * Concrete credential type once a credential is bound.
+   *
+   * NOT the venue, though on a CEX the two coincide — a Boros account binds a
+   * `pendle/boros-agent` credential and trades on `boros`. Anything asking
+   * "which venue?" (catalogue pickers, adapter lookups) wants `venue` below;
+   * this answers "which secret?".
+   */
   type?: string
+  /**
+   * Venue the bound implementation is pinned to, resolved by the runtime.
+   * Absent on kind-generic implementations, which serve every venue.
+   */
+  venue?: string
   /** 'inactive' until a credential is bound. */
   status: 'ready' | 'inactive' | 'broken'
   /** Populated when status is 'broken' (missing impl/credential, type mismatch). */

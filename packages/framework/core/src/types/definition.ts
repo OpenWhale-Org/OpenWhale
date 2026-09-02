@@ -232,6 +232,13 @@ export interface MonitorDefinition {
   compiledPath?: string
   /** Key structure fields — derived from the monitor's keySchema at registration. */
   keyFields?: ParamFieldDef[]
+  /**
+   * The venue this monitor's keys live on, when it has exactly one — declared
+   * by the implementation behind the contract. Catalogue pickers need it:
+   * without a venue there is no market list to fetch. Absent on multi-venue
+   * monitors, whose key carries the venue as a field of its own.
+   */
+  venue?: string
   /** This monitor can reconstruct history on first subscribe (see BaseMonitor.backfill). */
   supportsBackfill?: boolean
   createdAt: string

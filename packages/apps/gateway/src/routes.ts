@@ -825,6 +825,7 @@ export function buildRouter(): Router {
         id: def.id,
         name: def.name,
         ...(def.description ? { description: def.description } : {}),
+        ...(def.venue ? { venue: def.venue } : {}),
         mode: status?.mode ?? 'unknown',
         activeKeys: status?.activeKeys ?? [],
         wildcardSubscribers: status?.wildcardSubscribers ?? 0,

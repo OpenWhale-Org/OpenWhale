@@ -41,6 +41,7 @@ import { buildParamsFromFields, defaultFieldValues, fieldValuesFromParams, type 
 import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { useDirtyFlag } from '@/components/unsaved'
+import { implVenueMap, pickerVenue } from '@/components/venue'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -1813,7 +1814,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   const [slotBindings, setSlotBindings] = useState<Record<string, string>>(initial?.credentials ?? {})
   const [credentialTypes, setCredentialTypes] = useState<Array<{ type: string; kinds: string[] }>>([])
   // Account entities — the binding targets for account slots (credential names accepted as legacy fallback)
-  const [accounts, setAccounts] = useState<Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; status: string }>>([])
+  const [accounts, setAccounts] = useState<Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; venue?: string; status: string }>>([])
   /** implementation id → venue pin, so a catalogue can ask the VENUE, not the credential type. */
   const [implVenues, setImplVenues] = useState<Record<string, string>>({})
   // Per-label LLM slot overrides: { [label]: { model?, credentialName? } }
@@ -1841,13 +1842,13 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       fetch('/api/strategies').then((r) => r.json() as Promise<StrategyDefinition[]>),
       fetch('/api/credentials').then((r) => r.json() as Promise<CredentialInfo[]>),
       fetch('/api/credential-types').then((r) => r.json() as Promise<Array<{ type: string; kinds: string[] }>>),
-      fetch('/api/accounts').then((r) => r.json() as Promise<{ accounts: Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; status: string }>; implementations?: Array<{ id: string; type?: string }> }>),
+      fetch('/api/accounts').then((r) => r.json() as Promise<{ accounts: Array<{ name: string; implementation: string; credential?: string; kind?: string; type?: string; venue?: string; status: string }>; implementations?: Array<{ id: string; venue?: string; type?: string }> }>),
     ]).then(([s, c, ct, a]) => {
       setStrategies(s)
       setCredentials(c)
       setCredentialTypes(ct)
       setAccounts(a.accounts ?? [])
-      setImplVenues(Object.fromEntries((a.implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : [])))
+      setImplVenues(implVenueMap(a.implementations))
       if (initial) {
         // Edit mode: the strategy is fixed; prefill fields from the saved params
         const strat = s.find((x) => x.id === initial.strategyId)
@@ -2023,10 +2024,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       // Instances from before Account entities bind by credential name — match either
       const account = accounts.find((a) => a.name === bound || a.credential === bound)
       if (!account) continue
-      // A venue-pinned implementation names the venue; otherwise (CEX) the
-      // credential type IS the venue. On-chain venues differ: a Boros account
-      // binds a pendle/boros-agent key, but the catalogue lives on 'boros'.
-      const venue = implVenues[account.implementation] ?? account.type
+      const venue = pickerVenue(account, implVenues)
       if (venue) out[slot.label] = venue
     }
     return out

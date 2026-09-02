@@ -39,6 +39,17 @@ export interface OwMonitorMeta {
   /** Credential requirement for instances (absent = credential-less). */
   credential?: { type: string; level: 'optional' | 'required' }
   /**
+   * The venue this monitor's keys live on, when it has exactly one.
+   *
+   * A catalogue picker needs (kind, venue) to list anything. Multi-venue
+   * monitors carry the venue IN the key and let the form read it from that
+   * field; a monitor pinned to one venue has no such field, and without this
+   * the dashboard has nothing to go on — the operator types symbols by hand.
+   * Declare it only when the pin is real: a wrong venue is a 404 at the
+   * catalogue, not a caught mistake.
+   */
+  venue?: string
+  /**
    * Top-level tuning params (Zod object, .meta() drives the form). Filled per
    * instance at creation, editable any time (an active one is rebuilt).
    */

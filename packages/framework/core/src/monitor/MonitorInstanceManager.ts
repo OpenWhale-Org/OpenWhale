@@ -655,7 +655,7 @@ export class MonitorInstanceManager {
 
   // ── Introspection ─────────────────────────────────────────────────────────
 
-  listImplementations(): Array<{ id: string; contract: string; owner: string; displayName?: string; description?: string; credential?: { type: string; level: 'optional' | 'required' } }> {
+  listImplementations(): Array<{ id: string; contract: string; owner: string; displayName?: string; description?: string; venue?: string; credential?: { type: string; level: 'optional' | 'required' } }> {
     const out = []
     for (const record of this.contracts.values()) {
       for (const rec of record.impls.values()) {
@@ -665,6 +665,7 @@ export class MonitorInstanceManager {
           owner: rec.owner,
           ...(rec.impl.displayName !== undefined ? { displayName: rec.impl.displayName } : {}),
           ...(rec.impl.description !== undefined ? { description: rec.impl.description } : {}),
+          ...(rec.impl.venue !== undefined ? { venue: rec.impl.venue } : {}),
           ...(rec.impl.credential !== undefined ? { credential: rec.impl.credential } : {}),
         })
       }

@@ -43,6 +43,12 @@ export interface MonitorImplementation {
    */
   credential?: { type: string; level: 'optional' | 'required' }
   /**
+   * The venue this implementation's keys live on, when it has exactly one.
+   * Reaches the dashboard on the contract's definition, where catalogue
+   * pickers read it. See OwMonitorMeta.venue.
+   */
+  venue?: string
+  /**
    * Top-level tuning parameters (throttles, poll intervals, thresholds).
    * Filled per INSTANCE on the dashboard at creation and editable at any
    * time — the runner is built FROM them, so editing an active instance

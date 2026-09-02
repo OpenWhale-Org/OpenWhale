@@ -109,6 +109,16 @@ symbol: z.string().min(1).meta({
 
 - `venueField` names the **sibling field** holding the venue. Omit it on STRATEGY params, where
   there is no venue field at all (rule 5) — the instance form supplies the bound account's venue.
+- A monitor that lives on **one venue** has no such sibling to name. Declare the pin on the
+  registration instead, and the picker resolves it without a venue field:
+
+  ```ts
+  { id: 'market-watch', contract: 'market-watch', venue: 'boros', create: (ctx) => new MarketWatchMonitor(ctx) }
+  // or on the class: @OwMonitor({ id: 'market-watch', venue: 'boros', … })
+  ```
+
+  Declare it only when the pin is real. It is not validated at registration — a wrong venue
+  surfaces as a 404 from the catalogue, which reads as "this venue lists nothing".
 - `marketType` narrows the list (`'swap'` for perps, `'spot'` for spot).
 - The field stays a plain string and free text always submits: an unlisted symbol, a venue with no
   catalogue, or an unreachable gateway all fall back to typing. The picker is an aid, not a
