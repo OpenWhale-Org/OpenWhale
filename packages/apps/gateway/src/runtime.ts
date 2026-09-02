@@ -14,6 +14,7 @@ import os from 'os'
 import { restorePlugins } from './plugins.js'
 import { notifyCredentialTypes } from './notify/credentialTypes.js'
 import { AlertService, setAlertService } from './notify/alerts.js'
+import { RetentionService, setRetentionService } from './maintenance/retention.js'
 
 let runtimeSingleton: OpenWhaleRuntime | undefined
 /** The same SQLite file backs auth — one database, one lifecycle. */
@@ -113,6 +114,14 @@ export async function ensureStarted(): Promise<OpenWhaleRuntime> {
         const alerts = new AlertService(getDatabase(), runtime, credentialStore)
         await alerts.initialize()
         setAlertService(alerts)
+      })
+      // Housekeeping for the monitor stores. Starts disabled in effect: the
+      // table is empty until an operator saves a policy, so the hourly sweep
+      // is a no-op on a fresh install.
+      .then(async () => {
+        const retention = new RetentionService(getDatabase(), runtime)
+        await retention.initialize()
+        setRetentionService(retention)
       })
       .catch((err) => {
         startPromise = undefined

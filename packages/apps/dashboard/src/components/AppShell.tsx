@@ -22,6 +22,7 @@ const routeLabels: Record<string, string> = {
   '/credentials': 'Credentials',
   '/monitor': 'Monitor',
   '/monitor-data': 'Explorer',
+  '/monitor-data/retention': 'Retention',
   '/executors': 'Executors',
   '/plugins': 'Plugins',
   '/compiler': 'Compiler',

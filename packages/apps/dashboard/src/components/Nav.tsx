@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
-type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts'
+type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts' | 'retention'
 
 const links: Array<{ href: string; label: string; auroraLabel?: string; group?: string; icon: IconName }> = [
   { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
@@ -12,6 +12,7 @@ const links: Array<{ href: string; label: string; auroraLabel?: string; group?: 
   { href: '/credentials', label: 'Credentials', group: 'SETTINGS', icon: 'credentials' },
   { href: '/monitor', label: 'Monitor', group: 'OBSERVE', icon: 'monitor' },
   { href: '/monitor-data', label: 'Explorer', group: 'OBSERVE', icon: 'explorer' },
+  { href: '/monitor-data/retention', label: 'Retention', group: 'OBSERVE', icon: 'retention' },
   { href: '/executors', label: 'Executors', group: 'AUTOMATE', icon: 'executors' },
   { href: '/plugins', label: 'Plugins', group: 'DEVELOP', icon: 'plugins' },
   { href: '/compiler', label: 'Compiler', group: 'DEVELOP', icon: 'compiler' },
@@ -40,6 +41,7 @@ function Icon({ name }: { name: IconName }) {
     case 'scripts': return <svg {...common}><path d="m4 7 5 5-5 5M12 18h8" /></svg>
     case 'assistant': return <svg {...common}><path d="M12 3 13.5 8.5 19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5Z" /><path d="M19 17l.7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7Z" /></svg>
     case 'alerts': return <svg {...common}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+    case 'retention': return <svg {...common}><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" /><path d="M12 11v3l2 1" /></svg>
     case 'users': return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.2a4 4 0 0 1 0 7.6" /></svg>
   }
 }
@@ -57,7 +59,16 @@ function NavLink({ href, label, icon, active }: { href: string; label: string; i
 
 export function Nav() {
   const pathname = usePathname()
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
+  /*
+   * Prefix matching, EXCEPT where another link owns the deeper path. Without
+   * the second clause /monitor-data lit up alongside /monitor-data/retention
+   * and both rows looked selected.
+   */
+  const isActive = (href: string) => {
+    if (pathname === href) return true
+    if (!pathname.startsWith(href + '/')) return false
+    return !links.some(l => l.href !== href && l.href.startsWith(href + '/') && (pathname === l.href || pathname.startsWith(l.href + '/')))
+  }
 
   return (
     <aside className="aurora-sidebar">

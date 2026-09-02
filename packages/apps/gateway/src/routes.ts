@@ -17,6 +17,7 @@ import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, rec
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
+import { getRetentionService } from './maintenance/retention.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
 import { installFromNpm, installFromGithub, installFromFile, uninstallPlugin, listInstalledPlugins, PluginConflictError, describeSource, checkPluginUpdates, updatePlugin, reloadUnloaded } from './plugins.js'
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
@@ -1083,6 +1084,78 @@ export function buildRouter(): Router {
       return
     }
     res.json({ records: tailRecords(filePath, limit) })
+  }))
+
+  // ── monitor retention ───────────────────────────────────────────────────────
+  //
+  // Pruning is opt-in per store: some monitor files ARE the historical record a
+  // strategy fits its baseline against, so nothing is trimmed until an operator
+  // names a target and a horizon. Every mutating call is explicit; the sweep
+  // that runs hourly only touches policies saved through here.
+
+  router.get('/api/monitor-retention', h(async (_req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    res.json({ policies: await svc.list() })
+  }))
+
+  router.post('/api/monitor-retention', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    try {
+      res.json({ policy: await svc.upsert((req.body ?? {}) as Record<string, never>) })
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  router.delete('/api/monitor-retention/:id', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    await svc.remove(String(req.params['id']))
+    res.json({ ok: true })
+  }))
+
+  /**
+   * What a horizon WOULD cost, without touching a byte. The editor calls this
+   * as the operator types, because "keep 7 days" means nothing until you can
+   * see it is about to drop 5.4GB from a store you meant to keep.
+   */
+  router.post('/api/monitor-retention/preview', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    const body = (req.body ?? {}) as { monitor?: string; keyPattern?: string; keepDays?: number }
+    const monitor = (body.monitor ?? '').trim()
+    const keyPattern = (body.keyPattern ?? '*').trim() || '*'
+    const keepDays = Number(body.keepDays)
+    if (!monitor || !Number.isFinite(keepDays) || keepDays <= 0) {
+      res.status(400).json({ error: 'monitor and a positive keepDays are required' })
+      return
+    }
+    const matched = svc.matches(monitor, keyPattern)
+    const summary = await svc.apply({ monitor, keyPattern, keepDays }, true)
+    res.json({
+      // Absolute paths stay server-side; the client identifies a store by
+      // (monitor, key) exactly as the Explorer does.
+      matched: matched.map(({ monitor: m, key, bytes, updatedAt }) => ({ monitor: m, key, bytes, updatedAt })),
+      summary,
+    })
+  }))
+
+  router.post('/api/monitor-retention/run', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    const id = (req.body as { id?: string } | undefined)?.id
+    try {
+      res.json(id ? { summaries: [await svc.runPolicy(id)] } : { summaries: await svc.sweep() })
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
   }))
 
   router.post('/api/monitor-data/open', h(async (req, res) => {
