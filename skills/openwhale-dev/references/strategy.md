@@ -135,6 +135,53 @@ past `quiesceTimeoutMs` (runtime option, default 15 s), is logged and teardown c
 instance that cannot be stopped would resume trading on the next boot. Do housekeeping here, not
 on the first evaluation behind a store flag — that spends the first trigger.
 
+## Presets — named configurations, or a live ranking
+
+`paramPresets` is a static list: "conservative", "aggressive", "paper". Each names the fields
+it sets; the Dashboard renders a dropdown and fills those fields, leaving every field editable.
+
+A strategy whose sensible starting points are **opportunities** — which pair, which market,
+right now — computes them instead (core ≥ 0.2.3):
+
+```ts
+override readonly presetSource = { title: 'Fixed-rate opportunities', description: 'Ranked by net APR after fees at $100k per leg; executable pairs first.', ttlMs: 60_000 }
+
+override async presets(ctx: PresetContext): Promise<ParamPreset[]> {
+  const boros = await ctx.adapters.resolve<BorosSession>('pendle/rates', 'boros')     // keyless cells only
+  const markets = await boros.fetchMarkets()
+  return rank(markets).map(o => ({
+    id: `${o.longMarket}|${o.shortMarket}`,
+    label: `${o.asset} ${o.longVenue} ↔ ${o.shortVenue}`,
+    base: { longMarket: o.longMarket, shortMarket: o.shortMarket, perpLongSymbol: o.perpLong, perpShortSymbol: o.perpShort },
+    card: {
+      title: o.asset, subtitle: `${o.longVenue} ↔ ${o.shortVenue}`,
+      headline: { label: 'net APR', value: pct(o.netApr), tone: o.netApr >= 0 ? 'positive' : 'negative' },
+      rows: [{ label: 'matures', value: `${o.days}d` }, { label: 'per leg', value: '$100k' }],
+      badges: o.executable ? [{ text: 'executable', tone: 'positive' }] : [],
+      group: o.executable ? 'Executable' : 'Not on this venue',
+    },
+  }))
+}
+```
+
+Rules:
+- `presets()` runs on a **probe** instance: no store, no accounts, no params of its own. It gets
+  keyless adapters, the slots the operator has bound so far (`ctx.accounts`, label → account
+  name) and the form's current values (`ctx.params`), which a scan may size to.
+- The runtime caches the result for `presetSource.ttlMs` (default 60 s) keyed by those inputs;
+  the dialog's Refresh bypasses it. Throw on a venue you cannot reach — an empty list reads as
+  "no opportunities", which is a different fact.
+- The **order is the ranking**. Cards with the same `group` sit under one heading, groups in
+  first-seen order. Static `paramPresets` are listed first, as a plain list.
+- A preset with a `card` renders as one: `title` / `subtitle` top left, the `headline` figure set
+  large top right, `rows` as label/value pairs, `badges` as pills. Tones are `positive |
+  negative | neutral | muted` — theme colours, so the card is right in both themes. `card.html`
+  replaces all of that with your own drawing in a sandboxed frame, as a `ParamIllustration` is.
+- The moment any preset carries a card, or the strategy has a `presetSource`, the Dashboard
+  offers a dialog instead of the dropdown. Choosing fills the named fields; nothing is locked.
+- The same scan usually wants to exist as a **Script** too (a report an operator runs without
+  opening the form). Put the computation in one module and call it from both.
+
 ## The API you have inside a strategy
 
 | Member | What it gives you |
@@ -153,6 +200,7 @@ on the first evaluation behind a store flag — that spends the first trigger.
 | `this.trace(step, data?)` | Record one decision step of the current run. The Dashboard shows the trace per run and it survives restarts; `GET /api/instances/{id}/runs` returns them. Call it at EVERY gate — `this.trace('rate-below-min', { rate, min })` before `return []` — so a run that emitted nothing still says which condition refused. No-op outside `run()` |
 | `this.rule(cond, instructions)` / `this.parallel(sets)` | `rule` returns the instructions only when `cond` holds (else `[]`); `parallel` flattens several instruction sets. Sugar for readable `evaluate` bodies |
 | `onActivate(ctx)` / `onDeactivate(ctx)` | Lifecycle hooks — see the section above |
+| `presetSource` / `presets(ctx)` | Live presets — see the section above |
 | `onExecutionResult(result, { instanceId })` | Optional override: called with the executor's recorded `ExecutionResult` for every instruction THIS instance emitted (success, failed or skipped), after the record is written — the place to note fill ids or a failed leg in `this.store`. `this.store` is the same per-instance store; `this.trace` is a no-op here unless a run happens to be active. Runs off the queue path: a throw is logged as a warning and never touches the execution record |
 | `availabilityCheckers` | `Readonly<Record<name, AvailabilityChecker>>` — pure functions over the venue's market list, named from a param's `.meta({ availability: { checker } })`. The built-in `availability: { source: 'market', kind? }` needs no checker: every value must be a listed market |
 

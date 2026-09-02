@@ -3,7 +3,7 @@ import type { StrategyInstance, StrategyInstanceView } from '../types/instance.j
 import type { ExecutionQueue, ExecutionResult } from '../types/executor.js'
 import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from '../types/runtime.js'
 import { PluginAlreadyLoadedError } from '../types/runtime.js'
-import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from '../types/definition.js'
+import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamPreset, PresetSource } from '../types/definition.js'
 import type { Trigger } from '../types/trigger.js'
 import type { PlotOption } from '../types/monitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
@@ -177,6 +177,8 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly accountSnapshots: AccountSnapshotStore
   /** Last snapshot failure per account — silent-failure killer for the Accounts page. */
   private readonly accountSnapshotErrors = new Map<string, string>()
+  /** strategyPresets() results, by strategy + bindings + params. */
+  private readonly presetCache = new Map<string, { presets: ParamPreset[]; computedAt: number }>()
   private accountSnapshotTimer: ReturnType<typeof setInterval> | undefined
   private readonly accountSnapshotIntervalMs: number
   private readonly accountSnapshotRetentionMs: number
@@ -393,6 +395,7 @@ export class OpenWhaleRuntime implements IRuntime {
       ...(definition.paramsFields || !probe.paramsFields?.length ? {} : { paramsFields: probe.paramsFields }),
       ...(definition.paramsIllustrations || !probe.paramsIllustrations?.length ? {} : { paramsIllustrations: probe.paramsIllustrations }),
       ...(definition.paramPresets || !probe.paramPresets?.length ? {} : { paramPresets: probe.paramPresets }),
+      ...(typeof probe.presets === 'function' ? { presetSource: { ...(probe.presetSource ?? {}) } } : {}),
     }
     this.strategyRegistry.register(complete, factory)
   }
@@ -1945,6 +1948,39 @@ export class OpenWhaleRuntime implements IRuntime {
    * Advisory by construction: a venue that publishes no catalogue yields no
    * verdicts rather than a wall of false negatives.
    */
+  /**
+   * A strategy's presets: the static list, then what `presets()` computes.
+   *
+   * Computed on a probe instance with keyless adapters and cached for the
+   * source's ttl (60 s by default), keyed by the bindings and params the
+   * form sent — the same scan is not run twice because two operators opened
+   * the dialog. `refresh` bypasses the cache; a throwing `presets()` is
+   * reported, not swallowed, because an empty list reads as "no
+   * opportunities" and that is a different fact.
+   */
+  async strategyPresets(
+    strategyId: string,
+    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean; signal?: AbortSignal } = {},
+  ): Promise<{ presets: ParamPreset[]; computedAt: number; source?: PresetSource }> {
+    const definition = this.strategyRegistry.getDefinition(strategyId)
+    if (!definition) throw new Error(`Strategy "${strategyId}" is not registered`)
+    const statics = definition.paramPresets ?? []
+    const factory = this.strategyRegistry.get(strategyId)
+    const probe = factory?.()
+    if (!probe || typeof probe.presets !== 'function') return { presets: statics, computedAt: Date.now() }
+    const source = definition.presetSource ?? {}
+    const accounts = opts.accounts ?? {}
+    const params = { base: opts.params?.base ?? {}, tunable: opts.params?.tunable ?? {} }
+    const key = `${strategyId}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
+    const ttl = source.ttlMs ?? 60_000
+    const cached = this.presetCache.get(key)
+    if (!opts.refresh && cached && Date.now() - cached.computedAt < ttl) return { presets: [...statics, ...cached.presets], computedAt: cached.computedAt, source }
+    const computed = await probe.presets({ adapters: this.adapters, accounts, params, ...(opts.signal ? { signal: opts.signal } : {}) })
+    const computedAt = Date.now()
+    this.presetCache.set(key, { presets: computed, computedAt })
+    return { presets: [...statics, ...computed], computedAt, source }
+  }
+
   async checkParamAvailability(
     strategyId: string,
     fieldName: string,

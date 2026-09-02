@@ -7,7 +7,7 @@ import type { ZodType, ZodRawShape } from 'zod'
 import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { AccountSlot, ReaderClass } from '../types/materialization.js'
-import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset } from '../types/definition.js'
+import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset, PresetContext, PresetSource } from '../types/definition.js'
 import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
@@ -183,6 +183,10 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
    * configurations worth naming ('conservative', 'paper').
    */
   readonly paramPresets?: ParamPreset[]
+  /** Heading, blurb and cache life of live presets — see IStrategy.presetSource. */
+  readonly presetSource?: PresetSource
+  /** Compute presets live — see IStrategy.presets(). Absent by default. */
+  presets?(ctx: PresetContext): Promise<ParamPreset[]>
 
   /**
    * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.

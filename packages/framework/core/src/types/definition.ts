@@ -298,6 +298,75 @@ export interface ParamPreset {
   base?: Record<string, unknown>
   /** Values for `tunableParamsSchema` fields. */
   tunable?: Record<string, unknown>
+  /**
+   * A card, for a preset that is a live opportunity rather than a named
+   * configuration. A list of presets with no cards is a dropdown; once any
+   * preset carries one, the Dashboard offers a picker dialog and lays the
+   * cards out in the order given — so the order IS the ranking.
+   */
+  card?: PresetCard
+}
+
+/** Colour of a figure or badge — theme tokens, never a literal colour. */
+export type PresetTone = 'positive' | 'negative' | 'neutral' | 'muted'
+
+export interface PresetFigure {
+  label: string
+  value: string
+  tone?: PresetTone
+}
+
+/**
+ * What a preset looks like in the picker.
+ *
+ * The declarative fields cover the opportunity card every scan produces —
+ * a name, the number it is ranked by, a few facts, a badge or two — and
+ * render in the Dashboard's own type and colours, in both themes. `html` is
+ * the escape hatch for a card that needs its own drawing: it is rendered
+ * verbatim in a sandboxed frame, like a ParamIllustration, and the
+ * declarative fields are then ignored.
+ */
+export interface PresetCard {
+  /** Big text, top left — the underlying, the market, the pair. */
+  title: string
+  /** One line under the title — the venues, the maturity. */
+  subtitle?: string
+  /** The number the card is ranked by, set large, top right. */
+  headline?: PresetFigure
+  /** Small label/value pairs below. */
+  rows?: PresetFigure[]
+  /** Short flags — "executable", "at ceiling". */
+  badges?: Array<{ text: string; tone?: PresetTone }>
+  /** Cards with the same group render under one heading, in the order given. */
+  group?: string
+  /** Custom body; sandboxed iframe. Height in px via `height` (default 160). */
+  html?: string
+  height?: number
+}
+
+/**
+ * Declares that a strategy computes presets live — see IStrategy.presets().
+ * Derived onto the StrategyDefinition at registration; its presence is what
+ * tells the Dashboard to ask for presets rather than read the static list.
+ */
+export interface PresetSource {
+  /** Heading of the picker dialog, e.g. "Fixed-rate opportunities". */
+  title?: string
+  /** One line under the heading — what the ranking is and how it was made. */
+  description?: string
+  /** How long a computed list is served before it is recomputed. Default 60 000. */
+  ttlMs?: number
+}
+
+/** What IStrategy.presets() is given to compute with. */
+export interface PresetContext {
+  /** Keyless adapter cells — market catalogues, public quotes, funding. */
+  adapters: import('./materialization.js').AdapterResolver
+  /** Slot label → bound account name, for the slots the operator has bound so far. */
+  accounts: Record<string, string>
+  /** The form's current values, parsed where they parse; a preset may build on them. */
+  params: { base: Record<string, unknown>; tunable: Record<string, unknown> }
+  signal?: AbortSignal
 }
 
 export interface StrategyDefinition {
@@ -330,6 +399,8 @@ export interface StrategyDefinition {
   paramsIllustrations?: ParamIllustration[]
   /** Named parameter starting points the form offers. Derived from the strategy class at registration. */
   paramPresets?: ParamPreset[]
+  /** Present when the strategy computes presets live — see IStrategy.presets(). */
+  presetSource?: PresetSource
   createdAt: string
   updatedAt: string
 }

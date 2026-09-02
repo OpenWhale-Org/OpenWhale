@@ -27,10 +27,11 @@ const WhaleField = dynamic(
 import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
 import Link from 'next/link'
 import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
-import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ParamPreset, ExecutionResult } from '@openwhaleorg/core'
+import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ParamPreset, PresetSource, ExecutionResult } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
+import { PresetPickerModal, presetsNeedDialog } from '@/components/PresetPicker'
 import { statusDot, statusTitle } from './status'
 import { InlineRename } from '@/components/InlineRename'
 import { Switch } from '@/components/Switch'
@@ -381,6 +382,8 @@ export function ParamFieldsForm({
   strategyId,
   illustrations,
   presets,
+  presetSource,
+  slotBindings,
 }: {
   fields: ParamFieldDef[]
   values: Record<string, string>
@@ -389,6 +392,10 @@ export function ParamFieldsForm({
   illustrations?: ParamIllustration[]
   /** Strategy-declared starting points: choosing one seeds the fields it names, the rest stay. */
   presets?: ParamPreset[]
+  /** Present when the strategy computes presets live — the picker becomes a dialog. */
+  presetSource?: PresetSource | undefined
+  /** Slot label → account name bound so far; a live scan sizes to them. */
+  slotBindings?: Record<string, string>
   /** Strategy whose availability checkers to call. */
   strategyId?: string
   /**
@@ -442,10 +449,11 @@ export function ParamFieldsForm({
   // The preset last applied — a label on the dropdown, not a mode: every
   // field stays editable afterwards, and edits do not clear it.
   const [presetId, setPresetId] = useState('')
-  const applyPreset = (id: string) => {
-    setPresetId(id)
-    const preset = presets?.find(p => p.id === id)
-    if (!preset) return
+  const [presetLabel, setPresetLabel] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const applyPresetObject = (preset: ParamPreset) => {
+    setPresetId(preset.id)
+    setPresetLabel(preset.label)
     const next = { ...values }
     for (const f of fields) {
       const v = (f.group === 'base' ? preset.base : preset.tunable)?.[f.name]
@@ -453,6 +461,12 @@ export function ParamFieldsForm({
     }
     onChange(next)
   }
+  const applyPreset = (id: string) => {
+    setPresetId(id)
+    const preset = presets?.find(p => p.id === id)
+    if (preset) applyPresetObject(preset)
+  }
+  const useDialog = presetsNeedDialog(presets, presetSource)
 
   // Verify chosen values against the venue whenever either changes. Advisory:
   // a failure to check leaves the field unannotated rather than blocking.
@@ -696,7 +710,29 @@ export function ParamFieldsForm({
 
   return (
     <div className="flex flex-col gap-3">
-      {presets && presets.length > 0 && (
+      {useDialog && strategyId ? (
+        <div className="flex flex-col gap-1.5" data-tour="field-preset">
+          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Preset</label>
+          <div className="flex items-center gap-3">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPickerOpen(true)}>
+              {presetSource?.title ? `Choose from ${presetSource.title}…` : 'Choose a preset…'}
+            </button>
+            {presetLabel && <span className="text-xs" style={{ color: 'var(--muted)' }}>applied: <span style={{ color: 'var(--foreground)' }}>{presetLabel}</span> — every field stays editable</span>}
+          </div>
+          {pickerOpen && (
+            <PresetPickerModal
+              strategyId={strategyId}
+              source={presetSource}
+              presets={presets ?? []}
+              accounts={slotBindings ?? {}}
+              params={buildParamsFromFields(fields, values)}
+              current={presetId}
+              onPick={(p) => { applyPresetObject(p); setPickerOpen(false) }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </div>
+      ) : presets && presets.length > 0 && (
         <div className="flex flex-col gap-1.5" data-tour="field-preset">
           <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Preset</label>
           <Select
@@ -2270,6 +2306,8 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                   slotVenues={slotVenues}
                   illustrations={strategy.paramsIllustrations}
                   presets={strategy.paramPresets}
+                  presetSource={strategy.presetSource}
+                  slotBindings={slotBindings}
                 />
               )}
             </div>

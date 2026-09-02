@@ -807,6 +807,26 @@ export function buildRouter(): Router {
     }
   }))
 
+  /**
+   * A strategy's presets, live. The body carries what the form knows — the
+   * slots bound so far and the current values — so a scan can size to them;
+   * `refresh` skips the runtime's cache. Errors are the strategy's own words:
+   * a scan that could not reach its venue must not read as "no opportunities".
+   */
+  router.post('/api/strategies/:id/presets', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean }
+    try {
+      res.json(await runtime.strategyPresets(req.params['id']!, {
+        ...(body.accounts ? { accounts: body.accounts } : {}),
+        ...(body.params ? { params: body.params } : {}),
+        refresh: body.refresh === true,
+      }))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   // ── monitors ────────────────────────────────────────────────────────────────
 
   router.get('/api/monitor', h(async (_req, res) => {

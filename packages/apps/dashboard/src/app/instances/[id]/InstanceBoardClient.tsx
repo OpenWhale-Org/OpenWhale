@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
+import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset, PresetSource } from '@openwhaleorg/core'
 import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta } from '../InstancesClient'
 import { buildParamsFromFields, fieldValuesFromParams, sameValues, type ParamValues } from '@/components/paramsIo'
 import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
@@ -466,6 +466,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
      picture of what a knob does is worth the most. */
   const [illustrations, setIllustrations] = useState<ParamIllustration[] | undefined>(undefined)
   const [presets, setPresets] = useState<ParamPreset[] | undefined>(undefined)
+  const [presetSource, setPresetSource] = useState<PresetSource | undefined>(undefined)
   const history = useHistory<ParamValues>({})
   const values = history.state
   const setValues = history.set
@@ -493,6 +494,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       setFields(f)
       setIllustrations(def?.paramsIllustrations)
       setPresets(def?.paramPresets)
+      setPresetSource(def?.presetSource)
       const seed = fieldValuesFromParams(f, instance.params)
       history.reset(seed)
       setSaved(seed)
@@ -626,6 +628,8 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
               slotVenues={slotVenues}
               {...(illustrations ? { illustrations } : {})}
               {...(presets ? { presets } : {})}
+              presetSource={presetSource}
+              slotBindings={instance.credentials ?? {}}
             />
           )}
           <div className="flex justify-end items-center gap-3 mt-3">

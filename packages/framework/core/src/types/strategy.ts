@@ -8,7 +8,7 @@ import type { Trigger, MonitorSource } from './trigger.js'
 import type { StrategyParams } from './instance.js'
 import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
-import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset } from './definition.js'
+import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset, PresetContext, PresetSource } from './definition.js'
 import type { IPortfolioJournal, PortfolioMode } from './portfolio.js'
 import type { PortfolioUpdate } from './portfolio.js'
 
@@ -197,6 +197,16 @@ export interface IStrategy {
   readonly paramsIllustrations?: ParamIllustration[]
   /** Named parameter starting points the form offers — see ParamPreset. */
   readonly paramPresets?: ParamPreset[]
+  /** Heading, blurb and cache life of the live presets, when `presets()` is implemented. */
+  readonly presetSource?: PresetSource
+  /**
+   * Compute presets live — the opportunities a scan would rank, each one a
+   * card with the params that take it. Called on a probe instance (no store,
+   * no accounts materialized) with keyless adapters; the result is cached
+   * by the runtime for `presetSource.ttlMs`. Static `paramPresets`, if any,
+   * are listed first.
+   */
+  presets?(ctx: PresetContext): Promise<ParamPreset[]>
   /**
    * Availability checkers this strategy provides, keyed by the name a field's
    * `meta({ availability: { checker } })` refers to. Pure functions over the

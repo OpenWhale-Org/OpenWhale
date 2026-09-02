@@ -61,6 +61,11 @@ the discipline that risk limits live in code even when a model produces the sign
 
 ## Since 2026-08-26 (newest first)
 
+- **Live presets with cards** (core ≥ 0.2.3). A strategy may compute its presets — `presets(ctx)`
+  with keyless adapters, the bound slots and the form's current values — and give each a `card`
+  (title, headline figure, rows, badges, tone; or `html` for a custom drawing). The Dashboard
+  then offers a picker dialog laid out in the order returned; static `paramPresets` without cards
+  stay a dropdown. Results are cached by `presetSource.ttlMs`. (`references/strategy.md` §Presets)
 - **Lifecycle hooks — `onActivate` / `onDeactivate`** (core ≥ 0.2.3). A strategy gets a moment of
   its own at each end: `onActivate(ctx)` after every setter and before the first trigger (take a
   baseline, set leverage, settle a quote left from the last activation); `onDeactivate(ctx)` after
