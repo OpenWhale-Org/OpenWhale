@@ -28,6 +28,13 @@ export interface RuntimeOptions {
   database?: DatabaseAdapter
   /** Equity snapshotter tuning (Accounts page curves). Defaults: 5min interval, 30d retention. */
   accountSnapshots?: { intervalMs?: number; retentionMs?: number }
+  /**
+   * How long a deactivation waits for the strategy's own teardown — the run in
+   * flight, then onDeactivate and what it fires. Past it, teardown proceeds:
+   * an instance that cannot be stopped resumes trading on the next boot. On
+   * shutdown one budget covers every instance. Default 15 s.
+   */
+  quiesceTimeoutMs?: number
 }
 
 /** Summary of a loaded plugin: its namespace and the registry ids it contributed. */

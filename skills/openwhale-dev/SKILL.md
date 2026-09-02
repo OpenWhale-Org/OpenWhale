@@ -5,7 +5,7 @@ description: Write runnable OpenWhale components — strategies, monitors, execu
 
 # OpenWhale Plugin Development
 
-> **Calibrated against `@openwhaleorg/core` v0.2.2 on main (re-verified 2026-08-29: every template signature
+> **Calibrated against `@openwhaleorg/core` v0.2.3 on main (re-verified 2026-09-03: every template signature
 > checked against `packages/framework/core/src`).** If the installed core is newer, verify signatures against
 > the framework source before trusting a template verbatim.
 
@@ -60,6 +60,15 @@ before writing: they show the account-slot / `accountVenue` idiom, `store`-based
 the discipline that risk limits live in code even when a model produces the signal.
 
 ## Since 2026-08-26 (newest first)
+
+- **Lifecycle hooks — `onActivate` / `onDeactivate`** (core ≥ 0.2.3). A strategy gets a moment of
+  its own at each end: `onActivate(ctx)` after every setter and before the first trigger (take a
+  baseline, set leverage, settle a quote left from the last activation); `onDeactivate(ctx)` after
+  the run in flight has finished and BEFORE executor slots are removed (cancel what rests).
+  Both may return instructions, which are fired inline and awaited — never queued. `ctx.reason`
+  names the transition: `activate | boot | restart | rollback | stop | delete | shutdown`. A
+  throwing `onActivate` fails the activation; a throwing `onDeactivate` is logged and teardown
+  continues. Both show on the instance board as runs `lifecycle:<reason>`. (`references/strategy.md`)
 
 - **The framework version is settled at install.** A plugin's `peerDependencies` range for
   `@openwhaleorg/*` is checked against the running engine before anything is staged; a mismatch is

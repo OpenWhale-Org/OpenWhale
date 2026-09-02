@@ -44,6 +44,10 @@ interface InstanceEntry {
   subscriptions: MonitorSource[]
   /** Framework switches. Settable while live, so dry run is a usable kill switch. */
   options?: InstanceOptions
+  /** Set on the way out: no new run starts, so the deactivate hook never races evaluate(). */
+  suspended?: boolean
+  /** Runs started and not yet finished — what drain() waits for. */
+  inFlight: Set<Promise<void>>
 }
 
 /**
@@ -160,6 +164,7 @@ export class TriggerManager {
       instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel, executorLabelToKey,
       subscriptions: (strategy.subscriptions?.(params) ?? [])
         .map(source => this.resolveSourceKey(source, monitorLabelToKey)),
+      inFlight: new Set(),
     }
 
     // Re-registration (e.g. re-activate with new params) must first release the
@@ -232,6 +237,58 @@ export class TriggerManager {
 
   getStrategy(instanceId: string): IStrategy | undefined {
     return this.instances.get(instanceId)?.strategy
+  }
+
+  /** No run may start for this instance from now on. Idempotent. */
+  suspend(instanceId: string): void {
+    const entry = this.instances.get(instanceId)
+    if (entry) entry.suspended = true
+  }
+
+  /**
+   * Wait for the instance's runs in flight, up to `timeoutMs`.
+   *
+   * Returns false when a run was still going at the deadline — the caller
+   * proceeds anyway and says so, since a stop that waits forever on a strategy
+   * awaiting a venue is not a stop.
+   */
+  async drain(instanceId: string, timeoutMs: number): Promise<boolean> {
+    const entry = this.instances.get(instanceId)
+    if (!entry || entry.inFlight.size === 0) return true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })
+    const done = Promise.all(Array.from(entry.inFlight)).then(() => true as const)
+    try {
+      return await Promise.race([done, timeout])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Instructions leave a strategy with executor LABELS and no instance id; this
+   * resolves both, exactly as checkAndFire does on the way to the queue, and
+   * says whether the instance is in dry run so the caller records instead of
+   * firing. Used for what lifecycle hooks return.
+   */
+  prepareInstructions(instanceId: string, instructions: ExecutionInstruction[]): { instructions: ExecutionInstruction[]; dryRun: boolean } | undefined {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return undefined
+    return { instructions: this.tag(entry, instructions), dryRun: entry.options?.dryRun === true }
+  }
+
+  /** Record held instructions as dry-run results, the same way a run's are. */
+  recordDryRun(instructions: ExecutionInstruction[]): void {
+    const at = new Date()
+    this.dryRunSink?.(instructions.map(instruction => ({ instruction, status: 'dry-run' as const, executedAt: at })))
+  }
+
+  private tag(entry: InstanceEntry, instructions: ExecutionInstruction[]): ExecutionInstruction[] {
+    return instructions.map(i => ({
+      ...i,
+      instanceId: entry.instanceId,
+      executorId: entry.executorLabelToKey.get(i.executorId) ?? i.executorId,
+    }))
   }
 
   /**
@@ -494,9 +551,31 @@ export class TriggerManager {
       now: number,
   ): Promise<void> {
     const { instanceId, strategy } = entry
+    if (entry.suspended) return
     if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
     const monitorData = triggerState.collectMonitorData(trigger.conditions)
     triggerState.reset()
+    // Tracked so a deactivation can wait for this run rather than tear the
+    // instance down underneath it.
+    let release: () => void = () => {}
+    const running = new Promise<void>(resolve => { release = resolve })
+    entry.inFlight.add(running)
+    try {
+      await this.fireRun(entry, trigger, queue, now, monitorData)
+    } finally {
+      entry.inFlight.delete(running)
+      release()
+    }
+  }
+
+  private async fireRun(
+      entry: InstanceEntry,
+      trigger: Trigger,
+      queue: ExecutionQueue,
+      now: number,
+      monitorData: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    const { instanceId, strategy } = entry
     const context: StrategyContext = {
       instanceId,
       triggerId: trigger.id,
@@ -517,11 +596,7 @@ export class TriggerManager {
     }
     // Instructions leave the strategy with executor LABELS; resolve them to
     // registry keys here — the only point where instructions enter the queue.
-    const tagged = instructions.map(i => ({
-      ...i,
-      instanceId,
-      executorId: entry.executorLabelToKey.get(i.executorId) ?? i.executorId,
-    }))
+    const tagged = this.tag(entry, instructions)
     /* Dry run holds the instructions HERE, at the one point they would enter
        the queue, rather than asking each executor to behave. An executor that
        forgets to check, or a strategy whose own dryRun param only covers the
@@ -529,8 +604,7 @@ export class TriggerManager {
        a gate that is upstream of every executor. */
     const dryRun = entry.options?.dryRun === true
     if (dryRun) {
-      const at = new Date()
-      this.dryRunSink?.(tagged.map(instruction => ({ instruction, status: 'dry-run' as const, executedAt: at })))
+      this.recordDryRun(tagged)
       log.info({ instanceId, triggerId: trigger.id, held: tagged.length }, 'Dry run — instructions recorded, none queued')
     } else {
       await queue.pushBatch(tagged)

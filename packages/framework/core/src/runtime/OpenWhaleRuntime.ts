@@ -8,7 +8,7 @@ import type { Trigger } from '../types/trigger.js'
 import type { PlotOption } from '../types/monitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
-import type { IStrategy } from '../types/strategy.js'
+import type { LifecycleReason, IStrategy } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AdapterResolver, CredentialTypeDefinition, CredentialTypeInfo, NamespacedKind, PublicSessionAccessor } from '../types/materialization.js'
@@ -167,6 +167,8 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly sessions = new Map<string, { session: unknown; instances: Set<string> }>()
   /** The adapter cell table + resolver — the single gateway to adapter instances. */
   private readonly adapterRegistry: AdapterRegistry
+  /** Budget for a deactivation's own teardown — see RuntimeOptions.quiesceTimeoutMs. */
+  private readonly quiesceTimeoutMs: number
   /** Registered account implementations, keyed by qualified id '<plugin>/<id>'. */
   private readonly accountImpls = new Map<string, { impl: AccountImplementation; owner: string }>()
   /** Persisted account entities (DB when available, memory otherwise). */
@@ -205,6 +207,7 @@ export class OpenWhaleRuntime implements IRuntime {
   private running = false
 
   constructor(options?: RuntimeOptions) {
+    this.quiesceTimeoutMs = options?.quiesceTimeoutMs ?? 15_000
     this.dataDir = getDataDir(options?.dataDir)
     this.queue = options?.queue ?? new MemoryExecutionQueue()
     this.monitorRegistry = options?.monitorRegistry ?? createMonitorRegistry()
@@ -1329,7 +1332,7 @@ export class OpenWhaleRuntime implements IRuntime {
     if (existing) {
       const strategies = new Set(existing.strategies)
       const live = Array.from(this.instances.values()).filter(i => strategies.has(i.strategyId)).map(i => i.id)
-      for (const id of live) await this.releaseInstance(id)
+      for (const id of live) await this.releaseInstance(id, { reason: 'restart' })
       // Nothing of the plugin's is live now, so the ordinary guard is satisfied
       await this.unloadPlugin(ns)
     }
@@ -1353,7 +1356,7 @@ export class OpenWhaleRuntime implements IRuntime {
         continue
       }
       try {
-        await this.activateInstance(row, { persist: false })
+        await this.activateInstance(row, { persist: false, reason: 'restart' })
         resumed.push(row.id)
       } catch (err) {
         orphaned.push(row.id)
@@ -1522,7 +1525,7 @@ export class OpenWhaleRuntime implements IRuntime {
       // they resume only through an explicit activateById
       if (!instance.enabled) continue
       try {
-        await this.activateInstance(instance, { persist: false })
+        await this.activateInstance(instance, { persist: false, reason: 'boot' })
       } catch (err) {
         log.error({ instanceId: instance.id, strategyId: instance.strategyId, err }, 'Failed to restore persisted instance — skipping')
       }
@@ -1555,8 +1558,11 @@ export class OpenWhaleRuntime implements IRuntime {
     await this.queue.stop()
     // Release every instance so a later start() re-activates from persistence
     // with fresh accounts, instead of reusing entries whose accounts are closed.
+    // One quiesce budget across every instance: a shutdown that waits the full
+    // budget per instance is a shutdown nobody waits for.
+    const deadline = Date.now() + this.quiesceTimeoutMs
     for (const instanceId of Array.from(this.instances.keys())) {
-      await this.releaseInstance(instanceId, { closeAccounts: false })
+      await this.releaseInstance(instanceId, { closeAccounts: false, reason: 'shutdown', deadline })
     }
     for (const [key, entry] of this.sessions) {
       await this.closeSessionSafe(key, entry.session)
@@ -1607,7 +1613,7 @@ export class OpenWhaleRuntime implements IRuntime {
    * remove for good with deleteInstance.
    */
   async deactivate(instanceId: string): Promise<void> {
-    await this.releaseInstance(instanceId)
+    await this.releaseInstance(instanceId, { reason: 'stop' })
     const persisted = await this.instanceStore.load(instanceId)
     if (persisted) {
       persisted.enabled = false
@@ -1618,7 +1624,7 @@ export class OpenWhaleRuntime implements IRuntime {
 
   /** Stop (if active) and remove the persisted row. */
   async deleteInstance(instanceId: string): Promise<void> {
-    await this.releaseInstance(instanceId)
+    await this.releaseInstance(instanceId, { reason: 'delete' })
     await this.instanceStore.delete(instanceId)
   }
 
@@ -1699,7 +1705,7 @@ export class OpenWhaleRuntime implements IRuntime {
     // accounts open, so there is no window where the instance is torn down
     // waiting on fresh venue connections — and it persists only on success.
     try {
-      await this.activateInstance(persisted, { persist: true })
+      await this.activateInstance(persisted, { persist: true, reason: 'restart' })
       return persisted
     } catch (err) {
       // The edit is rejected at activation — bad params, an unbound slot, a
@@ -1710,7 +1716,7 @@ export class OpenWhaleRuntime implements IRuntime {
       let restored = false
       if (previous) {
         try {
-          await this.activateInstance(previous, { persist: true })
+          await this.activateInstance(previous, { persist: true, reason: 'rollback' })
           restored = true
         } catch (rollbackErr) {
           log.error({ instanceId, err: rollbackErr }, 'Rollback failed — instance is STOPPED')
@@ -1798,10 +1804,22 @@ export class OpenWhaleRuntime implements IRuntime {
    */
   private async releaseInstance(
     instanceId: string,
-    { closeAccounts = true }: { closeAccounts?: boolean } = {},
+    { closeAccounts = true, reason = 'stop', deadline }: { closeAccounts?: boolean; reason?: LifecycleReason; deadline?: number } = {},
   ): Promise<void> {
     const instance = this.instances.get(instanceId)
     const executorKeys = this.triggerManager.getExecutorKeys(instanceId)
+
+    /* The strategy's own moment at the end, before anything is torn down: no
+       new run may start, the run in flight finishes, then the hook runs while
+       executor slots are still materialized — a quote cancelled here is
+       cancelled by the slots removed a few lines down. Bounded, and never
+       fatal: an instance that cannot be deactivated resumes trading on the
+       next boot, which is worse than a quote left resting. */
+    const until = deadline ?? Date.now() + this.quiesceTimeoutMs
+    this.triggerManager.suspend(instanceId)
+    const drained = await this.triggerManager.drain(instanceId, Math.max(0, until - Date.now()))
+    if (!drained) log.warn({ instanceId, reason }, 'A run was still in flight at the quiesce deadline — tearing down anyway')
+    await this.runLifecycle(instanceId, 'onDeactivate', reason, until)
 
     this.triggerManager.unregisterInstance(instanceId)
     this.instances.delete(instanceId)
@@ -1818,6 +1836,55 @@ export class OpenWhaleRuntime implements IRuntime {
       if (entry.instances.size > 0 || !closeAccounts) continue
       this.sessions.delete(key)
       await this.closeSessionSafe(key, entry.session)
+    }
+  }
+
+  /**
+   * Run a lifecycle hook and fire what it returns, inline and awaited.
+   *
+   * Inline rather than queued: what a hook emits has to be finished before the
+   * lifecycle step completes — leverage set before the first clip, a quote
+   * cancelled before the slots that could cancel it are gone. Dry run holds
+   * them and records them, as it does a run's. `onActivate` failures propagate
+   * (activation fails); `onDeactivate` failures are logged and teardown goes
+   * on — see releaseInstance.
+   */
+  private async runLifecycle(instanceId: string, hook: 'onActivate' | 'onDeactivate', reason: LifecycleReason, until: number): Promise<void> {
+    const strategy = this.triggerManager.getStrategy(instanceId)
+    const fn = strategy?.[hook]
+    if (!strategy || !fn) return
+    const ctx = { instanceId, reason }
+    const work = () => fn.call(strategy, ctx)
+    const budget = Math.max(0, until - Date.now())
+    const attempt = async () => {
+      const emitted = strategy.lifecycle ? await strategy.lifecycle(reason, work) : ((await work()) ?? [])
+      if (emitted.length === 0) return
+      const prepared = this.triggerManager.prepareInstructions(instanceId, emitted)
+      if (!prepared) return
+      if (prepared.dryRun) { this.triggerManager.recordDryRun(prepared.instructions); return }
+      for (const instruction of prepared.instructions) {
+        const executor = this.executorRegistry.get(instruction.executorId)
+        if (!executor) {
+          log.warn({ instanceId, hook, executorId: instruction.executorId }, 'Lifecycle instruction names an executor that is not registered')
+          continue
+        }
+        await executor.fire(instruction)
+      }
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), budget) })
+    try {
+      const outcome = await Promise.race([attempt().then(() => 'done' as const), timeout])
+      if (outcome === 'timeout') {
+        const message = `${hook} did not finish within the quiesce budget (${budget}ms)`
+        if (hook === 'onActivate') throw new Error(message)
+        log.warn({ instanceId, reason }, message)
+      }
+    } catch (err) {
+      if (hook === 'onActivate') throw err
+      log.error({ instanceId, reason, err }, 'onDeactivate failed — continuing teardown')
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 
@@ -1954,7 +2021,7 @@ export class OpenWhaleRuntime implements IRuntime {
    * persist=true  → throw if strategy missing, save to instanceStore (activate path)
    * persist=false → skip if strategy missing, no save (start/restore path)
    */
-  private async activateInstance(instance: StrategyInstance, { persist }: { persist: boolean }): Promise<void> {
+  private async activateInstance(instance: StrategyInstance, { persist, reason = 'activate' }: { persist: boolean; reason?: LifecycleReason }): Promise<void> {
     const strategyFactory = this.strategyRegistry.get(instance.strategyId)
     if (!strategyFactory) {
       if (persist) throw new Error(`Strategy not found: ${instance.strategyId}`)
@@ -1964,7 +2031,7 @@ export class OpenWhaleRuntime implements IRuntime {
     // Re-activation: release the previous registration first so cron tasks,
     // subscriptions, and executor accounts don't accumulate. Accounts are kept
     // open — ensureAccounts() below reuses them from the registry.
-    if (this.instances.has(instance.id)) await this.releaseInstance(instance.id, { closeAccounts: false })
+    if (this.instances.has(instance.id)) await this.releaseInstance(instance.id, { closeAccounts: false, reason: reason === 'rollback' ? 'rollback' : 'restart' })
 
     const strategy = strategyFactory()
     const parsedParams = this.parseParams(strategy, instance)
@@ -2003,6 +2070,16 @@ export class OpenWhaleRuntime implements IRuntime {
 
     // Materialize each declared executor's credential slots (sessions / raw)
     await this.materializeExecutorSlots(instance, strategy, executorLabelToKey)
+
+    /* The strategy's own moment at the start: everything is wired, nothing
+       has fired. A hook that throws un-registers what was just registered,
+       so a half-activated instance is not left behind to trade. */
+    try {
+      await this.runLifecycle(instance.id, 'onActivate', reason, Date.now() + this.quiesceTimeoutMs)
+    } catch (err) {
+      await this.releaseInstance(instance.id, { closeAccounts: false, reason: 'stop' })
+      throw err
+    }
 
     if (persist) await this.instanceStore.save(instance)
   }

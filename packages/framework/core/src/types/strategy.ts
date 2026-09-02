@@ -134,6 +134,14 @@ export interface AccountSlotMeta {
   kind: string
 }
 
+/** Why a lifecycle hook is running — the same word the runtime uses for the transition. */
+export type LifecycleReason = 'activate' | 'boot' | 'restart' | 'rollback' | 'stop' | 'delete' | 'shutdown'
+
+export interface LifecycleContext {
+  instanceId: string
+  reason: LifecycleReason
+}
+
 /** Trace of one finished run — what the strategy saw, decided, and emitted. */
 export interface StrategyRunTrace {
   /**
@@ -226,6 +234,29 @@ export interface IStrategy {
    * happens to be active.
    */
   onExecutionResult?(result: ExecutionResult, ctx: { instanceId: string }): Promise<void> | void
+  /**
+   * The strategy's own moment at the start: every setter has run, triggers
+   * are registered, nothing has fired yet. Baselines, leverage, a leftover
+   * quote from the last activation — housekeeping that would otherwise spend
+   * the first trigger. Returned instructions are fired inline and awaited
+   * before the first trigger may fire. A throw fails the activation.
+   */
+  onActivate?(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void
+  /**
+   * The strategy's own moment at the end: no run is in flight and no new one
+   * can start, executor slots are still materialized. Returned instructions
+   * are fired inline and awaited — a resting quote cancelled here is cancelled
+   * by the slots that are about to be removed. A throw or a failed instruction
+   * is logged; teardown continues, because an instance that cannot be
+   * deactivated would resume trading on the next boot.
+   */
+  onDeactivate?(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void
+  /**
+   * Run a lifecycle hook under the strategy's trace machinery, so the
+   * instance board shows what activation and deactivation did. Provided by
+   * BaseStrategy; the runtime calls the hook directly when absent.
+   */
+  lifecycle?(reason: LifecycleReason, work: () => Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void): Promise<ExecutionInstruction[]>
   getMetrics(): StrategyMetrics
   setMonitorReader(label: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void

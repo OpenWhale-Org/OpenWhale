@@ -98,6 +98,43 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 }
 ```
 
+## Lifecycle hooks
+
+Two optional overrides, both traced like a run (`lifecycle:<reason>` on the instance board):
+
+```ts
+override async onActivate(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {
+  // After every setter, triggers registered, nothing fired yet.
+  if (!(await this.store.has('baseline'))) await this.store.set('baseline', await this.snapshot())
+  this.trace('leverage', { leverage: 3 })
+  return [this.instruction('trade', 'setLeverage', { symbol, leverage: 3 }, ['main'])]   // fired inline, awaited
+}
+
+override async onDeactivate(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {
+  // No run in flight, no new one can start, executor slots still materialized.
+  const quote = await this.store.get<RestingQuote>('quote')
+  if (!quote || ctx.reason === 'restart') return          // keep it across a restart if you like
+  return [this.instruction('trade', 'cancelOrder', { orderId: quote.orderId, symbol: quote.symbol }, ['main'])]
+}
+```
+
+| `ctx.reason` | when |
+|---|---|
+| `activate` | operator activates a stopped instance |
+| `boot` | the runtime restores persisted active instances at start |
+| `restart` | `updateInstance(…, { restart: true })` — deactivate, then activate the new object |
+| `rollback` | the restart's activation failed; the previous configuration is reactivated |
+| `stop` / `delete` | operator deactivates / deletes |
+| `shutdown` | `runtime.stop()` — one quiesce budget across every instance |
+
+Rules the runtime enforces: returned instructions pass through label resolution and the dry-run
+gate exactly as a run's do, and are **fired inline and awaited** — leverage is set before the
+first clip, a quote is cancelled by the slots that are about to be removed. `onActivate` throwing
+fails the activation and un-registers what was registered. `onDeactivate` throwing, or running
+past `quiesceTimeoutMs` (runtime option, default 15 s), is logged and teardown continues: an
+instance that cannot be stopped would resume trading on the next boot. Do housekeeping here, not
+on the first evaluation behind a store flag — that spends the first trigger.
+
 ## The API you have inside a strategy
 
 | Member | What it gives you |
@@ -115,6 +152,7 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 | `this.addMonitorSource(label, key, { trigger? })` | Start collecting a monitor key discovered at RUNTIME (e.g. an auto-detected pair's feed); `trigger: true` also wakes `evaluate` on its pushes. Returns false on runtimes without dynamic-source support; idempotence is your job |
 | `this.trace(step, data?)` | Record one decision step of the current run. The Dashboard shows the trace per run and it survives restarts; `GET /api/instances/{id}/runs` returns them. Call it at EVERY gate — `this.trace('rate-below-min', { rate, min })` before `return []` — so a run that emitted nothing still says which condition refused. No-op outside `run()` |
 | `this.rule(cond, instructions)` / `this.parallel(sets)` | `rule` returns the instructions only when `cond` holds (else `[]`); `parallel` flattens several instruction sets. Sugar for readable `evaluate` bodies |
+| `onActivate(ctx)` / `onDeactivate(ctx)` | Lifecycle hooks — see the section above |
 | `onExecutionResult(result, { instanceId })` | Optional override: called with the executor's recorded `ExecutionResult` for every instruction THIS instance emitted (success, failed or skipped), after the record is written — the place to note fill ids or a failed leg in `this.store`. `this.store` is the same per-instance store; `this.trace` is a no-op here unless a run happens to be active. Runs off the queue path: a throw is logged as a warning and never touches the execution record |
 | `availabilityCheckers` | `Readonly<Record<name, AvailabilityChecker>>` — pure functions over the venue's market list, named from a param's `.meta({ availability: { checker } })`. The built-in `availability: { source: 'market', kind? }` needs no checker: every value must be a listed market |
 

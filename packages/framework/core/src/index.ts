@@ -43,6 +43,8 @@ export type {
   CustomProviderConfig,
   IStrategy,
   StrategyRunTrace,
+  LifecycleReason,
+  LifecycleContext,
   StrategyPortfolioSnapshot,
   AccountSlotMeta,
   ScriptDefinition,

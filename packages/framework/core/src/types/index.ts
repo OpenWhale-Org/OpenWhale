@@ -22,6 +22,8 @@ export type {
   CustomProviderConfig,
   IStrategy,
   StrategyRunTrace,
+  LifecycleReason,
+  LifecycleContext,
   StrategyPortfolioSnapshot,
   MonitorDeclaration,
   ExecutorDeclaration,

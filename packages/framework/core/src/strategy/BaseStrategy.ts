@@ -1,5 +1,5 @@
 import type { ExecutionInstruction, ExecutionResult } from '../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace, DynamicSourceHooks } from '../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace, DynamicSourceHooks, LifecycleReason, LifecycleContext } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
@@ -551,18 +551,66 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     this.metrics.runsTotal++
     this.metrics.lastRunAt = Date.now()
     this.stepCache.clear()
+    return this.traced(context.triggerId, async () => {
+      this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
+      try {
+        const instructions = await this.evaluate(context)
+        this.metrics.instructionsEmitted += instructions.length
+        this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
+        return instructions
+      } catch (err) {
+        this.metrics.errors++
+        this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
+        throw err
+      }
+    })
+  }
+
+  /**
+   * The strategy's own moment at the start — after every setter, before the
+   * first trigger. Override to take a baseline, set leverage, settle a quote
+   * left over from the last activation. Returned instructions are fired
+   * inline and awaited; a throw fails the activation.
+   */
+  async onActivate(_ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {}
+
+  /**
+   * The strategy's own moment at the end — no run in flight, executor slots
+   * still materialized. Override to cancel what rests. A throw is logged and
+   * teardown continues.
+   */
+  async onDeactivate(_ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {}
+
+  /**
+   * A lifecycle hook, traced like a run.
+   *
+   * What activation and deactivation did is evidence of the same kind as what
+   * a run did — the cancel that went out at stop, the baseline taken at start
+   * — so it lands in the same run list, under `lifecycle:<reason>`.
+   */
+  async lifecycle(reason: LifecycleReason, work: () => Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void): Promise<ExecutionInstruction[]> {
+    return this.traced(`lifecycle:${reason}`, async () => (await work()) ?? [])
+  }
+
+  /**
+   * One run's worth of tracing around `work`: a scope for the log lines it
+   * causes, a trace record when it finishes, and the run id stamped on every
+   * instruction it returns.
+   *
+   * Logs this run CAUSED land in the trace; logs that merely happened at the
+   * same moment do not. Timestamps cannot tell those apart — a dozen monitor
+   * feeds and every other instance are logging too — and the difference is
+   * not cosmetic: a trace claiming an Aster pair read Binance order books for
+   * symbols it has never traded is worse than no logs at all, because it is
+   * read as evidence. The scope follows the async work started inside it.
+   */
+  private async traced(triggerId: string, work: () => Promise<ExecutionInstruction[]>): Promise<ExecutionInstruction[]> {
     const startedAt = Date.now()
     this.activeTraceSteps = []
-    /* Logs this run CAUSED land in the trace; logs that merely happened at the
-       same moment do not. Timestamps cannot tell those apart — a dozen monitor
-       feeds and every other instance are logging too — and the difference is
-       not cosmetic: a trace claiming an Aster pair read Binance order books for
-       symbols it has never traded is worse than no logs at all, because it is
-       read as evidence. The scope follows the async work started inside it. */
     /* One id, three jobs: it scopes the logs, names the trace, and stamps the
        instructions. Anything less and an execution could only be matched to a
        run by timestamp — which is a guess the moment two runs overlap. */
-    const scope = `run:${this.instanceId ?? 'strategy'}:${startedAt}:${this.metrics.runsTotal}`
+    const scope = `run:${this.instanceId ?? 'strategy'}:${startedAt}:${this.metrics.runsTotal}:${triggerId}`
     const unsubLogs = subscribeLogs((rec) => {
       if (rec.scope !== scope) return
       this.activeTraceSteps?.push({
@@ -570,12 +618,10 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
         data: { ...(rec.module !== undefined ? { module: rec.module } : {}), msg: rec.msg, ...rec.extra },
       })
     })
-    runInLogScope(scope, () => this.log.debug({ triggerId: context.triggerId }, 'Strategy run started'))
-    this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
     const finish = (instructions: number, error?: string) => {
       const rec: StrategyRunTrace = {
         runId: scope,
-        startedAt, triggerId: context.triggerId, durationMs: Date.now() - startedAt,
+        startedAt, triggerId, durationMs: Date.now() - startedAt,
         instructions, ...(error !== undefined ? { error } : {}),
         steps: this.activeTraceSteps ?? [],
       }
@@ -587,17 +633,13 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     }
     return runInLogScope(scope, async () => {
       try {
-        const emitted = await this.evaluate(context)
+        const emitted = await work()
         // Stamped here, the one place every instruction of every strategy
         // passes through on its way to the queue.
         const instructions = emitted.map(i => (i.runId === undefined ? { ...i, runId: scope } : i))
-        this.metrics.instructionsEmitted += instructions.length
-        this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
         finish(instructions.length)
         return instructions
       } catch (err) {
-        this.metrics.errors++
-        this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
         finish(0, err instanceof Error ? err.message : String(err))
         throw err
       }
