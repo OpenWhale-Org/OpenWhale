@@ -129,6 +129,8 @@ const FILL_RECHECK_MS = 10 * 60_000
  * collector treats it as such rather than as "everything since the watermark".
  */
 const FILLS_ALL_PAGE = 2000
+/** Pages read in one sweep before giving the venue a rest. 5 × 2000 rows an hour is far past any account here. */
+const FILLS_ALL_MAX_PAGES = 5
 const EPS = 1e-9
 
 export class PnlService {
@@ -335,27 +337,37 @@ export class PnlService {
       ? Math.min(...sinceBySymbol.values())
       : Math.max(Date.now() - this.backfillMs, Date.now() - MAX_FILL_LOOKBACK_MS)
 
-    let fills
-    try {
-      fills = await session.fetchFillsAll(since + 1, FILLS_ALL_PAGE)
-    } catch (err) {
-      log.warn({ err, account }, 'fetchFillsAll failed — falling back to one query per symbol')
-      for (const symbol of claimed) await this.collectSymbol(account, symbol, session)
-      return
-    }
-
     /*
-     * A page that came back full is a page that was cut: the venue had more,
-     * and everything past the last row here is still unread. Two things follow.
-     * A symbol ABSENT from a cut page has not been shown to be quiet — its fills
-     * may simply sit past the cut — so it may advance only to where the page
-     * ends, never to "now". And the sweep must come back for the rest, which the
-     * hourly cadence does on its own; the cut is logged so a backlog draining at
-     * one page an hour is a known thing rather than a mystery.
+     * Page through the venue's answer until a page comes back short. A full
+     * page means the venue had more; the next page starts at that page's last
+     * timestamp — inclusive, so fills sharing the boundary instant are not
+     * stepped over, with INSERT OR IGNORE absorbing the one row seen twice.
+     * Bounded, because a venue that answers every page full would otherwise
+     * be read for ever; past the bound the sweep simply resumes next hour.
      */
-    const cut = fills.length >= FILLS_ALL_PAGE
+    type Rows = Awaited<ReturnType<NonNullable<PnlSessionLike['fetchFillsAll']>>>
+    const fills: Rows = []
+    let complete = false
+    try {
+      let cursor = since + 1
+      for (let page = 0; page < FILLS_ALL_MAX_PAGES; page++) {
+        const rows = await session.fetchFillsAll(cursor, FILLS_ALL_PAGE)
+        fills.push(...rows)
+        if (rows.length < FILLS_ALL_PAGE) { complete = true; break }
+        cursor = Math.max(...rows.map(f => f.timestamp))
+      }
+    } catch (err) {
+      if (fills.length === 0) {
+        log.warn({ err, account }, 'fetchFillsAll failed — falling back to one query per symbol')
+        for (const symbol of claimed) await this.collectSymbol(account, symbol, session)
+        return
+      }
+      // Some pages arrived before the failure: file them, and treat the read as
+      // unfinished so no quiet-looking symbol is advanced past what was not seen.
+      log.warn({ err, account, rows: fills.length }, 'fetchFillsAll failed mid-way — filing what arrived')
+    }
     const pageEnd = fills.length > 0 ? Math.max(...fills.map(f => f.timestamp)) : since
-    if (cut) log.info({ account, rows: fills.length, pageEnd: new Date(pageEnd).toISOString() }, 'Fill page was cut — the rest arrives with the next sweep')
+    if (!complete) log.info({ account, rows: fills.length, pageEnd: new Date(pageEnd).toISOString() }, 'Fill history not fully read this sweep — resumes next hour')
 
     const bySymbol = new Map<string, typeof fills>()
     for (const f of fills) {
@@ -376,8 +388,11 @@ export class PnlService {
     for (const symbol of claimed) {
       if (bySymbol.has(symbol)) continue
       const own = sinceBySymbol.get(symbol) ?? since
-      if (cut) await this.setWatermark(account, `fills:${symbol}`, Math.max(own, pageEnd))
-      else await this.advanceEmpty(account, symbol, own)
+      // Read to the end and the symbol was not there: quiet, advance as usual.
+      // Read cut short and the symbol was not there: unknown, advance only to
+      // where the reading stopped.
+      if (complete) await this.advanceEmpty(account, symbol, own)
+      else await this.setWatermark(account, `fills:${symbol}`, Math.max(own, pageEnd))
     }
   }
 

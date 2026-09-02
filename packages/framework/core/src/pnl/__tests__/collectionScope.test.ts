@@ -121,16 +121,47 @@ describe('an account-scoped venue is asked once', () => {
      watermark may reach the page's end, never the present. Advancing it to
      "now" would step over every fill past the cut, silently: the same shape
      as the COTI loss, arriving through the bulk path instead. */
-  it('does not advance an absent symbol past a page that was cut', async () => {
+  it('pages until the venue comes back short, and files every page', async () => {
+    const db = await dbWithClaims(SYMBOLS)
+    const t0 = Date.now() - 3600_000
+    // 2000 BTC rows, then 300 SOL rows: two pages, the second one short.
+    const all = [
+      ...Array.from({ length: 2000 }, (_, i) => fill('BTC/USDC:USDC', `b${i}`, t0 + i * 1000)),
+      ...Array.from({ length: 300 }, (_, i) => fill('SOL/USDC:USDC', `s${i}`, t0 + 2000_000 + i * 1000)),
+    ]
+    const asked: number[] = []
+    const svc = new PnlService({
+      db,
+      resolveSession: async () => ({
+        fetchFills: async () => [],
+        fetchFillsAll: async (since: number, limit: number) => {
+          asked.push(since)
+          return all.filter(f => f.timestamp >= since).slice(0, limit)
+        },
+      }) as never,
+    })
+
+    await svc.collect()
+
+    expect(asked).toHaveLength(2)
+    const sol = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM pnl_fills WHERE symbol = 'SOL/USDC:USDC'`)
+    expect(sol?.n).toBe(300)
+    // ETH never traded and the read completed: it advances like any quiet symbol.
+    const eth = await db.get<{ ts: number }>(`SELECT ts FROM pnl_watermarks WHERE account = 'acct' AND scope = 'fills:ETH/USDC:USDC'`)
+    expect(eth?.ts).toBeGreaterThan(t0)
+  })
+
+  it('does not advance an absent symbol past a read that stopped short', async () => {
     const db = await dbWithClaims(SYMBOLS)
     const pageEnd = Date.now() - 6 * 3600_000
     const svc = new PnlService({
       db,
       resolveSession: async () => ({
         fetchFills: async () => [],
-        // Exactly the page size, all for BTC, all hours old: a full page.
-        fetchFillsAll: async (_since: number, limit: number) =>
-          Array.from({ length: limit }, (_, i) => fill('BTC/USDC:USDC', `f${i}`, pageEnd - (limit - i) * 1000)),
+        // Every page full, every page BTC, hours old: the venue keeps saying
+        // "more" until the sweep's page bound stops the read.
+        fetchFillsAll: async (since: number, limit: number) =>
+          Array.from({ length: limit }, (_, i) => fill('BTC/USDC:USDC', `f${since}-${i}`, pageEnd - (limit - i) * 1000)),
       }) as never,
     })
 
