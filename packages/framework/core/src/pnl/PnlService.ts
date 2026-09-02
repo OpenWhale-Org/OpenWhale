@@ -43,6 +43,17 @@ export interface PnlSessionLike {
     id: string; orderId: string; symbol: string; side: string; qty: number; price: number
     realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number
   }>>
+  /**
+   * Every symbol's fills in ONE call, for venues whose trade history is scoped
+   * to the account rather than the market (Hyperliquid's `userFills` takes an
+   * address, not a coin). Where it exists the sweep asks once instead of once
+   * per symbol — on an account trading seventeen symbols that is seventeen
+   * requests of the venue's rate budget reduced to one.
+   */
+  fetchFillsAll?(since?: number, limit?: number): Promise<Array<{
+    id: string; orderId: string; symbol: string; side: string; qty: number; price: number
+    realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number
+  }>>
   fetchFundingHistory?(since?: number, limit?: number): Promise<Array<{
     id?: string; symbol: string; amount: number; asset: string; timestamp: number
   }>>
@@ -90,7 +101,15 @@ export interface PnlServiceOptions {
   db: DatabaseAdapter
   /** Resolve a trading session for a credential name; null when unresolvable. */
   resolveSession(account: string): Promise<PnlSessionLike | null>
-  /** Collector interval, ms. Default 5 min. */
+  /**
+   * The safety sweep's interval, ms. Default 1 hour.
+   *
+   * Not the freshness knob it looks like: fills from THIS engine's own orders
+   * arrive within `KICK_DEBOUNCE_MS` of the order being claimed. The sweep
+   * exists for everything else — a position opened by hand, a liquidation, a
+   * protective order some other client placed — and for those, an hour is
+   * prompt enough while staying far inside the venue's serving window.
+   */
   intervalMs?: number
   /** How far back the first collection reaches when no watermark exists. Default 3 days. */
   backfillMs?: number
@@ -114,11 +133,13 @@ export class PnlService {
   private timer: ReturnType<typeof setInterval> | null = null
   private kickTimer: ReturnType<typeof setTimeout> | null = null
   private collecting = false
+  private pending = new Map<string, Set<string>>()
+  private pendingSweep = false
 
   constructor(options: PnlServiceOptions) {
     this.db = options.db
     this.resolveSession = options.resolveSession
-    this.intervalMs = options.intervalMs ?? 5 * 60_000
+    this.intervalMs = options.intervalMs ?? 60 * 60_000
     this.backfillMs = options.backfillMs ?? 3 * 24 * 3600_000
   }
 
@@ -143,20 +164,64 @@ export class PnlService {
          VALUES (?, ?, ?, ?, ?, ?)`,
         [claim.account, claim.orderId, claim.instanceId, claim.symbol, claim.executor ?? null, claim.ts],
       )
-      this.kick()
+      this.kick(claim.account, claim.symbol)
     } catch (err) {
       log.warn({ err, orderId: claim.orderId }, 'Order claim insert failed — that order will show as unattributed')
     }
   }
 
-  /** Debounced collect after fresh executions, so PnL shows up in ~30s not ~5min. */
-  kick(): void {
+  /**
+   * Collect what a fresh claim named, shortly.
+   *
+   * Scoped, because the claim knows exactly which account and symbol just
+   * traded and a sweep of everything else answers a question nobody asked: one
+   * order on one symbol used to re-query every symbol of every account —
+   * around 180 requests of venue rate budget, every thirty seconds, for one
+   * fill. The debounce still coalesces a burst of orders into one pass.
+   */
+  kick(account?: string, symbol?: string): void {
+    if (account !== undefined && symbol !== undefined) {
+      const symbols = this.pending.get(account) ?? new Set<string>()
+      symbols.add(symbol)
+      this.pending.set(account, symbols)
+    } else {
+      // No scope offered — the caller wants everything.
+      this.pendingSweep = true
+    }
     if (this.kickTimer) return
     this.kickTimer = setTimeout(() => {
       this.kickTimer = null
-      void this.collect()
+      const scope = this.pending
+      const sweep = this.pendingSweep
+      this.pending = new Map()
+      this.pendingSweep = false
+      void (sweep ? this.collect() : this.collectScoped(scope))
     }, KICK_DEBOUNCE_MS)
     this.kickTimer.unref?.()
+  }
+
+  /** The claimed (account, symbol) pairs waiting for the next debounced pass. */
+  private async collectScoped(scope: Map<string, Set<string>>): Promise<void> {
+    if (this.collecting) {
+      // A full sweep is already reading these very symbols; re-queue rather
+      // than race it, since both write the same rows.
+      for (const [account, symbols] of scope) for (const symbol of symbols) this.kick(account, symbol)
+      return
+    }
+    this.collecting = true
+    try {
+      for (const [account, symbols] of scope) {
+        try {
+          const session = await this.resolveSession(account)
+          if (!session?.fetchFills) continue
+          for (const symbol of symbols) await this.collectSymbol(account, symbol, session)
+        } catch (err) {
+          log.warn({ err, account }, 'Scoped PnL collection failed — the next sweep picks it up')
+        }
+      }
+    } finally {
+      this.collecting = false
+    }
   }
 
   // ── Collection ────────────────────────────────────────────────────────────
@@ -183,70 +248,11 @@ export class PnlService {
     const session = await this.resolveSession(account)
     if (!session?.fetchFills) return
 
-    const symbols = await this.db.all<{ symbol: string }>(
-      `SELECT DISTINCT symbol FROM pnl_order_claims WHERE account = ?`, [account])
+    const claimed = (await this.db.all<{ symbol: string }>(
+      `SELECT DISTINCT symbol FROM pnl_order_claims WHERE account = ?`, [account])).map(r => r.symbol)
 
-    for (const { symbol } of symbols) {
-      /*
-       * A watermark that falls outside the venue's serving window is a trap
-       * that closes behind you.
-       *
-       * Binance answers fetchMyTrades for the last 7 days only. Once a
-       * symbol's watermark is older than that, every query starts outside the
-       * range, comes back empty, and — because the watermark only advanced on
-       * a non-empty result — stays exactly where it was. The symbol then falls
-       * further behind for ever, silently: the error is not an error, it is an
-       * empty list.
-       *
-       * COTI on this install sat at 2026-08-14 while its executor kept
-       * claiming order ids every hour. Ten days of fills never reached the
-       * ledger, so every report read funding with no trades against it and
-       * called a losing week a profit.
-       */
-      const stale = (await this.watermark(account, `fills:${symbol}`)) ?? Date.now() - this.backfillMs
-      const floor = Date.now() - MAX_FILL_LOOKBACK_MS
-      const since = Math.max(stale, floor)
-      if (stale < floor) {
-        log.warn({
-          account, symbol,
-          watermark: new Date(stale).toISOString(),
-          skippedMs: floor - stale,
-        }, 'Fill watermark older than the venue serves — advancing past the gap; those fills are unrecoverable')
-      }
-      let fills
-      try {
-        fills = await session.fetchFills(symbol, since + 1, 1000)
-      } catch (err) {
-        log.warn({ err, account, symbol }, 'fetchFills failed — symbol skipped this cycle')
-        continue
-      }
-      if (fills.length === 0) {
-        /*
-         * Advance on empty too, or a symbol that simply had a quiet week walks
-         * into the same trap: its watermark stays put until it is older than
-         * the window, and from then on it can never come back.
-         *
-         * Only to now − RECHECK, never to now: a fill can reach the venue's
-         * trade endpoint slightly after it happened, and jumping the watermark
-         * to the present would step over it.
-         */
-        await this.setWatermark(account, `fills:${symbol}`, Math.max(since, Date.now() - FILL_RECHECK_MS))
-        continue
-      }
-      for (const f of fills) {
-        const claim = await this.db.get<{ instance_id: string }>(
-          `SELECT instance_id FROM pnl_order_claims WHERE account = ? AND order_id = ?`,
-          [account, f.orderId])
-        await this.db.run(
-          `INSERT OR IGNORE INTO pnl_fills
-             (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [account, f.id, f.orderId, claim?.instance_id ?? null, f.symbol || symbol,
-            f.side === 'sell' ? 'sell' : 'buy', f.qty, f.price,
-            f.realizedPnl ?? null, f.fee ?? null, f.feeAsset ?? null, f.timestamp])
-      }
-      await this.setWatermark(account, `fills:${symbol}`, Math.max(...fills.map(f => f.timestamp)))
-    }
+    if (session.fetchFillsAll) await this.collectAllSymbols(account, claimed, session)
+    else for (const symbol of claimed) await this.collectSymbol(account, symbol, session)
 
     if (session.fetchFundingHistory) {
       const since = (await this.watermark(account, 'funding')) ?? Date.now() - this.backfillMs
@@ -263,6 +269,139 @@ export class PnlService {
       if (events.length > 0) {
         await this.setWatermark(account, 'funding', Math.max(...events.map(e => e.timestamp)))
       }
+    }
+  }
+
+  /**
+   * One symbol's new fills, from its own watermark.
+   *
+   * The watermark is per symbol and the venue's window is finite, so the two
+   * hazards below are about the watermark, not the fills.
+   */
+  private async collectSymbol(account: string, symbol: string, session: PnlSessionLike): Promise<void> {
+    if (!session.fetchFills) return
+    /*
+     * A watermark that falls outside the venue's serving window is a trap
+     * that closes behind you.
+     *
+     * Binance answers fetchMyTrades for the last 7 days only. Once a
+     * symbol's watermark is older than that, every query starts outside the
+     * range, comes back empty, and — because the watermark only advanced on
+     * a non-empty result — stays exactly where it was. The symbol then falls
+     * further behind for ever, silently: the error is not an error, it is an
+     * empty list.
+     *
+     * COTI on this install sat at 2026-08-14 while its executor kept
+     * claiming order ids every hour. Ten days of fills never reached the
+     * ledger, so every report read funding with no trades against it and
+     * called a losing week a profit.
+     */
+    const since = await this.fillsSince(account, symbol)
+    let fills
+    try {
+      fills = await session.fetchFills(symbol, since + 1, 1000)
+    } catch (err) {
+      log.warn({ err, account, symbol }, 'fetchFills failed — symbol skipped this cycle')
+      return
+    }
+    if (fills.length === 0) {
+      await this.advanceEmpty(account, symbol, since)
+      return
+    }
+    await this.recordFills(account, symbol, fills)
+    await this.setWatermark(account, `fills:${symbol}`, Math.max(...fills.map(f => f.timestamp)))
+  }
+
+  /**
+   * Every symbol at once, for a venue whose fills are account-scoped.
+   *
+   * One query from the OLDEST symbol watermark, then the rows are filed by the
+   * symbol they name — including symbols nothing claimed, which is how a
+   * position opened by hand still reaches the ledger. Each symbol's watermark
+   * still advances on its own, so switching a venue between this path and the
+   * per-symbol one changes nothing about what is recorded.
+   */
+  private async collectAllSymbols(account: string, claimed: string[], session: PnlSessionLike): Promise<void> {
+    if (!session.fetchFillsAll) return
+    const sinceBySymbol = new Map<string, number>()
+    for (const symbol of claimed) sinceBySymbol.set(symbol, await this.fillsSince(account, symbol))
+    const since = sinceBySymbol.size > 0
+      ? Math.min(...sinceBySymbol.values())
+      : Math.max(Date.now() - this.backfillMs, Date.now() - MAX_FILL_LOOKBACK_MS)
+
+    let fills
+    try {
+      fills = await session.fetchFillsAll(since + 1, 2000)
+    } catch (err) {
+      log.warn({ err, account }, 'fetchFillsAll failed — falling back to one query per symbol')
+      for (const symbol of claimed) await this.collectSymbol(account, symbol, session)
+      return
+    }
+
+    const bySymbol = new Map<string, typeof fills>()
+    for (const f of fills) {
+      const rows = bySymbol.get(f.symbol) ?? []
+      rows.push(f)
+      bySymbol.set(f.symbol, rows)
+    }
+    for (const [symbol, rows] of bySymbol) {
+      // A fill older than this symbol's own watermark is already recorded;
+      // INSERT OR IGNORE makes replaying it harmless, so it is filed anyway
+      // rather than dropped on an off-by-one.
+      await this.recordFills(account, symbol, rows)
+      await this.setWatermark(account, `fills:${symbol}`, Math.max(...rows.map(f => f.timestamp)))
+    }
+    for (const symbol of claimed) {
+      if (bySymbol.has(symbol)) continue
+      await this.advanceEmpty(account, symbol, sinceBySymbol.get(symbol) ?? since)
+    }
+  }
+
+  /** Where a symbol's next query starts, clamped to what the venue still serves. */
+  private async fillsSince(account: string, symbol: string): Promise<number> {
+    const stale = (await this.watermark(account, `fills:${symbol}`)) ?? Date.now() - this.backfillMs
+    const floor = Date.now() - MAX_FILL_LOOKBACK_MS
+    if (stale < floor) {
+      log.warn({
+        account, symbol,
+        watermark: new Date(stale).toISOString(),
+        skippedMs: floor - stale,
+      }, 'Fill watermark older than the venue serves — advancing past the gap; those fills are unrecoverable')
+    }
+    return Math.max(stale, floor)
+  }
+
+  /*
+   * Advance on empty too, or a symbol that simply had a quiet week walks
+   * into the same trap: its watermark stays put until it is older than
+   * the window, and from then on it can never come back.
+   *
+   * Only to now − RECHECK, never to now: a fill can reach the venue's
+   * trade endpoint slightly after it happened, and jumping the watermark
+   * to the present would step over it.
+   */
+  private async advanceEmpty(account: string, symbol: string, since: number): Promise<void> {
+    await this.setWatermark(account, `fills:${symbol}`, Math.max(since, Date.now() - FILL_RECHECK_MS))
+  }
+
+  /** File fills against the instance that claimed their order, or as unattributed. */
+  private async recordFills(
+    account: string,
+    symbol: string,
+    fills: Array<{ id: string; orderId: string; symbol: string; side: string; qty: number; price: number
+      realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number }>,
+  ): Promise<void> {
+    for (const f of fills) {
+      const claim = await this.db.get<{ instance_id: string }>(
+        `SELECT instance_id FROM pnl_order_claims WHERE account = ? AND order_id = ?`,
+        [account, f.orderId])
+      await this.db.run(
+        `INSERT OR IGNORE INTO pnl_fills
+           (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [account, f.id, f.orderId, claim?.instance_id ?? null, f.symbol || symbol,
+          f.side === 'sell' ? 'sell' : 'buy', f.qty, f.price,
+          f.realizedPnl ?? null, f.fee ?? null, f.feeAsset ?? null, f.timestamp])
     }
   }
 

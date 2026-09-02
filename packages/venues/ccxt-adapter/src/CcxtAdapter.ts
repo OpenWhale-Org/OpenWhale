@@ -396,7 +396,10 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    * realizedPnl in the raw payload; venues without it leave it undefined).
    */
   async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
-    const trades = await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit))
+    return this.mapFills(await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit)), symbol)
+  }
+
+  protected mapFills(trades: Awaited<ReturnType<ccxt.Exchange['fetchMyTrades']>>, symbol?: string): ExchangeFill[] {
     return trades
       .map((t): ExchangeFill => {
         const info = (t.info ?? {}) as Record<string, unknown>
@@ -404,7 +407,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
         return {
           id: String(t.id),
           orderId: String(t.order ?? ''),
-          symbol: t.symbol ?? symbol,
+          symbol: t.symbol ?? symbol ?? '',
           side: t.side === 'sell' ? 'sell' : 'buy',
           qty: t.amount ?? 0,
           price: t.price ?? 0,

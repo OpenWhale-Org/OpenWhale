@@ -115,7 +115,26 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * actually charged.
    */
   override async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
-    const fills = await super.fetchFills(symbol, since, limit)
+    return this.netBuilderFee(await super.fetchFills(symbol, since, limit))
+  }
+
+  /**
+   * Every symbol's fills in one call.
+   *
+   * Hyperliquid's trade history is addressed by ACCOUNT, not by market:
+   * `userFills`/`userFillsByTime` take a wallet and answer for every coin it
+   * traded. Asking per symbol — which the generic path must, because Binance's
+   * endpoint requires one — spent an `info` request of weight 20 per symbol,
+   * seventeen of them on one account here, against an IP budget of 1200 a
+   * minute shared with every other read the engine makes.
+   */
+  async fetchFillsAll(since?: number, limit = 2000): Promise<ExchangeFill[]> {
+    return this.netBuilderFee(this.mapFills(
+      await this.guard(() => this.exchange.fetchMyTrades(undefined, since, limit)),
+    ))
+  }
+
+  private netBuilderFee(fills: ExchangeFill[]): ExchangeFill[] {
     return fills.map((f) => {
       const builder = Number((f as { info?: Record<string, unknown> }).info?.['builderFee'])
       if (f.fee === undefined || !Number.isFinite(builder) || builder === 0) return f
