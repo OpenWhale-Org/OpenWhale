@@ -79,6 +79,52 @@ export const BUILDER_MAX_FEE_RATE = '0.01%'
  */
 export const HIP3_DEX_LIMIT = 64
 
+/**
+ * Venue-global caches, deliberately not per adapter.
+ *
+ * The dex roster and the funding table describe the VENUE, not a credential —
+ * but this engine holds one adapter per account plus a keyless one, and each
+ * used to fetch both for itself. That multiplies the cost of the most expensive
+ * read on the exchange: `fetchFundingRates` fans out over every HIP-3 dex, and
+ * Hyperliquid prices each of those `metaAndAssetCtxs` calls at weight 20 — one
+ * invocation is ~220 of an IP budget of 1200 a minute.
+ *
+ * Measured on 2026-09-02, before this cache: metaAndAssetCtxs ×62 a minute =
+ * 1240 weight, 91% of everything this process spent on Hyperliquid, while the
+ * orders it exists to place cost 1 apiece. Funding settles hourly; asking five
+ * times a minute bought nothing and cost every read that queued behind it.
+ */
+interface Cached<T> { value: T; at: number; inFlight?: Promise<T> }
+const DEX_TTL_MS = 6 * 3_600_000
+/** Funding settles hourly. Half a minute is fresh by any measure that matters. */
+const FUNDING_TTL_MS = 30_000
+let dexCache: Cached<string[]> | undefined
+let fundingCache: Cached<FundingRateData[]> | undefined
+
+/** One in-flight fetch shared by every caller, then a TTL. */
+async function shared<T>(
+  cache: Cached<T> | undefined,
+  ttlMs: number,
+  fetch: () => Promise<T>,
+  store: (next: Cached<T>) => void,
+): Promise<T> {
+  if (cache && Date.now() - cache.at < ttlMs) return cache.value
+  if (cache?.inFlight) return cache.inFlight
+  const inFlight = fetch().then((value) => {
+    store({ value, at: Date.now() })
+    return value
+  }).catch((err) => {
+    // A failed refresh must not poison the cache: serve the stale value if
+    // there is one, since a rate limit is exactly when the old table is most
+    // useful, and only raise when there is nothing to serve.
+    if (cache) { store({ value: cache.value, at: cache.at }); return cache.value }
+    store(undefined as never)
+    throw err
+  })
+  store({ value: cache?.value as T, at: cache?.at ?? 0, inFlight })
+  return inFlight
+}
+
 export interface HyperliquidCredentials {
   walletAddress: string
   privateKey?: string
@@ -178,8 +224,6 @@ export class HyperliquidAdapter extends CcxtAdapter {
   }
 
   /** perpDexs list cache — the builder-dex roster changes rarely. */
-  private hip3Dexes: string[] | undefined
-  private hip3DexesFetchedAt = 0
 
   /**
    * Quirk: ccxt's fetchFundingRates hits metaAndAssetCtxs WITHOUT a dex
@@ -191,7 +235,18 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * failure is non-fatal (a broken builder dex must not blind the main
    * universe).
    */
+  /**
+   * Every market's funding rate — main dex plus each HIP-3 dex.
+   *
+   * Shared across adapters and cached: see the note on the venue-global caches.
+   * The fan-out is the single most expensive thing this process asks of
+   * Hyperliquid, and its answer is identical for every credential.
+   */
   override async fetchFundingRates(): Promise<FundingRateData[]> {
+    return shared(fundingCache, FUNDING_TTL_MS, () => this.fetchFundingRatesUncached(), (next) => { fundingCache = next })
+  }
+
+  private async fetchFundingRatesUncached(): Promise<FundingRateData[]> {
     // HIP-3 symbol mapping (hip3TokensByName) is built during loadMarkets —
     // without it parseFundingRates would emit raw ids for builder-dex coins.
     // ccxt caches the result, so this is a no-op after the first call.
@@ -210,29 +265,30 @@ export class HyperliquidAdapter extends CcxtAdapter {
     return [...main, ...perDex.flat()]
   }
 
+  /** The venue's HIP-3 dex roster — one fetch for the whole process, see the cache note. */
   private async listHip3Dexes(): Promise<string[]> {
-    if (this.hip3Dexes && Date.now() - this.hip3DexesFetchedAt < 6 * 3_600_000) return this.hip3Dexes
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = await this.guard(() => (this.exchange as any).publicPostInfo({ type: 'perpDexs' })) as Array<{ name?: string } | null>
-      this.hip3Dexes = raw
-        .map(d => d?.name)
-        .filter((name): name is string => typeof name === 'string' && name.length > 0)
-      this.hip3DexesFetchedAt = Date.now()
-      // Same roster ccxt walks when it builds the market map, so this is the
-      // one place that can tell us HIP3_DEX_LIMIT has been outgrown. ccxt's
-      // loop runs 1..limit-1, so it covers limit-1 dexes; past that, symbols
-      // on the overflow dexes resolve nowhere and orders on them fail.
-      if (this.hip3Dexes.length > HIP3_DEX_LIMIT - 1) {
-        this.log.warn(
-          { dexes: this.hip3Dexes.length, limit: HIP3_DEX_LIMIT },
-          'More HIP-3 dexes than the market map loads — raise HIP3_DEX_LIMIT',
-        )
+    return shared(dexCache, DEX_TTL_MS, async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = await this.guard(() => (this.exchange as any).publicPostInfo({ type: 'perpDexs' })) as Array<{ name?: string } | null>
+        const names = raw
+          .map(d => d?.name)
+          .filter((name): name is string => typeof name === 'string' && name.length > 0)
+        // Same roster ccxt walks when it builds the market map, so this is the
+        // one place that can tell us HIP3_DEX_LIMIT has been outgrown. ccxt's
+        // loop runs 1..limit-1, so it covers limit-1 dexes; past that, symbols
+        // on the overflow dexes resolve nowhere and orders on them fail.
+        if (names.length > HIP3_DEX_LIMIT - 1) {
+          this.log.warn(
+            { dexes: names.length, limit: HIP3_DEX_LIMIT },
+            'More HIP-3 dexes than the market map loads — raise HIP3_DEX_LIMIT',
+          )
+        }
+        return names
+      } catch {
+        return []
       }
-    } catch {
-      this.hip3Dexes = this.hip3Dexes ?? []
-    }
-    return this.hip3Dexes
+    }, (next) => { dexCache = next })
   }
 
   /** The builder dex a market lives on ('xyz:SKHX' → 'xyz'), undefined for the main universe. */
