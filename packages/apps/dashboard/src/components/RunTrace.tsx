@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { JsonTree } from './JsonTree'
 
 /**
  * One strategy run, rendered as what it actually is: a list of steps the
@@ -71,10 +72,12 @@ export function RunStep({ step, startedAt }: { step: RunStepRecord; startedAt: n
         {!open && hasData && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(step.data).slice(0, 90)}</span>}
       </div>
       {open && hasData && (
-        <pre className="ml-6 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden text-xs leading-snug"
-             style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
-          {JSON.stringify(step.data, null, 2)}
-        </pre>
+        // openDepth 1, not 2: a step sits inside a list of steps, so the
+        // useful default is "show me this step's fields", not its children's.
+        <div className="ml-6 p-2 rounded overflow-auto scroll-hidden"
+             style={{ background: 'var(--background)', border: '1px solid var(--border)', maxHeight: '16rem' }}>
+          <JsonTree data={step.data} openDepth={1} />
+        </div>
       )}
     </div>
   )

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { JsonTree } from '@/components/JsonTree'
+import { JsonModal, CopyButton } from '@/components/JsonModal'
 import type { StrategyInstanceView } from '@openwhaleorg/core'
 import { Select } from '@/components/Select'
 import { RunSteps, type RunTrace } from '@/components/RunTrace'
@@ -215,18 +217,19 @@ function ExecutionDetail({ row, instanceName }: { row: ExecutionRecord; instance
   return (
     <div className="px-3 pb-3 flex flex-col gap-3">
       <div className="grid gap-3 text-xs" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))' }}>
-        <Field label="Instruction">
-          <pre className="p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden leading-snug"
-               style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
-            {JSON.stringify(row.instruction ?? {}, null, 2)}
-          </pre>
-        </Field>
-        <Field label={row.status === 'failed' ? 'Error' : 'Result'}>
-          <pre className="p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden leading-snug"
-               style={{ background: 'var(--background)', border: '1px solid var(--border)', color: row.error ? 'var(--danger)' : 'var(--foreground)' }}>
-            {row.error ?? JSON.stringify(row.data ?? {}, null, 2)}
-          </pre>
-        </Field>
+        <JsonField label="Instruction" data={row.instruction ?? {}} />
+        {/* An error is a message, not a document — a tree of one string node
+            would be worse than the string. Only the success payload is JSON. */}
+        {row.error ? (
+          <Field label="Error">
+            <pre className="p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden leading-snug"
+                 style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--danger)' }}>
+              {row.error}
+            </pre>
+          </Field>
+        ) : (
+          <JsonField label="Result" data={row.data ?? {}} />
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -251,6 +254,40 @@ function ExecutionDetail({ row, instanceName }: { row: ExecutionRecord; instance
           <span className="text-xs" style={{ color: 'var(--muted)' }}>Loading the run…</span>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * A collapsible JSON pane.
+ *
+ * These payloads are the reason JsonTree exists: a fundingArb result carries a
+ * `legs` array per symbol, and as pretty-printed text the two fields worth
+ * reading sit 40 lines below the fold. Folded, they are on screen. The modal
+ * is there for when the inline box's 16rem is genuinely not enough.
+ */
+function JsonField({ label, data }: { label: string; data: unknown }) {
+  const [zoom, setZoom] = useState(false)
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span style={{ color: 'var(--muted)' }}>{label}</span>
+        <div className="ml-auto flex items-center gap-1">
+          <CopyButton value={data} />
+          <button
+            onClick={() => setZoom(true)}
+            title="Open full screen"
+            className="text-xs px-1.5 py-0.5 rounded shrink-0"
+            style={{ color: 'var(--muted)', border: '1px solid var(--border)', background: 'transparent' }}
+          >
+            ⤢
+          </button>
+        </div>
+      </div>
+      <div className="p-2 rounded overflow-auto scroll-hidden" style={{ background: 'var(--background)', border: '1px solid var(--border)', maxHeight: '16rem' }}>
+        <JsonTree data={data} openDepth={2} />
+      </div>
+      {zoom && <JsonModal title={label} data={data} onClose={() => setZoom(false)} />}
     </div>
   )
 }
