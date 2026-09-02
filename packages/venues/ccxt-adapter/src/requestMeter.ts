@@ -54,18 +54,40 @@ function traceIfExpensive(venue: string, key: string): void {
   log.warn({ venue, endpoint: key, stack }, 'Market map reload — each one costs a HIP-3 fan-out')
 }
 
+/** One minute of one venue's requests, as handed to listeners. */
+export interface VenueMinute {
+  venue: string
+  calls: number
+  weight: number
+  /** Heaviest endpoints first: `info:metaAndAssetCtxs ×11=220`. */
+  top: string[]
+}
+
+const listeners = new Set<(minute: VenueMinute) => void>()
+
+/**
+ * Hear every venue's minute as it closes. The alerting side lives here: the
+ * meter knows the spend, the gateway knows the venue's budget and who to tell.
+ */
+export function onVenueMinute(listener: (minute: VenueMinute) => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
 function report(): void {
   for (const [venue, tallies] of byVenue) {
     const rows = [...tallies].sort((a, b) => b[1].weight - a[1].weight)
     const weight = rows.reduce((n, [, t]) => n + t.weight, 0)
     const calls = rows.reduce((n, [, t]) => n + t.calls, 0)
     if (calls === 0) continue
-    log.info({
-      venue,
-      calls,
-      weight,
+    const minute: VenueMinute = {
+      venue, calls, weight,
       top: rows.slice(0, 8).map(([k, t]) => `${k} ×${t.calls}=${t.weight}`),
-    }, 'Venue REST usage this minute')
+    }
+    log.info(minute, 'Venue REST usage this minute')
+    for (const listener of listeners) {
+      try { listener(minute) } catch { /* a listener's fault is not the meter's */ }
+    }
   }
   byVenue.clear()
 }

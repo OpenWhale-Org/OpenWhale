@@ -14,6 +14,7 @@ import os from 'os'
 import { restorePlugins } from './plugins.js'
 import { notifyCredentialTypes } from './notify/credentialTypes.js'
 import { AlertService, setAlertService } from './notify/alerts.js'
+import { BudgetWatch } from './notify/budgetWatch.js'
 import { RetentionService, setRetentionService } from './maintenance/retention.js'
 
 let runtimeSingleton: OpenWhaleRuntime | undefined
@@ -114,6 +115,9 @@ export async function ensureStarted(): Promise<OpenWhaleRuntime> {
         const alerts = new AlertService(getDatabase(), runtime, credentialStore)
         await alerts.initialize()
         setAlertService(alerts)
+        // After the alert service, because it delivers through it: a venue
+        // running hot is told about before the venue starts saying 429.
+        new BudgetWatch().start()
       })
       // Housekeeping for the monitor stores. Starts disabled in effect: the
       // table is empty until an operator saves a policy, so the hourly sweep
