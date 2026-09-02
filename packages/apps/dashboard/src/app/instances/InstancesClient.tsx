@@ -42,6 +42,7 @@ import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@
 import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { useDirtyFlag } from '@/components/unsaved'
 import { implVenueMap, pickerVenue } from '@/components/venue'
+import { RunRow, type RunTrace } from '@/components/RunTrace'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -3210,60 +3211,6 @@ function ExecutionRow({ result }: { result: ExecutionResult }) {
         <pre className="ml-4 p-2 rounded overflow-x-auto max-h-96 overflow-y-auto scroll-hidden text-xs leading-snug"
              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
           {JSON.stringify(result, null, 2)}
-        </pre>
-      )}
-    </div>
-  )
-}
-
-interface RunTrace {
-  startedAt: number
-  triggerId: string
-  durationMs: number
-  instructions: number
-  error?: string
-  steps: Array<{ ts: number; step: string; data?: Record<string, unknown> }>
-}
-
-function RunRow({ run }: { run: RunTrace }) {
-  const [open, setOpen] = useState(false)
-  const color = run.error ? 'var(--danger)' : run.instructions > 0 ? 'var(--success)' : 'var(--muted)'
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex gap-2 items-start cursor-pointer" onClick={() => setOpen(o => !o)}>
-        <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'} {new Date(run.startedAt).toLocaleTimeString()}</span>
-        <span className="px-1 rounded text-xs" style={{ background: color + '22', color }}>
-          {run.error ? 'error' : `${run.instructions} instruction${run.instructions === 1 ? '' : 's'}`}
-        </span>
-        <span style={{ color: 'var(--muted)' }}>{run.durationMs}ms · {run.steps.length} steps · {run.triggerId}</span>
-        {run.error && <span className="truncate" style={{ color: 'var(--danger)' }}>{run.error.slice(0, 60)}</span>}
-      </div>
-      {open && (
-        <div className="ml-4 flex flex-col gap-1 p-2 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-          {run.steps.map((s, i) => <RunStep key={i} step={s} startedAt={run.startedAt} />)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function RunStep({ step, startedAt }: { step: { ts: number; step: string; data?: Record<string, unknown> }; startedAt: number }) {
-  const [open, setOpen] = useState(false)
-  const hasData = step.data && Object.keys(step.data).length > 0
-  const kind = step.step.split(':')[0]
-  const kindColor = kind === 'leg' ? 'var(--accent)' : kind === 'instruction' ? 'var(--success)' : kind === 'gate' ? 'var(--warning)' : 'var(--muted)'
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className={hasData ? 'flex gap-2 items-start cursor-pointer' : 'flex gap-2 items-start'}
-           onClick={() => hasData && setOpen(o => !o)}>
-        <span style={{ color: 'var(--muted)' }}>{hasData ? (open ? '▾' : '▸') : '·'} +{step.ts - startedAt}ms</span>
-        <span style={{ color: kindColor }}>{step.step}</span>
-        {!open && hasData && <span className="truncate" style={{ color: 'var(--muted)' }}>{JSON.stringify(step.data).slice(0, 90)}</span>}
-      </div>
-      {open && hasData && (
-        <pre className="ml-6 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden text-xs leading-snug"
-             style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
-          {JSON.stringify(step.data, null, 2)}
         </pre>
       )}
     </div>

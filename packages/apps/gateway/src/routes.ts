@@ -26,6 +26,7 @@ import { activityMeter } from './activity.js'
 import { getAuth, getScriptShelf } from './authService.js'
 import { SESSION_COOKIE, readCookie, setSessionCookie, clearSessionCookie } from './auth.js'
 import type { AuthedRequest } from './auth.js'
+import { readExecutions } from './executions.js'
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
@@ -427,6 +428,19 @@ export function buildRouter(): Router {
     res.json([...live, ...persisted].sort((a, b) => b.startedAt - a.startedAt).slice(0, 100))
   }))
 
+  router.get('/api/instances/:id/runs/:runId', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const id = req.params['id']!
+    const runId = req.params['runId']!
+    const strategy = runtime.getStrategy?.(id) as { getRecentRuns?: () => Array<{ runId?: string }> } | undefined
+    // The live ring holds runs the sampler never wrote (a no-op run that still
+    // explains why nothing was emitted), so it is asked first.
+    const live = strategy?.getRecentRuns?.()?.find(r => r.runId === runId)
+    const run = live ?? await runtime.readInstanceRun(id, runId)
+    if (!run) { res.status(404).json({ error: `no run "${runId}" for instance ${id}` }); return }
+    res.json(run)
+  }))
+
   // ── PnL attribution (order-claim ledger) ─────────────────────────────────
 
   router.get('/api/pnl/summary', h(async (_req, res) => {
@@ -628,38 +642,25 @@ export function buildRouter(): Router {
   }))
 
   router.get('/api/instances/:id/executions', h(async (req, res) => {
-    const instanceId = req.params['id']!
-    const executionsDir = path.join(dataDirFromEnv(), 'executions')
-    const results: unknown[] = []
-    try {
-      const executorDirs = await fs.promises.readdir(executionsDir)
-      await Promise.all(executorDirs.map(async (executorName) => {
-        const dir = path.join(executionsDir, executorName)
-        let files: string[]
-        try {
-          files = await fs.promises.readdir(dir)
-        } catch {
-          return
-        }
-        // Two most recent day-files so the list doesn't go empty after UTC midnight
-        const recent = files.filter(f => f.endsWith('.jsonl')).sort().slice(-2)
-        for (const file of recent) {
-          try {
-            const content = await fs.promises.readFile(path.join(dir, file), 'utf8')
-            for (const line of content.split('\n')) {
-              if (!line.trim()) continue
-              try {
-                const record = JSON.parse(line) as { instruction?: { instanceId?: string } }
-                if (record.instruction?.instanceId === instanceId) results.push(record)
-              } catch { /* skip malformed lines */ }
-            }
-          } catch { /* file may have been rotated away */ }
-        }
-      }))
-    } catch { /* executions dir may not exist yet */ }
-    results.sort((a, b) =>
-      new Date((b as { executedAt: string }).executedAt).getTime() - new Date((a as { executedAt: string }).executedAt).getTime())
-    res.json(results.slice(0, 200))
+    res.json(await readExecutions(dataDirFromEnv(), { instanceId: req.params['id']!, limit: 200 }))
+  }))
+
+  /**
+   * Every instance's executions, newest first — the Executions page.
+   *
+   * The same log the per-instance route reads; only the filter differs. What
+   * makes it usable across instances is `instruction.runId`, which points at
+   * the run that decided each one (see /api/instances/:id/runs/:runId).
+   */
+  router.get('/api/executions', h(async (req, res) => {
+    const q = req.query
+    res.json(await readExecutions(dataDirFromEnv(), {
+      limit: Number(q['limit']) || 100,
+      ...(typeof q['instanceId'] === 'string' ? { instanceId: q['instanceId'] } : {}),
+      ...(typeof q['executorId'] === 'string' ? { executorId: q['executorId'] } : {}),
+      ...(typeof q['status'] === 'string' ? { status: q['status'] } : {}),
+      ...(q['since'] !== undefined ? { since: Number(q['since']) } : {}),
+    }))
   }))
 
   // ── strategies / registry ───────────────────────────────────────────────────

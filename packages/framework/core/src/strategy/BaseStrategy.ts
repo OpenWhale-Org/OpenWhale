@@ -559,6 +559,9 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
        not cosmetic: a trace claiming an Aster pair read Binance order books for
        symbols it has never traded is worse than no logs at all, because it is
        read as evidence. The scope follows the async work started inside it. */
+    /* One id, three jobs: it scopes the logs, names the trace, and stamps the
+       instructions. Anything less and an execution could only be matched to a
+       run by timestamp — which is a guess the moment two runs overlap. */
     const scope = `run:${this.instanceId ?? 'strategy'}:${startedAt}:${this.metrics.runsTotal}`
     const unsubLogs = subscribeLogs((rec) => {
       if (rec.scope !== scope) return
@@ -571,6 +574,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
     const finish = (instructions: number, error?: string) => {
       const rec: StrategyRunTrace = {
+        runId: scope,
         startedAt, triggerId: context.triggerId, durationMs: Date.now() - startedAt,
         instructions, ...(error !== undefined ? { error } : {}),
         steps: this.activeTraceSteps ?? [],
@@ -583,7 +587,10 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     }
     return runInLogScope(scope, async () => {
       try {
-        const instructions = await this.evaluate(context)
+        const emitted = await this.evaluate(context)
+        // Stamped here, the one place every instruction of every strategy
+        // passes through on its way to the queue.
+        const instructions = emitted.map(i => (i.runId === undefined ? { ...i, runId: scope } : i))
         this.metrics.instructionsEmitted += instructions.length
         this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
         finish(instructions.length)

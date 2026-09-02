@@ -26,7 +26,7 @@ import type { MaterializedSlot } from '../executor/BaseExecutor.js'
 import type { RawCredentialData } from '../types/credential.js'
 import { MemoryExecutionQueue } from '../executor/MemoryExecutionQueue.js'
 import { TriggerManager } from '../trigger/TriggerManager.js'
-import { appendRunTrace, readRunTraces, countRunsSince } from '../strategy/runStore.js'
+import { appendRunTrace, readRunTraces, readRunTrace, countRunsSince } from '../strategy/runStore.js'
 import { PortfolioJournal } from '../strategy/PortfolioJournal.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import type { PortfolioReport, PortfolioReportQuery } from '../types/portfolio.js'
@@ -839,6 +839,11 @@ export class OpenWhaleRuntime implements IRuntime {
   /** Persisted run traces (newest first) — survive deactivation and restarts. */
   readInstanceRuns(instanceId: string, limit = 100): Promise<StrategyRunTrace[]> {
     return readRunTraces(this.dataDir, instanceId, limit)
+  }
+
+  /** One run by id — the trace an execution's `runId` points at. */
+  readInstanceRun(instanceId: string, runId: string): Promise<StrategyRunTrace | undefined> {
+    return readRunTrace(this.dataDir, instanceId, runId)
   }
 
   /** Runs and instructions since `since`, summed across every instance. */

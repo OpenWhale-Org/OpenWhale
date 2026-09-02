@@ -57,6 +57,41 @@ export async function readRunTraces(dataDir: string, instanceId: string, limit =
 }
 
 /**
+ * One trace by id, or undefined when it has rotated away.
+ *
+ * Reads the day files newest-first like readRunTraces, but stops at the match:
+ * the caller has an execution in hand and wants the run behind it, which is
+ * usually today's or yesterday's.
+ */
+export async function readRunTrace(
+  dataDir: string,
+  instanceId: string,
+  runId: string,
+): Promise<StrategyRunTrace | undefined> {
+  let files: string[]
+  try {
+    files = (await fs.promises.readdir(runsDir(dataDir, instanceId)))
+      .filter(f => f.endsWith('.jsonl')).sort().reverse()
+  } catch {
+    return undefined
+  }
+  const needle = JSON.stringify(runId)
+  for (const f of files.slice(0, 7)) {
+    const lines = (await fs.promises.readFile(path.join(runsDir(dataDir, instanceId), f), 'utf8')).split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!.trim()
+      // Cheap reject before parsing: most lines in the file are not this run.
+      if (!line || !line.includes(needle)) continue
+      try {
+        const trace = JSON.parse(line) as StrategyRunTrace
+        if (trace.runId === runId) return trace
+      } catch { /* torn tail write */ }
+    }
+  }
+  return undefined
+}
+
+/**
  * Runs and emitted instructions since `since`, for one instance.
  *
  * Counting only — the traces themselves are never materialised, because a

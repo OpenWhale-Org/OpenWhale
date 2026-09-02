@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
-type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts' | 'retention'
+type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts' | 'executions' | 'retention'
 
 const links: Array<{ href: string; label: string; auroraLabel?: string; group?: string; icon: IconName }> = [
   { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
@@ -13,6 +13,7 @@ const links: Array<{ href: string; label: string; auroraLabel?: string; group?: 
   { href: '/monitor', label: 'Monitor', group: 'OBSERVE', icon: 'monitor' },
   { href: '/monitor-data', label: 'Explorer', group: 'OBSERVE', icon: 'explorer' },
   { href: '/monitor-data/retention', label: 'Retention', group: 'OBSERVE', icon: 'retention' },
+  { href: '/executions', label: 'Executions', group: 'OBSERVE', icon: 'executions' },
   { href: '/executors', label: 'Executors', group: 'AUTOMATE', icon: 'executors' },
   { href: '/plugins', label: 'Plugins', group: 'DEVELOP', icon: 'plugins' },
   { href: '/compiler', label: 'Compiler', group: 'DEVELOP', icon: 'compiler' },
@@ -29,6 +30,8 @@ function Icon({ name }: { name: IconName }) {
   switch (name) {
     case 'start': return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="m10 8 6 4-6 4Z" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2" /></svg>
     case 'overview': return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></svg>
+    // A receipt: what was actually sent, one line per instruction.
+    case 'executions': return <svg {...common}><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
     case 'strategies': return <svg {...common}><path d="M4 18 9 12l4 3 7-9" /><path d="M15 6h5v5" /></svg>
     case 'accounts': return <svg {...common}><path d="M3 7h18v12H3z" /><path d="M16 12h5v3h-5a1.5 1.5 0 0 1 0-3Z" /><path d="M6 7V5h12v2" /></svg>
     case 'credentials': return <svg {...common}><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l2 2M14 9l2 2" /></svg>

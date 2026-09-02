@@ -136,6 +136,13 @@ export interface AccountSlotMeta {
 
 /** Trace of one finished run — what the strategy saw, decided, and emitted. */
 export interface StrategyRunTrace {
+  /**
+   * Identity of this run, unique per instance and stable on disk. The SAME
+   * string scopes the run's log lines and stamps the instructions it emitted,
+   * so an execution leads back to exactly one trace. Absent on traces written
+   * before it existed.
+   */
+  runId?: string
   startedAt: number
   triggerId: string
   durationMs: number
