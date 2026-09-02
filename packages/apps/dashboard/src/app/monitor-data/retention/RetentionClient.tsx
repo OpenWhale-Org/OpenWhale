@@ -8,6 +8,14 @@ import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
 interface ContractEntry { monitor: string; keys: number; bytes: number }
 interface MatchedFile { monitor: string; key: string; bytes: number; updatedAt: number }
 interface RunSummary { at: string; files: number; droppedRecords: number; bytesFreed: number; errors: string[] }
+interface RetentionRun extends RunSummary {
+  id: number
+  policyId: string
+  monitor: string
+  keyPattern: string
+  keepDays: number
+  trigger: 'scheduled' | 'manual'
+}
 interface Policy {
   id: string
   monitor: string
@@ -45,15 +53,21 @@ export function RetentionClient() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [runs, setRuns] = useState<RetentionRun[]>([])
 
   const load = useCallback(async () => {
-    const [dataRes, polRes] = await Promise.all([fetch('/api/monitor-data'), fetch('/api/monitor-retention')])
+    const [dataRes, polRes, runRes] = await Promise.all([
+      fetch('/api/monitor-data'),
+      fetch('/api/monitor-retention'),
+      fetch('/api/monitor-retention/runs?limit=100'),
+    ])
     if (dataRes.ok) {
       const d = await dataRes.json() as { contracts: ContractEntry[]; disk?: { freeBytes: number; totalBytes: number } }
       setContracts(d.contracts.sort((a, b) => b.bytes - a.bytes))
       setDisk(d.disk ?? null)
     }
     if (polRes.ok) setPolicies(((await polRes.json()) as { policies: Policy[] }).policies)
+    if (runRes.ok) setRuns(((await runRes.json()) as { runs: RetentionRun[] }).runs)
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -306,6 +320,57 @@ export function RetentionClient() {
               </button>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* ── run history ────────────────────────────────────────────────────
+          Only passes that actually deleted something land here; a sweep that
+          found nothing to do is not an event. "Still running at all" is
+          answered by each policy's last-run line above. */}
+      <div className="rounded-lg flex flex-col" style={{ ...panelStyle, maxHeight: '22rem' }}>
+        <div className="px-3 py-2 text-xs font-medium shrink-0 flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+          <span>Run history</span>
+          <span>passes that deleted something · newest first</span>
+        </div>
+        <div className="flex-1 overflow-y-auto scroll-hidden">
+          {runs.length === 0 && (
+            <p className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>
+              Nothing pruned yet.
+            </p>
+          )}
+          {runs.length > 0 && (
+            <table className="w-full text-xs" style={{ minWidth: '40rem' }}>
+              <thead>
+                <tr style={{ color: 'var(--muted)' }}>
+                  <th className="text-left font-medium px-3 py-1.5">When</th>
+                  <th className="text-left font-medium py-1.5">Target</th>
+                  <th className="text-right font-medium py-1.5">Kept</th>
+                  <th className="text-right font-medium py-1.5">Files</th>
+                  <th className="text-right font-medium py-1.5">Records</th>
+                  <th className="text-right font-medium py-1.5 pr-3">Freed</th>
+                  <th className="text-left font-medium py-1.5 pr-3">By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map(r => (
+                  <tr key={r.id} className="hoverable" style={{ borderTop: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{new Date(r.at).toLocaleString()}</td>
+                    <td className="py-1.5 font-mono truncate" style={{ maxWidth: 260 }} title={`${r.monitor} / ${r.keyPattern}`}>
+                      {r.monitor} <span style={{ color: 'var(--muted)' }}>/</span> {r.keyPattern}
+                    </td>
+                    <td className="py-1.5 text-right font-mono" style={{ color: 'var(--muted)' }}>{r.keepDays}d</td>
+                    <td className="py-1.5 text-right font-mono">{r.files}</td>
+                    <td className="py-1.5 text-right font-mono">{r.droppedRecords.toLocaleString()}</td>
+                    <td className="py-1.5 text-right font-mono pr-3" style={{ color: 'var(--accent)' }}>{formatBytes(r.bytesFreed)}</td>
+                    <td className="py-1.5 pr-3" style={{ color: r.errors.length ? 'var(--danger, #ef4444)' : 'var(--muted)' }}
+                        title={r.errors.join('\n')}>
+                      {r.trigger}{r.errors.length ? ` · ${r.errors.length} error(s)` : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

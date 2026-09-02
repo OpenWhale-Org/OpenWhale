@@ -15,6 +15,17 @@ const noDb = {
   get: async () => undefined,
 } as unknown as SQLiteAdapter
 
+/** Captures the SQL a run issues, so the history rules can be asserted. */
+function recordingDb(policy: Record<string, unknown>) {
+  const sql: Array<{ q: string; params: unknown[] }> = []
+  const db = {
+    run: async (q: string, params: unknown[] = []) => { sql.push({ q, params }); return 0 },
+    all: async () => [],
+    get: async () => policy,
+  } as unknown as SQLiteAdapter
+  return { db, sql, inserts: () => sql.filter(e => e.q.includes('INSERT INTO monitor_retention_runs')) }
+}
+
 function store(monitor: string, key: string, records: Array<{ ts: number }>): void {
   // Keys containing '/' become nested directories on POSIX — that is how the
   // collector writes them, so the walk has to find them the same way.
@@ -93,5 +104,38 @@ describe('RetentionService.apply', () => {
   it('a horizon wider than the data is a no-op', async () => {
     const s = await svc.apply({ monitor: '*', keyPattern: '*', keepDays: 365 }, false)
     expect(s).toMatchObject({ files: 0, droppedRecords: 0, bytesFreed: 0 })
+  })
+})
+
+describe('RetentionService run history', () => {
+  const policyRow = {
+    id: 'p1', monitor: 'funding-rates', key_pattern: '*', keep_days: 7,
+    enabled: 1, last_run_at: null, last_result: null,
+  }
+
+  it('records a pass that deleted something', async () => {
+    const { db, inserts } = recordingDb(policyRow)
+    const svc = new RetentionService(db, { dataDirPath: dataDir } as unknown as OpenWhaleRuntime)
+    const summary = await svc.runPolicy('p1', 'manual')
+    expect(summary.droppedRecords).toBe(2)
+    expect(inserts()).toHaveLength(1)
+    expect(inserts()[0]!.params).toContain('manual')
+  })
+
+  it('does NOT record a pass that found nothing — liveness lives on the policy', async () => {
+    const { db, sql, inserts } = recordingDb({ ...policyRow, keep_days: 365 })
+    const svc = new RetentionService(db, { dataDirPath: dataDir } as unknown as OpenWhaleRuntime)
+    const summary = await svc.runPolicy('p1', 'scheduled')
+    expect(summary.files).toBe(0)
+    expect(inserts()).toHaveLength(0)
+    // last_run_at still moves, so "is it running" stays answerable.
+    expect(sql.some(e => e.q.includes('SET last_run_at'))).toBe(true)
+  })
+
+  it('trims the history after every insert, so the log cannot grow without bound', async () => {
+    const { db, sql } = recordingDb(policyRow)
+    const svc = new RetentionService(db, { dataDirPath: dataDir } as unknown as OpenWhaleRuntime)
+    await svc.runPolicy('p1', 'manual')
+    expect(sql.some(e => e.q.includes('DELETE FROM monitor_retention_runs'))).toBe(true)
   })
 })

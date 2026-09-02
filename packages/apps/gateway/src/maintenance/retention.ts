@@ -35,6 +35,17 @@ export interface RunSummary {
   errors: string[]
 }
 
+/** One entry in the run history. */
+export interface RetentionRun extends RunSummary {
+  id: number
+  policyId: string
+  monitor: string
+  keyPattern: string
+  keepDays: number
+  /** 'scheduled' for the hourly sweep, 'manual' for a button. */
+  trigger: 'scheduled' | 'manual'
+}
+
 /** One matched store. `file` is carried from the walk rather than rebuilt. */
 export interface MatchedFile {
   monitor: string
@@ -57,6 +68,8 @@ interface Row {
 }
 
 const HOUR_MS = 3_600_000
+/** Rows kept in the run history — see `record`. */
+const HISTORY_CAP = 500
 
 function toPolicy(row: Row): RetentionPolicy {
   let lastResult: RunSummary | undefined
@@ -97,6 +110,22 @@ export class RetentionService {
         updated_at  TEXT NOT NULL
       )
     `)
+    await this.db.run(`
+      CREATE TABLE IF NOT EXISTS monitor_retention_runs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        policy_id       TEXT NOT NULL,
+        monitor         TEXT NOT NULL,
+        key_pattern     TEXT NOT NULL,
+        keep_days       REAL NOT NULL,
+        at              TEXT NOT NULL,
+        files           INTEGER NOT NULL,
+        dropped_records INTEGER NOT NULL,
+        bytes_freed     INTEGER NOT NULL,
+        errors          TEXT NOT NULL,
+        trigger         TEXT NOT NULL
+      )
+    `)
+    await this.db.run('CREATE INDEX IF NOT EXISTS idx_retention_runs_at ON monitor_retention_runs (at DESC)')
     // Hourly is fine for a housekeeping job whose horizons are measured in
     // days — and it means a policy saved now takes effect within the hour
     // without a restart. unref'd so it never holds the process open.
@@ -219,16 +248,73 @@ export class RetentionService {
   }
 
   /** Run one saved policy now and record the outcome. */
-  async runPolicy(id: string): Promise<RunSummary> {
+  async runPolicy(id: string, trigger: 'scheduled' | 'manual' = 'manual'): Promise<RunSummary> {
     const row = await this.db.get<Row>('SELECT * FROM monitor_retention_policies WHERE id = ?', [id])
     if (!row) throw new Error('no such policy')
     const policy = toPolicy(row)
     const summary = await this.apply(policy, false)
+    // last_run_at moves on EVERY pass — that is what answers "is this policy
+    // still alive". The history below is the opposite question, so it only
+    // takes passes that did something.
     await this.db.run(
       'UPDATE monitor_retention_policies SET last_run_at = ?, last_result = ? WHERE id = ?',
       [summary.at, JSON.stringify(summary), id],
     )
+    if (summary.files > 0 || summary.errors.length > 0) await this.record(policy, summary, trigger)
     return summary
+  }
+
+  /**
+   * Append to the run history, then trim it.
+   *
+   * A log about reclaiming disk that grows without bound would be its own
+   * punchline. Only passes that moved something get a row, and the newest
+   * HISTORY_CAP survive — enough to answer "what did this actually delete,
+   * and when" long after the fact.
+   */
+  private async record(
+    policy: Pick<RetentionPolicy, 'id' | 'monitor' | 'keyPattern' | 'keepDays'>,
+    summary: RunSummary,
+    trigger: 'scheduled' | 'manual',
+  ): Promise<void> {
+    await this.db.run(
+      `INSERT INTO monitor_retention_runs
+         (policy_id, monitor, key_pattern, keep_days, at, files, dropped_records, bytes_freed, errors, trigger)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [policy.id, policy.monitor, policy.keyPattern, policy.keepDays, summary.at,
+        summary.files, summary.droppedRecords, summary.bytesFreed, JSON.stringify(summary.errors), trigger],
+    )
+    await this.db.run(
+      `DELETE FROM monitor_retention_runs WHERE id NOT IN (
+         SELECT id FROM monitor_retention_runs ORDER BY id DESC LIMIT ?
+       )`,
+      [HISTORY_CAP],
+    )
+  }
+
+  /** Newest first. */
+  async runs(limit = 100): Promise<RetentionRun[]> {
+    const rows = await this.db.all<Row>(
+      'SELECT * FROM monitor_retention_runs ORDER BY id DESC LIMIT ?',
+      [Math.min(Math.max(limit, 1), HISTORY_CAP)],
+    )
+    return rows.map(r => {
+      let errors: string[] = []
+      try { errors = JSON.parse(String(r.errors)) as string[] } catch { /* advisory */ }
+      return {
+        id: Number(r.id),
+        policyId: String(r.policy_id),
+        monitor: String(r.monitor),
+        keyPattern: String(r.key_pattern),
+        keepDays: Number(r.keep_days),
+        at: String(r.at),
+        files: Number(r.files),
+        droppedRecords: Number(r.dropped_records),
+        bytesFreed: Number(r.bytes_freed),
+        trigger: r.trigger === 'scheduled' ? 'scheduled' : 'manual',
+        errors,
+      }
+    })
   }
 
   /** The scheduled pass: every enabled policy, one after another. */
@@ -240,7 +326,7 @@ export class RetentionService {
       for (const policy of await this.list()) {
         if (!policy.enabled) continue
         try {
-          const summary = await this.runPolicy(policy.id)
+          const summary = await this.runPolicy(policy.id, 'scheduled')
           if (summary.files > 0)
             log.info({ monitor: policy.monitor, keyPattern: policy.keyPattern, ...summary }, 'Pruned monitor data')
           out.push(summary)

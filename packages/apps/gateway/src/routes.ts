@@ -1147,6 +1147,15 @@ export function buildRouter(): Router {
     })
   }))
 
+  /** What retention actually deleted, newest first. Passes that moved
+   *  nothing are not recorded — `lastRunAt` on the policy answers liveness. */
+  router.get('/api/monitor-retention/runs', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    res.json({ runs: await svc.runs(Number(req.query['limit'] ?? 100) || 100) })
+  }))
+
   router.post('/api/monitor-retention/run', h(async (req, res) => {
     await ensureStarted()
     const svc = getRetentionService()
