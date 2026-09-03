@@ -352,10 +352,22 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
  * can draw diagrams that react to what the user is typing. Scripts run, but
  * same-origin is denied — the page can't touch the dashboard or its cookies.
  */
-function IllustrationFrame({ ill, values, data, dataError }: { ill: ParamIllustration; values: Record<string, string>; data?: Record<string, unknown> | undefined; dataError?: string | undefined }) {
+function IllustrationFrame({ ill, values, data, dataError, pending }: { ill: ParamIllustration; values: Record<string, string>; data?: Record<string, unknown> | undefined; dataError?: string | undefined; pending?: boolean | undefined }) {
   const ref = useRef<HTMLIFrameElement>(null)
-  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}) }, '*')
-  useEffect(() => { post() }, [values, data, dataError])   // eslint-disable-line react-hooks/exhaustive-deps
+  /* A page that reports its own height gets it: fixed heights clip a picture
+     that reflows with the panel's width. Until it reports, the declared one. */
+  const [height, setHeight] = useState<number | undefined>(undefined)
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== ref.current?.contentWindow) return
+      const m = e.data as { type?: string; height?: number } | undefined
+      if (m?.type === 'ow-size' && typeof m.height === 'number' && m.height > 0) setHeight(Math.min(2000, Math.ceil(m.height)))
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}), pending: pending === true }, '*')
+  useEffect(() => { post() }, [values, data, dataError, pending])   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-1">
       {ill.title && <span className="text-xs" style={{ color: 'var(--muted)' }}>{ill.title}</span>}
@@ -366,7 +378,7 @@ function IllustrationFrame({ ill, values, data, dataError }: { ill: ParamIllustr
         srcDoc={ill.html}
         onLoad={post}
         className="w-full rounded-md"
-        style={{ height: ill.height ?? 220, border: '1px solid var(--border)', background: 'var(--surface)', overflow: 'hidden' }}
+        style={{ height: height ?? ill.height ?? 220, border: '1px solid var(--border)', background: 'var(--surface)', overflow: 'hidden' }}
       />
     </div>
   )
@@ -475,11 +487,13 @@ export function ParamFieldsForm({
      and it is asked again, debounced, whenever the state changes. */
   const [illData, setIllData] = useState<Record<string, unknown> | undefined>(undefined)
   const [illError, setIllError] = useState<string | undefined>(undefined)
+  const [illPending, setIllPending] = useState(false)
   const illParams = JSON.stringify(buildParamsFromFields(fields, values))
   const illAccounts = JSON.stringify(slotBindings ?? {})
   useEffect(() => {
     if (!illustrationData || !strategyId) return
     const controller = new AbortController()
+    setIllPending(true)
     const timer = setTimeout(() => {
       void (async () => {
         try {
@@ -491,9 +505,11 @@ export function ParamFieldsForm({
           if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
           setIllData(body.data)
           setIllError(undefined)
+          setIllPending(false)
         } catch (err) {
           if (controller.signal.aborted) return
           setIllError(err instanceof Error ? err.message : String(err))
+          setIllPending(false)
         }
       })()
     }, 400)
@@ -778,7 +794,7 @@ export function ParamFieldsForm({
           </span>
         </div>
       )}
-      {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} data={illData} dataError={illError} />)}
+      {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
       {baseFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Base Parameters</label>
@@ -841,7 +857,7 @@ export function ParamFieldsForm({
                   {!isCollapsed && (
                     <div className="flex flex-col gap-3 p-3" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
                       {fieldsIn(sec).map(renderField)}
-                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} data={illData} dataError={illError} />)}
+                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
                     </div>
                   )}
                 </div>
