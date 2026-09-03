@@ -221,7 +221,21 @@ export class OpenWhaleRuntime implements IRuntime {
     this.executorRegistry = options?.executorRegistry ?? createExecutorRegistry()
     this.strategyRegistry = options?.strategyRegistry ?? createStrategyRegistry()
     this.triggerManager = new TriggerManager(this.monitorRegistry, options?.credentialStore, options?.database)
-    this.triggerManager.setDryRunSink((results) => { void this.recordDryRun(results) })
+    /*
+     * Serialized, not fired and forgotten.
+     *
+     * recordDryRun awaits a mkdir and an append before it announces anything,
+     * so two independent calls race on the filesystem and the LATER batch can
+     * be announced first. That reorders the execution stream against causality
+     * — a deactivate record ahead of the activate that preceded it — which the
+     * Executions page and every SSE consumer read as the order things happened.
+     * Chaining costs nothing here: the sink is called once per run.
+     */
+    this.triggerManager.setDryRunSink((results) => {
+      this.dryRunChain = this.dryRunChain
+        .then(() => this.recordDryRun(results))
+        .catch(err => { log.warn({ err }, 'Dry-run recording failed') })
+    })
     this.database = options?.database
     this.instanceStore = options?.instanceStore
       ?? (this.database ? new DBStrategyInstanceStore(this.database) : new StrategyInstanceStore(this.dataDir))
@@ -897,7 +911,19 @@ export class OpenWhaleRuntime implements IRuntime {
 
   // ── PnL attribution ─────────────────────────────────────────────────────────
 
+  /** Keeps dry-run batches announced in the order they were produced. */
+  private dryRunChain: Promise<void> = Promise.resolve()
+
   private pnlService: PnlService | undefined
+
+  /**
+   * The ledger, for callers that need to read it rather than be handed a
+   * summary — the circuit breaker asks it for windows and for whether it is
+   * being kept up to date at all. Undefined on a memory-mode runtime.
+   */
+  get pnl(): PnlService | undefined {
+    return this.pnlService
+  }
 
   /** Per-instance realized PnL / fees / funding summary from the attribution ledger. */
   async instancePnl(instanceId: string): Promise<PnlSummary> {

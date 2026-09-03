@@ -92,6 +92,19 @@ class Quoter extends BaseStrategy<typeof decls> {
 
 async function settle(ms = 150) { await new Promise(r => setTimeout(r, ms)) }
 
+/**
+ * Wait for a condition, not for a duration.
+ *
+ * A fixed sleep is a bet that the machine is idle, and during a full-suite run
+ * it is not: 150ms was enough on its own and failed about one run in two under
+ * load. Poll instead, and let the deadline be generous — a passing test costs
+ * one tick, only a genuinely broken one waits.
+ */
+async function until(pred: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!pred() && Date.now() < deadline) await new Promise(r => setTimeout(r, 10))
+}
+
 async function harness(quiesceTimeoutMs?: number) {
   const monitor = new SignalMonitor()
   const executor = new RecordingExecutor()
@@ -203,7 +216,8 @@ describe('lifecycle hooks', () => {
     runtime.onExecution(r => { seen.push(r) })
     await runtime.activate(instance('dry', { dryRun: true }))
     await runtime.deactivate('dry')
-    await settle()   // dry-run records are written and announced asynchronously, as a run's are
+    // Dry-run records are written and announced asynchronously, as a run's are.
+    await until(() => seen.filter(r => r.instruction.instanceId === 'dry').length >= 2)
     expect(executor.actions).toEqual([])
     expect(seen.filter(r => r.instruction.instanceId === 'dry').map(r => [r.instruction.action, r.status]))
       .toEqual([['setLeverage', 'dry-run'], ['cancel', 'dry-run']])
