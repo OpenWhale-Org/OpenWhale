@@ -7,6 +7,7 @@ import type {
 } from '@openwhaleorg/exchange'
 import { RetryableAdapterError, TerminalAdapterError, createLogger } from '@openwhaleorg/core'
 import { meterRequests } from './requestMeter.js'
+import { shareMarketMap } from './marketMap.js'
 
 /**
  * Generic PerpExchangeAdapter over any ccxt.pro exchange.
@@ -256,6 +257,9 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     // Measurement only — it paces nothing and delays nothing.
     meterRequests(this.exchange as unknown as Parameters<typeof meterRequests>[0])
     if (options.testnet) this.exchange.setSandboxMode(true)
+    // One market walk per venue, shared by every adapter on it; a failed walk
+    // is retried, not memoised. Keyed after sandbox mode: testnet has its own map.
+    shareMarketMap(this.exchange as unknown as Parameters<typeof shareMarketMap>[0], `${options.exchangeId}:${options.testnet ? 'testnet' : 'mainnet'}`)
     // Symbol-less fetchOpenOrders is a deliberate adapter capability (the
     // account detail view wants ALL open orders); ccxt otherwise throws a
     // warning-as-error about the heavier rate-limit weight — acknowledged.
