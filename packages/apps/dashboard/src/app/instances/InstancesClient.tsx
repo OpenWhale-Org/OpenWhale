@@ -743,7 +743,8 @@ export function ParamFieldsForm({
     )
   }
 
-  const illsFor = (sec: string) => (illustrations ?? []).filter(i => (i.section ?? '') === sec)
+  const illsFor = (sec: string) => (illustrations ?? []).filter(i => (i.section ?? '') === sec && (sec !== '' || i.placement !== 'bottom'))
+  const illsBottom = (illustrations ?? []).filter(i => (i.section ?? '') === '' && i.placement === 'bottom')
 
   const sections = [...new Set(tunableFields.map(f => f.section ?? ''))]
   const fieldsIn = (sec: string) => tunableFields.filter(f => (f.section ?? '') === sec)
@@ -866,6 +867,7 @@ export function ParamFieldsForm({
           </div>
         </div>
       )}
+      {illsBottom.map((ill, i) => <IllustrationFrame key={`bottom-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
     </div>
   )
 }

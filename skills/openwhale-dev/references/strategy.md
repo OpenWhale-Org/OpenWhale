@@ -184,7 +184,9 @@ Rules:
 
 ## Illustrations with live figures
 
-`paramsIllustrations` are HTML pages drawn under the form; each receives `{ type: 'ow-params',
+`paramsIllustrations` are HTML pages drawn in the form — above the fields by default, after a
+named `section`, or with `placement: 'bottom'` after the last field (a preview of what the
+fields add up to belongs below them). Each receives `{ type: 'ow-params',
 values }` by postMessage on load and on every edit. A page that needs what the form does not
 hold — quotes, an estimate, the venue's limits — gets it from the strategy (core ≥ 0.2.3):
 

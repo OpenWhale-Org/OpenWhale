@@ -272,6 +272,12 @@ export interface ExecutorDefinition {
 export interface ParamIllustration {
   /** Render after this section's fields (matches ParamFieldMeta.section); top of the form when omitted. */
   section?: string
+  /**
+   * Where a section-less illustration sits: 'top' (default) above the fields,
+   * 'bottom' after the last of them — for a picture that reads as a preview
+   * of what the fields add up to rather than an explanation of them.
+   */
+  placement?: 'top' | 'bottom'
   title?: string
   /**
    * The page. It receives `{ type: 'ow-params', values, data?, dataError? }`
