@@ -241,6 +241,25 @@ describe('staging — what makes a reinstall load new code', () => {
     expect(fs.existsSync(live.dir)).toBe(true)
   })
 
+  /* `@scope/venue` and `@scope/venue-strategy` stage under names that share a
+     prefix. Pruning the venue's generations must not take the strategy's
+     live copy with it — that is exactly the package that depends on the venue
+     and is reloaded right after the venue is reinstalled. */
+  it('prunes only this package\'s generations, not a package whose name extends it', async () => {
+    install('v1')
+    const live = await stage('demo-plugin')
+    const root = path.dirname(live.dir)
+    const cousin = path.join(root, 'demo-plugin-strategy-1788413390473')
+    const stale = path.join(root, 'demo-plugin-1000')
+    fs.mkdirSync(cousin, { recursive: true })
+    fs.mkdirSync(stale, { recursive: true })
+    await pruneStaged('demo-plugin', live.dir)
+    expect(fs.existsSync(stale)).toBe(false)
+    expect(fs.existsSync(cousin)).toBe(true)
+    expect(fs.existsSync(live.dir)).toBe(true)
+    fs.rmSync(cousin, { recursive: true, force: true })
+  })
+
   /* stagedDirOf's answer is handed to rm -rf, so anything not inside the
      staging root must come back undefined — manifest entries written before
      staging existed point straight into node_modules. */
