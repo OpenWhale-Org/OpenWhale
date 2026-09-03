@@ -96,3 +96,48 @@ describe('ticker reads', () => {
     expect(t.last).toBeGreaterThan(0)
   })
 })
+
+/**
+ * Position reads: shared while in flight, never stale, never silently flat.
+ *
+ * Measured 2026-09-03: a two-leg strategy on one account reconciled both legs
+ * at once, sending two identical clearinghouseState requests in the same
+ * millisecond, and a 429 on the xyz dex was swallowed into an empty list —
+ * the account read as flat while holding two XYZ legs.
+ */
+describe('position reads', () => {
+  function positionsAdapter(counters: { main: number; xyz: number }, opts: { failXyz?: boolean } = {}) {
+    const a = new HyperliquidAdapter({ walletAddress: '0x' + '1'.repeat(40) })
+    const ex = (a as unknown as { exchange: Record<string, unknown> }).exchange
+    ex['loadMarkets'] = async () => ({})
+    ex['markets'] = { 'XYZ-MU/USDC:USDC': { info: { name: 'xyz:MU' } }, 'BTC/USDC:USDC': { info: { name: 'BTC' } } }
+    ex['market'] = (symbol: string) => (ex['markets'] as Record<string, unknown>)[symbol]
+    ex['fetchPositions'] = async (_s: unknown, params?: { dex?: string }) => {
+      await new Promise(r => setTimeout(r, 5))
+      if (params?.dex === 'xyz') {
+        counters.xyz++
+        if (opts.failXyz) throw new Error('hyperliquid POST /info 429 Too Many Requests')
+        return [{ symbol: 'XYZ-MU/USDC:USDC', contracts: 1, side: 'short', info: {} }]
+      }
+      counters.main++
+      return []
+    }
+    return a
+  }
+
+  it('shares one in-flight read between callers that arrive together', async () => {
+    const counters = { main: 0, xyz: 0 }
+    const a = positionsAdapter(counters)
+    await Promise.all([a.fetchPositions(['XYZ-MU/USDC:USDC']), a.fetchPositions(['XYZ-MU/USDC:USDC'])])
+    expect(counters.xyz).toBe(1)
+    // Sequential callers are not served from the past.
+    await a.fetchPositions(['XYZ-MU/USDC:USDC'])
+    expect(counters.xyz).toBe(2)
+  })
+
+  it('fails the read when a dex read fails, rather than reporting the account flat', async () => {
+    const counters = { main: 0, xyz: 0 }
+    const a = positionsAdapter(counters, { failXyz: true })
+    await expect(a.fetchPositions(['XYZ-MU/USDC:USDC'])).rejects.toThrow(/429/)
+  })
+})

@@ -398,20 +398,41 @@ export class HyperliquidAdapter extends CcxtAdapter {
       ? [...new Set(symbols.map(s => this.hip3DexOf(s)).filter((d): d is string => d !== undefined))]
       : await this.listHip3Dexes()
     const needMain = !symbols?.length || symbols.some(s => this.hip3DexOf(s) === undefined)
+    /*
+     * A per-dex failure is the whole read's failure. Swallowing it returned
+     * the account as FLAT on that dex — a 429 on the xyz clearinghouse and a
+     * strategy holding two XYZ legs reconciled against an empty list. A read
+     * that fails is retried next minute; a read that lies is acted on now.
+     */
     const [main, ...perDex] = await Promise.all([
-      needMain ? super.fetchPositions(symbols) : Promise.resolve([] as ExchangePosition[]),
-      ...wantedDexes.map(async (dex) => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const raw = await this.guard(() => this.exchange.fetchPositions(undefined, { dex })) as any[]
-          return raw.map(this.mapPosition)
-        } catch {
-          return [] as ExchangePosition[]
-        }
-      }),
+      needMain ? this.clearinghouse('', () => super.fetchPositions(symbols)) : Promise.resolve([] as ExchangePosition[]),
+      ...wantedDexes.map((dex) => this.clearinghouse(dex, async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = await this.guard(() => this.exchange.fetchPositions(undefined, { dex })) as any[]
+        return raw.map(this.mapPosition)
+      })),
     ])
     const all = [...main, ...perDex.flat()]
     return symbols?.length ? all.filter(p => symbols.includes(p.symbol)) : all
+  }
+
+  /**
+   * One clearinghouse read in flight per dex, per account.
+   *
+   * A two-leg strategy on one account reconciles both legs at once — two
+   * identical `clearinghouseState` requests in the same millisecond, and the
+   * account snapshot adds a third. Callers that arrive while one is in flight
+   * share its answer; nothing is ever served from the past — the next caller
+   * after it settles asks the venue again. Position reads must be current;
+   * they need not be duplicated.
+   */
+  private readonly clearinghouseInFlight = new Map<string, Promise<ExchangePosition[]>>()
+  private clearinghouse(dex: string, read: () => Promise<ExchangePosition[]>): Promise<ExchangePosition[]> {
+    const pending = this.clearinghouseInFlight.get(dex)
+    if (pending) return pending
+    const p = read().finally(() => { this.clearinghouseInFlight.delete(dex) })
+    this.clearinghouseInFlight.set(dex, p)
+    return p
   }
 
   /**
