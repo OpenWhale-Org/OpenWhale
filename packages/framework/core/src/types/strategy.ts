@@ -208,6 +208,13 @@ export interface IStrategy {
    */
   presets?(ctx: PresetContext): Promise<ParamPreset[]>
   /**
+   * Live figures for the param illustrations: called with the form's current
+   * values (and keyless adapters) whenever they change, debounced; whatever
+   * it returns is posted to every illustration frame as `data`. A probe
+   * instance, like presets(). Throw to have the frame told `dataError`.
+   */
+  illustrationData?(ctx: PresetContext): Promise<Record<string, unknown>>
+  /**
    * Availability checkers this strategy provides, keyed by the name a field's
    * `meta({ availability: { checker } })` refers to. Pure functions over the
    * venue's market list — see AvailabilityChecker.

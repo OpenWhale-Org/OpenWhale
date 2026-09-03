@@ -273,6 +273,13 @@ export interface ParamIllustration {
   /** Render after this section's fields (matches ParamFieldMeta.section); top of the form when omitted. */
   section?: string
   title?: string
+  /**
+   * The page. It receives `{ type: 'ow-params', values, data?, dataError? }`
+   * by postMessage on load and on every change: `values` are the form's
+   * fields as strings; `data` is what IStrategy.illustrationData() returned
+   * for them, when the strategy implements it — live quotes, an estimate,
+   * anything the picture needs that the form does not hold.
+   */
   html: string
   /** iframe height in px. Default 220. */
   height?: number
@@ -401,6 +408,8 @@ export interface StrategyDefinition {
   paramPresets?: ParamPreset[]
   /** Present when the strategy computes presets live — see IStrategy.presets(). */
   presetSource?: PresetSource
+  /** True when the strategy serves live figures to its illustrations — see IStrategy.illustrationData(). */
+  illustrationData?: boolean
   createdAt: string
   updatedAt: string
 }

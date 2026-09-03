@@ -61,6 +61,10 @@ the discipline that risk limits live in code even when a model produces the sign
 
 ## Since 2026-08-26 (newest first)
 
+- **Illustrations get live figures** (core ≥ 0.2.3). `illustrationData(ctx)` on a strategy is called,
+  debounced, for the form's current values, and its answer reaches every `paramsIllustrations`
+  frame as `data` in the `ow-params` message — quotes, an estimate, a venue limit, drawn live as
+  the operator types. (`references/strategy.md` §Illustrations)
 - **Live presets with cards** (core ≥ 0.2.3). A strategy may compute its presets — `presets(ctx)`
   with keyless adapters, the bound slots and the form's current values — and give each a `card`
   (title, headline figure, rows, badges, tone; or `html` for a custom drawing). The Dashboard

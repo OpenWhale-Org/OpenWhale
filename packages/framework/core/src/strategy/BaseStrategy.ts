@@ -187,6 +187,8 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   readonly presetSource?: PresetSource
   /** Compute presets live — see IStrategy.presets(). Absent by default. */
   presets?(ctx: PresetContext): Promise<ParamPreset[]>
+  /** Live figures for the illustrations — see IStrategy.illustrationData(). Absent by default. */
+  illustrationData?(ctx: PresetContext): Promise<Record<string, unknown>>
 
   /**
    * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.

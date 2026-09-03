@@ -182,6 +182,29 @@ Rules:
 - The same scan usually wants to exist as a **Script** too (a report an operator runs without
   opening the form). Put the computation in one module and call it from both.
 
+## Illustrations with live figures
+
+`paramsIllustrations` are HTML pages drawn under the form; each receives `{ type: 'ow-params',
+values }` by postMessage on load and on every edit. A page that needs what the form does not
+hold — quotes, an estimate, the venue's limits — gets it from the strategy (core ≥ 0.2.3):
+
+```ts
+readonly paramsIllustrations = [carryIllustration]
+
+override async illustrationData(ctx: PresetContext): Promise<Record<string, unknown>> {
+  const b = ctx.params.base
+  if (!b['longMarket']) return { ok: false, reason: 'Pick a market to see the estimate.' }
+  const boros = await ctx.adapters.resolve<BorosSession>('pendle/rates', 'boros')
+  const q = await boros.marketQuote(await marketId(boros, String(b['longMarket'])))
+  return { ok: true, estimate: carryEstimate({ ...termsOf(q), notionalUsd: Number(b['notionalUsd']) }) }
+}
+```
+
+The Dashboard calls it, debounced, whenever the form changes, and posts the answer to every frame
+as `data` (a throw arrives as `dataError`). Same probe rules as `presets()`: keyless adapters, no
+store; the runtime caches by form state for 15 s. Keep the arithmetic here and let the page only
+format — one estimator, the strategy's own, for the trace, the presets and the picture.
+
 ## The API you have inside a strategy
 
 | Member | What it gives you |
@@ -201,6 +224,7 @@ Rules:
 | `this.rule(cond, instructions)` / `this.parallel(sets)` | `rule` returns the instructions only when `cond` holds (else `[]`); `parallel` flattens several instruction sets. Sugar for readable `evaluate` bodies |
 | `onActivate(ctx)` / `onDeactivate(ctx)` | Lifecycle hooks — see the section above |
 | `presetSource` / `presets(ctx)` | Live presets — see the section above |
+| `illustrationData(ctx)` | Live figures for the illustrations — see the section above |
 | `onExecutionResult(result, { instanceId })` | Optional override: called with the executor's recorded `ExecutionResult` for every instruction THIS instance emitted (success, failed or skipped), after the record is written — the place to note fill ids or a failed leg in `this.store`. `this.store` is the same per-instance store; `this.trace` is a no-op here unless a run happens to be active. Runs off the queue path: a throw is logged as a warning and never touches the execution record |
 | `availabilityCheckers` | `Readonly<Record<name, AvailabilityChecker>>` — pure functions over the venue's market list, named from a param's `.meta({ availability: { checker } })`. The built-in `availability: { source: 'market', kind? }` needs no checker: every value must be a listed market |
 

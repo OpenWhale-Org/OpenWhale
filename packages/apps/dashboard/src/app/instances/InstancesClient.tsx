@@ -352,11 +352,10 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
  * can draw diagrams that react to what the user is typing. Scripts run, but
  * same-origin is denied — the page can't touch the dashboard or its cookies.
  */
-function IllustrationFrame({ ill, values }: { ill: ParamIllustration; values: Record<string, string> }) {
+function IllustrationFrame({ ill, values, data, dataError }: { ill: ParamIllustration; values: Record<string, string>; data?: Record<string, unknown> | undefined; dataError?: string | undefined }) {
   const ref = useRef<HTMLIFrameElement>(null)
-  useEffect(() => {
-    ref.current?.contentWindow?.postMessage({ type: 'ow-params', values }, '*')
-  }, [values])
+  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}) }, '*')
+  useEffect(() => { post() }, [values, data, dataError])   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-1">
       {ill.title && <span className="text-xs" style={{ color: 'var(--muted)' }}>{ill.title}</span>}
@@ -365,7 +364,7 @@ function IllustrationFrame({ ill, values }: { ill: ParamIllustration; values: Re
         sandbox="allow-scripts"
         scrolling="no"
         srcDoc={ill.html}
-        onLoad={() => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values }, '*')}
+        onLoad={post}
         className="w-full rounded-md"
         style={{ height: ill.height ?? 220, border: '1px solid var(--border)', background: 'var(--surface)', overflow: 'hidden' }}
       />
@@ -384,6 +383,7 @@ export function ParamFieldsForm({
   presets,
   presetSource,
   slotBindings,
+  illustrationData,
 }: {
   fields: ParamFieldDef[]
   values: Record<string, string>
@@ -396,6 +396,8 @@ export function ParamFieldsForm({
   presetSource?: PresetSource | undefined
   /** Slot label → account name bound so far; a live scan sizes to them. */
   slotBindings?: Record<string, string>
+  /** True when the strategy serves live figures to its illustrations; fetched, debounced, on every change. */
+  illustrationData?: boolean | undefined
   /** Strategy whose availability checkers to call. */
   strategyId?: string
   /**
@@ -467,6 +469,36 @@ export function ParamFieldsForm({
     if (preset) applyPresetObject(preset)
   }
   const useDialog = presetsNeedDialog(presets, presetSource)
+
+  /* Live figures for the illustrations: the strategy computes them for the
+     form's current state, so the picture can show what the numbers mean —
+     and it is asked again, debounced, whenever the state changes. */
+  const [illData, setIllData] = useState<Record<string, unknown> | undefined>(undefined)
+  const [illError, setIllError] = useState<string | undefined>(undefined)
+  const illParams = JSON.stringify(buildParamsFromFields(fields, values))
+  const illAccounts = JSON.stringify(slotBindings ?? {})
+  useEffect(() => {
+    if (!illustrationData || !strategyId) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/illustration-data`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+            body: JSON.stringify({ accounts: JSON.parse(illAccounts), params: JSON.parse(illParams) }),
+          })
+          const body = (await res.json()) as { data?: Record<string, unknown>; error?: string }
+          if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+          setIllData(body.data)
+          setIllError(undefined)
+        } catch (err) {
+          if (controller.signal.aborted) return
+          setIllError(err instanceof Error ? err.message : String(err))
+        }
+      })()
+    }, 400)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [illustrationData, strategyId, illParams, illAccounts])
 
   // Verify chosen values against the venue whenever either changes. Advisory:
   // a failure to check leaves the field unannotated rather than blocking.
@@ -746,7 +778,7 @@ export function ParamFieldsForm({
           </span>
         </div>
       )}
-      {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} />)}
+      {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} data={illData} dataError={illError} />)}
       {baseFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Base Parameters</label>
@@ -809,7 +841,7 @@ export function ParamFieldsForm({
                   {!isCollapsed && (
                     <div className="flex flex-col gap-3 p-3" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
                       {fieldsIn(sec).map(renderField)}
-                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} />)}
+                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} data={illData} dataError={illError} />)}
                     </div>
                   )}
                 </div>
@@ -2308,6 +2340,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                   presets={strategy.paramPresets}
                   presetSource={strategy.presetSource}
                   slotBindings={slotBindings}
+                  illustrationData={strategy.illustrationData}
                 />
               )}
             </div>

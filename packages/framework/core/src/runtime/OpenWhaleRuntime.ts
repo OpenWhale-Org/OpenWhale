@@ -54,6 +54,9 @@ import type { MonitorDeclaration } from '../types/strategy.js'
 
 const log = createLogger('OpenWhaleRuntime')
 
+/** How long one illustrationData() answer serves the same form state. */
+const ILLUSTRATION_TTL_MS = 15_000
+
 /**
  * Resolve a viewer's plot-option request against the options that exist in the
  * current record window.
@@ -179,6 +182,8 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly accountSnapshotErrors = new Map<string, string>()
   /** strategyPresets() results, by strategy + bindings + params. */
   private readonly presetCache = new Map<string, { presets: ParamPreset[]; computedAt: number }>()
+  /** strategyIllustrationData() results, by strategy + bindings + params. */
+  private readonly illustrationCache = new Map<string, { data: Record<string, unknown>; computedAt: number }>()
   private accountSnapshotTimer: ReturnType<typeof setInterval> | undefined
   private readonly accountSnapshotIntervalMs: number
   private readonly accountSnapshotRetentionMs: number
@@ -396,6 +401,7 @@ export class OpenWhaleRuntime implements IRuntime {
       ...(definition.paramsIllustrations || !probe.paramsIllustrations?.length ? {} : { paramsIllustrations: probe.paramsIllustrations }),
       ...(definition.paramPresets || !probe.paramPresets?.length ? {} : { paramPresets: probe.paramPresets }),
       ...(typeof probe.presets === 'function' ? { presetSource: { ...(probe.presetSource ?? {}) } } : {}),
+      ...(typeof probe.illustrationData === 'function' ? { illustrationData: true } : {}),
     }
     this.strategyRegistry.register(complete, factory)
   }
@@ -850,6 +856,34 @@ export class OpenWhaleRuntime implements IRuntime {
   /** One run by id — the trace an execution's `runId` points at. */
   readInstanceRun(instanceId: string, runId: string): Promise<StrategyRunTrace | undefined> {
     return readRunTrace(this.dataDir, instanceId, runId)
+  }
+
+  /**
+   * Every instance's recent runs in one list, newest first — the Runs page.
+   *
+   * Per instance, the live ring comes first (it holds EVERY recent run; the
+   * disk samples the no-ops down to a heartbeat), then persisted history so
+   * a stopped instance still shows what it last decided. A status filter is
+   * applied before the cut, so "errors only" reaches back through the
+   * per-instance read rather than just the newest few rows.
+   */
+  async readAllRuns(opts: { limit?: number; instanceId?: string; status?: 'error' | 'instructions' | 'noop' } = {}): Promise<Array<StrategyRunTrace & { instanceId: string }>> {
+    const limit = opts.limit ?? 200
+    const views = await this.listInstanceViews()
+    const ids = opts.instanceId ? views.filter(v => v.id === opts.instanceId).map(v => v.id) : views.map(v => v.id)
+    const keep = (r: StrategyRunTrace): boolean =>
+      opts.status === 'error' ? r.error !== undefined
+        : opts.status === 'instructions' ? r.instructions > 0
+          : opts.status === 'noop' ? r.instructions === 0 && r.error === undefined
+            : true
+    const per = await Promise.all(ids.map(async (id) => {
+      const strategy = this.triggerManager.getStrategy(id) as { getRecentRuns?: () => StrategyRunTrace[] } | undefined
+      const live = strategy?.getRecentRuns?.() ?? []
+      const seen = new Set(live.map(r => `${r.startedAt}:${r.triggerId}`))
+      const persisted = (await readRunTraces(this.dataDir, id, limit)).filter(r => !seen.has(`${r.startedAt}:${r.triggerId}`))
+      return [...live, ...persisted].filter(keep).map(r => ({ ...r, instanceId: id }))
+    }))
+    return per.flat().sort((a, b) => b.startedAt - a.startedAt).slice(0, limit)
   }
 
   /** Runs and instructions since `since`, summed across every instance. */
@@ -1979,6 +2013,32 @@ export class OpenWhaleRuntime implements IRuntime {
     const computedAt = Date.now()
     this.presetCache.set(key, { presets: computed, computedAt })
     return { presets: [...statics, ...computed], computedAt, source }
+  }
+
+  /**
+   * What a strategy's illustrations draw from: illustrationData() on a probe,
+   * for the form's current values. Cached briefly by those values — the form
+   * asks on every keystroke, debounced, and two keystrokes back to the same
+   * state need not ask the venue twice.
+   */
+  async strategyIllustrationData(
+    strategyId: string,
+    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; signal?: AbortSignal } = {},
+  ): Promise<{ data: Record<string, unknown>; computedAt: number }> {
+    const factory = this.strategyRegistry.get(strategyId)
+    const probe = factory?.()
+    if (!probe) throw new Error(`Strategy "${strategyId}" is not registered`)
+    if (typeof probe.illustrationData !== 'function') throw new Error(`Strategy "${strategyId}" serves no illustration data`)
+    const accounts = opts.accounts ?? {}
+    const params = { base: opts.params?.base ?? {}, tunable: opts.params?.tunable ?? {} }
+    const key = `${strategyId}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
+    const cached = this.illustrationCache.get(key)
+    if (cached && Date.now() - cached.computedAt < ILLUSTRATION_TTL_MS) return cached
+    const data = await probe.illustrationData({ adapters: this.adapters, accounts, params, ...(opts.signal ? { signal: opts.signal } : {}) })
+    const entry = { data, computedAt: Date.now() }
+    this.illustrationCache.set(key, entry)
+    if (this.illustrationCache.size > 200) this.illustrationCache.delete(this.illustrationCache.keys().next().value!)
+    return entry
   }
 
   async checkParamAvailability(

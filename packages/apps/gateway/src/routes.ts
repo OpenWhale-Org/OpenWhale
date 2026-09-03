@@ -441,6 +441,26 @@ export function buildRouter(): Router {
     res.json(run)
   }))
 
+  /**
+   * Every instance's runs, newest first — the Runs page.
+   *
+   * The Executions page answers "what was sent"; this one answers "what was
+   * decided", including the runs that decided nothing and the runs that
+   * failed before deciding — an error here is the strategy's own evaluation
+   * throwing (a venue read that came back 429, say), which never reaches an
+   * executor and so never shows up as an execution.
+   */
+  router.get('/api/runs', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const q = req.query
+    const status = q['status']
+    res.json(await runtime.readAllRuns({
+      limit: Math.min(Number(q['limit']) || 200, 1000),
+      ...(typeof q['instanceId'] === 'string' && q['instanceId'] ? { instanceId: q['instanceId'] } : {}),
+      ...(status === 'error' || status === 'instructions' || status === 'noop' ? { status } : {}),
+    }))
+  }))
+
   // ── PnL attribution (order-claim ledger) ─────────────────────────────────
 
   router.get('/api/pnl/summary', h(async (_req, res) => {
@@ -821,6 +841,20 @@ export function buildRouter(): Router {
         ...(body.accounts ? { accounts: body.accounts } : {}),
         ...(body.params ? { params: body.params } : {}),
         refresh: body.refresh === true,
+      }))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  /** Live figures for a strategy's illustrations, for the form's current values. */
+  router.post('/api/strategies/:id/illustration-data', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> } }
+    try {
+      res.json(await runtime.strategyIllustrationData(req.params['id']!, {
+        ...(body.accounts ? { accounts: body.accounts } : {}),
+        ...(body.params ? { params: body.params } : {}),
       }))
     } catch (err) {
       res.status(400).json({ error: errText(err) })

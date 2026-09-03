@@ -48,6 +48,10 @@ class Scanner extends BaseStrategy {
       card: { title: 'ETH', headline: { label: 'APR', value: '15.7%', tone: 'positive' }, badges: [{ text: 'executable' }] },
     }]
   }
+  override async illustrationData(ctx: PresetContext): Promise<Record<string, unknown>> {
+    scans += 1
+    return { market: ctx.params.base['market'], size: ctx.params.tunable['size'] }
+  }
   triggers(): Omit<Trigger, 'id' | 'strategyInstanceId'>[] { return [] }
   async evaluate(_ctx: StrategyContext): Promise<ExecutionInstruction[]> { return [] }
 }
@@ -111,6 +115,19 @@ describe('live presets', () => {
     await new Promise(r => setTimeout(r, 60))
     await runtime.strategyPresets('scanner', { accounts: { main: 'A' } })
     expect(scans).toBe(4)
+    await runtime.stop()
+  })
+
+  it('illustration data is computed for the form state, flagged on the definition, and refused where absent', async () => {
+    scans = 0
+    const runtime = await harness()
+    expect(runtime.listStrategies().find(s => s.id === 'scanner')!.illustrationData).toBe(true)
+    expect(runtime.listStrategies().find(s => s.id === 'plain')!.illustrationData).toBeUndefined()
+    const a = await runtime.strategyIllustrationData('scanner', { params: { base: { market: 'ETH' }, tunable: { size: 2 } } })
+    expect(a.data).toEqual({ market: 'ETH', size: 2 })
+    await runtime.strategyIllustrationData('scanner', { params: { base: { market: 'ETH' }, tunable: { size: 2 } } })
+    expect(scans).toBe(1)   // same state, served from the cache
+    await expect(runtime.strategyIllustrationData('plain')).rejects.toThrow(/serves no illustration data/)
     await runtime.stop()
   })
 

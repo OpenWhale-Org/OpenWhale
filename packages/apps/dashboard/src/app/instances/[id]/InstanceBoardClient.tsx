@@ -467,6 +467,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   const [illustrations, setIllustrations] = useState<ParamIllustration[] | undefined>(undefined)
   const [presets, setPresets] = useState<ParamPreset[] | undefined>(undefined)
   const [presetSource, setPresetSource] = useState<PresetSource | undefined>(undefined)
+  const [illustrationData, setIllustrationData] = useState<boolean | undefined>(undefined)
   const history = useHistory<ParamValues>({})
   const values = history.state
   const setValues = history.set
@@ -495,6 +496,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       setIllustrations(def?.paramsIllustrations)
       setPresets(def?.paramPresets)
       setPresetSource(def?.presetSource)
+      setIllustrationData(def?.illustrationData)
       const seed = fieldValuesFromParams(f, instance.params)
       history.reset(seed)
       setSaved(seed)
@@ -630,6 +632,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
               {...(presets ? { presets } : {})}
               presetSource={presetSource}
               slotBindings={instance.credentials ?? {}}
+              illustrationData={illustrationData}
             />
           )}
           <div className="flex justify-end items-center gap-3 mt-3">
