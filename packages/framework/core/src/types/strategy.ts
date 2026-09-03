@@ -36,6 +36,13 @@ export interface StrategyContext {
   monitorData: Record<string, Record<string, unknown>>
   timestamp: number
   /**
+   * True when the instance runs with the framework's Dry run option: what
+   * this run returns is recorded and not sent, and no result comes back.
+   * A strategy declares no dry-run switch of its own; it reads this only
+   * where its own memory depends on whether an order actually went out.
+   */
+  dryRun?: boolean
+  /**
    * Retrieve trigger data for a specific monitor label and key.
    * Returns undefined if this monitor/key did not contribute to the trigger.
    */
@@ -140,6 +147,8 @@ export type LifecycleReason = 'activate' | 'boot' | 'restart' | 'rollback' | 'st
 export interface LifecycleContext {
   instanceId: string
   reason: LifecycleReason
+  /** The instance's Dry run option — see StrategyContext.dryRun. */
+  dryRun?: boolean
 }
 
 /** Trace of one finished run — what the strategy saw, decided, and emitted. */

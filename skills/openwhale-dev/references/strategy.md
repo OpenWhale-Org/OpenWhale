@@ -185,8 +185,8 @@ Rules:
 ## Illustrations with live figures
 
 `paramsIllustrations` are HTML pages drawn in the form — above the fields by default, after a
-named `section`, or with `placement: 'bottom'` after the last field (a preview of what the
-fields add up to belongs below them). Each receives `{ type: 'ow-params',
+named `section`, with `placement: 'after-base'` between the base and tunable params, or `'bottom'` after the last
+field (a preview of what the fields add up to belongs below them). Each receives `{ type: 'ow-params',
 values }` by postMessage on load and on every edit. A page that needs what the form does not
 hold — quotes, an estimate, the venue's limits — gets it from the strategy (core ≥ 0.2.3):
 
@@ -208,6 +208,16 @@ the page can dim what it shows). A page that posts `{ type: 'ow-size', height }`
 gets that height — do it after every render, so nothing is clipped at any panel width. Same probe rules as `presets()`: keyless adapters, no
 store; the runtime caches by form state for 15 s. Keep the arithmetic here and let the page only
 format — one estimator, the strategy's own, for the trace, the presets and the picture.
+
+## Dry run is the framework's, not yours
+
+Do not declare a `dryRun` param. Every instance has a **Dry run** option (`options.dryRun`), and
+under it the engine records what a run returns without sending it — the trace and the Executions
+page show the instruction, no result comes back, `onExecutionResult` is not called. Emit the real
+actions (`clip`, `open`, `cancel`); a `simulate*` twin the strategy chooses itself still reaches
+the venue and gives an operator two switches to read where one would do. `ctx.dryRun` is there
+for the rare strategy whose own memory depends on whether an order went out (a maker that
+remembers the quote it would have rested); read it, never branch the action on it.
 
 ## The API you have inside a strategy
 

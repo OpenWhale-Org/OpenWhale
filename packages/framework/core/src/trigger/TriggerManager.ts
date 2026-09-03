@@ -271,6 +271,11 @@ export class TriggerManager {
    * says whether the instance is in dry run so the caller records instead of
    * firing. Used for what lifecycle hooks return.
    */
+  /** Whether an instance runs under the framework's Dry run option. */
+  isDryRun(instanceId: string): boolean {
+    return this.instances.get(instanceId)?.options?.dryRun === true
+  }
+
   prepareInstructions(instanceId: string, instructions: ExecutionInstruction[]): { instructions: ExecutionInstruction[]; dryRun: boolean } | undefined {
     const entry = this.instances.get(instanceId)
     if (!entry) return undefined
@@ -581,6 +586,7 @@ export class TriggerManager {
       triggerId: trigger.id,
       monitorData,
       timestamp: now,
+      ...(entry.options?.dryRun === true ? { dryRun: true } : {}),
       getData(monitorLabel: string, key: string) {
         return monitorData[`${monitorLabel}:${key}`]
       },

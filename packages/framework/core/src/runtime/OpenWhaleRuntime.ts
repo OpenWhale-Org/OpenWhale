@@ -1916,7 +1916,7 @@ export class OpenWhaleRuntime implements IRuntime {
     const strategy = this.triggerManager.getStrategy(instanceId)
     const fn = strategy?.[hook]
     if (!strategy || !fn) return
-    const ctx = { instanceId, reason }
+    const ctx = { instanceId, reason, ...(this.triggerManager.isDryRun(instanceId) ? { dryRun: true } : {}) }
     const work = () => fn.call(strategy, ctx)
     const budget = Math.max(0, until - Date.now())
     const attempt = async () => {

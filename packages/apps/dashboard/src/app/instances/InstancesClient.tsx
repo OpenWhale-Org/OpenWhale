@@ -743,8 +743,8 @@ export function ParamFieldsForm({
     )
   }
 
-  const illsFor = (sec: string) => (illustrations ?? []).filter(i => (i.section ?? '') === sec && (sec !== '' || i.placement !== 'bottom'))
-  const illsBottom = (illustrations ?? []).filter(i => (i.section ?? '') === '' && i.placement === 'bottom')
+  const illsFor = (sec: string) => (illustrations ?? []).filter(i => (i.section ?? '') === sec && (sec !== '' || (i.placement ?? 'top') === 'top'))
+  const illsPlaced = (where: 'after-base' | 'bottom') => (illustrations ?? []).filter(i => (i.section ?? '') === '' && i.placement === where)
 
   const sections = [...new Set(tunableFields.map(f => f.section ?? ''))]
   const fieldsIn = (sec: string) => tunableFields.filter(f => (f.section ?? '') === sec)
@@ -804,6 +804,7 @@ export function ParamFieldsForm({
           </div>
         </div>
       )}
+      {illsPlaced('after-base').map((ill, i) => <IllustrationFrame key={`after-base-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
       {tunableFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -867,7 +868,7 @@ export function ParamFieldsForm({
           </div>
         </div>
       )}
-      {illsBottom.map((ill, i) => <IllustrationFrame key={`bottom-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
+      {illsPlaced('bottom').map((ill, i) => <IllustrationFrame key={`bottom-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
     </div>
   )
 }
