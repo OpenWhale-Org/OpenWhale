@@ -1,3 +1,4 @@
+import dc from 'node:diagnostics_channel'
 import { createLogger } from '@openwhaleorg/core'
 
 /**
@@ -66,6 +67,52 @@ export interface VenueMinute {
 const listeners = new Set<(minute: VenueMinute) => void>()
 
 /**
+ * The last few seconds of requests, so a 429 can be read next to what
+ * preceded it. A rejection alone says "too many"; only the timeline says
+ * how many, of what, and from where — which is the whole question when the
+ * per-minute tally sits far under the venue's budget and the venue still
+ * says no.
+ */
+const RECENT_MAX = 400
+const RECENT_WINDOW_MS = 5_000
+const recent: Array<{ t: number; venue: string; key: string }> = []
+function remember(venue: string, key: string): void {
+  recent.push({ t: Date.now(), venue, key })
+  if (recent.length > RECENT_MAX) recent.splice(0, recent.length - RECENT_MAX)
+}
+function recentFor(venue: string, now: number): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const r of recent) {
+    if (r.venue !== venue || now - r.t > RECENT_WINDOW_MS) continue
+    out[r.key] = (out[r.key] ?? 0) + 1
+  }
+  return out
+}
+
+/**
+ * Every HTTPS request this process makes, by host — the wire, not ccxt.
+ *
+ * The tally above counts what goes through `fetch2`; a raw `fetch` to a
+ * venue, from a monitor or a script, is invisible to it and to the budget
+ * alert built on it. undici publishes each request it creates, so the wire
+ * count is one subscription away, and the gap between the two columns is the
+ * unmetered caller.
+ */
+const wireByHost = new Map<string, number>()
+let wireTapped = false
+function tapWire(): void {
+  if (wireTapped) return
+  wireTapped = true
+  try {
+    dc.subscribe('undici:request:create', (message) => {
+      const req = (message as { request?: { origin?: string } }).request
+      const host = req?.origin ?? 'unknown'
+      wireByHost.set(host, (wireByHost.get(host) ?? 0) + 1)
+    })
+  } catch { /* no undici channel on this runtime */ }
+}
+
+/**
  * Hear every venue's minute as it closes. The alerting side lives here: the
  * meter knows the spend, the gateway knows the venue's budget and who to tell.
  */
@@ -90,6 +137,10 @@ function report(): void {
     }
   }
   byVenue.clear()
+  if (wireByHost.size > 0) {
+    log.info({ hosts: Object.fromEntries(wireByHost) }, 'Raw fetch() requests this minute, by host')
+    wireByHost.clear()
+  }
 }
 
 /**
@@ -116,10 +167,39 @@ export function meterRequests<T extends {
       // The venue's own weight, as ccxt computes it for its rate limiter.
       row.weight += Number(exchange.calculateRateLimiterCost(api, method, path, params, config)) || 0
       tallies.set(key, row)
+      remember(venue, key)
       traceIfExpensive(venue, key)
     } catch { /* accounting must never break a request */ }
     return original(path, api, method, params, headers, body, config)
   }
+  // ccxt's own response hook: sees status, headers and body before any error
+  // is raised. A 429 is logged with the request that drew it and the last
+  // five seconds of this venue's traffic.
+  const ex = exchange as unknown as {
+    onRestResponse?: (...args: unknown[]) => unknown
+    walletAddress?: string
+  }
+  const onRestResponse = ex.onRestResponse?.bind(exchange)
+  if (onRestResponse) {
+    ex.onRestResponse = (...args: unknown[]) => {
+      try {
+        const [status, , url, , responseHeaders, responseBody, , requestBody] = args as [number, string, string, string, Record<string, string>, string, unknown, string]
+        if (status === 429) {
+          const now = Date.now()
+          log.warn({
+            venue: exchange.id, url,
+            request: String(requestBody ?? '').slice(0, 200),
+            responseHeaders,
+            responseBody: String(responseBody ?? '').slice(0, 300),
+            account: ex.walletAddress ? `${ex.walletAddress.slice(0, 6)}…${ex.walletAddress.slice(-4)}` : undefined,
+            last5s: recentFor(exchange.id, now),
+          }, 'Venue answered 429')
+        }
+      } catch { /* diagnostics must never break a response */ }
+      return onRestResponse(...args)
+    }
+  }
+  tapWire()
   if (!timer) {
     timer = setInterval(report, WINDOW_MS)
     timer.unref?.()
