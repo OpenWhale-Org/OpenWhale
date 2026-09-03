@@ -1992,6 +1992,9 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   async function handleSubmit(e: React.FormEvent, start = true) {
     e.preventDefault()
     setSubmitError('')
+    // The input is `required`, but only a submit runs that check — "Save
+    // only" is a plain button, and it used to create a nameless instance.
+    if (!name.trim()) { setSubmitError('Name is required'); return }
     const params = buildParams()
     if (!params) return
 
@@ -2392,7 +2395,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
             <button
               type="button"
               onClick={(e) => void handleSubmit(e, false)}
-              disabled={submitting || strategies.length === 0 || !selectedStrategy}
+              disabled={submitting || strategies.length === 0 || !selectedStrategy || !name.trim()}
               className="btn btn-secondary"
               style={{ opacity: submitting ? 0.6 : 1 }}
               title="Create it stopped — start it from the list when you are ready"
@@ -2402,7 +2405,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           )}
           <button
             type="submit"
-            disabled={submitting || (!initial && (strategies.length === 0 || !selectedStrategy))}
+            disabled={submitting || !name.trim() || (!initial && (strategies.length === 0 || !selectedStrategy))}
             className="btn btn-primary"
             style={{ opacity: submitting ? 0.6 : 1 }}
           >

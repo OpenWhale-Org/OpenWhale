@@ -568,9 +568,23 @@ export function buildRouter(): Router {
     res.json(replayed.slice(-n))
   }))
 
+  /**
+   * A name is how an operator tells instances apart in every list, alert
+   * and run trace. The form marks it required, but a browser only enforces
+   * that on submit — the "Save only" button is not a submit — so the row
+   * must refuse a blank one itself.
+   */
+  const blankName = (body: unknown): boolean => {
+    const name = (body as { name?: unknown } | undefined)?.name
+    return typeof name !== 'string' || name.trim() === ''
+  }
+  const namePatched = (body: unknown): boolean =>
+    typeof body === 'object' && body !== null && 'name' in body
+
   router.post('/api/instances', h(async (req, res) => {
     const runtime = await ensureStarted()
     const instance = req.body as StrategyInstance
+    if (blankName(instance)) { res.status(400).send('Name is required'); return }
     try {
       /* `enabled: false` used to be accepted and ignored — every create
          started trading, whatever the form said. Saving stopped is the whole
@@ -608,6 +622,7 @@ export function buildRouter(): Router {
   router.patch('/api/instances/:id', h(async (req, res) => {
     const runtime = await ensureStarted()
     const restart = req.query['restart'] === '1' || req.query['restart'] === 'true'
+    if (namePatched(req.body) && blankName(req.body)) { res.status(400).send('Name is required'); return }
     try {
       res.json(await runtime.updateInstance(
         req.params['id']!, req.body as Parameters<typeof runtime.updateInstance>[1], { restart },
@@ -621,6 +636,7 @@ export function buildRouter(): Router {
   // Cosmetic metadata (icon/folder/order/name/description) — allowed while active
   router.patch('/api/instances/:id/meta', h(async (req, res) => {
     const runtime = await ensureStarted()
+    if (namePatched(req.body) && blankName(req.body)) { res.status(400).send('Name is required'); return }
     try {
       res.json(await runtime.updateInstanceMeta(req.params['id']!, req.body as Parameters<typeof runtime.updateInstanceMeta>[1]))
     } catch (err) {
