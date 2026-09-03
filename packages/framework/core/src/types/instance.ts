@@ -32,6 +32,56 @@ export interface InstanceOptions {
    * thing you turned on, never the default you inherited.
    */
   dryRun?: boolean
+  /**
+   * Circuit breaker: alert, or stop the instance, when its own ledger turns
+   * against it. Absent or false = off — a switch that can stop trading is
+   * never something you inherit by default.
+   */
+  breakerEnabled?: boolean
+  /**
+   * The tiers. Every rule is evaluated on every pass and each one fires
+   * independently, so a mild rule can page you while a severe one pulls the
+   * plug. Empty or absent = nothing to check, even when breakerEnabled is on.
+   */
+  breaker?: BreakerRule[]
+}
+
+/**
+ * One breaker tier.
+ *
+ * A rule is always of the form "over the last `windowMin` minutes, this
+ * measure came in below `below`". Below, not above, in both metrics: losses
+ * are negative net and a bad win rate is a low percentage, so one comparison
+ * covers both and there is no direction to get backwards when reading a
+ * config back.
+ */
+export interface BreakerRule {
+  /** Stable id — the cooldown and the trip history are keyed by it. */
+  id: string
+  /** Shown in the alert and the history. */
+  label?: string
+  metric: 'netPnl' | 'winRate'
+  /** Rolling window, minutes. Cannot see finer than the PnL collection cycle. */
+  windowMin: number
+  /**
+   * Trip when the measure is strictly below this.
+   * `netPnl`: quote currency, so a loss limit is written negative (-50).
+   * `winRate`: percent, 0–100.
+   */
+  below: number
+  /**
+   * `winRate` only: ignore the window until this many CLOSING fills exist.
+   * Two closes at 0% is noise, not a losing streak. Default 10.
+   */
+  minSamples?: number
+  /**
+   * `alert` mails and moves on. `deactivate` stops the instance, which runs
+   * the strategy's onDeactivate hook — whether a position is flattened is
+   * that hook's business, not the breaker's.
+   */
+  action: 'alert' | 'deactivate'
+  /** Silence between repeat alerts for this rule. Default 60. */
+  cooldownMin?: number
 }
 
 export interface StrategyInstance {

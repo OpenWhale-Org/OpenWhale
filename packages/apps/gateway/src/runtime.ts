@@ -16,6 +16,7 @@ import { notifyCredentialTypes } from './notify/credentialTypes.js'
 import { AlertService, setAlertService } from './notify/alerts.js'
 import { BudgetWatch } from './notify/budgetWatch.js'
 import { RetentionService, setRetentionService } from './maintenance/retention.js'
+import { BreakerService, setBreakerService } from './maintenance/breaker.js'
 
 let runtimeSingleton: OpenWhaleRuntime | undefined
 /** The same SQLite file backs auth — one database, one lifecycle. */
@@ -126,6 +127,14 @@ export async function ensureStarted(): Promise<OpenWhaleRuntime> {
         const retention = new RetentionService(getDatabase(), runtime)
         await retention.initialize()
         setRetentionService(retention)
+      })
+      // Circuit breakers. Inert until an instance opts in: the table is only
+      // read for instances whose options carry rules, so a fresh install
+      // sweeps nothing.
+      .then(async () => {
+        const breaker = new BreakerService(getDatabase(), runtime)
+        await breaker.initialize()
+        setBreakerService(breaker)
       })
       .catch((err) => {
         startPromise = undefined

@@ -53,6 +53,7 @@ export type {
   ScriptInfo,
   StrategyInstance,
   InstanceOptions,
+  BreakerRule,
   StrategyInstanceView,
   StrategyParams,
   PortfolioMode,
@@ -142,7 +143,7 @@ export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 // Monitor
 export { BaseMonitor, MonitorMode } from './monitor/BaseMonitor.js'
 export { PnlService } from './pnl/PnlService.js'
-export type { OrderClaim, PnlSummary, PnlSeriesPoint, PnlFillRow, PnlPositionRow, PnlSessionLike } from './pnl/PnlService.js'
+export type { OrderClaim, PnlSummary, PnlSeriesPoint, PnlFillRow, PnlPositionRow, PnlSessionLike, PnlWindow, LedgerHealth } from './pnl/PnlService.js'
 export { MonitorDataReaderImpl } from './monitor/MonitorDataReader.js'
 export { pruneJsonlByTime, matchesKeyPattern } from './monitor/retention.js'
 export type { PruneResult } from './monitor/retention.js'

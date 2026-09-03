@@ -18,6 +18,7 @@ import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance 
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
 import { getRetentionService } from './maintenance/retention.js'
+import { getBreakerService } from './maintenance/breaker.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
 import { installFromNpm, installFromGithub, installFromFile, uninstallPlugin, listInstalledPlugins, PluginConflictError, describeSource, checkPluginUpdates, updatePlugin, reloadUnloaded } from './plugins.js'
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
@@ -1139,6 +1140,34 @@ export function buildRouter(): Router {
       return
     }
     res.json({ records: tailRecords(filePath, limit) })
+  }))
+
+  // ── circuit breakers ────────────────────────────────────────────────────────
+
+  /** What the breaker currently sees for one instance — including why it is
+   *  abstaining, so a safety net that has gone blind is never silent. */
+  router.get('/api/instances/:id/breaker', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getBreakerService()
+    if (!svc) { res.status(503).json({ error: 'breaker service not ready' }); return }
+    res.json(await svc.status(req.params['id']!))
+  }))
+
+  /** Evaluate one instance now. Rules that trip WILL fire — this is the real
+   *  pass, not a rehearsal, because a rehearsal that cannot stop an instance
+   *  proves nothing about the one that can. */
+  router.post('/api/instances/:id/breaker/evaluate', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getBreakerService()
+    if (!svc) { res.status(503).json({ error: 'breaker service not ready' }); return }
+    res.json({ trips: await svc.evaluate(req.params['id']!) })
+  }))
+
+  router.get('/api/breaker/trips', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getBreakerService()
+    if (!svc) { res.status(503).json({ error: 'breaker service not ready' }); return }
+    res.json({ trips: await svc.trips(Number(req.query['limit'] ?? 100) || 100) })
   }))
 
   // ── monitor retention ───────────────────────────────────────────────────────

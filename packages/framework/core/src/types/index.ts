@@ -29,7 +29,7 @@ export type {
   ExecutorDeclaration,
   AccountSlotMeta,
 } from './strategy.js'
-export type { StrategyInstance, StrategyInstanceView, StrategyParams, InstanceOptions } from './instance.js'
+export type { StrategyInstance, StrategyInstanceView, StrategyParams, InstanceOptions, BreakerRule } from './instance.js'
 export type {
   PortfolioMode,
   PortfolioFillIntent,

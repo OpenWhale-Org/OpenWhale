@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { StrategyInstanceView, StrategyDefinition, InstanceOptions } from '@openwhaleorg/core'
 import { Switch } from '@/components/Switch'
+import { BreakerRules } from './BreakerRules'
 
 /**
  * The switches that belong to the ENGINE rather than to the strategy.
@@ -85,8 +86,13 @@ export function InstanceMiscPanel({ instance, onSaved }: {
           <span>{open ? '▾' : '▸'}</span>
           <span>Misc</span>
           <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
-            (alerting and dry run — applied without a restart)
+            (alerting, circuit breaker and dry run — applied without a restart)
           </span>
+          {options.breakerEnabled && (options.breaker?.length ?? 0) > 0 && (
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
+              BREAKER {options.breaker!.length}
+            </span>
+          )}
           {dryRun && (
             <span className="text-xs px-1.5 py-0.5 rounded" style={{ border: '1px solid var(--warning)', color: 'var(--warning)' }}>
               DRY RUN
@@ -142,6 +148,13 @@ export function InstanceMiscPanel({ instance, onSaved }: {
               </div>
             )}
           </div>
+
+          <BreakerRules
+            instanceId={instance.id}
+            enabled={options.breakerEnabled === true}
+            rules={options.breaker ?? []}
+            onChange={patch}
+          />
 
           <Switch
             checked={dryRun}

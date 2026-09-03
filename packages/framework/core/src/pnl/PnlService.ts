@@ -78,6 +78,52 @@ export interface PnlSummary {
   bySymbol: Array<{ symbol: string; realized: number; fees: number; funding: number; net: number; fills: number }>
 }
 
+/** One instance's ledger over a rolling window — what a breaker judges. */
+export interface PnlWindow {
+  instanceId: string
+  /** Window start, epoch ms. */
+  since: number
+  realized: number
+  /** Already negated, like PnlSummary: a cost is a negative number. */
+  fees: number
+  funding: number
+  net: number
+  /** Every fill in the window, opens included. */
+  fills: number
+  /**
+   * Fills that actually closed something — the only ones a win rate can be
+   * computed over. An opening fill realizes nothing, and counting it as a
+   * loss would drag every win rate toward zero.
+   */
+  closingFills: number
+  wins: number
+  /** wins / closingFills as a percentage, or null when nothing closed. */
+  winRatePct: number | null
+}
+
+/**
+ * Whether the ledger behind an instance is actually being kept up to date.
+ *
+ * The breaker must abstain when it is not. A collector that has stopped looks
+ * exactly like a strategy that has stopped trading — flat PnL, no fills — and
+ * acting on that reading would deactivate a healthy instance for the crime of
+ * being unobserved.
+ *
+ * Watermarks are the signal because they advance on every cycle even when a
+ * symbol is quiet: a cycle that finds no fills still pushes the mark forward
+ * to now − FILL_RECHECK_MS. So a stale watermark means the cycle itself is
+ * not happening, which is the thing worth refusing to act on.
+ */
+export interface LedgerHealth {
+  live: boolean
+  /** The oldest watermark among the instance's claimed pairs, epoch ms. */
+  oldestMarkTs: number | null
+  /** Claimed (account, symbol) pairs; 0 = the instance has never traded. */
+  pairs: number
+  stalePairs: number
+  reason?: string
+}
+
 export interface PnlFillRow {
   symbol: string; side: string; qty: number; price: number
   realizedPnl: number | null; fee: number | null; feeAsset: string | null
@@ -147,7 +193,18 @@ export class PnlService {
   constructor(options: PnlServiceOptions) {
     this.db = options.db
     this.resolveSession = options.resolveSession
-    this.intervalMs = options.intervalMs ?? 60 * 60_000
+    /*
+     * Ten minutes, not an hour.
+     *
+     * The circuit breaker reads this ledger, and a breaker cannot react faster
+     * than the data it judges — an hourly collector makes "loss over the last
+     * 15 minutes" a sentence with no meaning behind it. The cost is bounded by
+     * the one venue that has no bulk endpoint: only Hyperliquid implements
+     * fetchFillsAll, so Binance costs one fetchMyTrades per claimed symbol per
+     * cycle. At ~156 claimed symbols that is ~78 weight/minute against a
+     * 2400/minute budget, and collect() already refuses to overlap itself.
+     */
+    this.intervalMs = options.intervalMs ?? (Number(process.env['OPENWHALE_PNL_INTERVAL_MS']) || 10 * 60_000)
     this.backfillMs = options.backfillMs ?? 3 * 24 * 3600_000
   }
 
@@ -600,6 +657,73 @@ export class PnlService {
     }
     for (const o of Object.values(out)) o.net = o.realized + o.fees + o.funding
     return out
+  }
+
+  /**
+   * The ledger for one instance over `[since, now]`.
+   *
+   * Realized only. Unrealized PnL is deliberately excluded: it swings with the
+   * mark on an open position, so a breaker fed by it would trip on a position
+   * that is doing exactly what the strategy intends to hold.
+   */
+  async instanceWindow(instanceId: string, since: number): Promise<PnlWindow> {
+    const row = await this.db.get<{
+      realized: number | null; fees: number | null; fills: number
+      closing: number | null; wins: number | null
+    }>(
+      `SELECT SUM(realized_pnl) AS realized,
+              SUM(fee)          AS fees,
+              COUNT(*)          AS fills,
+              SUM(CASE WHEN realized_pnl IS NOT NULL AND realized_pnl <> 0 THEN 1 ELSE 0 END) AS closing,
+              SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END)                               AS wins
+         FROM pnl_fills WHERE instance_id = ? AND ts >= ?`,
+      [instanceId, since])
+    const fundingRow = await this.db.get<{ funding: number | null }>(
+      `SELECT SUM(amount) AS funding FROM pnl_funding WHERE instance_id = ? AND ts >= ?`,
+      [instanceId, since])
+
+    const realized = row?.realized ?? 0
+    // `-(0)` is -0, which survives into JSON as 0 but compares unequal to it
+    // and renders as "-0.00". Not worth debugging twice.
+    const fees = row?.fees ? -row.fees : 0
+    const funding = fundingRow?.funding ?? 0
+    const closingFills = row?.closing ?? 0
+    const wins = row?.wins ?? 0
+    return {
+      instanceId, since, realized, fees, funding,
+      net: realized + fees + funding,
+      fills: row?.fills ?? 0,
+      closingFills, wins,
+      winRatePct: closingFills > 0 ? (wins / closingFills) * 100 : null,
+    }
+  }
+
+  /** See LedgerHealth. `maxAgeMs` defaults to three collection cycles. */
+  async ledgerHealth(instanceId: string, maxAgeMs = this.intervalMs * 3): Promise<LedgerHealth> {
+    const rows = await this.db.all<{ account: string; symbol: string; ts: number | null }>(
+      `SELECT c.account, c.symbol, w.ts
+         FROM (SELECT DISTINCT account, symbol FROM pnl_order_claims WHERE instance_id = ?) c
+         LEFT JOIN pnl_watermarks w
+                ON w.account = c.account AND w.scope = 'fills:' || c.symbol`,
+      [instanceId])
+    if (rows.length === 0)
+      return { live: false, oldestMarkTs: null, pairs: 0, stalePairs: 0, reason: 'instance has claimed no fills yet' }
+
+    const floor = Date.now() - maxAgeMs
+    let oldest: number | null = null
+    let stale = 0
+    for (const r of rows) {
+      if (r.ts === null) { stale++; continue }
+      if (r.ts < floor) stale++
+      if (oldest === null || r.ts < oldest) oldest = r.ts
+    }
+    if (stale > 0) {
+      return {
+        live: false, oldestMarkTs: oldest, pairs: rows.length, stalePairs: stale,
+        reason: `${stale}/${rows.length} claimed symbols have no fresh watermark — the collector is behind or stopped`,
+      }
+    }
+    return { live: true, oldestMarkTs: oldest, pairs: rows.length, stalePairs: 0 }
   }
 
   async instanceFills(instanceId: string, limit = 200): Promise<PnlFillRow[]> {
