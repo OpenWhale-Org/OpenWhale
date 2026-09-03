@@ -38,6 +38,18 @@ export async function streamWithWarmup(options: StreamWarmupOptions): Promise<bo
   } finally {
     clearTimeout(timer)
     signal.removeEventListener('abort', onOuterAbort)
+    /*
+     * Whatever the stream started dies with the call. A two-leg stream is a
+     * Promise.all of two watchers: when one rejects, the other is still
+     * running, still holding the caller's callbacks and the caller's stale
+     * state — and the caller, seeing a rejection, starts a fresh pair. Two
+     * emitters for one key, one of them frozen at the last price it saw.
+     * Measured 2026-09-03 on binance SNXX/SNDK: every record arrived twice,
+     * two milliseconds apart, the A leg alternating between a live price and
+     * a dead one while B matched exactly. The deviation swung ±0.3% every two
+     * seconds and the z-score ±2σ with it, on a pair that was not moving.
+     */
+    watch.abort()
   }
   return signal.aborted || hasEmitted()
 }
