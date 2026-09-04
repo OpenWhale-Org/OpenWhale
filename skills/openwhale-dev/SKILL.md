@@ -61,6 +61,10 @@ the discipline that risk limits live in code even when a model produces the sign
 
 ## Since 2026-08-26 (newest first)
 
+- **Picker fields** (core ≥ 0.2.3). An object param with `meta({ picker: { source: 'strategy', id } })`
+  renders as a button and a card dialog whose options `pickerOptions(id, ctx)` computes — for a
+  value that is a whole decision (the four legs of a carry), where a preset would scatter it over
+  fields. (`references/strategy.md` §Picker fields)
 - **Illustrations get live figures** (core ≥ 0.2.3). `illustrationData(ctx)` on a strategy is called,
   debounced, for the form's current values, and its answer reaches every `paramsIllustrations`
   frame as `data` in the `ow-params` message — quotes, an estimate, a venue limit, drawn live as

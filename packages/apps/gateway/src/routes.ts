@@ -878,6 +878,21 @@ export function buildRouter(): Router {
     }
   }))
 
+  /** Options of a strategy's picker field, computed for the form's current state. */
+  router.post('/api/strategies/:id/pickers/:pickerId', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean }
+    try {
+      res.json(await runtime.strategyPickerOptions(req.params['id']!, req.params['pickerId']!, {
+        ...(body.accounts ? { accounts: body.accounts } : {}),
+        ...(body.params ? { params: body.params } : {}),
+        refresh: body.refresh === true,
+      }))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   // ── monitors ────────────────────────────────────────────────────────────────
 
   router.get('/api/monitor', h(async (_req, res) => {

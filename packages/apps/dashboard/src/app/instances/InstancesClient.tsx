@@ -27,11 +27,11 @@ const WhaleField = dynamic(
 import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
 import Link from 'next/link'
 import type { StrategyInstance, StrategyInstanceView } from '@openwhaleorg/core'
-import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ParamPreset, PresetSource, ExecutionResult } from '@openwhaleorg/core'
+import type { StrategyDefinition, CredentialInfo, ParamFieldDef, ParamIllustration, ParamPreset, PickerOption, PresetSource, ExecutionResult } from '@openwhaleorg/core'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
-import { PresetPickerModal, presetsNeedDialog } from '@/components/PresetPicker'
+import { PresetPickerModal, FieldPickerModal, presetsNeedDialog } from '@/components/PresetPicker'
 import { statusDot, statusTitle } from './status'
 import { InlineRename } from '@/components/InlineRename'
 import { Switch } from '@/components/Switch'
@@ -482,6 +482,20 @@ export function ParamFieldsForm({
   }
   const useDialog = presetsNeedDialog(presets, presetSource)
 
+  /* Picker fields: a value that is a whole decision, chosen from cards the
+     strategy computes. The label of the choice is remembered from the option
+     picked; a value that arrived otherwise (an import, an edit) is summarised. */
+  const [pickerFor, setPickerFor] = useState<string | null>(null)
+  const [pickerLabels, setPickerLabels] = useState<Record<string, string>>({})
+  const pickerSummary = (raw: string): string => {
+    if (!raw) return ''
+    try {
+      const v = JSON.parse(raw) as unknown
+      if (v && typeof v === 'object' && !Array.isArray(v)) return Object.values(v as Record<string, unknown>).map(String).join(' · ')
+      return String(v)
+    } catch { return raw }
+  }
+
   /* Live figures for the illustrations: the strategy computes them for the
      form's current state, so the picture can show what the numbers mean —
      and it is asked again, debounced, whenever the state changes. */
@@ -680,6 +694,47 @@ export function ParamFieldsForm({
             options={field.options.map((opt) => ({ value: String(opt.value), label: opt.label, ...(opt.description ? { hint: opt.description } : {}) }))}
           />
           {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
+        </div>
+      )
+    }
+
+    if (field.picker && strategyId) {
+      const summary = pickerLabels[field.name] ?? pickerSummary(value)
+      return (
+        <div key={field.name} data-tour={tour} className="flex flex-col gap-1">
+          <div className="flex items-baseline gap-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
+              {field.displayName}{field.required && <span style={{ color: 'var(--danger)' }}> *</span>}
+            </span>
+            {field.hint && <span className="text-xs" style={{ color: 'var(--muted)' }}>— {field.hint}</span>}
+          </div>
+          <div className="flex items-center gap-3">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPickerFor(field.name)}>
+              {field.picker.title ? `Choose from ${field.picker.title}…` : 'Choose…'}
+            </button>
+            {summary
+              ? <span className="text-xs font-mono truncate" style={{ color: 'var(--foreground)' }} title={value}>{summary}</span>
+              : <span className="text-xs" style={{ color: 'var(--muted)' }}>nothing chosen yet</span>}
+            {value && (
+              <button type="button" className="text-xs" style={{ color: 'var(--muted)' }} onClick={() => { set(field.name, ''); setPickerLabels(l => { const { [field.name]: _, ...rest } = l; return rest }) }}>clear</button>
+            )}
+          </div>
+          {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
+          {pickerFor === field.name && (
+            <FieldPickerModal
+              strategyId={strategyId}
+              pickerId={field.picker.id}
+              heading={{ ...(field.picker.title ? { title: field.picker.title } : {}), ...(field.picker.description ? { description: field.picker.description } : {}) }}
+              accounts={slotBindings ?? {}}
+              params={buildParamsFromFields(fields, values)}
+              onPick={(o: PickerOption) => {
+                set(field.name, typeof o.value === 'string' ? o.value : JSON.stringify(o.value))
+                setPickerLabels(l => ({ ...l, [field.name]: o.label }))
+                setPickerFor(null)
+              }}
+              onClose={() => setPickerFor(null)}
+            />
+          )}
         </div>
       )
     }

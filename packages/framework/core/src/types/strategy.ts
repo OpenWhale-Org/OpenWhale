@@ -8,7 +8,7 @@ import type { Trigger, MonitorSource } from './trigger.js'
 import type { StrategyParams } from './instance.js'
 import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
-import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset, PresetContext, PresetSource } from './definition.js'
+import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset, PickerOption, PresetContext, PresetSource } from './definition.js'
 import type { IPortfolioJournal, PortfolioMode } from './portfolio.js'
 import type { PortfolioUpdate } from './portfolio.js'
 
@@ -223,6 +223,13 @@ export interface IStrategy {
    * instance, like presets(). Throw to have the frame told `dataError`.
    */
   illustrationData?(ctx: PresetContext): Promise<Record<string, unknown>>
+  /**
+   * Options for a field declared with `meta({ picker: { source: 'strategy', id } })`:
+   * the decisions an operator may choose between, each with the value that
+   * takes it and a card to compare by. Probe rules as presets(); cached by
+   * the runtime for the picker's ttl.
+   */
+  pickerOptions?(pickerId: string, ctx: PresetContext): Promise<PickerOption[]>
   /**
    * Availability checkers this strategy provides, keyed by the name a field's
    * `meta({ availability: { checker } })` refers to. Pure functions over the

@@ -25,7 +25,7 @@ function toFieldString(v: unknown): string {
 export function defaultFieldValues(fields: ParamFieldDef[]): ParamValues {
   const out: ParamValues = {}
   for (const f of fields) {
-    if (f.default !== undefined) out[f.name] = f.type === 'list' ? JSON.stringify(f.default) : String(f.default)
+    if (f.default !== undefined) out[f.name] = f.type === 'list' || f.type === 'object' ? JSON.stringify(f.default) : String(f.default)
   }
   return out
 }
@@ -56,7 +56,7 @@ export function buildParamsFromFields(fields: ParamFieldDef[], values: ParamValu
       if (!isNaN(n)) parsed = n
     } else if (field.type === 'boolean') {
       parsed = raw === 'true'
-    } else if (field.type === 'list') {
+    } else if (field.type === 'list' || field.type === 'object') {
       try { parsed = JSON.parse(raw) } catch { continue }
     }
     if (field.group === 'base') base[field.name] = parsed

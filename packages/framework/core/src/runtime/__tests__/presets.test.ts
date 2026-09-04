@@ -9,7 +9,7 @@ import { MemoryExecutionQueue } from '../../executor/MemoryExecutionQueue.js'
 import type { StrategyContext } from '../../types/strategy.js'
 import type { Trigger } from '../../types/trigger.js'
 import type { ExecutionInstruction } from '../../types/executor.js'
-import type { ParamPreset, PresetContext } from '../../types/definition.js'
+import type { ParamPreset, PickerOption, PresetContext } from '../../types/definition.js'
 import type { CredentialStore } from '../../types/credential.js'
 import { SQLiteAdapter } from '../../database/SQLiteAdapter.js'
 
@@ -35,7 +35,10 @@ class Scanner extends BaseStrategy {
   readonly strategyId = 'scanner'
   override readonly monitors = []
   override readonly executors = []
-  override readonly baseParamsSchema = z.object({ market: z.string() })
+  override readonly baseParamsSchema = z.object({
+    market: z.string(),
+    legs: z.object({ a: z.string(), b: z.string() }).meta({ picker: { source: 'strategy', id: 'pairs', ttlMs: 50 } }),
+  })
   override readonly tunableParamsSchema = z.object({ size: z.number().default(1) })
   override readonly paramPresets: ParamPreset[] = [{ id: 'paper', label: 'Paper', tunable: { size: 0 } }]
   override readonly presetSource = { title: 'Opportunities', ttlMs: 50 }
@@ -47,6 +50,10 @@ class Scanner extends BaseStrategy {
       id: 'eth', label: 'ETH', base: { market: 'ETH' },
       card: { title: 'ETH', headline: { label: 'APR', value: '15.7%', tone: 'positive' }, badges: [{ text: 'executable' }] },
     }]
+  }
+  override async pickerOptions(pickerId: string, ctx: PresetContext): Promise<PickerOption[]> {
+    scans += 1
+    return [{ id: 'ab', label: `${pickerId}: A/B for ${String(ctx.params.base['market'] ?? '?')}`, value: { a: 'A', b: 'B' }, card: { title: 'A ↔ B' } }]
   }
   override async illustrationData(ctx: PresetContext): Promise<Record<string, unknown>> {
     scans += 1
@@ -128,6 +135,21 @@ describe('live presets', () => {
     await runtime.strategyIllustrationData('scanner', { params: { base: { market: 'ETH' }, tunable: { size: 2 } } })
     expect(scans).toBe(1)   // same state, served from the cache
     await expect(runtime.strategyIllustrationData('plain')).rejects.toThrow(/serves no illustration data/)
+    await runtime.stop()
+  })
+
+  it('a picker field is derived with its picker, and its options come from the strategy, cached', async () => {
+    scans = 0
+    const runtime = await harness()
+    const legs = runtime.listStrategies().find(s => s.id === 'scanner')!.paramsFields!.find(f => f.name === 'legs')!
+    expect(legs.type).toBe('object')
+    expect(legs.picker).toEqual({ source: 'strategy', id: 'pairs', ttlMs: 50 })
+    const out = await runtime.strategyPickerOptions('scanner', 'pairs', { params: { base: { market: 'ETH' } } })
+    expect(out.options).toEqual([{ id: 'ab', label: 'pairs: A/B for ETH', value: { a: 'A', b: 'B' }, card: { title: 'A ↔ B' } }])
+    await runtime.strategyPickerOptions('scanner', 'pairs', { params: { base: { market: 'ETH' } } })
+    expect(scans).toBe(1)
+    await expect(runtime.strategyPickerOptions('scanner', 'nope')).rejects.toThrow(/declares no picker/)
+    await expect(runtime.strategyPickerOptions('plain', 'pairs')).rejects.toThrow(/declares no picker/)
     await runtime.stop()
   })
 

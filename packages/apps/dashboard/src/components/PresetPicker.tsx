@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { ParamPreset, PresetCard, PresetSource, PresetTone } from '@openwhaleorg/core'
+import type { ParamPreset, PickerOption, PresetCard, PresetSource, PresetTone } from '@openwhaleorg/core'
 import { Modal } from '@/components/Modal'
 
 /**
@@ -25,54 +25,57 @@ const toneColor = (tone: PresetTone | undefined): string =>
       : tone === 'muted' ? 'var(--muted)'
         : 'var(--foreground)'
 
-export function PresetPickerModal({ strategyId, source, presets: staticPresets, accounts, params, current, onPick, onClose }: {
-  strategyId: string
-  /** Present when the strategy computes presets live; absent = the static list only. */
-  source?: PresetSource | undefined
-  presets: ParamPreset[]
-  /** Slot label → account name, as bound in the form so far. */
-  accounts: Record<string, string>
-  params: { base: Record<string, unknown>; tunable: Record<string, unknown> }
-  /** The preset applied last, if any — drawn as selected. */
-  current?: string
-  onPick: (preset: ParamPreset) => void
+/** One choosable thing in the dialog — a preset or a picker option. */
+export interface CardChoice {
+  id: string
+  label: string
+  description?: string | undefined
+  card?: PresetCard | undefined
+}
+
+interface Loaded<T extends CardChoice> { items: T[]; computedAt: number | null; heading?: PresetSource | undefined }
+
+/**
+ * The dialog itself: a heading, a refresh, and the choices — cards in a grid
+ * under their group headings, plain ones as a list — in the order given.
+ */
+export function CardPickerModal<T extends CardChoice>({ heading, load, current, onPick, onClose, footer }: {
+  heading?: PresetSource | undefined
+  /** Fetch the choices; `refresh` bypasses whatever cache stands behind them. Absent = static, nothing to refresh. */
+  load?: ((refresh: boolean) => Promise<Loaded<T>>) | undefined
+  /** Static choices, when there is nothing to load. */
+  items?: T[]
+  current?: string | undefined
+  onPick: (item: T) => void
   onClose: () => void
-}) {
-  const [list, setList] = useState<ParamPreset[]>(source ? [] : staticPresets)
-  const [heading, setHeading] = useState<PresetSource | undefined>(source)
+  footer?: string
+} & { items?: T[] }) {
+  const [list, setList] = useState<T[]>([])
+  const [head, setHead] = useState<PresetSource | undefined>(heading)
   const [computedAt, setComputedAt] = useState<number | null>(null)
-  const [loading, setLoading] = useState(source !== undefined)
+  const [loading, setLoading] = useState(load !== undefined)
   const [error, setError] = useState('')
 
-  const load = useCallback(async (refresh: boolean) => {
-    if (!source) return
+  const run = useCallback(async (refresh: boolean) => {
+    if (!load) return
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/presets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts, params, refresh }),
-      })
-      const body = (await res.json()) as { presets?: ParamPreset[]; computedAt?: number; source?: PresetSource; error?: string }
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
-      setList(body.presets ?? [])
-      setComputedAt(body.computedAt ?? Date.now())
-      if (body.source) setHeading(body.source)
+      const got = await load(refresh)
+      setList(got.items)
+      setComputedAt(got.computedAt)
+      if (got.heading) setHead(got.heading)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [strategyId, source, accounts, params])
+  }, [load])
 
-  useEffect(() => { void load(false) }, [load])
+  useEffect(() => { void run(false) }, [run])
 
-  /* Cards under their group heading, groups in first-seen order; presets
-     without a card are a plain list above the cards — they are the named
-     configurations, and they read best as a list. */
   const plain = list.filter(p => !p.card)
-  const groups: Array<{ name: string | undefined; items: ParamPreset[] }> = []
+  const groups: Array<{ name: string | undefined; items: T[] }> = []
   for (const p of list) {
     if (!p.card) continue
     const name = p.card.group
@@ -87,8 +90,8 @@ export function PresetPickerModal({ strategyId, source, presets: staticPresets, 
       <div className="flex flex-col h-full min-h-0">
         <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex flex-col gap-0.5 min-w-0">
-            <h2 className="text-base font-semibold">{heading?.title ?? 'Presets'}</h2>
-            {heading?.description && <p className="text-xs" style={{ color: 'var(--muted)' }}>{heading.description}</p>}
+            <h2 className="text-base font-semibold">{head?.title ?? 'Choose'}</h2>
+            {head?.description && <p className="text-xs" style={{ color: 'var(--muted)' }}>{head.description}</p>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {computedAt !== null && !loading && (
@@ -96,8 +99,8 @@ export function PresetPickerModal({ strategyId, source, presets: staticPresets, 
                 {cardCount} · {new Date(computedAt).toLocaleTimeString()}
               </span>
             )}
-            {source && (
-              <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void load(true)}>
+            {load && (
+              <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void run(true)}>
                 {loading ? 'Scanning…' : 'Refresh'}
               </button>
             )}
@@ -147,15 +150,79 @@ export function PresetPickerModal({ strategyId, source, presets: staticPresets, 
           ))}
         </div>
 
-        <div className="px-5 py-2 text-xs" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
-          Choosing one fills the fields it names; everything stays editable.
-        </div>
+        {footer && (
+          <div className="px-5 py-2 text-xs" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>{footer}</div>
+        )}
       </div>
     </Modal>
   )
 }
 
-function PresetCardView({ preset, card, selected, onPick }: { preset: ParamPreset; card: PresetCard; selected: boolean; onPick: () => void }) {
+export function PresetPickerModal({ strategyId, source, presets: staticPresets, accounts, params, current, onPick, onClose }: {
+  strategyId: string
+  /** Present when the strategy computes presets live; absent = the static list only. */
+  source?: PresetSource | undefined
+  presets: ParamPreset[]
+  /** Slot label → account name, as bound in the form so far. */
+  accounts: Record<string, string>
+  params: { base: Record<string, unknown>; tunable: Record<string, unknown> }
+  /** The preset applied last, if any — drawn as selected. */
+  current?: string
+  onPick: (preset: ParamPreset) => void
+  onClose: () => void
+}) {
+  const load = useCallback(async (refresh: boolean): Promise<Loaded<ParamPreset>> => {
+    if (!source) return { items: staticPresets, computedAt: null }
+    const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/presets`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accounts, params, refresh }),
+    })
+    const body = (await res.json()) as { presets?: ParamPreset[]; computedAt?: number; source?: PresetSource; error?: string }
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+    return { items: body.presets ?? [], computedAt: body.computedAt ?? Date.now(), heading: body.source }
+  }, [strategyId, source, staticPresets, accounts, params])
+  return (
+    <CardPickerModal<ParamPreset>
+      heading={source ?? { title: 'Presets' }}
+      load={load}
+      current={current}
+      onPick={onPick}
+      onClose={onClose}
+      footer="Choosing one fills the fields it names; everything stays editable."
+    />
+  )
+}
+
+/** The dialog behind a picker field: options the strategy computes for the form's current state. */
+export function FieldPickerModal({ strategyId, pickerId, heading, accounts, params, current, onPick, onClose }: {
+  strategyId: string
+  pickerId: string
+  heading?: PresetSource | undefined
+  accounts: Record<string, string>
+  params: { base: Record<string, unknown>; tunable: Record<string, unknown> }
+  current?: string | undefined
+  onPick: (option: PickerOption) => void
+  onClose: () => void
+}) {
+  const load = useCallback(async (refresh: boolean): Promise<Loaded<PickerOption>> => {
+    const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/pickers/${encodeURIComponent(pickerId)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accounts, params, refresh }),
+    })
+    const body = (await res.json()) as { options?: PickerOption[]; computedAt?: number; error?: string }
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+    return { items: body.options ?? [], computedAt: body.computedAt ?? Date.now() }
+  }, [strategyId, pickerId, accounts, params])
+  return (
+    <CardPickerModal<PickerOption>
+      heading={heading ?? { title: 'Choose' }}
+      load={load}
+      current={current}
+      onPick={onPick}
+      onClose={onClose}
+    />
+  )
+}
+
+function PresetCardView({ preset, card, selected, onPick }: { preset: CardChoice; card: PresetCard; selected: boolean; onPick: () => void }) {
   const border = `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`
   if (card.html) {
     /* A custom drawing: the frame is the card. It cannot take the click

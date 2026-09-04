@@ -3,7 +3,7 @@ import type { StrategyInstance, StrategyInstanceView } from '../types/instance.j
 import type { ExecutionQueue, ExecutionResult } from '../types/executor.js'
 import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from '../types/runtime.js'
 import { PluginAlreadyLoadedError } from '../types/runtime.js'
-import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamPreset, PresetSource } from '../types/definition.js'
+import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamPreset, PickerOption, PresetSource } from '../types/definition.js'
 import type { Trigger } from '../types/trigger.js'
 import type { PlotOption } from '../types/monitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
@@ -184,6 +184,8 @@ export class OpenWhaleRuntime implements IRuntime {
   private readonly presetCache = new Map<string, { presets: ParamPreset[]; computedAt: number }>()
   /** strategyIllustrationData() results, by strategy + bindings + params. */
   private readonly illustrationCache = new Map<string, { data: Record<string, unknown>; computedAt: number }>()
+  /** strategyPickerOptions() results, by strategy + picker + bindings + params. */
+  private readonly pickerCache = new Map<string, { options: PickerOption[]; computedAt: number }>()
   private accountSnapshotTimer: ReturnType<typeof setInterval> | undefined
   private readonly accountSnapshotIntervalMs: number
   private readonly accountSnapshotRetentionMs: number
@@ -2064,6 +2066,33 @@ export class OpenWhaleRuntime implements IRuntime {
     const entry = { data, computedAt: Date.now() }
     this.illustrationCache.set(key, entry)
     if (this.illustrationCache.size > 200) this.illustrationCache.delete(this.illustrationCache.keys().next().value!)
+    return entry
+  }
+
+  /**
+   * The options of a strategy's picker field — pickerOptions(id) on a probe,
+   * cached by bindings and form state for the picker's ttl, like presets.
+   */
+  async strategyPickerOptions(
+    strategyId: string,
+    pickerId: string,
+    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean; signal?: AbortSignal } = {},
+  ): Promise<{ options: PickerOption[]; computedAt: number }> {
+    const definition = this.strategyRegistry.getDefinition(strategyId)
+    if (!definition) throw new Error(`Strategy "${strategyId}" is not registered`)
+    const picker = definition.paramsFields?.find(f => f.picker?.id === pickerId)?.picker
+    if (!picker) throw new Error(`Strategy "${strategyId}" declares no picker "${pickerId}"`)
+    const probe = this.strategyRegistry.get(strategyId)?.()
+    if (!probe || typeof probe.pickerOptions !== 'function') throw new Error(`Strategy "${strategyId}" serves no picker options`)
+    const accounts = opts.accounts ?? {}
+    const params = { base: opts.params?.base ?? {}, tunable: opts.params?.tunable ?? {} }
+    const key = `${strategyId}\u0000${pickerId}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
+    const cached = this.pickerCache.get(key)
+    if (!opts.refresh && cached && Date.now() - cached.computedAt < (picker.ttlMs ?? 60_000)) return cached
+    const options = await probe.pickerOptions(pickerId, { adapters: this.adapters, accounts, params, ...(opts.signal ? { signal: opts.signal } : {}) })
+    const entry = { options, computedAt: Date.now() }
+    this.pickerCache.set(key, entry)
+    if (this.pickerCache.size > 200) this.pickerCache.delete(this.pickerCache.keys().next().value!)
     return entry
   }
 

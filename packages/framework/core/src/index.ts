@@ -118,6 +118,8 @@ export type {
   PresetTone,
   PresetSource,
   PresetContext,
+  ParamPicker,
+  PickerOption,
   ParamAvailability,
   AvailabilityVerdict,
   AvailabilityChecker,

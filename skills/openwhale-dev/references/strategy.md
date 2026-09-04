@@ -182,6 +182,34 @@ Rules:
 - The same scan usually wants to exist as a **Script** too (a report an operator runs without
   opening the form). Put the computation in one module and call it from both.
 
+## Picker fields — a value that is a whole decision
+
+A catalogue answers "which symbol". When the choice is several things at once — the four legs
+of a carry, a market with its size — make the param an **object** and give it a picker (core ≥
+0.2.3):
+
+```ts
+legs: z.object({ longMarket: z.string(), shortMarket: z.string(), perpLongSymbol: z.string(), perpShortSymbol: z.string() }).meta({
+  displayName: 'The four legs',
+  picker: { source: 'strategy', id: 'carry-legs', title: 'Fixed-rate carry opportunities', description: 'Ranked by net APR after fees.', ttlMs: 60_000 },
+})
+
+override async pickerOptions(pickerId: string, ctx: PresetContext): Promise<PickerOption[]> {
+  if (pickerId !== 'carry-legs') return []
+  return (await scan(ctx.adapters)).map(o => ({
+    id: o.id, label: `${o.asset} ${o.longVenue} → ${o.shortVenue}`,
+    value: { longMarket: o.longMarket, shortMarket: o.shortMarket, perpLongSymbol: o.perpLong, perpShortSymbol: o.perpShort },
+    card: { title: o.asset, headline: { label: 'net APR', value: pct(o.netApr), tone: 'positive' }, rows: [...], badges: [...], group: 'Executable' },
+  }))
+}
+```
+
+The Dashboard draws the field as a button naming the current choice and opens the same card
+dialog presets use; choosing sets the field to `option.value`. `pickerOptions()` runs on a probe
+with keyless adapters, the bound slots and the form's current values, cached for `ttlMs`; the
+order is the ranking. Prefer this over a preset when the decision IS the param — a preset fills
+fields the operator may then drift from, a picker keeps the four names together.
+
 ## Illustrations with live figures
 
 `paramsIllustrations` are HTML pages drawn in the form — above the fields by default, after a
@@ -239,6 +267,7 @@ remembers the quote it would have rested); read it, never branch the action on i
 | `onActivate(ctx)` / `onDeactivate(ctx)` | Lifecycle hooks — see the section above |
 | `presetSource` / `presets(ctx)` | Live presets — see the section above |
 | `illustrationData(ctx)` | Live figures for the illustrations — see the section above |
+| `pickerOptions(id, ctx)` | Options of a picker field — see the section above |
 | `onExecutionResult(result, { instanceId })` | Optional override: called with the executor's recorded `ExecutionResult` for every instruction THIS instance emitted (success, failed or skipped), after the record is written — the place to note fill ids or a failed leg in `this.store`. `this.store` is the same per-instance store; `this.trace` is a no-op here unless a run happens to be active. Runs off the queue path: a throw is logged as a warning and never touches the execution record |
 | `availabilityCheckers` | `Readonly<Record<name, AvailabilityChecker>>` — pure functions over the venue's market list, named from a param's `.meta({ availability: { checker } })`. The built-in `availability: { source: 'market', kind? }` needs no checker: every value must be a listed market |
 

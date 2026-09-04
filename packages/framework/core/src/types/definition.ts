@@ -1,6 +1,6 @@
 // ── Param field UI schema ─────────────────────────────────────────────────────
 
-export type ParamFieldType = 'string' | 'number' | 'boolean' | 'options' | 'list'
+export type ParamFieldType = 'string' | 'number' | 'boolean' | 'options' | 'list' | 'object'
 
 export interface ParamFieldOption {
   label: string
@@ -62,6 +62,12 @@ export interface ListParamDef {
 export interface ParamFieldMeta {
   /** Display section within the group — dashboard renders a header per section. */
   section?: string
+  /**
+   * Render a picker dialog whose options the strategy computes — see
+   * ParamPicker. For a field whose value is a whole decision (an object
+   * naming several legs at once) rather than a symbol from a catalogue.
+   */
+  picker?: ParamPicker
   displayName?: string
   description?: string
   hint?: string
@@ -208,6 +214,8 @@ export interface ParamFieldDef {
     hide?: Record<string, (string | number | boolean)[]>
   }
   /** Render a live catalogue picker (see ParamFieldCatalogue); degrades to a text input. */
+  /** Render a picker dialog with strategy-computed options — see ParamPicker. */
+  picker?: ParamPicker
   catalogue?: ParamFieldCatalogue
   /** Verify the chosen value(s) against the bound account's venue (see ParamAvailability). */
   availability?: ParamAvailability
@@ -370,6 +378,38 @@ export interface PresetSource {
   description?: string
   /** How long a computed list is served before it is recomputed. Default 60 000. */
   ttlMs?: number
+}
+
+/**
+ * A field whose options the strategy computes live, each drawn as a card.
+ *
+ * A catalogue answers "which symbol"; a picker answers "which decision" —
+ * the four legs of a carry, a market with its size — where the value is an
+ * object and choosing it is a comparison of live figures. The Dashboard
+ * shows the field as a button naming the current choice and opens a card
+ * dialog on click; the options come from IStrategy.pickerOptions(id, ctx),
+ * cached like presets.
+ */
+export interface ParamPicker {
+  source: 'strategy'
+  /** The id pickerOptions() is asked for — one strategy may serve several pickers. */
+  id: string
+  /** Dialog heading and blurb. */
+  title?: string
+  description?: string
+  /** How long a computed list is served before it is recomputed. Default 60 000. */
+  ttlMs?: number
+}
+
+export interface PickerOption {
+  /** Stable identifier — what the picker remembers; never shown as-is. */
+  id: string
+  label: string
+  description?: string
+  /** What the field is set to when this option is chosen. */
+  value: unknown
+  /** The card the dialog draws; a plain row without one. */
+  card?: PresetCard
 }
 
 /** What IStrategy.presets() is given to compute with. */

@@ -7,7 +7,7 @@ import type { ZodType, ZodRawShape } from 'zod'
 import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { AccountSlot, ReaderClass } from '../types/materialization.js'
-import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset, PresetContext, PresetSource } from '../types/definition.js'
+import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset, PresetContext, PresetSource, PickerOption } from '../types/definition.js'
 import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
@@ -189,6 +189,8 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   presets?(ctx: PresetContext): Promise<ParamPreset[]>
   /** Live figures for the illustrations — see IStrategy.illustrationData(). Absent by default. */
   illustrationData?(ctx: PresetContext): Promise<Record<string, unknown>>
+  /** Options for a picker field — see IStrategy.pickerOptions(). Absent by default. */
+  pickerOptions?(pickerId: string, ctx: PresetContext): Promise<PickerOption[]>
 
   /**
    * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.
@@ -305,6 +307,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
           ...(meta.displayOptions ? { displayOptions: meta.displayOptions } : {}),
           ...(meta.catalogue ? { catalogue: meta.catalogue } : {}),
           ...(meta.availability ? { availability: meta.availability } : {}),
+          ...(meta.picker ? { picker: meta.picker } : {}),
           ...(meta.multiple ? { multiple: true } : {}),
           ...(meta.slider ? { slider: meta.slider } : {}),
           ...(meta.unit ? { unit: meta.unit } : {}),
@@ -326,6 +329,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
       case 'number': return 'number'
       case 'boolean': return 'boolean'
       case 'array': return 'list'
+      case 'object': return 'object'
       default: return 'string'
     }
   }
