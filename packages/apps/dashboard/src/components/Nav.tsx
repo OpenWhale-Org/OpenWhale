@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useI18n, LOCALES, type MessageKey } from '@/i18n'
+import { useI18n, type MessageKey } from '@/i18n'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
@@ -66,7 +66,7 @@ function NavLink({ href, label, icon, active }: { href: string; label: string; i
 
 export function Nav() {
   const pathname = usePathname()
-  const { t, locale, setLocale } = useI18n()
+  const { t } = useI18n()
   /*
    * Prefix matching, EXCEPT where another link owns the deeper path. Without
    * the second clause /monitor-data lit up alongside /monitor-data/retention
@@ -103,12 +103,6 @@ export function Nav() {
             first-run overlay you dismissed once is otherwise gone for good. */}
         <NavLink href="/start" label={t('nav.start')} icon="start" active={isActive('/start')} />
         <NavLink href="/assistant" label={t('nav.assistant')} icon="assistant" active={isActive('/assistant')} />
-        {/* The language switch lives with the other things that must always be findable. */}
-        <div className="aurora-nav-lang" role="group" aria-label={t('nav.language')}>
-          {LOCALES.map(l => (
-            <button key={l.id} type="button" className={`aurora-nav-lang-btn${locale === l.id ? ' is-active' : ''}`} onClick={() => { if (locale !== l.id) setLocale(l.id) }}>{l.label}</button>
-          ))}
-        </div>
       </div>
     </aside>
   )

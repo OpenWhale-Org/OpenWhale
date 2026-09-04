@@ -5,7 +5,7 @@ import { Nav } from './Nav'
 import { UserMenu } from './UserMenu'
 import { Tour } from './Tour'
 import { UnsavedGuard } from './unsaved'
-import { useT, type MessageKey } from '@/i18n'
+import { useI18n, LOCALES, type MessageKey } from '@/i18n'
 
 /**
  * The application shell.
@@ -39,7 +39,7 @@ function currentLabel(pathname: string, t: (k: MessageKey) => string): string {
 }
 
 export function AppShell({ signedIn, username, children }: { signedIn: boolean; username?: string; children: React.ReactNode }) {
-  const t = useT()
+  const { t, locale, setLocale } = useI18n()
   const pathname = usePathname()
   const login = pathname === '/login'
 
@@ -56,7 +56,14 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
             <span className="aurora-topbar-separator">/</span>
             <strong>{currentLabel(pathname, t)}</strong>
           </div>
-          <UserMenu {...(username ? { username } : {})} />
+          <div className="aurora-topbar-right">
+            <div className="aurora-lang" role="group" aria-label={t('nav.language')}>
+              {LOCALES.map(l => (
+                <button key={l.id} type="button" className={`aurora-lang-btn${locale === l.id ? ' is-active' : ''}`} onClick={() => { if (locale !== l.id) setLocale(l.id) }}>{l.label}</button>
+              ))}
+            </div>
+            <UserMenu {...(username ? { username } : {})} />
+          </div>
         </header>
         <main className="aurora-main">
           {/* The scroll container's own padding cannot be used: it would sit above
