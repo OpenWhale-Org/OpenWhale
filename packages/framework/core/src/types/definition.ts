@@ -73,6 +73,13 @@ export interface ParamFieldMeta {
   description?: Text
   hint?: Text
   placeholder?: Text
+  /**
+   * Translations of this field's text, per locale — the form zod's `.meta()`
+   * accepts, since zod types `description` and `title` as strings:
+   * `.meta({ displayName: 'Notional', description: '…', i18n: { 'zh-CN': { displayName: '名义仓位', description: '…' } } })`.
+   * Folded into the same Text tables as a table written inline.
+   */
+  i18n?: Record<string, Partial<Record<'displayName' | 'description' | 'hint' | 'placeholder' | 'section', string>>>
   options?: ParamFieldOption[]
   displayOptions?: {
     show?: Record<string, (string | number | boolean)[]>
@@ -334,7 +341,7 @@ export interface ParamPreset {
 export type PresetTone = 'positive' | 'negative' | 'neutral' | 'muted'
 
 export interface PresetFigure {
-  label: string
+  label: Text
   value: string
   tone?: PresetTone
 }
@@ -351,17 +358,17 @@ export interface PresetFigure {
  */
 export interface PresetCard {
   /** Big text, top left — the underlying, the market, the pair. */
-  title: string
+  title: Text
   /** One line under the title — the venues, the maturity. */
-  subtitle?: string
+  subtitle?: Text
   /** The number the card is ranked by, set large, top right. */
   headline?: PresetFigure
   /** Small label/value pairs below. */
   rows?: PresetFigure[]
   /** Short flags — "executable", "at ceiling". */
-  badges?: Array<{ text: string; tone?: PresetTone }>
+  badges?: Array<{ text: Text; tone?: PresetTone }>
   /** Cards with the same group render under one heading, in the order given. */
-  group?: string
+  group?: Text
   /** Custom body; sandboxed iframe. Height in px via `height` (default 160). */
   html?: string
   height?: number

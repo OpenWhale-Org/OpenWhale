@@ -143,10 +143,14 @@ an illustration's `title`, a preset's or picker's `title`/`description`, a Scrip
 the plugin's `readme` — is a `Text`: a plain string (English) or a table with `en` required:
 
 ```ts
+// In a zod .meta(): English as written, translations under i18n — zod types
+// `description` as a string, so a table cannot sit there directly.
 notionalUsd: z.number().positive().meta({
-  displayName: { en: 'Notional (USD)', 'zh-CN': '名义仓位（USD）' },
-  description: { en: 'Per leg. Every leg is this size.', 'zh-CN': '每条腿的名义金额，四条腿相同。' },
+  displayName: 'Notional (USD)', description: 'Per leg. Every leg is this size.',
+  i18n: { 'zh-CN': { displayName: '名义仓位（USD）', description: '每条腿的名义金额，四条腿相同。' } },
 }),
+// Everywhere else — decorators, manifests, cards, account panels — a table:
+@OwStrategy({ name: { en: 'Fixed-rate carry', 'zh-CN': '固定利率套利' }, description: { en: '…', 'zh-CN': '…' } })
 ```
 
 The gateway resolves every table for the reader's locale before a page sees it; a locale that

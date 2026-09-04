@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { PresetCard, PresetTone } from '@openwhaleorg/core'
-import type { ParamPreset, PickerOption, PresetSource } from '@/lib/core-types'
+import type { PresetTone } from '@openwhaleorg/core'
+import type { ParamPreset, PickerOption, PresetSource, PresetCard } from '@/lib/core-types'
 import { Modal } from '@/components/Modal'
 import { useT } from '@/i18n'
 

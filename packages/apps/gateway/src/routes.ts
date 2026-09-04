@@ -985,7 +985,7 @@ export function buildRouter(): Router {
   // Plot routes MUST precede the generic :name/:key record route
   router.get('/api/monitor/:name/plots', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(runtime.monitorPlots(req.params['name']!))
+    res.json(localize(runtime.monitorPlots(req.params['name']!), localeOf(req)))
   }))
 
   router.get('/api/monitor/:name/plots/:plotId', h(async (req, res) => {
@@ -1005,7 +1005,7 @@ export function buildRouter(): Router {
       : Array.isArray(raw) ? raw.map(String)
       : String(raw)
     try {
-      res.json(await runtime.monitorPlotSeries(req.params['name']!, req.params['plotId']!, key, n, option))
+      res.json(localize(await runtime.monitorPlotSeries(req.params['name']!, req.params['plotId']!, key, n, option), localeOf(req)))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }

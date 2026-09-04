@@ -32,7 +32,7 @@ import type { StrategyDefinition, ParamFieldDef, ParamIllustration, ParamPreset,
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
-import { useT, type MessageKey } from '@/i18n'
+import { useT, useI18n, type MessageKey } from '@/i18n'
 import { PresetPickerModal, FieldPickerModal, presetsNeedDialog } from '@/components/PresetPicker'
 import { statusDot, statusTitle } from './status'
 import { InlineRename } from '@/components/InlineRename'
@@ -382,6 +382,7 @@ function IllustrationFrame({ ill, values, data, dataError, pending, logos }: { i
   /* A page that reports its own height gets it: fixed heights clip a picture
      that reflows with the panel's width. Until it reports, the declared one. */
   const [height, setHeight] = useState<number | undefined>(undefined)
+  const { locale } = useI18n()
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.source !== ref.current?.contentWindow) return
@@ -391,8 +392,8 @@ function IllustrationFrame({ ill, values, data, dataError, pending, logos }: { i
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [])
-  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}), pending: pending === true, logos: logos ?? {} }, '*')
-  useEffect(() => { post() }, [values, data, dataError, pending, logos])   // eslint-disable-line react-hooks/exhaustive-deps
+  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}), pending: pending === true, logos: logos ?? {}, locale }, '*')
+  useEffect(() => { post() }, [values, data, dataError, pending, logos, locale])   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-1">
       {ill.title && <span className="text-xs" style={{ color: 'var(--muted)' }}>{ill.title}</span>}

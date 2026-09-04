@@ -8,6 +8,7 @@ import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { AccountSlot, ReaderClass } from '../types/materialization.js'
 import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset, PresetContext, PresetSource, PickerOption } from '../types/definition.js'
+import type { Text } from '../i18n.js'
 import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
@@ -264,20 +265,31 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
           : zt === 'number' ? 'number' as const
           : zt === 'boolean' ? 'boolean' as const
           : 'string' as const
+        const placeholder = textOf(col.meta, 'placeholder')
+        const description = textOf(col.meta, 'description')
         return {
           name,
-          displayName: col.meta.displayName ?? name,
+          displayName: textOf(col.meta, 'displayName') ?? name,
           type,
           ...(col.meta.options ? { options: col.meta.options } : {}),
           ...(col.meta.slider ? { slider: col.meta.slider } : {}),
           ...(col.meta.catalogue ? { catalogue: col.meta.catalogue } : {}),
           ...(col.meta.unit ? { unit: col.meta.unit } : {}),
-          ...(col.meta.placeholder ? { placeholder: col.meta.placeholder } : {}),
-          ...(col.meta.description ? { description: col.meta.description } : {}),
+          ...(placeholder ? { placeholder } : {}),
+          ...(description ? { description } : {}),
           ...(col.defaultValue !== undefined ? { default: col.defaultValue } : {}),
         }
       })
       return { columns, ...(meta.list ?? {}) }
+    }
+
+    /** A field's text with its per-locale translations folded in — one Text table, or the string as written. */
+    function textOf(m: ParamFieldMeta, key: 'displayName' | 'description' | 'hint' | 'placeholder' | 'section'): Text | undefined {
+      const base = m[key]
+      const extra = Object.entries(m.i18n ?? {}).flatMap(([locale, t]) => (t?.[key] !== undefined ? [[locale, t[key]!] as const] : []))
+      if (extra.length === 0) return base
+      const en = typeof base === 'string' ? base : base?.en ?? extra[0]![1]
+      return { ...(typeof base === 'object' ? base : {}), en, ...Object.fromEntries(extra) }
     }
 
     function processShape(shape: ZodRawShape, group: 'base' | 'tunable') {
@@ -292,17 +304,21 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
         const enumValues = zodType === 'enum' ? (field as unknown as { options?: readonly (string | number)[] }).options : undefined
         const options = meta.options ?? enumValues?.map(v => ({ value: v, label: String(v) }))
 
+        const description = textOf(meta, 'description')
+        const hint = textOf(meta, 'hint')
+        const section = textOf(meta, 'section')
+        const placeholder = textOf(meta, 'placeholder')
         fields.push({
           name,
-          displayName: meta.displayName ?? name,
+          displayName: textOf(meta, 'displayName') ?? name,
           type: fieldType,
           group,
           ...(defaultValue !== undefined ? { default: defaultValue } : {}),
           ...(required ? { required: true } : {}),
-          ...(meta.description ? { description: meta.description } : {}),
-          ...(meta.hint ? { hint: meta.hint } : {}),
-          ...(meta.section ? { section: meta.section } : {}),
-          ...(meta.placeholder ? { placeholder: meta.placeholder } : {}),
+          ...(description ? { description } : {}),
+          ...(hint ? { hint } : {}),
+          ...(section ? { section } : {}),
+          ...(placeholder ? { placeholder } : {}),
           ...(options ? { options } : {}),
           ...(meta.displayOptions ? { displayOptions: meta.displayOptions } : {}),
           ...(meta.catalogue ? { catalogue: meta.catalogue } : {}),
