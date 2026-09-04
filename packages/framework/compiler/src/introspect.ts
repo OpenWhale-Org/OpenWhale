@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { OpenWhaleRuntime } from '@openwhaleorg/core'
+import { resolveText } from '@openwhaleorg/core'
 
 /**
  * Registry introspection: what the AI is told up front (snapshot) and what it
@@ -30,8 +31,8 @@ export function snapshot(runtime: OpenWhaleRuntime): ComponentSnapshot {
     const keySchema = instance?.keySchema
     return {
       id: def.id,
-      name: def.name,
-      ...(def.description ? { description: def.description } : {}),
+      name: resolveText(def.name),
+      ...(def.description ? { description: resolveText(def.description) } : {}),
       ...(emitSchema ? { emitSchema: z.toJSONSchema(emitSchema) } : {}),
       ...(keySchema ? { keySchema: z.toJSONSchema(keySchema) } : {}),
     }
@@ -42,8 +43,8 @@ export function snapshot(runtime: OpenWhaleRuntime): ComponentSnapshot {
     const actionSchemas = instance?.actionSchemas
     return {
       id: def.id,
-      name: def.name,
-      ...(def.description ? { description: def.description } : {}),
+      name: resolveText(def.name),
+      ...(def.description ? { description: resolveText(def.description) } : {}),
       supportedActions: def.supportedActions,
       ...(actionSchemas
         ? { actionSchemas: Object.fromEntries(Object.entries(actionSchemas).map(([a, s]) => [a, z.toJSONSchema(s)])) }
@@ -55,7 +56,7 @@ export function snapshot(runtime: OpenWhaleRuntime): ComponentSnapshot {
   return {
     monitors,
     executors,
-    strategies: runtime.listStrategies().map(s => ({ id: s.id, name: s.name })),
+    strategies: runtime.listStrategies().map(s => ({ id: s.id, name: resolveText(s.name) })),
     kinds: runtime.listKinds(),
     credentialTypes: runtime.describeCredentialTypes().map(t => ({ type: t.type, kinds: t.kinds })),
   }
