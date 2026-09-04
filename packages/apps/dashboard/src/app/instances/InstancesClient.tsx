@@ -32,6 +32,7 @@ import type { StrategyDefinition, ParamFieldDef, ParamIllustration, ParamPreset,
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { Select } from '@/components/Select'
+import { useT, type MessageKey } from '@/i18n'
 import { PresetPickerModal, FieldPickerModal, presetsNeedDialog } from '@/components/PresetPicker'
 import { statusDot, statusTitle } from './status'
 import { InlineRename } from '@/components/InlineRename'
@@ -72,14 +73,14 @@ function newId(prefix: string): string {
 }
 
 // ── Instance icons ────────────────────────────────────────────────────────────
-const SORTS = [
-  { id: 'manual', label: 'Manual order' },
-  { id: 'name', label: 'Name A→Z' },
-  { id: 'strategy', label: 'Strategy' },
-  { id: 'pnl', label: 'PnL high→low' },
-  { id: 'pnl-asc', label: 'PnL low→high' },
-  { id: 'newest', label: 'Newest first' },
-  { id: 'oldest', label: 'Oldest first' },
+const SORTS: Array<{ id: string; label: MessageKey }> = [
+  { id: 'manual', label: 'inst.sort.manual' },
+  { id: 'name', label: 'inst.sort.name' },
+  { id: 'strategy', label: 'inst.sort.strategy' },
+  { id: 'pnl', label: 'inst.sort.pnlDesc' },
+  { id: 'pnl-asc', label: 'inst.sort.pnlAsc' },
+  { id: 'newest', label: 'inst.sort.newest' },
+  { id: 'oldest', label: 'inst.sort.oldest' },
 ] as const
 
 type SortId = typeof SORTS[number]['id']
@@ -117,6 +118,7 @@ export function IconMenu({ current, onPick, children }: {
   onPick: (emoji: string) => void
   children: React.ReactNode
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -131,7 +133,7 @@ export function IconMenu({ current, onPick, children }: {
 
   return (
     <div ref={boxRef} className="relative inline-block">
-      <span className="cursor-pointer" title="Click to change the icon" onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}>
+      <span className="cursor-pointer" title={t('inst.iconChange')} onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}>
         {children}
       </span>
       {open && (
@@ -256,6 +258,7 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
   /** Venue for a catalogue cell, resolved from the cell's `accountSlot` (see ParamFieldsForm). */
   venueFor: (slot?: string) => string | undefined
 }) {
+  const t = useT()
   const columns = field.list?.columns ?? []
   const rows = parseListRows(value)
   const commit = (next: ListRow[]) => onChange(JSON.stringify(next))
@@ -341,7 +344,7 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
       <button type="button" onClick={addRow}
         className="self-start text-xs px-2 py-1 rounded"
         style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}>
-        ＋ {field.list?.addLabel ?? 'Add row'}
+        ＋ {field.list?.addLabel ?? t('params.addRow')}
       </button>
     </div>
   )
@@ -449,6 +452,7 @@ export function ParamFieldsForm({
    */
   slotVenues?: Record<string, string>
 }) {
+  const t = useT()
   /** Venue a field's picker/check should use: its named slot's, else the first bound slot's. */
   const venueFor = (slot?: string): string | undefined =>
     (slot ? slotVenues?.[slot] : undefined) ?? venueContext
@@ -653,7 +657,7 @@ export function ParamFieldsForm({
                         {verdict.available ? '⚠ ' : '✕ '}{verdict.reason ?? ''}
                       </span>
                     )}
-                    {on && verdict === null && <span style={{ color: 'var(--success)' }}>✓ available</span>}
+                    {on && verdict === null && <span style={{ color: 'var(--success)' }}>{t('params.available')}</span>}
                     {opt.description && !on && <span style={{ color: 'var(--muted)' }}>{opt.description}</span>}
                   </span>
                 </button>
@@ -733,13 +737,13 @@ export function ParamFieldsForm({
           </div>
           <div className="flex items-center gap-3">
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPickerFor(field.name)}>
-              {field.picker.title ? `Choose from ${field.picker.title}…` : 'Choose…'}
+              {field.picker.title ? t('common.chooseFrom', { title: field.picker.title }) : t('common.choose')}
             </button>
             {summary
               ? <span className="text-xs font-mono truncate" style={{ color: 'var(--foreground)' }} title={value}>{summary}</span>
-              : <span className="text-xs" style={{ color: 'var(--muted)' }}>nothing chosen yet</span>}
+              : <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('common.nothingChosen')}</span>}
             {value && (
-              <button type="button" className="text-xs" style={{ color: 'var(--muted)' }} onClick={() => { set(field.name, ''); setPickerLabels(l => { const { [field.name]: _, ...rest } = l; return rest }) }}>clear</button>
+              <button type="button" className="text-xs" style={{ color: 'var(--muted)' }} onClick={() => { set(field.name, ''); setPickerLabels(l => { const { [field.name]: _, ...rest } = l; return rest }) }}>{t('common.clear')}</button>
             )}
           </div>
           {field.description && <span className="text-xs" style={{ color: 'var(--muted)' }}>{field.description}</span>}
@@ -839,12 +843,12 @@ export function ParamFieldsForm({
     <div className="flex flex-col gap-3">
       {useDialog && strategyId ? (
         <div className="flex flex-col gap-1.5" data-tour="field-preset">
-          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Preset</label>
+          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('params.preset')}</label>
           <div className="flex items-center gap-3">
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPickerOpen(true)}>
-              {presetSource?.title ? `Choose from ${presetSource.title}…` : 'Choose a preset…'}
+              {presetSource?.title ? t('common.chooseFrom', { title: presetSource.title }) : t('params.preset.choose')}
             </button>
-            {presetLabel && <span className="text-xs" style={{ color: 'var(--muted)' }}>applied: <span style={{ color: 'var(--foreground)' }}>{presetLabel}</span> — every field stays editable</span>}
+            {presetLabel && <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('params.preset.applied')} <span style={{ color: 'var(--foreground)' }}>{presetLabel}</span> — {t('params.preset.editable')}</span>}
           </div>
           {pickerOpen && (
             <PresetPickerModal
@@ -861,22 +865,22 @@ export function ParamFieldsForm({
         </div>
       ) : presets && presets.length > 0 && (
         <div className="flex flex-col gap-1.5" data-tour="field-preset">
-          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Preset</label>
+          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('params.preset')}</label>
           <Select
             value={presetId}
             onChange={applyPreset}
-            placeholder="— custom —"
+            placeholder={t('params.preset.custom')}
             options={presets.map(p => ({ value: p.id, label: p.label, ...(p.description ? { hint: p.description } : {}) }))}
           />
           <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            Fills the fields the preset names; everything stays editable.
+            {t('params.preset.fills')}
           </span>
         </div>
       )}
       {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} logos={venueLogos} />)}
       {baseFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Base Parameters</label>
+          <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('params.base')}</label>
           <div className="rounded-md p-3 flex flex-col gap-3" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
             {baseFields.map(renderField)}
           </div>
@@ -886,7 +890,7 @@ export function ParamFieldsForm({
       {tunableFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Tunable Parameters</label>
+            <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('params.tunable')}</label>
             {sections.length > 1 && (
               <button
                 type="button"
@@ -894,7 +898,7 @@ export function ParamFieldsForm({
                 className="text-xs px-2 py-0.5 rounded-md"
                 style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
               >
-                {allCollapsed ? 'Expand all' : 'Collapse all'}
+                {allCollapsed ? t('params.expandAll') : t('params.collapseAll')}
               </button>
             )}
           </div>
@@ -911,7 +915,7 @@ export function ParamFieldsForm({
                     onClick={() => toggleSection(key)}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
                     style={{ background: 'var(--surface)' }}
-                    title={isCollapsed ? 'Expand' : 'Collapse'}
+                    title={isCollapsed ? t('params.expand') : t('params.collapse')}
                   >
                     <svg
                       width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
@@ -921,7 +925,7 @@ export function ParamFieldsForm({
                       <path d="M6 9l6 6 6-6" />
                     </svg>
                     <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--foreground)' }}>
-                      {sec || 'General'}
+                      {sec || t('params.general')}
                     </span>
                     <span className="text-xs" style={{ color: 'var(--muted)' }}>{fieldsIn(sec).length}</span>
                     {/* A collapsed group must still say whether anything inside it was touched. */}
@@ -959,6 +963,7 @@ export { buildParamsFromFields, fieldValuesFromParams }
 export interface PnlTotals { realized: number; fees: number; funding: number; net: number; unrealized: number | null }
 
 export function InstancesClient({ initialInstances }: Props) {
+  const t = useT()
   const router = useRouter()
   // ?new=<strategyId> (the Plugins page's jump link) opens the form on that
   // strategy; the param is consumed so a refresh doesn't reopen it.
@@ -1099,14 +1104,14 @@ export function InstancesClient({ initialInstances }: Props) {
     <div>
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-semibold">Strategy Instances</h1>
+          <h1 className="text-2xl font-semibold">{t('inst.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
             Activate and manage running strategy instances
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={refresh} disabled={loading} className="btn btn-secondary">
-            {loading ? 'Refreshing…' : 'Refresh'}
+            {loading ? t('common.refreshing') : t('common.refresh')}
           </button>
           {/* The dialog covers the page, so this never needs to read "Cancel" —
               cancelling belongs to the dialog that has focus. */}
@@ -1125,7 +1130,7 @@ export function InstancesClient({ initialInstances }: Props) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by name, strategy or account…"
+            placeholder={t('inst.filterPlaceholder')}
             className="rounded-md px-3 h-8 text-xs min-w-0 flex-1"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
           />
@@ -1133,9 +1138,9 @@ export function InstancesClient({ initialInstances }: Props) {
             value={status}
             onChange={(v) => setStatus(v as typeof status)}
             options={[
-              { id: 'all', label: 'All' },
-              { id: 'running', label: 'Running' },
-              { id: 'stopped', label: 'Stopped' },
+              { id: 'all', label: t('inst.filter.all') },
+              { id: 'running', label: t('inst.filter.running') },
+              { id: 'stopped', label: t('inst.filter.stopped') },
             ]}
           />
           <select
@@ -1143,9 +1148,9 @@ export function InstancesClient({ initialInstances }: Props) {
             onChange={(e) => setSort(e.target.value as SortId)}
             className="rounded-md px-2 h-8 text-xs shrink-0"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-            title="Sort order"
+            title={t('inst.sortOrder')}
           >
-            {SORTS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            {SORTS.map(o => <option key={o.id} value={o.id}>{t(o.label)}</option>)}
           </select>
           <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
             {layout === 'whale'
@@ -1185,15 +1190,15 @@ export function InstancesClient({ initialInstances }: Props) {
           <Modal onClose={() => setDeletingFolder(null)} maxWidth="26rem">
             <div className="p-4 flex flex-col gap-3">
               <div>
-                <h3 className="text-sm font-medium">Delete folder “{deletingFolder}”?</h3>
+                <h3 className="text-sm font-medium">{t('inst.folder.deleteTitle', { folder: deletingFolder })}</h3>
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                   {members.length === 0
-                    ? 'It is empty — the heading simply goes away.'
-                    : `Its ${members.length} ${members.length > 1 ? 'instances become' : 'instance becomes'} ungrouped. Nothing is deleted, nothing stops${running > 0 ? ` — ${running} of them ${running > 1 ? 'are' : 'is'} running and stay${running > 1 ? '' : 's'} that way` : ''}.`}
+                    ? t('inst.folder.deleteEmpty')
+                    : t('inst.folder.deleteMembers', { n: members.length, running })}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDeletingFolder(null)} autoFocus>Cancel</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDeletingFolder(null)} autoFocus>{t('common.cancel')}</button>
                 <button type="button" className="btn btn-danger-solid btn-sm" onClick={() => void deleteFolder(deletingFolder)}>
                   Delete folder
                 </button>
@@ -1219,12 +1224,12 @@ export function InstancesClient({ initialInstances }: Props) {
           }}
         >
           <span />
-          <span className="text-xs">Instance</span>
-          <span className="text-xs">Strategy · Account</span>
-          <span className="text-xs text-right">PnL</span>
-          <span className="text-xs text-right">Unrealized</span>
-          <span className="text-xs text-right">Funding</span>
-          <span className="text-xs">Parameters</span>
+          <span className="text-xs">{t('inst.col.instance')}</span>
+          <span className="text-xs">{t('inst.col.strategyAccount')}</span>
+          <span className="text-xs text-right">{t('pnl.pnl')}</span>
+          <span className="text-xs text-right">{t('pnl.unrealized')}</span>
+          <span className="text-xs text-right">{t('pnl.funding')}</span>
+          <span className="text-xs">{t('params.title')}</span>
           <span />
         </div>
       )}
@@ -1346,7 +1351,7 @@ export function InstancesClient({ initialInstances }: Props) {
                           return next
                         })}
                         onDoubleClick={() => setRenamingFolder(folder)}
-                        title="Double-click to rename"
+                        title={t('inst.renameHint')}
                       >
                         <span>{collapsedFolders.has(folder) ? '▸' : '▾'}</span>
                         <span>📁 {folder}</span>
@@ -1359,8 +1364,8 @@ export function InstancesClient({ initialInstances }: Props) {
                       <button
                         type="button"
                         onClick={() => setDeletingFolder(folder)}
-                        title="Delete this folder"
-                        aria-label={`Delete folder ${folder}`}
+                        title={t('inst.folder.delete')}
+                        aria-label={t('inst.folder.deleteAria', { folder })}
                         className="opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1 rounded"
                         style={{ color: 'var(--muted)' }}
                       >
@@ -1371,12 +1376,12 @@ export function InstancesClient({ initialInstances }: Props) {
                         grip you can grab but that refuses to do anything is
                         worse than no grip. */}
                     {reorderable && (
-                      <DragHandle title="Drag to reorder folders" onPointerDown={(e) => beginDrag('folder', folder, e)} />
+                      <DragHandle title={t('inst.folder.drag')} onPointerDown={(e) => beginDrag('folder', folder, e)} />
                     )}
                   </div>
                 )}
                 {folder === undefined && groups.length > 1 && (
-                  <div className="text-xs mt-2" style={{ color: 'var(--muted)' }}>Ungrouped</div>
+                  <div className="text-xs mt-2" style={{ color: 'var(--muted)' }}>{t('inst.folder.ungrouped')}</div>
                 )}
                 {/* A GRID, not a column: 13 instances as full-width rows is a
                     page you scroll rather than read. Cards stay drag-and-drop
@@ -1402,7 +1407,7 @@ export function InstancesClient({ initialInstances }: Props) {
                       return <Item
                       instance={inst}
                       {...(reorderable
-                        ? { dragHandle: <DragHandle title="Drag to reorder or re-file" onPointerDown={(e) => beginDrag('card', inst.id, e)} /> }
+                        ? { dragHandle: <DragHandle title={t('inst.dragCard')} onPointerDown={(e) => beginDrag('card', inst.id, e)} /> }
                         : {})}
                       pnl={pnl[inst.id]}
                       folders={folderNames}
@@ -1455,6 +1460,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
   onActivate: (id: string) => void
   onDeactivate: (id: string) => void
 }) {
+  const t = useT()
   const byId = new Map(instances.map(i => [i.id, i]))
   const hovered = hover ? byId.get(hover.id) : undefined
   const chosen = selected ? byId.get(selected) : undefined
@@ -1550,12 +1556,12 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
             <span className="pnl">
               {pnl[hovered.id] ? statMoney(pnl[hovered.id]!.net) : '—'}
             </span>
-            <span className="unit">net PnL</span>
+            <span className="unit">{t('inst.netPnl')}</span>
           </div>
           {(() => {
             const pts = series.get(hovered.id)
-            if (pts === undefined) return <div className="spark-wait">loading curve…</div>
-            if (pts === null || pts.length === 0) return <div className="spark-wait">no fills yet</div>
+            if (pts === undefined) return <div className="spark-wait">{t('inst.loadingCurve')}</div>
+            if (pts === null || pts.length === 0) return <div className="spark-wait">{t('inst.noFills')}</div>
             return (
               <svg viewBox="0 0 220 56" preserveAspectRatio="none" aria-hidden>
                 <polyline points={seriesPoints(pts)} />
@@ -1563,7 +1569,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
             )
           })()}
           <div className="foot">
-            realized · {hovered.strategyId.split('/').pop()} · {hovered.active ? 'LIVE' : 'STOPPED'}
+            {t('pnl.realizedLower')} · {hovered.strategyId.split('/').pop()} · {hovered.active ? t('inst.live') : t('inst.stoppedCaps')}
           </div>
         </div>
       )}
@@ -1596,7 +1602,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
               onClick={() => onSelect(null)}
               className="w-6 h-6 rounded-md flex items-center justify-center leading-none shrink-0"
               style={{ color: 'var(--muted)' }}
-              aria-label="Close"
+              aria-label={t('common.close')}
             >
               ✕
             </button>
@@ -1604,23 +1610,23 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
 
           <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3 flex flex-col gap-4">
             <section className="flex flex-col gap-1.5">
-              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>PROFIT AND LOSS</h3>
+              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.heading.pnl')}</h3>
               {/* Realized only — nothing records what an open position was
                   worth an hour ago, so the curve and Net can differ while one
                   is open. The label says which. */}
               <PnlSpark points={series.get(chosen.id)} up={(pnl[chosen.id]?.net ?? 0) >= 0} />
               <div className="grid grid-cols-2 gap-2">
-                <Figure label="Net" value={pnl[chosen.id]?.net} />
-                <Figure label="Realized" value={pnl[chosen.id]?.realized} />
-                <Figure label="Unrealized" value={pnl[chosen.id]?.unrealized} />
-                <Figure label="Funding" value={pnl[chosen.id]?.funding} />
-                <Figure label="Fees" value={pnl[chosen.id]?.fees} />
+                <Figure label={t('pnl.net')} value={pnl[chosen.id]?.net} />
+                <Figure label={t('pnl.realized')} value={pnl[chosen.id]?.realized} />
+                <Figure label={t('pnl.unrealized')} value={pnl[chosen.id]?.unrealized} />
+                <Figure label={t('pnl.funding')} value={pnl[chosen.id]?.funding} />
+                <Figure label={t('pnl.fees')} value={pnl[chosen.id]?.fees} />
               </div>
             </section>
 
             {bindingsOf(chosen).length > 0 && (
               <section className="flex flex-col gap-1.5">
-                <h3 className="text-xs" style={{ color: 'var(--muted)' }}>ACCOUNTS</h3>
+                <h3 className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.heading.accounts')}</h3>
                 <div className="flex flex-wrap gap-1.5">
                   {bindingsOf(chosen).map(b => (
                     <span key={b} className="text-xs px-1.5 py-0.5 rounded font-mono"
@@ -1633,7 +1639,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
             )}
 
             <section className="flex flex-col gap-1.5">
-              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>PARAMETERS</h3>
+              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.heading.parameters')}</h3>
               <div className="flex flex-col gap-0.5">
                 {paramRows(chosen).map(([k, v]) => (
                   <div key={k} className="flex gap-3 text-xs py-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
@@ -1642,13 +1648,13 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
                   </div>
                 ))}
                 {paramRows(chosen).length === 0 && (
-                  <span className="text-xs" style={{ color: 'var(--muted)' }}>No parameters set.</span>
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.noParams')}</span>
                 )}
               </div>
             </section>
 
             <section className="flex flex-col gap-1.5">
-              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>IDENTITY</h3>
+              <h3 className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.heading.identity')}</h3>
               <div className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{chosen.id}</div>
               <div className="text-xs" style={{ color: 'var(--muted)' }}>
                 created {new Date(chosen.createdAt).toLocaleString()}
@@ -1717,14 +1723,15 @@ export function PnlSpark({ points, up, height = 64 }: {
   up: boolean
   height?: number
 }) {
+  const t = useT()
   const colour = up ? 'var(--success, #4ade80)' : 'var(--danger)'
   const frame = (child: React.ReactNode) => (
     <div className="rounded-md px-2 py-2" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
       {child}
     </div>
   )
-  if (points === undefined) return frame(<div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>loading curve…</div>)
-  if (points === null || points.length === 0) return frame(<div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>no fills yet</div>)
+  if (points === undefined) return frame(<div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>{t('inst.loadingCurve')}</div>)
+  if (points === null || points.length === 0) return frame(<div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>{t('inst.noFills')}</div>)
   return frame(
     <>
       <svg viewBox="0 0 220 56" preserveAspectRatio="none" style={{ display: 'block', width: '100%', height, overflow: 'visible' }} aria-hidden>
@@ -1738,7 +1745,7 @@ export function PnlSpark({ points, up, height = 64 }: {
         />
       </svg>
       <div className="text-xs mt-1 flex justify-between" style={{ color: 'var(--muted)' }}>
-        <span>realized · {points.length} events</span>
+        <span>{t('inst.realizedEvents', { n: points.length })}</span>
         <span>{new Date(points[points.length - 1]!.ts).toLocaleDateString()}</span>
       </div>
     </>,
@@ -1846,6 +1853,7 @@ interface TopTrader {
  * trading is following someone in particular.
  */
 function TopTraders({ onPick, current }: { onPick: (address: string) => void; current: string }) {
+  const t = useT()
   const [rows, setRows] = useState<TopTrader[] | null | 'error'>(null)
   const [open, setOpen] = useState(false)
 
@@ -1865,12 +1873,12 @@ function TopTraders({ onPick, current }: { onPick: (address: string) => void; cu
         className="btn btn-soft btn-sm self-start flex items-center gap-1.5"
       >
         {open ? '▾' : '▸'} Suggest a trader
-        <span style={{ opacity: 0.7 }}>· top of the Hyperliquid leaderboard, last 30 days</span>
+        <span style={{ opacity: 0.7 }}>· {t('inst.leaderboardHint')}</span>
       </button>
 
       {open && (
         <div className="rounded-md overflow-hidden" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
-          {rows === null && <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>Loading the leaderboard…</p>}
+          {rows === null && <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>{t('inst.leaderboardLoading')}</p>}
           {rows === 'error' && (
             <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>
               Could not reach the leaderboard. Paste an address instead.
@@ -1972,6 +1980,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
   onSuccess: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   const [strategies, setStrategies] = useState<StrategyDefinition[]>([])
   const [credentials, setCredentials] = useState<CredentialInfo[]>([])
   const [selectedStrategy, setSelectedStrategy] = useState(initial?.strategyId ?? '')
@@ -2061,7 +2070,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       setter('')
       return true
     } catch {
-      setter('Invalid JSON')
+      setter(t('common.invalidJson'))
       return false
     }
   }
@@ -2091,7 +2100,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     setSubmitError('')
     // The input is `required`, but only a submit runs that check — "Save
     // only" is a plain button, and it used to create a nameless instance.
-    if (!name.trim()) { setSubmitError('Name is required'); return }
+    if (!name.trim()) { setSubmitError(t('inst.nameRequired')); return }
     const params = buildParams()
     if (!params) return
 
@@ -2146,7 +2155,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
       onSuccess()
     } else {
       const body = await res.text()
-      setSubmitError(body || (initial ? 'Failed to save instance' : start ? 'Failed to activate instance' : 'Failed to save instance'))
+      setSubmitError(body || (start && !initial ? t('inst.activateFailed') : t('inst.saveFailed')))
     }
     setSubmitting(false)
   }
@@ -2169,7 +2178,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     if (pristine === null && strategies.length > 0) setPristine(formSignature)
   }, [pristine, strategies.length, formSignature])
   const formDirty = pristine !== null && formSignature !== pristine && !submitting
-  useDirtyFlag(formDirty, initial ? 'Instance edits' : 'New instance')
+  useDirtyFlag(formDirty, initial ? t('inst.edits') : t('instance.newInstance'))
 
   useUndoShortcuts(
     !pickerOpen && paramsView === 'form' && !!strategy?.paramsFields,
@@ -2226,7 +2235,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           selectedId={selectedStrategy}
           onPick={(id) => { handleStrategyChange(id); setPickerOpen(false) }}
           onCancel={dismiss}
-          cancelLabel={selectedStrategy ? '← Back' : 'Cancel'}
+          cancelLabel={selectedStrategy ? `← ${t('common.back')}` : t('common.cancel')}
         />
       ) : (
       <form data-tour="instance-form" onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
@@ -2240,8 +2249,8 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmDiscard(false)} autoFocus>Keep editing</button>
-                <button type="button" className="btn btn-danger-solid btn-sm" onClick={() => { setConfirmDiscard(false); onCancel() }}>Discard</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmDiscard(false)} autoFocus>{t('unsaved.keepEditing')}</button>
+                <button type="button" className="btn btn-danger-solid btn-sm" onClick={() => { setConfirmDiscard(false); onCancel() }}>{t('unsaved.discard')}</button>
               </div>
             </div>
           </Modal>
@@ -2251,15 +2260,15 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
         <div className="flex items-start gap-3 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium">
-              {initial ? `Edit "${initial.name}"` : 'Configure the instance'}
+              {initial ? t('inst.editTitle', { name: initial.name }) : t('instance.configure')}
             </div>
             <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>
-              {!initial && 'Step 2 of 2 · '}
+              {!initial && `${t('instance.step', { n: 2, total: 2 })} · `}
               {strategy
                 ? <>{strategy.name || strategy.id} <span className="mono">{strategy.id}</span></>
                 : initial
                   ? <span className="mono">{initial.strategyId}</span>
-                  : 'No strategy chosen'}
+                  : t('inst.noStrategy')}
             </div>
           </div>
           <ModalMaximizeButton />
@@ -2270,33 +2279,33 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
             would leave that strip for the form to scroll through. */}
         <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-5 pb-4 flex flex-col gap-4 [&>*:first-child]:mt-4">
           {!initial && strategies.length === 0 && (
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>No strategies registered.</p>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>{t('inst.noStrategies')}</p>
           )}
           {strategy && ((strategy.monitorIds?.length ?? 0) > 0 || (strategy.executorIds?.length ?? 0) > 0) && (
             <div className="flex flex-wrap gap-2">
-              {(strategy.monitorIds?.length ?? 0) > 0 && <Tag label="Monitors" values={strategy.monitorIds ?? []} color="var(--accent)" />}
-              {(strategy.executorIds?.length ?? 0) > 0 && <Tag label="Executors" values={strategy.executorIds ?? []} color="var(--warning)" />}
+              {(strategy.monitorIds?.length ?? 0) > 0 && <Tag label={t('inst.monitors')} values={strategy.monitorIds ?? []} color="var(--accent)" />}
+              {(strategy.executorIds?.length ?? 0) > 0 && <Tag label={t('inst.executors')} values={strategy.executorIds ?? []} color="var(--warning)" />}
             </div>
           )}
 
           {/* Name */}
-          <FormField label="Name" required>
+          <FormField label={t('instance.name')} required>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="e.g. Copy Trade BTC Leader"
+              placeholder={t('instance.namePlaceholder')}
               className="rounded-md px-3 py-2 text-sm w-full"
               style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
             />
           </FormField>
 
           {/* Description */}
-          <FormField label="Description">
+          <FormField label={t('instance.description')}>
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description"
+              placeholder={t('instance.descriptionPlaceholder')}
               className="rounded-md px-3 py-2 text-sm w-full"
               style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
             />
@@ -2304,7 +2313,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
 
           {/* Account slots — one labeled binding per strategy declaration, eligible ACCOUNTS only */}
           {(strategy?.accountRequirements?.length ?? 0) > 0 && (
-            <FormField label="Accounts" hint="Each slot lists the accounts whose kind (and venue, when pinned) matches — create accounts on the Accounts page">
+            <FormField label={t('instance.accounts')} hint={t('instance.accountsHint')}>
               <div className="flex flex-col gap-2">
                 {strategy!.accountRequirements!.map((slot) => {
                   const eligible = accounts.filter(a =>
@@ -2344,12 +2353,12 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                               : 'choose account…'}
                         </option>
                         {eligible.length > 0 && (
-                          <optgroup label="Accounts">
+                          <optgroup label={t('instance.accountsGroup')}>
                             {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.venue ?? a.kind})</option>)}
                           </optgroup>
                         )}
                         {legacyEligible.length > 0 && (
-                          <optgroup label={slot.kind ? 'Credentials (legacy direct binding)' : 'Credentials'}>
+                          <optgroup label={slot.kind ? t('instance.credentialsLegacy') : t('nav.credentials')}>
                             {legacyEligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
                           </optgroup>
                         )}
@@ -2363,7 +2372,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
 
           {/* LLM slots — model/credential overrides per declared label */}
           {(strategy?.llmRequirements?.length ?? 0) > 0 && (
-            <FormField label="LLM Slots" hint="Override each slot's model or pin a credential; empty fields use the strategy's declared defaults">
+            <FormField label={t('inst.llmSlots')} hint={t('inst.llmHint')}>
               <div className="flex flex-col gap-2">
                 {strategy!.llmRequirements!.map((slot) => {
                   const binding = llmBindings[slot.label] ?? {}
@@ -2404,7 +2413,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                 className="sticky top-0 z-10 -mx-5 px-5 py-2 flex items-center gap-2"
                 style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
               >
-                <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Parameters</span>
+                <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('params.title')}</span>
                 <div className="flex-1" />
                 <ParamsToolbar
                   fields={strategy.paramsFields}
@@ -2426,7 +2435,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                   json={paramsJsonView}
                   path={`params/${strategy.id}.json`}
                   height="52vh"
-                  note="The whole parameter document, exactly as this form submits it. A field left out falls back to its default."
+                  note={t('params.jsonNote')}
                 />
               ) : (
                 <ParamFieldsForm
@@ -2446,7 +2455,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
             </div>
           ) : (
             <>
-              <FormField label="Base Params (JSON)" hint="Required params defined in baseParamsSchema" error={baseError}>
+              <FormField label={t('inst.baseJson')} hint={t('inst.baseJsonHint')} error={baseError}>
                 <JsonEditor
                   value={baseParams}
                   onChange={(v) => { setBaseParams(v); validateJson(v, setBaseError) }}
@@ -2454,7 +2463,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                   hasError={!!baseError}
                 />
               </FormField>
-              <FormField label="Tunable Params (JSON)" hint="Optional — Zod defaults apply for missing fields" error={tunableError}>
+              <FormField label={t('inst.tunableJson')} hint={t('inst.tunableJsonHint')} error={tunableError}>
                 <JsonEditor
                   value={tunableParams}
                   onChange={(v) => { setTunableParams(v); validateJson(v, setTunableError) }}
@@ -2484,7 +2493,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
             </button>
           )}
           <div className="flex-1" />
-          <button type="button" onClick={onCancel} className="btn btn-secondary">Cancel</button>
+          <button type="button" onClick={onCancel} className="btn btn-secondary">{t('common.cancel')}</button>
           {/* Creating a strategy and running it are two decisions. Saved
               stopped, it can be read over and started from the list; the
               params and bindings are no longer reviewable once it is live. */}
@@ -2495,9 +2504,9 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
               disabled={submitting || strategies.length === 0 || !selectedStrategy || !name.trim()}
               className="btn btn-secondary"
               style={{ opacity: submitting ? 0.6 : 1 }}
-              title="Create it stopped — start it from the list when you are ready"
+              title={t('inst.saveOnlyHint')}
             >
-              {submitting ? 'Saving…' : 'Save only'}
+              {submitting ? t('common.saving') : t('inst.saveOnly')}
             </button>
           )}
           <button
@@ -2506,7 +2515,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
             className="btn btn-primary"
             style={{ opacity: submitting ? 0.6 : 1 }}
           >
-            {initial ? (submitting ? 'Saving…' : 'Save Changes') : (submitting ? 'Activating…' : 'Activate')}
+            {initial ? (submitting ? t('common.saving') : t('instance.saveChanges')) : (submitting ? t('inst.activating') : t('instance.activate'))}
           </button>
         </div>
       </form>
@@ -2570,12 +2579,13 @@ function Tag({ label, values, color }: { label: string; values: string[]; color:
 }
 
 function EmptyState({ onNew }: { onNew: () => void }) {
+  const t = useT()
   return (
     <div
       className="rounded-lg p-10 text-center flex flex-col items-center gap-3"
       style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}
     >
-      <p className="text-sm" style={{ color: 'var(--muted)' }}>No active instances yet.</p>
+      <p className="text-sm" style={{ color: 'var(--muted)' }}>{t('inst.noActive')}</p>
       <button
         onClick={onNew}
         className="px-4 py-2 rounded-md text-sm"
@@ -2684,13 +2694,14 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
   onDelete: () => void
   onSetFolder?: (name: string) => void
 }) {
+  const t = useT()
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
     <KebabMenu>
       {(close) => (
         <>
-          <Link href={onEdit} className={MENU_ITEM} style={{ color: 'var(--foreground)' }}>Edit</Link>
+          <Link href={onEdit} className={MENU_ITEM} style={{ color: 'var(--foreground)' }}>{t('common.edit')}</Link>
           <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
             onClick={() => { onDuplicate(); close() }}>
             Duplicate
@@ -2711,7 +2722,7 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
               onDelete(); close(); setConfirmDelete(false)
             }}
           >
-            {confirmDelete ? 'Delete for good?' : 'Delete'}
+            {confirmDelete ? t('common.deleteConfirm') : t('common.delete')}
           </button>
         </>
       )}
@@ -2747,6 +2758,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
   onSetIcon?: (emoji: string) => void
   onRename?: (name: string) => void
 }) {
+  const t = useT()
   const base = instance.params?.base ?? {}
   const bindings = instance.credentials
     ? Object.entries(instance.credentials).map(([slot, target]) => `${slot} → ${target}`)
@@ -2773,7 +2785,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
           <InlineRename
             value={instance.name}
             onSave={(name) => onRename?.(name)}
-            title="Double-click to rename"
+            title={t('inst.renameHint')}
             inputClassName="px-1.5 py-0.5 rounded-md text-sm font-medium w-full"
           >
             <div className="font-medium truncate">{instance.name}</div>
@@ -2819,18 +2831,18 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
           tooltip — they explain the net, they are not separately actionable. */}
       <div className="grid grid-cols-3 gap-2">
         <Stat
-          label="PnL"
+          label={t('pnl.pnl')}
           value={pnl ? statMoney(pnl.net) : '—'}
           color={moneyColor(pnl?.net)}
           {...(pnl ? { title: `realized ${pnl.realized.toFixed(2)} · fees ${pnl.fees.toFixed(2)}` } : {})}
         />
         <Stat
-          label="Unrealized"
+          label={t('pnl.unrealized')}
           value={pnl && pnl.unrealized !== null ? statMoney(pnl.unrealized) : '—'}
           color={moneyColor(pnl?.unrealized)}
         />
         <Stat
-          label="Funding"
+          label={t('pnl.funding')}
           value={pnl ? statMoney(pnl.funding) : '—'}
           color={moneyColor(pnl?.funding)}
         />
@@ -2869,6 +2881,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
   onActivate: () => void
   onDeactivate: () => void
 }) {
+  const t = useT()
   const [confirmStop, setConfirmStop] = useState(false)
   return (
     <div className="flex items-center gap-1.5">
@@ -2878,7 +2891,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
         href={`/instances/${instance.id}`}
         className={`${CTRL} px-3 gap-1.5`}
         style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        title="Open the board"
+        title={t('inst.openBoard')}
       >
         <span className="text-sm leading-none">↗</span>
         Open
@@ -2900,7 +2913,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
             onClick={() => setConfirmStop(true)}
             className={`${CTRL} px-3 gap-1.5`}
             style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
-            title="Running — click to stop it"
+            title={t('inst.runningStop')}
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
             Running
@@ -2952,6 +2965,7 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
   onSetIcon?: (emoji: string) => void
   onRename?: (name: string) => void
 }) {
+  const t = useT()
   const base = instance.params?.base ?? {}
   const bindings = instance.credentials
     ? Object.entries(instance.credentials).map(([slot, target]) => `${slot} → ${target}`)
@@ -2985,7 +2999,7 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
         <InlineRename
           value={instance.name}
           onSave={(name) => onRename?.(name)}
-          title="Double-click to rename"
+          title={t('inst.renameHint')}
           inputClassName="px-1.5 py-0.5 rounded-md text-sm font-medium w-full"
         >
           <span className="font-medium text-sm truncate block">{instance.name}</span>
@@ -3013,10 +3027,10 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
         title={pnl ? `PnL · realized ${pnl.realized.toFixed(2)} · fees ${pnl.fees.toFixed(2)}` : 'PnL'}>
         {pnl ? statMoney(pnl.net) : '—'}
       </div>
-      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.unrealized) }} title="Unrealized">
+      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.unrealized) }} title={t('pnl.unrealized')}>
         {pnl && pnl.unrealized !== null ? statMoney(pnl.unrealized) : '—'}
       </div>
-      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.funding) }} title="Funding">
+      <div className="text-xs font-mono text-right truncate" style={{ color: moneyColor(pnl?.funding) }} title={t('pnl.funding')}>
         {pnl ? statMoney(pnl.funding) : '—'}
       </div>
 
@@ -3047,6 +3061,7 @@ function FolderMenu({ current, folders, onPick }: {
   folders: string[]
   onPick: (name: string) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
@@ -3068,7 +3083,7 @@ function FolderMenu({ current, folders, onPick }: {
         type="button"
         onClick={() => setOpen(v => !v)}
         className="px-3 py-1.5 rounded-md text-xs"
-        title="Move to a folder"
+        title={t('inst.moveFolder')}
         style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
       >
         📁{current ? ` ${current}` : ''}
@@ -3100,11 +3115,11 @@ function FolderMenu({ current, folders, onPick }: {
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="New folder…"
+              placeholder={t('inst.newFolderPlaceholder')}
               className="flex-1 min-w-0 rounded px-2 py-1 text-xs"
               style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
             />
-            <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Add</button>
+            <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>{t('common.add')}</button>
           </form>
           {current && (
             <button
@@ -3125,6 +3140,7 @@ function FolderMenu({ current, folders, onPick }: {
 // ── Instance detail panel ─────────────────────────────────────────────────────
 
 export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?: boolean }) {
+  const t = useT()
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([])
   const [executions, setExecutions] = useState<ExecutionResult[]>([])
   const [logs, setLogs] = useState<Array<{ ts: number; level: string; module?: string; msg: string; extra?: Record<string, unknown> }>>([])
@@ -3216,7 +3232,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
               borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
             }}
           >
-            {tab === 'events' ? `Live Events (${liveEvents.length})` : tab === 'executions' ? `Executions (${executions.length})` : tab === 'runs' ? 'Runs' : 'Logs'}
+            {tab === 'events' ? t('inst.tab.events', { n: liveEvents.length }) : tab === 'executions' ? t('inst.tab.executions', { n: executions.length }) : tab === 'runs' ? t('nav.runs') : t('inst.tab.logs')}
           </button>
         ))}
       </div>
@@ -3227,7 +3243,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
       >
         {activeTab === 'events' ? (
           liveEvents.length === 0 ? (
-            <span style={{ color: 'var(--muted)' }}>Waiting for events…</span>
+            <span style={{ color: 'var(--muted)' }}>{t('inst.waitingEvents')}</span>
           ) : (
             liveEvents.map((ev) => (
               <EventRow
@@ -3238,7 +3254,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
           )
         ) : activeTab === 'executions' ? (
           executions.length === 0 ? (
-            <span style={{ color: 'var(--muted)' }}>No executions recorded today.</span>
+            <span style={{ color: 'var(--muted)' }}>{t('inst.noExecutionsToday')}</span>
           ) : (
             executions.map((ex, i) => (
               <ExecutionRow key={(ex.instruction as { messageId?: string } | undefined)?.messageId ?? `${ex.executedAt}:${i}`} result={ex} />
@@ -3247,7 +3263,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
         ) : activeTab === 'runs' ? (
           <>
             <div className="flex gap-2 items-center flex-wrap pb-1" style={{ borderBottom: '1px solid var(--border)' }}>
-              {([['all', 'All'], ['acted', 'With instructions'], ['error', 'Errors']] as const).map(([k, label]) => (
+              {([['all', t('inst.runs.all')], ['acted', t('inst.runs.acted')], ['error', t('inst.runs.errors')]] as const).map(([k, label]) => (
                 <button
                   key={k}
                   onClick={() => setRunFilter(k)}
@@ -3264,7 +3280,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
               <input
                 value={runQuery}
                 onChange={(e) => setRunQuery(e.target.value)}
-                placeholder="Search step / content…"
+                placeholder={t('inst.searchSteps')}
                 className="px-2 py-0.5 rounded text-xs flex-1 min-w-32"
                 style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
               />
@@ -3288,8 +3304,8 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
               return shown.length === 0 ? (
                 <span style={{ color: 'var(--muted)' }}>
                   {runs.length === 0
-                    ? 'No runs recorded yet. Runs with instructions or errors persist to disk; idle runs are sampled every 10 min.'
-                    : `No matching runs (${runs.length} total).`}
+                    ? t('inst.noRuns')
+                    : t('inst.noMatchingRuns', { n: runs.length })}
                 </span>
               ) : (
                 shown.map((r) => <RunRow key={`${r.startedAt}:${r.triggerId}`} run={r} />)
@@ -3298,7 +3314,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
           </>
         ) : (
           logs.length === 0 ? (
-            <span style={{ color: 'var(--muted)' }}>No matching log lines yet.</span>
+            <span style={{ color: 'var(--muted)' }}>{t('inst.noLogLines')}</span>
           ) : (
             [...logs].reverse().map((l, i) => <LogRow key={i} row={l} />)
           )
@@ -3309,6 +3325,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
 }
 
 function EventRow({ event }: { event: LiveEvent }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const time = new Date(event.type === 'monitor_emit' ? event.ts : event.timestamp).toLocaleTimeString()
 
@@ -3338,7 +3355,7 @@ function EventRow({ event }: { event: LiveEvent }) {
       <div className="flex gap-2 items-start cursor-pointer" onClick={() => setOpen(o => !o)}>
         <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'} {time}</span>
         <span className="px-1 rounded text-xs" style={{ background: 'var(--warning)22', color: 'var(--warning)' }}>strategy</span>
-        <span style={{ color: 'var(--foreground)' }}>triggered</span>
+        <span style={{ color: 'var(--foreground)' }}>{t('inst.log.triggered')}</span>
         <span style={{ color: 'var(--muted)' }}>{event.triggerId}</span>
       </div>
       {open && (
