@@ -28,8 +28,8 @@ const decls = {
 } as const satisfies StrategyDeclarations
 
 @OwStrategy({
-  name: 'Momentum Breakout',
-  description: 'Donchian channel breakout on any perp venue — long above the channel, exit (or flip) below it',
+  name: { en: 'Momentum Breakout', 'zh-CN': '动量突破' },
+  description: { en: 'Donchian channel breakout on any perp venue — long above the channel, exit (or flip) below it', 'zh-CN': '任意永续交易所的唐奇安通道突破——突破上轨做多，跌破下轨离场（或反手）' },
 })
 export class MomentumBreakoutStrategy extends BaseStrategy<typeof decls> {
   readonly strategyId = 'momentum-breakout'
@@ -41,31 +41,31 @@ export class MomentumBreakoutStrategy extends BaseStrategy<typeof decls> {
   readonly baseParamsSchema = z.object({
     symbol: z.string().meta({
       displayName: 'Symbol', placeholder: 'BTC/USDT:USDT',
-      description: 'Contract to trade — must match a key of the klines monitor instance',
+      description: 'Contract to trade — must match a key of the klines monitor instance', i18n: { 'zh-CN': { description: '要交易的合约——必须匹配 klines 监控实例的一个 key' } }
     }),
     timeframe: z.string().default('1h').meta({
       displayName: 'Timeframe', placeholder: '1h',
-      description: 'Candle size; the klines monitor instance must collect this same timeframe',
+      description: 'Candle size; the klines monitor instance must collect this same timeframe', i18n: { 'zh-CN': { description: 'K 线周期；klines 监控实例必须采集同一周期' } }
     }),
     notionalUsd: z.number().positive().meta({
       displayName: 'Order Notional (USD)', placeholder: '500',
-      description: 'USD notional per entry order',
+      description: 'USD notional per entry order', i18n: { 'zh-CN': { displayName: '单笔名义（USD）', description: '每笔入场单的 USD 名义' } }
     }),
     maxPositionUsd: z.number().positive().meta({
       displayName: 'Max Position (USD)', placeholder: '2000',
-      description: 'Hard cap on |exposure| for this symbol — checked against the venue, not against what this strategy thinks it opened',
+      description: 'Hard cap on |exposure| for this symbol — checked against the venue, not against what this strategy thinks it opened', i18n: { 'zh-CN': { displayName: '最大仓位（USD）', description: '该合约 |敞口| 的硬上限——对照交易所核对，而不是策略自以为开了多少' } }
     }),
   })
 
   readonly tunableParamsSchema = z.object({
     entryLookback: z.number().int().min(2).default(20)
-      .meta({ displayName: 'Entry Lookback (bars)', description: 'Breakout channel length for entries', slider: { min: 5, max: 100, step: 1 } }),
+      .meta({ displayName: 'Entry Lookback (bars)', description: 'Breakout channel length for entries', slider: { min: 5, max: 100, step: 1 }, i18n: { 'zh-CN': { displayName: '入场回看（根）', description: '入场用的突破通道长度' } } }),
     exitLookback: z.number().int().min(2).default(10)
-      .meta({ displayName: 'Exit Lookback (bars)', description: 'Shorter channel for exits — trends give back less', slider: { min: 2, max: 50, step: 1 } }),
+      .meta({ displayName: 'Exit Lookback (bars)', description: 'Shorter channel for exits — trends give back less', slider: { min: 2, max: 50, step: 1 }, i18n: { 'zh-CN': { displayName: '离场回看（根）', description: '更短的离场通道——趋势回吐更少' } } }),
     allowShort: z.boolean().default(false)
-      .meta({ displayName: 'Allow Shorts', description: 'Open a short on a downside breakout instead of only flattening' }),
+      .meta({ displayName: 'Allow Shorts', description: 'Open a short on a downside breakout instead of only flattening', i18n: { 'zh-CN': { displayName: '允许做空', description: '向下突破时开空，而不只是平仓' } } }),
     slippage: z.number().min(0).max(1).default(0.005)
-      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders (0.005 = 0.5%)' }),
+      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders (0.005 = 0.5%)', i18n: { 'zh-CN': { displayName: '滑点容忍', description: '市价单的最大滑点比例（0.005 = 0.5%）' } } }),
   })
 
   /** Klines are keyed venue:symbol:timeframe — the venue derives from the bound account. */

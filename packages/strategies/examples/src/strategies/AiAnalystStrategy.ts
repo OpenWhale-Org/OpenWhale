@@ -39,8 +39,8 @@ const verdictSchema = z.object({
 })
 
 @OwStrategy({
-  name: 'AI Market Analyst',
-  description: 'An LLM reads recent candles and returns a structured verdict; code enforces sizing and position caps. Any perp venue, any model',
+  name: { en: 'AI Market Analyst', 'zh-CN': 'AI 市场分析师' },
+  description: { en: 'An LLM reads recent candles and returns a structured verdict; code enforces sizing and position caps. Any perp venue, any model', 'zh-CN': '由 LLM 阅读近期 K 线并给出结构化判断；仓位大小和上限由代码强制。任意永续交易所、任意模型' },
 })
 export class AiAnalystStrategy extends BaseStrategy<typeof decls> {
   readonly strategyId = 'ai-analyst'
@@ -54,32 +54,32 @@ export class AiAnalystStrategy extends BaseStrategy<typeof decls> {
     symbol: z.string().meta({ displayName: 'Symbol', placeholder: 'BTC/USDT:USDT' }),
     timeframe: z.string().default('1h').meta({
       displayName: 'Timeframe', placeholder: '1h',
-      description: 'Candle size; the klines monitor instance must collect this same timeframe',
+      description: 'Candle size; the klines monitor instance must collect this same timeframe', i18n: { 'zh-CN': { description: 'K 线周期；klines 监控实例必须采集同一周期' } }
     }),
     notionalUsd: z.number().positive().meta({
       displayName: 'Max Order Notional (USD)', placeholder: '200',
-      description: 'Clip size at FULL confidence — the model scales down from here, never up',
+      description: 'Clip size at FULL confidence — the model scales down from here, never up', i18n: { 'zh-CN': { displayName: '单笔最大名义（USD）', description: '置信度满格时的单笔规模——模型只会从这里往下缩，不会放大' } }
     }),
     maxPositionUsd: z.number().positive().meta({
       displayName: 'Max Position (USD)', placeholder: '1000',
-      description: 'Hard cap on |exposure|, enforced in code regardless of what the model says',
+      description: 'Hard cap on |exposure|, enforced in code regardless of what the model says', i18n: { 'zh-CN': { displayName: '最大仓位（USD）', description: '|敞口| 的硬上限，无论模型怎么说都由代码强制' } }
     }),
   })
 
   readonly tunableParamsSchema = z.object({
     schedule: z.string().min(1).default('0 */15 * * * *')
-      .meta({ displayName: 'Schedule (cron)', description: '6-field cron. Default: every 15 minutes — each tick costs one model call' }),
+      .meta({ displayName: 'Schedule (cron)', description: '6-field cron. Default: every 15 minutes — each tick costs one model call', i18n: { 'zh-CN': { displayName: '计划（cron）', description: '6 段 cron。默认每 15 分钟——每个 tick 花一次模型调用' } } }),
     candleCount: z.number().int().min(10).max(200).default(48)
-      .meta({ displayName: 'Candles in Prompt', description: 'How much history the model sees', slider: { min: 10, max: 200, step: 1 } }),
+      .meta({ displayName: 'Candles in Prompt', description: 'How much history the model sees', slider: { min: 10, max: 200, step: 1 }, i18n: { 'zh-CN': { displayName: '提示词中的 K 线数', description: '模型能看到多少历史' } } }),
     minConfidence: z.number().min(0).max(1).default(0.6)
-      .meta({ displayName: 'Min Confidence', description: 'Verdicts below this are logged and ignored', slider: { min: 0, max: 1, step: 0.05 } }),
+      .meta({ displayName: 'Min Confidence', description: 'Verdicts below this are logged and ignored', slider: { min: 0, max: 1, step: 0.05 }, i18n: { 'zh-CN': { displayName: '最低置信度', description: '低于此值的判断只记录、不执行' } } }),
     guidance: z.string().default('')
       .meta({
         displayName: 'Extra Guidance',
-        description: 'Optional free text appended to the prompt — house style, risk posture, things to avoid',
+        description: 'Optional free text appended to the prompt — house style, risk posture, things to avoid', i18n: { 'zh-CN': { displayName: '附加指引', description: '可选的自由文本，附加到提示词——风格、风险偏好、要避免的事' } }
       }),
     slippage: z.number().min(0).max(1).default(0.005)
-      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders' }),
+      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders', i18n: { 'zh-CN': { displayName: '滑点容忍', description: '市价单的最大滑点比例' } } }),
   })
 
   private candleKey(params: StrategyParams): string {
