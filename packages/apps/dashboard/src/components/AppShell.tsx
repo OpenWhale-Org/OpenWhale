@@ -5,6 +5,7 @@ import { Nav } from './Nav'
 import { UserMenu } from './UserMenu'
 import { Tour } from './Tour'
 import { UnsavedGuard } from './unsaved'
+import { useT, type MessageKey } from '@/i18n'
 
 /**
  * The application shell.
@@ -15,29 +16,30 @@ import { UnsavedGuard } from './unsaved'
  * one nobody was maintaining.
  */
 
-const routeLabels: Record<string, string> = {
-  '/overview': 'Overview',
-  '/instances': 'Strategies',
-  '/accounts': 'Accounts',
-  '/credentials': 'Credentials',
-  '/monitor': 'Monitor',
-  '/monitor-data': 'Explorer',
-  '/monitor-data/retention': 'Retention',
-  '/executors': 'Executors',
-  '/plugins': 'Plugins',
-  '/compiler': 'Compiler',
-  '/scripts': 'Scripts',
-  '/assistant': 'Assistant',
-  '/alerts': 'Alerts',
-  '/users': 'Users',
+const routeLabels: Record<string, MessageKey> = {
+  '/overview': 'nav.overview',
+  '/instances': 'nav.instances.aurora',
+  '/accounts': 'nav.accounts',
+  '/credentials': 'nav.credentials',
+  '/monitor': 'nav.monitor',
+  '/monitor-data': 'nav.explorer',
+  '/monitor-data/retention': 'nav.retention',
+  '/executors': 'nav.executors',
+  '/plugins': 'nav.plugins',
+  '/compiler': 'nav.compiler',
+  '/scripts': 'nav.scripts',
+  '/assistant': 'nav.assistant',
+  '/alerts': 'nav.alerts',
+  '/users': 'nav.users',
 }
 
-function currentLabel(pathname: string): string {
+function currentLabel(pathname: string, t: (k: MessageKey) => string): string {
   const key = Object.keys(routeLabels).find(path => pathname === path || pathname.startsWith(path + '/'))
-  return key ? routeLabels[key]! : 'OpenWhale'
+  return key ? t(routeLabels[key]!) : 'OpenWhale'
 }
 
 export function AppShell({ signedIn, username, children }: { signedIn: boolean; username?: string; children: React.ReactNode }) {
+  const t = useT()
   const pathname = usePathname()
   const login = pathname === '/login'
 
@@ -52,7 +54,7 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
             <span className="aurora-live-dot" />
             <span>OpenWhale</span>
             <span className="aurora-topbar-separator">/</span>
-            <strong>{currentLabel(pathname)}</strong>
+            <strong>{currentLabel(pathname, t)}</strong>
           </div>
           <UserMenu {...(username ? { username } : {})} />
         </header>
