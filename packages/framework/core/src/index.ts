@@ -231,3 +231,5 @@ export {
   getInstancePath,
 } from './utils/paths.js'
 export { appendJsonl, readJsonlLines, writeJsonlLines, streamJsonlLines } from './utils/jsonl.js'
+export { DEFAULT_LOCALE, resolveText, pickLocale, normalizeLocale, localize, foldLanguagePacks, isLocalizedText } from './i18n.js'
+export type { Locale, Text, LocalizedText, Localized, LanguagePack } from './i18n.js'

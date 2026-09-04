@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from './materialization.js'
 
@@ -41,7 +42,7 @@ export interface AccountEntity {
 export interface AccountImplementation {
   /** Short id; qualified to '<plugin>/<id>' at load. */
   id: string
-  displayName?: string
+  displayName?: Text
   /** The kind this implementation's accounts expose. */
   kind: NamespacedKind
   /**
@@ -115,7 +116,7 @@ export function implementationVenue(impl: Pick<AccountImplementation, 'venue' | 
 /** Serializable implementation view (dashboard implementation picker). */
 export interface AccountImplementationInfo {
   id: string
-  displayName?: string
+  displayName?: Text
   kind: NamespacedKind
   /** Venue pin (legacy field name kept for the dashboard wire format). */
   type?: string

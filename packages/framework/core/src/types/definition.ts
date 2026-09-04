@@ -1,11 +1,12 @@
+import type { Locale, Text } from '../i18n.js'
 // ── Param field UI schema ─────────────────────────────────────────────────────
 
 export type ParamFieldType = 'string' | 'number' | 'boolean' | 'options' | 'list' | 'object'
 
 export interface ParamFieldOption {
-  label: string
+  label: Text
   value: string | number | boolean
-  description?: string
+  description?: Text
 }
 
 /**
@@ -27,7 +28,7 @@ export interface ParamFieldSlider {
  */
 export interface ListColumnDef {
   name: string
-  displayName: string
+  displayName: Text
   type: 'string' | 'number' | 'boolean' | 'options'
   options?: ParamFieldOption[]
   slider?: ParamFieldSlider
@@ -35,8 +36,8 @@ export interface ListColumnDef {
   catalogue?: ParamFieldCatalogue
   /** Short unit suffix rendered after the input ('σ', '%', '$'). */
   unit?: string
-  placeholder?: string
-  description?: string
+  placeholder?: Text
+  description?: Text
   /** Value a freshly added row starts with. */
   default?: unknown
 }
@@ -61,17 +62,17 @@ export interface ListParamDef {
  */
 export interface ParamFieldMeta {
   /** Display section within the group — dashboard renders a header per section. */
-  section?: string
+  section?: Text
   /**
    * Render a picker dialog whose options the strategy computes — see
    * ParamPicker. For a field whose value is a whole decision (an object
    * naming several legs at once) rather than a symbol from a catalogue.
    */
   picker?: ParamPicker
-  displayName?: string
-  description?: string
-  hint?: string
-  placeholder?: string
+  displayName?: Text
+  description?: Text
+  hint?: Text
+  placeholder?: Text
   options?: ParamFieldOption[]
   displayOptions?: {
     show?: Record<string, (string | number | boolean)[]>
@@ -186,7 +187,7 @@ export interface ParamFieldDef {
   /** Field key in the params object */
   name: string
   /** Human-readable label shown in the UI */
-  displayName: string
+  displayName: Text
   /** Field type — controls which input widget is rendered */
   type: ParamFieldType
   /** Which params group this field belongs to */
@@ -194,13 +195,13 @@ export interface ParamFieldDef {
   /** Default value (used as placeholder hint and Zod default) */
   default?: unknown
   /** Short description shown below the field */
-  description?: string
+  description?: Text
   /** Inline hint shown next to the label */
-  hint?: string
+  hint?: Text
   /** Display section within the group — the dashboard renders a header per section, in first-appearance order. */
-  section?: string
+  section?: Text
   /** Input placeholder text */
-  placeholder?: string
+  placeholder?: Text
   /** Whether the field is required */
   required?: boolean
   /** Options for type='options' */
@@ -233,8 +234,8 @@ export interface ParamFieldDef {
 
 export interface MonitorDefinition {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   source: 'builtin' | 'plugin' | 'compiled'
   pluginName?: string
   compiledPath?: string
@@ -255,8 +256,8 @@ export interface MonitorDefinition {
 
 export interface ExecutorDefinition {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   source: 'builtin' | 'plugin' | 'compiled'
   pluginName?: string
   compiledPath?: string
@@ -287,7 +288,7 @@ export interface ParamIllustration {
    * add up to rather than an explanation of them.
    */
   placement?: 'top' | 'after-base' | 'bottom'
-  title?: string
+  title?: Text
   /**
    * The page. It receives `{ type: 'ow-params', values, data?, dataError? }`
    * by postMessage on load and on every change: `values` are the form's
@@ -313,9 +314,9 @@ export interface ParamPreset {
   /** Stable identifier — what the Dashboard remembers; never shown as-is. */
   id: string
   /** Dropdown label. */
-  label: string
+  label: Text
   /** One line under the label: who this preset is for. */
-  description?: string
+  description?: Text
   /** Values for `baseParamsSchema` fields. */
   base?: Record<string, unknown>
   /** Values for `tunableParamsSchema` fields. */
@@ -373,9 +374,9 @@ export interface PresetCard {
  */
 export interface PresetSource {
   /** Heading of the picker dialog, e.g. "Fixed-rate opportunities". */
-  title?: string
+  title?: Text
   /** One line under the heading — what the ranking is and how it was made. */
-  description?: string
+  description?: Text
   /** How long a computed list is served before it is recomputed. Default 60 000. */
   ttlMs?: number
 }
@@ -395,8 +396,8 @@ export interface ParamPicker {
   /** The id pickerOptions() is asked for — one strategy may serve several pickers. */
   id: string
   /** Dialog heading and blurb. */
-  title?: string
-  description?: string
+  title?: Text
+  description?: Text
   /** How long a computed list is served before it is recomputed. Default 60 000. */
   ttlMs?: number
 }
@@ -404,8 +405,8 @@ export interface ParamPicker {
 export interface PickerOption {
   /** Stable identifier — what the picker remembers; never shown as-is. */
   id: string
-  label: string
-  description?: string
+  label: Text
+  description?: Text
   /** What the field is set to when this option is chosen. */
   value: unknown
   /** The card the dialog draws; a plain row without one. */
@@ -420,13 +421,15 @@ export interface PresetContext {
   accounts: Record<string, string>
   /** The form's current values, parsed where they parse; a preset may build on them. */
   params: { base: Record<string, unknown>; tunable: Record<string, unknown> }
+  /** The reader's locale — what cards and figures should be written in. */
+  locale?: Locale
   signal?: AbortSignal
 }
 
 export interface StrategyDefinition {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   source: 'builtin' | 'plugin' | 'compiled'
   pluginName?: string
   compiledPath?: string

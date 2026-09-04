@@ -13,7 +13,7 @@ import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { z } from 'zod'
 import { getAlertService, type AlertSettings } from './notify/alerts.js'
-import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs } from '@openwhaleorg/core'
+import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
@@ -64,6 +64,23 @@ function h(fn: (req: Request, res: Response) => Promise<void> | void) {
       if (!res.headersSent) res.status(500).json({ error: errText(err) })
     })
   }
+}
+
+/**
+ * The locale a request reads in: `?locale=`, then the `ow_locale` cookie the
+ * Dashboard sets, then the browser's Accept-Language, then English. Every
+ * definition the gateway serves is resolved for it — a plugin's tables never
+ * reach a page.
+ */
+function localeOf(req: { query: Record<string, unknown>; headers: Record<string, unknown> }): string {
+  const q = req.query['locale']
+  if (typeof q === 'string' && q.trim()) return normalizeLocale(q)
+  const cookie = String(req.headers['cookie'] ?? '')
+  const m = /(?:^|;\s*)ow_locale=([^;]+)/.exec(cookie)
+  if (m?.[1]) return normalizeLocale(decodeURIComponent(m[1]))
+  const accept = String(req.headers['accept-language'] ?? '')
+  const first = accept.split(',')[0]?.trim().split(';')[0]
+  return first ? normalizeLocale(first) : 'en'
 }
 
 export function buildRouter(): Router {
@@ -147,11 +164,11 @@ export function buildRouter(): Router {
 
   // ── accounts ────────────────────────────────────────────────────────────────
 
-  router.get('/api/accounts', h(async (_req, res) => {
+  router.get('/api/accounts', h(async (req, res) => {
     const runtime = await ensureStarted()
     res.json({
       accounts: await runtime.listAccounts(),
-      implementations: runtime.listAccountImplementations(),
+      implementations: localize(runtime.listAccountImplementations(), localeOf(req)),
       snapshots: await runtime.latestAccountSnapshots(),
     })
   }))
@@ -299,9 +316,9 @@ export function buildRouter(): Router {
 
   // ── Scripts — on-demand plugin utilities ─────────────────────────────────────
 
-  router.get('/api/scripts', h(async (_req, res) => {
+  router.get('/api/scripts', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(await runtime.listScripts())
+    res.json(localize(await runtime.listScripts(), localeOf(req)))
   }))
 
   /* Shelf = how the page is arranged (folders + what is taken off it).
@@ -702,18 +719,18 @@ export function buildRouter(): Router {
 
   // ── strategies / registry ───────────────────────────────────────────────────
 
-  router.get('/api/strategies', h(async (_req, res) => {
+  router.get('/api/strategies', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(runtime.listStrategies())
+    res.json(localize(runtime.listStrategies(), localeOf(req)))
   }))
 
-  router.get('/api/registry', h(async (_req, res) => {
+  router.get('/api/registry', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json({
+    res.json(localize({
       monitors: runtime.listMonitors(),
       executors: runtime.listExecutors(),
       strategies: runtime.listStrategies(),
-    })
+    }, localeOf(req)))
   }))
 
   router.post('/api/registry', upload.single('file'), h(async (req, res) => {
@@ -854,11 +871,12 @@ export function buildRouter(): Router {
     const runtime = await ensureStarted()
     const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean }
     try {
-      res.json(await runtime.strategyPresets(req.params['id']!, {
+      res.json(localize(await runtime.strategyPresets(req.params['id']!, {
         ...(body.accounts ? { accounts: body.accounts } : {}),
         ...(body.params ? { params: body.params } : {}),
         refresh: body.refresh === true,
-      }))
+        locale: localeOf(req),
+      }), localeOf(req)))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }
@@ -872,6 +890,7 @@ export function buildRouter(): Router {
       res.json(await runtime.strategyIllustrationData(req.params['id']!, {
         ...(body.accounts ? { accounts: body.accounts } : {}),
         ...(body.params ? { params: body.params } : {}),
+        locale: localeOf(req),
       }))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
@@ -883,11 +902,12 @@ export function buildRouter(): Router {
     const runtime = await ensureStarted()
     const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean }
     try {
-      res.json(await runtime.strategyPickerOptions(req.params['id']!, req.params['pickerId']!, {
+      res.json(localize(await runtime.strategyPickerOptions(req.params['id']!, req.params['pickerId']!, {
         ...(body.accounts ? { accounts: body.accounts } : {}),
         ...(body.params ? { params: body.params } : {}),
         refresh: body.refresh === true,
-      }))
+        locale: localeOf(req),
+      }), localeOf(req)))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }
@@ -895,12 +915,12 @@ export function buildRouter(): Router {
 
   // ── monitors ────────────────────────────────────────────────────────────────
 
-  router.get('/api/monitor', h(async (_req, res) => {
+  router.get('/api/monitor', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json({ monitors: runtime.listMonitors(), executors: runtime.listExecutors() })
+    res.json(localize({ monitors: runtime.listMonitors(), executors: runtime.listExecutors() }, localeOf(req)))
   }))
 
-  router.get('/api/monitor/status', h(async (_req, res) => {
+  router.get('/api/monitor/status', h(async (req, res) => {
     const runtime = await ensureStarted()
     const statuses = await Promise.all(runtime.listMonitors().map(async (def) => {
       const instance = runtime.getMonitorInstance(def.id)
@@ -926,7 +946,7 @@ export function buildRouter(): Router {
         dataKeys,
       }
     }))
-    res.json(statuses)
+    res.json(localize(statuses, localeOf(req)))
   }))
 
   router.post('/api/monitor/:name/watch', h(async (req, res) => {
@@ -1004,11 +1024,11 @@ export function buildRouter(): Router {
 
   // ── monitor instances ───────────────────────────────────────────────────────
 
-  router.get('/api/monitor-instances', h(async (_req, res) => {
+  router.get('/api/monitor-instances', h(async (req, res) => {
     const runtime = await ensureStarted()
     res.json({
       instances: await runtime.listMonitorInstances(),
-      implementations: runtime.listMonitorImplementations(),
+      implementations: localize(runtime.listMonitorImplementations(), localeOf(req)),
       pendingKeys: runtime.monitorPendingKeys(),
     })
   }))
@@ -1298,7 +1318,7 @@ export function buildRouter(): Router {
 
   // ── executors ───────────────────────────────────────────────────────────────
 
-  router.get('/api/executor/status', h(async (_req, res) => {
+  router.get('/api/executor/status', h(async (req, res) => {
     const runtime = await ensureStarted()
     const executors = runtime.listExecutors().map((def) => {
       const instance = runtime.getExecutorInstance(def.id)
@@ -1318,7 +1338,7 @@ export function buildRouter(): Router {
           : {}),
       }
     })
-    res.json(executors)
+    res.json(localize(executors, localeOf(req)))
   }))
 
   router.post('/api/executor/:name/fire', h(async (req, res) => {
@@ -1364,9 +1384,9 @@ export function buildRouter(): Router {
 
   // ── plugins ─────────────────────────────────────────────────────────────────
 
-  router.get('/api/plugins', h(async (_req, res) => {
+  router.get('/api/plugins', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(await listInstalledPlugins(runtime))
+    res.json(localize(await listInstalledPlugins(runtime), localeOf(req)))
   }))
 
   router.post('/api/plugins', upload.single('file'), h(async (req, res) => {

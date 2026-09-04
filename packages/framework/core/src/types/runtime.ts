@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { StrategyInstance } from './instance.js'
 import type { ExecutionQueue } from './executor.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from './definition.js'
@@ -54,7 +55,7 @@ export interface LoadedPluginInfo {
   declaredName?: string
   version: string
   /** Markdown shipped by the plugin (manifest `readme`) — the Plugins page's detail pane. */
-  readme?: string
+  readme?: Text
   /** Brand mark (https URL or data: URI); the dashboard falls back to a credential type's mark, then a letter chip. */
   logo?: string
   icon?: string

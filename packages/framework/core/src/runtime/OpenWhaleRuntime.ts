@@ -4,6 +4,8 @@ import type { ExecutionQueue, ExecutionResult } from '../types/executor.js'
 import type { IRuntime, RuntimeOptions, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from '../types/runtime.js'
 import { PluginAlreadyLoadedError } from '../types/runtime.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamPreset, PickerOption, PresetSource } from '../types/definition.js'
+import { foldLanguagePacks, normalizeLocale } from '../i18n.js'
+import type { LanguagePack, Locale } from '../i18n.js'
 import type { Trigger } from '../types/trigger.js'
 import type { PlotOption } from '../types/monitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
@@ -378,6 +380,30 @@ export class OpenWhaleRuntime implements IRuntime {
       log.warn({ err, instanceId, executorId: result.instruction.executorId, messageId: result.instruction.messageId },
         'Strategy onExecutionResult hook threw — ignored')
     }
+  }
+
+  /**
+   * The language packs that apply to a plugin: what it declared, with the
+   * operator's overlay from `<dataDir>/i18n/<plugin>/<locale>.json` on top —
+   * a plugin one did not write can still be read in one's own language.
+   */
+  private languagePacksFor(ns: string, declared: Record<Locale, LanguagePack> | undefined): Record<Locale, LanguagePack> | undefined {
+    const packs: Record<Locale, LanguagePack> = {}
+    for (const [locale, pack] of Object.entries(declared ?? {})) packs[normalizeLocale(locale)] = { ...pack }
+    const dir = path.join(this.dataDir, 'i18n', ns)
+    let files: string[] = []
+    try { files = fs.readdirSync(dir) } catch { /* no overlay */ }
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      try {
+        const overlay = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as LanguagePack
+        const locale = normalizeLocale(file.slice(0, -5))
+        packs[locale] = { ...(packs[locale] ?? {}), ...overlay }
+      } catch (err) {
+        log.warn({ plugin: ns, file, err }, 'Language pack overlay is not valid JSON — ignored')
+      }
+    }
+    return Object.keys(packs).length > 0 ? packs : undefined
   }
 
   registerStrategy(definition: StrategyDefinition, factory: () => IStrategy): void {
@@ -1281,14 +1307,21 @@ export class OpenWhaleRuntime implements IRuntime {
         undo.push(() => void this.adapterRegistry.unregisterOwner(ns))
       }
 
+      /* Language packs: the plugin's own, then whatever the operator laid
+         over it in the data directory, folded into each component's text
+         before it is registered — one shape for every reader afterwards. */
+      const packs = this.languagePacksFor(ns, plugin.i18n)
+      const fold = <T extends object>(target: T, prefix: string): T => foldLanguagePacks(target, packs, prefix)
+      if (packs && plugin.readme !== undefined) plugin = { ...plugin, readme: fold({ readme: plugin.readme }, '').readme }
+
       for (const { definition, instance } of plugin.monitors ?? []) {
         const id = p(instance.monitorName)
-        this.registerMonitor({ ...definition, id, pluginName: ns }, instance)
+        this.registerMonitor(fold({ ...definition, id, pluginName: ns }, `monitors.${instance.monitorName}`), instance)
         undo.push(() => this.monitorRegistry.unregister(id))
       }
       for (const { definition, instance } of plugin.executors ?? []) {
         const id = p(instance.executorName)
-        this.registerExecutor({ ...definition, id, pluginName: ns }, instance)
+        this.registerExecutor(fold({ ...definition, id, pluginName: ns }, `executors.${instance.executorName}`), instance)
         undo.push(() => {
           this.queue.cancelConsumers?.(id)
           this.executorRegistry.unregister(id)
@@ -1301,6 +1334,8 @@ export class OpenWhaleRuntime implements IRuntime {
         const { monitorIds: _m, executorIds: _e, ...rest } = definition
         const id = p(definition.id)
         this.registerStrategy({ ...rest, id, pluginName: ns }, sf)
+        // The params fields exist only once registered; the pack addresses them.
+        if (packs) fold(this.strategyRegistry.getDefinition(id)!, `strategies.${definition.id}`)
         undo.push(() => this.strategyRegistry.unregister(id))
       }
       for (const credentialType of plugin.credentialTypes ?? []) {
@@ -1313,15 +1348,15 @@ export class OpenWhaleRuntime implements IRuntime {
       for (const script of plugin.scripts ?? []) {
         const id = p(script.id)
         if (this.scriptRegistry.has(id)) throw new Error(`Script "${id}" is already registered`)
-        this.scriptRegistry.set(id, { def: { ...script, id }, owner: ns })
+        this.scriptRegistry.set(id, { def: fold({ ...script, id }, `scripts.${script.id}`), owner: ns })
         undo.push(() => this.scriptRegistry.delete(id))
       }
       for (const impl of accountImpls) {
-        this.registerAccountImplementation(ns, impl)
+        this.registerAccountImplementation(ns, fold({ ...impl }, `accounts.${impl.id}`))
         undo.push(() => this.accountImpls.delete(impl.id))
       }
       for (const impl of monitorImpls) {
-        const createdFacade = this.registerMonitorImplementation(ns, impl)
+        const createdFacade = this.registerMonitorImplementation(ns, fold({ ...impl }, `monitors.${impl.id}`))
         undo.push(() => {
           void this.monitorInstances.unregisterOwner(ns)
           if (createdFacade !== undefined) this.monitorRegistry.unregister(createdFacade)
@@ -2022,7 +2057,7 @@ export class OpenWhaleRuntime implements IRuntime {
    */
   async strategyPresets(
     strategyId: string,
-    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean; signal?: AbortSignal } = {},
+    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean; locale?: Locale; signal?: AbortSignal } = {},
   ): Promise<{ presets: ParamPreset[]; computedAt: number; source?: PresetSource }> {
     const definition = this.strategyRegistry.getDefinition(strategyId)
     if (!definition) throw new Error(`Strategy "${strategyId}" is not registered`)
@@ -2033,11 +2068,12 @@ export class OpenWhaleRuntime implements IRuntime {
     const source = definition.presetSource ?? {}
     const accounts = opts.accounts ?? {}
     const params = { base: opts.params?.base ?? {}, tunable: opts.params?.tunable ?? {} }
-    const key = `${strategyId}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
+    const locale = opts.locale ?? 'en'
+    const key = `${strategyId}\u0000${locale}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
     const ttl = source.ttlMs ?? 60_000
     const cached = this.presetCache.get(key)
     if (!opts.refresh && cached && Date.now() - cached.computedAt < ttl) return { presets: [...statics, ...cached.presets], computedAt: cached.computedAt, source }
-    const computed = await probe.presets({ adapters: this.adapters, accounts, params, ...(opts.signal ? { signal: opts.signal } : {}) })
+    const computed = await probe.presets({ adapters: this.adapters, accounts, params, locale, ...(opts.signal ? { signal: opts.signal } : {}) })
     const computedAt = Date.now()
     this.presetCache.set(key, { presets: computed, computedAt })
     return { presets: [...statics, ...computed], computedAt, source }
@@ -2051,7 +2087,7 @@ export class OpenWhaleRuntime implements IRuntime {
    */
   async strategyIllustrationData(
     strategyId: string,
-    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; signal?: AbortSignal } = {},
+    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; locale?: Locale; signal?: AbortSignal } = {},
   ): Promise<{ data: Record<string, unknown>; computedAt: number }> {
     const factory = this.strategyRegistry.get(strategyId)
     const probe = factory?.()
@@ -2059,10 +2095,11 @@ export class OpenWhaleRuntime implements IRuntime {
     if (typeof probe.illustrationData !== 'function') throw new Error(`Strategy "${strategyId}" serves no illustration data`)
     const accounts = opts.accounts ?? {}
     const params = { base: opts.params?.base ?? {}, tunable: opts.params?.tunable ?? {} }
-    const key = `${strategyId}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
+    const locale = opts.locale ?? 'en'
+    const key = `${strategyId}\u0000${locale}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
     const cached = this.illustrationCache.get(key)
     if (cached && Date.now() - cached.computedAt < ILLUSTRATION_TTL_MS) return cached
-    const data = await probe.illustrationData({ adapters: this.adapters, accounts, params, ...(opts.signal ? { signal: opts.signal } : {}) })
+    const data = await probe.illustrationData({ adapters: this.adapters, accounts, params, locale, ...(opts.signal ? { signal: opts.signal } : {}) })
     const entry = { data, computedAt: Date.now() }
     this.illustrationCache.set(key, entry)
     if (this.illustrationCache.size > 200) this.illustrationCache.delete(this.illustrationCache.keys().next().value!)
@@ -2076,7 +2113,7 @@ export class OpenWhaleRuntime implements IRuntime {
   async strategyPickerOptions(
     strategyId: string,
     pickerId: string,
-    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean; signal?: AbortSignal } = {},
+    opts: { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean; locale?: Locale; signal?: AbortSignal } = {},
   ): Promise<{ options: PickerOption[]; computedAt: number }> {
     const definition = this.strategyRegistry.getDefinition(strategyId)
     if (!definition) throw new Error(`Strategy "${strategyId}" is not registered`)
@@ -2086,10 +2123,11 @@ export class OpenWhaleRuntime implements IRuntime {
     if (!probe || typeof probe.pickerOptions !== 'function') throw new Error(`Strategy "${strategyId}" serves no picker options`)
     const accounts = opts.accounts ?? {}
     const params = { base: opts.params?.base ?? {}, tunable: opts.params?.tunable ?? {} }
-    const key = `${strategyId}\u0000${pickerId}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
+    const locale = opts.locale ?? 'en'
+    const key = `${strategyId}\u0000${pickerId}\u0000${locale}\u0000${JSON.stringify(accounts)}\u0000${JSON.stringify(params)}`
     const cached = this.pickerCache.get(key)
     if (!opts.refresh && cached && Date.now() - cached.computedAt < (picker.ttlMs ?? 60_000)) return cached
-    const options = await probe.pickerOptions(pickerId, { adapters: this.adapters, accounts, params, ...(opts.signal ? { signal: opts.signal } : {}) })
+    const options = await probe.pickerOptions(pickerId, { adapters: this.adapters, accounts, params, locale, ...(opts.signal ? { signal: opts.signal } : {}) })
     const entry = { options, computedAt: Date.now() }
     this.pickerCache.set(key, entry)
     if (this.pickerCache.size > 200) this.pickerCache.delete(this.pickerCache.keys().next().value!)

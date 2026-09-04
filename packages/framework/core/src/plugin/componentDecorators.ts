@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from '../types/materialization.js'
 import type { AccountSectionDef } from '../types/account.js'
@@ -34,8 +35,8 @@ export interface OwMonitorMeta {
    * narrow its keySchema (values only, same fields).
    */
   contract?: string
-  name?: string
-  description?: string
+  name?: Text
+  description?: Text
   /** Credential requirement for instances (absent = credential-less). */
   credential?: { type: string; level: 'optional' | 'required' }
   /**
@@ -81,7 +82,7 @@ export interface OwAccountMeta {
   venue?: string
   /** @deprecated Legacy name for {@link venue}. */
   type?: string
-  displayName?: string
+  displayName?: Text
   /** Declared configuration schema — see AccountImplementation.paramsSchema. */
   paramsSchema?: ZodObject<ZodRawShape>
   /** Declarative detail panel — see AccountImplementation.sections. */
@@ -119,8 +120,8 @@ export type AccountClass = new (accountName: string, session: never, params?: Re
 export interface OwExecutorMeta {
   /** Registry id. Defaults to the instance's executorName at lowering. */
   id?: string
-  name?: string
-  description?: string
+  name?: Text
+  description?: Text
 }
 
 const executorMeta = new WeakMap<object, OwExecutorMeta>()
@@ -139,8 +140,8 @@ export function owExecutorMeta(ctor: object): OwExecutorMeta | undefined {
 export interface OwStrategyMeta {
   /** Registry id. Defaults to the probe instance's strategyId at lowering. */
   id?: string
-  name?: string
-  description?: string
+  name?: Text
+  description?: Text
 }
 
 const strategyMeta = new WeakMap<object, OwStrategyMeta>()

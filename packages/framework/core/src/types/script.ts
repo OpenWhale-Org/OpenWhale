@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { ParamFieldDef } from './definition.js'
 
@@ -68,8 +69,8 @@ export interface ScriptContext {
 export interface ScriptDefinition {
   /** Qualified to '<plugin>/<id>' at load. */
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   paramsSchema?: ZodObject<ZodRawShape>
   /**
    * Live-resolved select options, keyed by param name — for params whose
@@ -84,8 +85,8 @@ export interface ScriptDefinition {
 /** Serializable listing entry (dashboard Scripts page). */
 export interface ScriptInfo {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   pluginName: string
   paramsFields?: ParamFieldDef[]
 }

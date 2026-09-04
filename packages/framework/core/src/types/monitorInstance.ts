@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { AdapterResolver } from './materialization.js'
 import type { RawCredentialData } from './credential.js'
@@ -33,8 +34,8 @@ export interface MonitorImplementation {
    * specialize another plugin's contract.
    */
   contract: string
-  displayName?: string
-  description?: string
+  displayName?: Text
+  description?: Text
   /**
    * Credential requirement for instances of this implementation.
    * Absent = credential-less. The credential's raw data is handed to
@@ -97,7 +98,7 @@ export interface MonitorInstanceEntity {
 
 /** Serializable instance view (dashboard Monitor Instances page). */
 export interface MonitorInstanceView extends MonitorInstanceEntity {
-  implementationDisplayName?: string
+  implementationDisplayName?: Text
   credentialLevel?: 'optional' | 'required'
   /** Param form fields derived from the implementation's schema. */
   paramsFields?: ParamFieldDef[]

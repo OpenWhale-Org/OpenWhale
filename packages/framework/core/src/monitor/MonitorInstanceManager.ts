@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import { BaseMonitor, MonitorMode } from './BaseMonitor.js'
 import type { MonitorOptions, EmitHandler, MonitorPlotDef } from '../types/monitor.js'
 import type { ZodObject, ZodRawShape } from 'zod'
@@ -655,7 +656,7 @@ export class MonitorInstanceManager {
 
   // ── Introspection ─────────────────────────────────────────────────────────
 
-  listImplementations(): Array<{ id: string; contract: string; owner: string; displayName?: string; description?: string; venue?: string; credential?: { type: string; level: 'optional' | 'required' } }> {
+  listImplementations(): Array<{ id: string; contract: string; owner: string; displayName?: Text; description?: Text; venue?: string; credential?: { type: string; level: 'optional' | 'required' } }> {
     const out = []
     for (const record of this.contracts.values()) {
       for (const rec of record.impls.values()) {
