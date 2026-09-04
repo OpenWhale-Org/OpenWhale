@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import type { AccountImplementationInfo, CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
+import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
+import type { AccountImplementationInfo } from '@/lib/core-types'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import { ParamsFields, buildParams } from '../../components/ParamsFields'
 import { Select } from '../../components/Select'

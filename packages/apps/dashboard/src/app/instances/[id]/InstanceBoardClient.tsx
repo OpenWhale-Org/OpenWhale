@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset, PresetSource } from '@openwhaleorg/core'
+import type { StrategyInstanceView } from '@openwhaleorg/core'
+import type { StrategyDefinition, ParamFieldDef, ParamIllustration, ParamPreset, PresetSource } from '@/lib/core-types'
 import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta } from '../InstancesClient'
 import { buildParamsFromFields, fieldValuesFromParams, sameValues, type ParamValues } from '@/components/paramsIo'
 import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'

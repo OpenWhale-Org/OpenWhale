@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { StrategyInstanceView, StrategyDefinition, InstanceOptions } from '@openwhaleorg/core'
+import type { StrategyInstanceView, InstanceOptions } from '@openwhaleorg/core'
+import type { StrategyDefinition } from '@/lib/core-types'
 import { Switch } from '@/components/Switch'
 import { BreakerRules } from './BreakerRules'
 

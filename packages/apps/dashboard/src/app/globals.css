@@ -590,3 +590,8 @@ body {
 .drag-grip:hover { opacity: 1; color: var(--foreground); }
 *:hover > .drag-grip, *:hover .drag-grip { opacity: .8; }
 .drag-grip:active { cursor: grabbing; }
+
+/* Language switch in the sidebar footer */
+.aurora-nav-lang { display: flex; gap: 4px; padding: 6px 10px 2px; }
+.aurora-nav-lang-btn { flex: 1; font-size: 11px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+.aurora-nav-lang-btn.is-active { color: var(--foreground); border-color: var(--accent); background: var(--accent-soft); }

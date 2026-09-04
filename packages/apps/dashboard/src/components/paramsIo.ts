@@ -1,4 +1,4 @@
-import type { ParamFieldDef } from '@openwhaleorg/core'
+import type { ParamFieldDef } from '@/lib/core-types'
 
 /**
  * Params ⇄ form values, and the import/export that travels between machines.

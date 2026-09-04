@@ -1,30 +1,31 @@
 'use client'
 
 import Link from 'next/link'
+import { useI18n, LOCALES, type MessageKey } from '@/i18n'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
 type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts' | 'executions' | 'runs' | 'retention'
 
-const links: Array<{ href: string; label: string; auroraLabel?: string; group?: string; icon: IconName }> = [
-  { href: '/instances', label: 'Instances', auroraLabel: 'Strategies', group: 'TRADE', icon: 'strategies' },
-  { href: '/runs', label: 'Runs', group: 'TRADE', icon: 'runs' },
-  { href: '/accounts', label: 'Accounts', group: 'TRADE', icon: 'accounts' },
-  { href: '/credentials', label: 'Credentials', group: 'SETTINGS', icon: 'credentials' },
-  { href: '/monitor', label: 'Monitor', group: 'OBSERVE', icon: 'monitor' },
-  { href: '/monitor-data', label: 'Explorer', group: 'OBSERVE', icon: 'explorer' },
-  { href: '/monitor-data/retention', label: 'Retention', group: 'OBSERVE', icon: 'retention' },
-  { href: '/executors', label: 'Executors', group: 'AUTOMATE', icon: 'executors' },
-  { href: '/executions', label: 'Executions', group: 'AUTOMATE', icon: 'executions' },
-  { href: '/plugins', label: 'Plugins', group: 'DEVELOP', icon: 'plugins' },
-  { href: '/compiler', label: 'Compiler', group: 'DEVELOP', icon: 'compiler' },
-  { href: '/scripts', label: 'Scripts', group: 'AUTOMATE', icon: 'scripts' },
-  { href: '/assistant', label: 'Assistant', icon: 'assistant' },
-  { href: '/alerts', label: 'Alerts', group: 'SETTINGS', icon: 'alerts' },
-  { href: '/users', label: 'Users', group: 'SETTINGS', icon: 'users' },
+const links: Array<{ href: string; label: MessageKey; auroraLabel?: MessageKey; group?: MessageKey; icon: IconName }> = [
+  { href: '/instances', label: 'nav.instances', auroraLabel: 'nav.instances.aurora', group: 'nav.group.trade', icon: 'strategies' },
+  { href: '/runs', label: 'nav.runs', group: 'nav.group.trade', icon: 'runs' },
+  { href: '/accounts', label: 'nav.accounts', group: 'nav.group.trade', icon: 'accounts' },
+  { href: '/credentials', label: 'nav.credentials', group: 'nav.group.settings', icon: 'credentials' },
+  { href: '/monitor', label: 'nav.monitor', group: 'nav.group.observe', icon: 'monitor' },
+  { href: '/monitor-data', label: 'nav.explorer', group: 'nav.group.observe', icon: 'explorer' },
+  { href: '/monitor-data/retention', label: 'nav.retention', group: 'nav.group.observe', icon: 'retention' },
+  { href: '/executors', label: 'nav.executors', group: 'nav.group.automate', icon: 'executors' },
+  { href: '/executions', label: 'nav.executions', group: 'nav.group.automate', icon: 'executions' },
+  { href: '/plugins', label: 'nav.plugins', group: 'nav.group.develop', icon: 'plugins' },
+  { href: '/compiler', label: 'nav.compiler', group: 'nav.group.develop', icon: 'compiler' },
+  { href: '/scripts', label: 'nav.scripts', group: 'nav.group.automate', icon: 'scripts' },
+  { href: '/assistant', label: 'nav.assistant', icon: 'assistant' },
+  { href: '/alerts', label: 'nav.alerts', group: 'nav.group.settings', icon: 'alerts' },
+  { href: '/users', label: 'nav.users', group: 'nav.group.settings', icon: 'users' },
 ]
 
-const auroraGroups = ['TRADE', 'OBSERVE', 'AUTOMATE', 'DEVELOP', 'SETTINGS']
+const auroraGroups: MessageKey[] = ['nav.group.trade', 'nav.group.observe', 'nav.group.automate', 'nav.group.develop', 'nav.group.settings']
 
 function Icon({ name }: { name: IconName }) {
   const common = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
@@ -65,6 +66,7 @@ function NavLink({ href, label, icon, active }: { href: string; label: string; i
 
 export function Nav() {
   const pathname = usePathname()
+  const { t, locale, setLocale } = useI18n()
   /*
    * Prefix matching, EXCEPT where another link owns the deeper path. Without
    * the second clause /monitor-data lit up alongside /monitor-data/retention
@@ -83,14 +85,14 @@ export function Nav() {
         <span className="aurora-beta"><span>AURORA</span><b>BETA</b></span>
       </div>
       <nav className="aurora-nav">
-        <NavLink href="/overview" label="Overview" icon="overview" active={isActive('/overview')} />
+        <NavLink href="/overview" label={t('nav.overview')} icon="overview" active={isActive('/overview')} />
         {auroraGroups.map(group => {
           const grouped = links.filter(link => link.group === group)
           if (grouped.length === 0) return null
           return (
             <div className="aurora-nav-group" key={group}>
-              <div className="aurora-nav-heading">{group}</div>
-              {grouped.map(link => <NavLink key={link.href} href={link.href} label={link.auroraLabel ?? link.label} icon={link.icon} active={isActive(link.href)} />)}
+              <div className="aurora-nav-heading">{t(group)}</div>
+              {grouped.map(link => <NavLink key={link.href} href={link.href} label={t(link.auroraLabel ?? link.label)} icon={link.icon} active={isActive(link.href)} />)}
             </div>
           )
         })}
@@ -99,8 +101,14 @@ export function Nav() {
         {/* Kept where it can always be found. The tour is skippable and most
             people skip it, which is exactly why it needs a way back — a
             first-run overlay you dismissed once is otherwise gone for good. */}
-        <NavLink href="/start" label="Getting started" icon="start" active={isActive('/start')} />
-        <NavLink href="/assistant" label="Assistant" icon="assistant" active={isActive('/assistant')} />
+        <NavLink href="/start" label={t('nav.start')} icon="start" active={isActive('/start')} />
+        <NavLink href="/assistant" label={t('nav.assistant')} icon="assistant" active={isActive('/assistant')} />
+        {/* The language switch lives with the other things that must always be findable. */}
+        <div className="aurora-nav-lang" role="group" aria-label={t('nav.language')}>
+          {LOCALES.map(l => (
+            <button key={l.id} type="button" className={`aurora-nav-lang-btn${locale === l.id ? ' is-active' : ''}`} onClick={() => { if (locale !== l.id) setLocale(l.id) }}>{l.label}</button>
+          ))}
+        </div>
       </div>
     </aside>
   )

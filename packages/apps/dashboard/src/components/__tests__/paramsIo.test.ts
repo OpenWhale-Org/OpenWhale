@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { ParamFieldDef } from '@openwhaleorg/core'
+import type { ParamFieldDef } from '@/lib/core-types'
 import { applyChanges, planImport, paramsJson, fieldValuesFromParams } from '../paramsIo'
 
 /**

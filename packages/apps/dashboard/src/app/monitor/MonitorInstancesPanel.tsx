@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import type { MonitorInstanceView, CredentialInfo, ParamFieldDef } from '@openwhaleorg/core'
+import type { CredentialInfo } from '@openwhaleorg/core'
+import type { MonitorInstanceView, ParamFieldDef } from '@/lib/core-types'
 import { ParamsFields, buildParams, FIELD_CLASS, FIELD_STYLE } from '../../components/ParamsFields'
 
 export interface ImplementationInfo {

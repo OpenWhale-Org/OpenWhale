@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
-import type { ScriptInfo, ParamFieldDef } from '@openwhaleorg/core'
+import type { ScriptInfo, ParamFieldDef } from '@/lib/core-types'
 import { TypeMark } from '../../components/TypeMark'
 
 /**

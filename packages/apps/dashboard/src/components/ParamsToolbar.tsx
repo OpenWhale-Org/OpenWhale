@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import type { ParamFieldDef } from '@openwhaleorg/core'
+import type { ParamFieldDef } from '@/lib/core-types'
 import { Modal } from './Modal'
 import { applyChanges, fieldValuesFromParams, planImport, paramsJson, paramsFilename, type ImportPlan, type ParamValues } from './paramsIo'
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
-import type { StrategyDefinition } from '@openwhaleorg/core'
+import type { StrategyDefinition } from '@/lib/core-types'
 import { ModalMaximizeButton } from '@/components/Modal'
 
 /**

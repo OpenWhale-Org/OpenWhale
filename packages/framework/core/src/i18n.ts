@@ -28,7 +28,7 @@ export type Text = string | LocalizedText
 
 /** The same shape with every Text resolved to a string — what a reader is sent. */
 export type Localized<T> =
-  T extends string ? string
+  T extends string ? T
     : T extends LocalizedText ? string
       : T extends (infer U)[] ? Localized<U>[]
         : T extends (...args: never[]) => unknown ? T

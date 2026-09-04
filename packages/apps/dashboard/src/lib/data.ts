@@ -10,7 +10,8 @@
  * still renders when the gateway is down — the SSE status dot goes red.
  */
 import { cookies } from 'next/headers'
-import type { StrategyInstance, StrategyInstanceView, CredentialInfo, CredentialTypeInfo, MonitorDefinition, ExecutorDefinition, StrategyDefinition, AccountView, AccountImplementationInfo, AccountSnapshotRecord, MonitorInstanceView, LoadedPluginInfo } from '@openwhaleorg/core'
+import type { StrategyInstance, StrategyInstanceView, CredentialInfo, CredentialTypeInfo, AccountView, AccountSnapshotRecord } from '@openwhaleorg/core'
+import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, AccountImplementationInfo, MonitorInstanceView, LoadedPluginInfo } from '@/lib/core-types'
 import type { AuthUser } from './auth'
 
 export const GATEWAY_URL = process.env['OPENWHALE_GATEWAY_URL'] ?? 'http://localhost:3001'
@@ -114,7 +115,7 @@ export function fetchAccountsData(): Promise<{ accounts: AccountView[]; implemen
   return gw('/api/accounts', { accounts: [], implementations: [], snapshots: {} })
 }
 
-export function fetchMonitorInstancesData(): Promise<{ instances: MonitorInstanceView[]; implementations: Array<{ id: string; contract: string; owner: string; displayName?: string; description?: string; credential?: { type: string; level: 'optional' | 'required' }; paramsFields?: import('@openwhaleorg/core').ParamFieldDef[] }>; pendingKeys: Record<string, string[]> }> {
+export function fetchMonitorInstancesData(): Promise<{ instances: MonitorInstanceView[]; implementations: Array<{ id: string; contract: string; owner: string; displayName?: string; description?: string; credential?: { type: string; level: 'optional' | 'required' }; paramsFields?: import('@/lib/core-types').ParamFieldDef[] }>; pendingKeys: Record<string, string[]> }> {
   return gw('/api/monitor-instances', { instances: [], implementations: [], pendingKeys: {} })
 }
 
@@ -122,7 +123,7 @@ export function fetchExecutorStatus(): Promise<ExecutorStatusView[]> {
   return gw('/api/executor/status', [])
 }
 
-export function fetchScripts(): Promise<import('@openwhaleorg/core').ScriptInfo[]> {
+export function fetchScripts(): Promise<import('@/lib/core-types').ScriptInfo[]> {
   return gw('/api/scripts', [])
 }
 
