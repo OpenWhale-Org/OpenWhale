@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import type { ParamFieldDef } from '@/lib/core-types'
 import { Modal } from './Modal'
 import { applyChanges, fieldValuesFromParams, planImport, paramsJson, paramsFilename, type ImportPlan, type ParamValues } from './paramsIo'
+import { useT } from '@/i18n'
 
 /** Monaco is ~1 MB and only the JSON view needs it — loaded when asked for. */
 const CodeEditor = dynamic(() => import('./CodeEditor').then(m => m.CodeEditor), {
@@ -37,6 +38,7 @@ export function ParamsToolbar({
   /** JSON that has not parsed yet: exporting or switching view would lose it. */
   disabled?: boolean
 }) {
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [exported, setExported] = useState(false)
 
@@ -62,21 +64,21 @@ export function ParamsToolbar({
               type="button"
               onClick={() => onView(v)}
               disabled={disabled && v !== view}
-              title={v === 'json' ? 'Edit the parameters as JSON' : 'Edit the parameters as fields'}
+              title={v === 'json' ? t('toolbar.editJson') : t('toolbar.editFields')}
               className="px-2 py-1 text-xs"
               style={{
                 background: view === v ? 'var(--accent)' : 'transparent',
                 color: view === v ? '#fff' : 'var(--muted)',
               }}
             >
-              {v === 'form' ? 'Form' : 'JSON'}
+              {v === 'form' ? t('common.form') : t('common.json')}
             </button>
           ))}
         </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={history.undo} disabled={!history.canUndo} title="Undo (⌘Z)" aria-label="Undo">↶</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={history.redo} disabled={!history.canRedo} title="Redo (⌘⇧Z)" aria-label="Redo">↷</button>
-        <button type="button" className="btn btn-soft btn-sm" onClick={() => setImporting(true)}>Import</button>
-        <button type="button" className="btn btn-soft btn-sm" onClick={exportFile} disabled={disabled}>{exported ? 'Saved ✓' : 'Export'}</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={history.undo} disabled={!history.canUndo} title={`${t('common.undo')} (⌘Z)`} aria-label={t('common.undo')}>↶</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={history.redo} disabled={!history.canRedo} title={`${t('common.redo')} (⌘⇧Z)`} aria-label={t('common.redo')}>↷</button>
+        <button type="button" className="btn btn-soft btn-sm" onClick={() => setImporting(true)}>{t('common.import')}</button>
+        <button type="button" className="btn btn-soft btn-sm" onClick={exportFile} disabled={disabled}>{exported ? t('board.saved') : t('common.export')}</button>
       </div>
       {importing && (
         <ImportDialog
@@ -103,6 +105,7 @@ function ImportDialog({ fields, values, onClose, onApply }: {
   onClose: () => void
   onApply: (values: ParamValues) => void
 }) {
+  const t = useT()
   const [text, setText] = useState('')
   /* Fields the user struck off this import. A file is rarely wanted whole —
      someone copies an instance's parameters and keeps their own symbols. */
@@ -138,15 +141,15 @@ function ImportDialog({ fields, values, onClose, onApply }: {
     <Modal onClose={onClose} maxWidth="42rem">
       <div className="p-4 flex flex-col gap-3">
         <div>
-          <h3 className="text-sm font-medium">Import parameters</h3>
+          <h3 className="text-sm font-medium">{t('toolbar.importTitle')}</h3>
           <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
             A partial file is fine: only the fields it names are replaced, everything else keeps its value.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}>Choose file…</button>
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>or paste below</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}>{t('toolbar.chooseFile')}</button>
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('toolbar.orPaste')}</span>
           <input
             ref={fileRef}
             type="file"
@@ -208,8 +211,8 @@ function ImportDialog({ fields, values, onClose, onApply }: {
                         <button
                           type="button"
                           onClick={() => toggle(c.name)}
-                          title={off ? `Import ${c.name} after all` : `Keep the current ${c.name}`}
-                          aria-label={off ? `Restore ${c.name}` : `Skip ${c.name}`}
+                          title={off ? t('toolbar.importAfterAll', { name: c.name }) : t('toolbar.keepCurrent', { name: c.name })}
+                          aria-label={off ? t('toolbar.restore', { name: c.name }) : t('toolbar.skip', { name: c.name })}
                           className="btn btn-ghost btn-sm shrink-0 self-center"
                           style={{ padding: '0 0.4rem' }}
                         >
@@ -234,7 +237,7 @@ function ImportDialog({ fields, values, onClose, onApply }: {
         )}
 
         <div className="flex justify-end gap-2 pt-1">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>{t('common.cancel')}</button>
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -287,7 +290,7 @@ export function useParamsJson(
       const doc = parsed as { base?: unknown; tunable?: unknown }
       const grouped = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v)
       if (!(grouped(parsed) && (grouped(doc.base) || grouped(doc.tunable)))) {
-        setError('Expected a JSON object with "base" and/or "tunable" groups.')
+        setError(t('toolbar.expectedGroups'))
         return
       }
       setError('')

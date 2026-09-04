@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { StrategyDefinition } from '@/lib/core-types'
 import { ModalMaximizeButton } from '@/components/Modal'
+import { useT } from '@/i18n'
 
 /**
  * Choosing a strategy used to be a bare `<select>` of registry ids — you had
@@ -49,7 +50,7 @@ function Chips({ items, empty }: { items: string[]; empty: string }) {
   )
 }
 
-export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, cancelLabel = 'Cancel' }: {
+export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, cancelLabel }: {
   strategies: StrategyDefinition[]
   /** Current choice, so reopening lands on it instead of the top of the list. */
   selectedId?: string
@@ -57,6 +58,7 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
   onCancel: () => void
   cancelLabel?: string
 }) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string>(selectedId ?? '')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -108,20 +110,20 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
     <>
       <div className="flex items-center justify-between px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <div>
-          <div className="text-sm font-medium">Choose a strategy</div>
+          <div className="text-sm font-medium">{t('picker.chooseStrategy')}</div>
           <div className="text-xs" style={{ color: 'var(--muted)' }}>
             Step 1 of 2 · {strategies.length} available · ↑↓ to move, Enter to select
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">{cancelLabel}</button>
+          <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">{cancelLabel ?? t('common.cancel')}</button>
           <ModalMaximizeButton />
         </div>
       </div>
 
       <div data-tour="strategy-picker" className="flex flex-1 min-h-0">
           {/* ── Left: search + grouped list ── */}
-          <Rail bare width="16rem" search={{ value: query, onChange: setQuery, placeholder: 'Search strategies…', autoFocus: true }}>
+          <Rail bare width="16rem" search={{ value: query, onChange: setQuery, placeholder: t('picker.searchStrategies'), autoFocus: true }}>
             {groups.length === 0 && (
               <div className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>Nothing matches “{query}”.</div>
             )}
@@ -163,16 +165,16 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
                     )}
                   </div>
 
-                  <Section title="Accounts it binds">
+                  <Section title={t('picker.accountsItBinds')}>
                     {(current.accountRequirements ?? []).length === 0
-                      ? <div className="text-xs" style={{ color: 'var(--muted)' }}>None — this strategy trades through no account of its own.</div>
+                      ? <div className="text-xs" style={{ color: 'var(--muted)' }}>{t('picker.noAccounts')}</div>
                       : (
                         <div className="flex flex-wrap gap-1.5">
                           {current.accountRequirements!.map(a => (
                             <span key={a.label} className="badge badge-neutral">
                               <span className="mono">{a.label}</span>
                               <span style={{ color: 'var(--muted)' }}>{a.type ?? a.kind}</span>
-                              {a.optional && <span style={{ color: 'var(--muted)' }}>· optional</span>}
+                              {a.optional && <span style={{ color: 'var(--muted)' }}>· {t('common.optional')}</span>}
                             </span>
                           ))}
                         </div>
@@ -180,21 +182,21 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
                   </Section>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <Section title="Monitors it reads">
-                      <Chips items={current.monitorIds ?? []} empty="None" />
+                    <Section title={t('picker.monitorsItReads')}>
+                      <Chips items={current.monitorIds ?? []} empty={t('common.none')} />
                     </Section>
-                    <Section title="Executors it drives">
-                      <Chips items={current.executorIds ?? []} empty="None" />
+                    <Section title={t('picker.executorsItDrives')}>
+                      <Chips items={current.executorIds ?? []} empty={t('common.none')} />
                     </Section>
                   </div>
 
                   {(current.llmRequirements ?? []).length > 0 && (
-                    <Section title="LLM slots">
-                      <Chips items={current.llmRequirements!.map(l => `${l.label} · ${l.model}`)} empty="None" />
+                    <Section title={t('inst.llmSlots')}>
+                      <Chips items={current.llmRequirements!.map(l => `${l.label} · ${l.model}`)} empty={t('common.none')} />
                     </Section>
                   )}
 
-                  <Section title={`Parameters — ${required.length} required, ${tunable.length} tunable`}>
+                  <Section title={t('picker.paramsSummary', { required: required.length, tunable: tunable.length })}>
                     {params.length === 0 ? (
                       <div className="text-xs" style={{ color: 'var(--muted)' }}>
                         No declared fields; this strategy takes raw JSON params.
@@ -225,7 +227,7 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
                 </div>
 
                 <div className="flex justify-end gap-2 px-5 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-                  <button type="button" onClick={onCancel} className="btn btn-secondary">{cancelLabel}</button>
+                  <button type="button" onClick={onCancel} className="btn btn-secondary">{cancelLabel ?? t('common.cancel')}</button>
                   <button type="button" onClick={() => onPick(current.id)} className="btn btn-primary">
                     Use this strategy →
                   </button>

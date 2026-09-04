@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Modal } from './Modal'
+import { useT } from '@/i18n'
 
 /**
  * "You have unsaved changes" — one guard for the whole app.
@@ -61,6 +62,7 @@ export function useUnsavedLabels(): string[] {
  * if the user says leave.
  */
 export function UnsavedGuard() {
+  const t = useT()
   const labels = useUnsavedLabels()
   const dirty = labels.length > 0
   const router = useRouter()
@@ -106,13 +108,13 @@ export function UnsavedGuard() {
     <Modal onClose={() => setPending(null)} maxWidth="26rem">
       <div className="p-4 flex flex-col gap-3">
         <div>
-          <h3 className="text-sm font-medium">Leave without saving?</h3>
+          <h3 className="text-sm font-medium">{t('unsaved.leaveTitle')}</h3>
           <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
             {labels.join(' · ')} {labels.length > 1 ? 'have' : 'has'} unsaved changes. Leaving this page discards them.
           </p>
         </div>
         <div className="flex justify-end gap-2">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPending(null)} autoFocus>Stay</button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPending(null)} autoFocus>{t('unsaved.stay')}</button>
           <button
             type="button"
             className="btn btn-danger-solid btn-sm"

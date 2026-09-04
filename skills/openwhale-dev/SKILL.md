@@ -61,6 +61,10 @@ the discipline that risk limits live in code even when a model produces the sign
 
 ## Since 2026-08-26 (newest first)
 
+- **Text in more than one language** (core ≥ 0.2.3). Every user-facing string in a manifest, a
+  decorator or a param's `.meta()` is a `Text`: a string, or `{ en, 'zh-CN' }`. The gateway resolves
+  it per request; our strategies carry both languages on every string; a plugin may ship language
+  packs (`definePlugin({ i18n })`) instead. (`references/strategy.md` §Text)
 - **Picker fields** (core ≥ 0.2.3). An object param with `meta({ picker: { source: 'strategy', id } })`
   renders as a button and a card dialog whose options `pickerOptions(id, ctx)` computes — for a
   value that is a whole decision (the four legs of a carry), where a preset would scatter it over

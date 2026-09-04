@@ -5,6 +5,7 @@ import type { StrategyInstanceView, InstanceOptions } from '@openwhaleorg/core'
 import type { StrategyDefinition } from '@/lib/core-types'
 import { Switch } from '@/components/Switch'
 import { BreakerRules } from './BreakerRules'
+import { useT } from '@/i18n'
 
 /**
  * The switches that belong to the ENGINE rather than to the strategy.
@@ -23,6 +24,7 @@ export function InstanceMiscPanel({ instance, onSaved }: {
   instance: StrategyInstanceView
   onSaved?: (options: InstanceOptions) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [options, setOptions] = useState<InstanceOptions>(instance.options ?? {})
   const [actions, setActions] = useState<string[]>([])
@@ -72,9 +74,9 @@ export function InstanceMiscPanel({ instance, onSaved }: {
     setSaving(false)
     if (res.ok) {
       setDirty(false)
-      setNotice('Saved ✓')
+      setNotice(t('board.saved'))
       onSaved?.(options)
-    } else setNotice(`Save failed: ${await res.text()}`)
+    } else setNotice(t('board.saveFailed', { error: await res.text() }))
   }
 
   const alertOnFailure = options.alertOnFailure !== false
@@ -85,7 +87,7 @@ export function InstanceMiscPanel({ instance, onSaved }: {
       <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
         <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>
-          <span>Misc</span>
+          <span>{t('misc.title')}</span>
           <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
             (alerting, circuit breaker and dry run — applied without a restart)
           </span>
@@ -99,16 +101,16 @@ export function InstanceMiscPanel({ instance, onSaved }: {
               DRY RUN
             </span>
           )}
-          {dirty && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
+          {dirty && <span className="text-xs" style={{ color: 'var(--warning)' }}>{t('board.unsaved')}</span>}
         </button>
-        {notice && <span className="text-xs" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        {notice && <span className="text-xs" style={{ color: notice.startsWith(t('board.savedPrefix')) ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
         <button
           onClick={() => void save()}
           disabled={saving || !dirty}
           className="px-3 py-1.5 rounded-md text-xs shrink-0"
           style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
       </div>
 
@@ -117,16 +119,16 @@ export function InstanceMiscPanel({ instance, onSaved }: {
           <Switch
             checked={alertOnFailure}
             onChange={(alertOnFailure) => patch({ alertOnFailure })}
-            label="Alert when an execution fails"
-            hint="On by default. Repeats of the same error are sent once every 15 minutes, and one instance may send at most 20 an hour — the rest are counted and reported with the next one."
+            label={t('misc.alertFail')}
+            hint={t('misc.alertFailHint')}
           />
 
           <div>
             <Switch
               checked={chosen.size > 0}
               onChange={(on) => patch({ alertOnActions: on ? (actions[0] ? [actions[0]] : []) : [] })}
-              label="Alert when these actions execute"
-              hint="Off by default: the successful ones too, so a strategy that acts every minute would mail every minute. Choose the few worth hearing about."
+              label={t('misc.alertActions')}
+              hint={t('misc.alertActionsHint')}
             />
             {chosen.size > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2 ml-7">
@@ -160,7 +162,7 @@ export function InstanceMiscPanel({ instance, onSaved }: {
           <Switch
             checked={dryRun}
             onChange={(dryRun) => patch({ dryRun })}
-            label="Dry run"
+            label={t('instance.dryRun')}
             hint={<>
                 The engine records what this instance decides and queues none of it — no executor runs, nothing reaches a
                 venue. Held instructions appear under Executions marked <span className="mono">dry-run</span>. This is the

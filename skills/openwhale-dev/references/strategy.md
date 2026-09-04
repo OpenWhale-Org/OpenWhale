@@ -135,6 +135,39 @@ past `quiesceTimeoutMs` (runtime option, default 15 s), is logged and teardown c
 instance that cannot be stopped would resume trading on the next boot. Do housekeeping here, not
 on the first evaluation behind a store flag — that spends the first trigger.
 
+## Text in more than one language
+
+Every string a person reads — the strategy's `name` and `description`, a param's `displayName`,
+`description`, `hint`, `placeholder` and `section`, an enum option's `label`, a list column's name,
+an illustration's `title`, a preset's or picker's `title`/`description`, a Script's name and params,
+the plugin's `readme` — is a `Text`: a plain string (English) or a table with `en` required:
+
+```ts
+notionalUsd: z.number().positive().meta({
+  displayName: { en: 'Notional (USD)', 'zh-CN': '名义仓位（USD）' },
+  description: { en: 'Per leg. Every leg is this size.', 'zh-CN': '每条腿的名义金额，四条腿相同。' },
+}),
+```
+
+The gateway resolves every table for the reader's locale before a page sees it; a locale that
+is missing falls back to `en`. **Our own strategies carry `en` and `zh-CN` on every string.**
+Dynamic text — preset and picker cards, illustration figures, a Script's report — is yours to
+write in `ctx.locale` (`PresetContext.locale`, `ScriptContext.locale`; the illustration message
+carries `locale` too); core exports `resolveText(text, locale)` for the tables you keep yourself.
+
+A plugin that keeps its source in one language ships language packs instead, and an operator
+can lay their own over any plugin from `<dataDir>/i18n/<plugin>/<locale>.json`:
+
+```ts
+definePlugin({
+  i18n: { 'zh-CN': { 'strategies.fixed-rate-carry.name': '固定利率套利', 'strategies.fixed-rate-carry.params.legs.displayName': '四条腿', 'readme': '…' } },
+})
+```
+
+Paths: `strategies|monitors|executors|scripts|accounts.<local id>.<field>`, with
+`params.<name>.<field>` and `params.<name>.options.<value>.label` underneath, and `readme`.
+Never translate trace step names, log lines or ids — those are keys people grep for.
+
 ## Presets — named configurations, or a live ranking
 
 `paramPresets` is a static list: "conservative", "aggressive", "paper". Each names the fields

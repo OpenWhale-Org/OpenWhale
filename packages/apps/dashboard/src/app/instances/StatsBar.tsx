@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useT } from '@/i18n'
 
 /**
  * The four numbers that answer "is anything happening, and is it working" —
@@ -54,6 +55,7 @@ function Stat({ label, value, sub, color, title }: {
 }
 
 export function StatsBar({ refreshKey }: { refreshKey?: number }) {
+  const t = useT()
   const [stats, setStats] = useState<Stats | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -92,7 +94,7 @@ export function StatsBar({ refreshKey }: { refreshKey?: number }) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
       <Stat
-        label="Instances"
+        label={t('nav.instances')}
         value={String(instances.total)}
         color={idle ? 'var(--foreground)' : undefined}
         sub={
@@ -102,19 +104,19 @@ export function StatsBar({ refreshKey }: { refreshKey?: number }) {
         }
       />
       <Stat
-        label={`Runs · ${runs.windowHours}h`}
+        label={`${t('nav.runs')} · ${runs.windowHours}h`}
         value={compact(runs.runs)}
         sub={`${compact(runs.instructions)} instruction${runs.instructions === 1 ? '' : 's'}`}
-        title="Strategy evaluations recorded in the last 24 hours, and how many of them emitted an execution instruction"
+        title={t('stats.runsTitle')}
       />
       <Stat
-        label={`Events · ${coverage(events.coveredMs, events.windowHours)}`}
+        label={`${t('stats.events')} · ${coverage(events.coveredMs, events.windowHours)}`}
         value={compact(events.count)}
         sub="monitor emits"
-        title="Monitor emits counted since the gateway started — the live data flowing into your strategies"
+        title={t('stats.eventsTitle')}
       />
       <Stat
-        label="PnL"
+        label={t('pnl.pnl')}
         value={money(pnl.net)}
         color={pnlColor(pnl.net)}
         sub={`realized ${money(pnl.realized)} · funding ${money(pnl.funding)}`}

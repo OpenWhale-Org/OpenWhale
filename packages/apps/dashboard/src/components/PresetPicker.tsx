@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PresetCard, PresetTone } from '@openwhaleorg/core'
 import type { ParamPreset, PickerOption, PresetSource } from '@/lib/core-types'
 import { Modal } from '@/components/Modal'
+import { useT } from '@/i18n'
 
 /**
  * The preset picker, for presets that are more than a name.
@@ -91,7 +92,7 @@ export function CardPickerModal<T extends CardChoice>({ heading, load, current, 
       <div className="flex flex-col h-full min-h-0">
         <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex flex-col gap-0.5 min-w-0">
-            <h2 className="text-base font-semibold">{head?.title ?? 'Choose'}</h2>
+            <h2 className="text-base font-semibold">{head?.title ?? t('common.choose')}</h2>
             {head?.description && <p className="text-xs" style={{ color: 'var(--muted)' }}>{head.description}</p>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -102,10 +103,10 @@ export function CardPickerModal<T extends CardChoice>({ heading, load, current, 
             )}
             {load && (
               <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void run(true)}>
-                {loading ? 'Scanning…' : 'Refresh'}
+                {loading ? t('common.scanning') : t('common.refresh')}
               </button>
             )}
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>{t('common.close')}</button>
           </div>
         </div>
 
@@ -116,10 +117,10 @@ export function CardPickerModal<T extends CardChoice>({ heading, load, current, 
             </div>
           )}
           {loading && list.length === 0 && !error && (
-            <div className="text-sm py-10 text-center" style={{ color: 'var(--muted)' }}>Scanning the venue…</div>
+            <div className="text-sm py-10 text-center" style={{ color: 'var(--muted)' }}>{t('common.scanningVenue')}</div>
           )}
           {!loading && !error && list.length === 0 && (
-            <div className="text-sm py-10 text-center" style={{ color: 'var(--muted)' }}>Nothing to offer right now.</div>
+            <div className="text-sm py-10 text-center" style={{ color: 'var(--muted)' }}>{t('common.nothingToOffer')}</div>
           )}
 
           {plain.length > 0 && (
@@ -172,6 +173,7 @@ export function PresetPickerModal({ strategyId, source, presets: staticPresets, 
   onPick: (preset: ParamPreset) => void
   onClose: () => void
 }) {
+  const t = useT()
   const load = useCallback(async (refresh: boolean): Promise<Loaded<ParamPreset>> => {
     if (!source) return { items: staticPresets, computedAt: null }
     const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/presets`, {
@@ -183,12 +185,12 @@ export function PresetPickerModal({ strategyId, source, presets: staticPresets, 
   }, [strategyId, source, staticPresets, accounts, params])
   return (
     <CardPickerModal<ParamPreset>
-      heading={source ?? { title: 'Presets' }}
+      heading={source ?? { title: t('params.presets') }}
       load={load}
       current={current}
       onPick={onPick}
       onClose={onClose}
-      footer="Choosing one fills the fields it names; everything stays editable."
+      footer={t('params.preset.footer')}
     />
   )
 }
@@ -204,6 +206,7 @@ export function FieldPickerModal({ strategyId, pickerId, heading, accounts, para
   onPick: (option: PickerOption) => void
   onClose: () => void
 }) {
+  const t = useT()
   const load = useCallback(async (refresh: boolean): Promise<Loaded<PickerOption>> => {
     const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/pickers/${encodeURIComponent(pickerId)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accounts, params, refresh }),
@@ -214,7 +217,7 @@ export function FieldPickerModal({ strategyId, pickerId, heading, accounts, para
   }, [strategyId, pickerId, accounts, params])
   return (
     <CardPickerModal<PickerOption>
-      heading={heading ?? { title: 'Choose' }}
+      heading={heading ?? { title: t('common.choose') }}
       load={load}
       current={current}
       onPick={onPick}
