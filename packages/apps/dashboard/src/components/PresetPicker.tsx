@@ -52,6 +52,7 @@ export function CardPickerModal<T extends CardChoice>({ heading, load, current, 
   onClose: () => void
   footer?: string
 } & { items?: T[] }) {
+  const t = useT()
   const [list, setList] = useState<T[]>([])
   const [head, setHead] = useState<PresetSource | undefined>(heading)
   const [computedAt, setComputedAt] = useState<number | null>(null)

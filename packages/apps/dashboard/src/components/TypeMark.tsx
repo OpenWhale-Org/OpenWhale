@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { CredentialTypeInfo } from '@openwhaleorg/core'
+import type { CredentialTypeInfo } from '@/lib/core-types'
 
 /**
  * A type's mark: its logo, else its glyph, else the first letter of its name.

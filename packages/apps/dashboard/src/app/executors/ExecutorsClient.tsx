@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
-import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
+import type { CredentialInfo } from '@openwhaleorg/core'
+import type { CredentialTypeInfo } from '@/lib/core-types'
 import { LogsPanel } from '@/components/LogsPanel'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
 

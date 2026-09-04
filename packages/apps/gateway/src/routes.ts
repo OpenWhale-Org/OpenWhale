@@ -258,9 +258,9 @@ export function buildRouter(): Router {
 
   // ── credentials ─────────────────────────────────────────────────────────────
 
-  router.get('/api/credential-types', h(async (_req, res) => {
+  router.get('/api/credential-types', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(runtime.describeCredentialTypes())
+    res.json(localize(runtime.describeCredentialTypes(), localeOf(req)))
   }))
 
   router.post('/api/credential-types/:type/test', h(async (req, res) => {

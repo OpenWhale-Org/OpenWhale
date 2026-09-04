@@ -280,6 +280,7 @@ export function useParamsJson(
   values: ParamValues,
   setValues: (next: ParamValues) => void,
 ): ParamsJson {
+  const t = useT()
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState('')
 

@@ -19,6 +19,7 @@ import type {
   AccountImplementationInfo as RawAccountImplementationInfo,
   LoadedPluginInfo as RawLoadedPluginInfo,
   MonitorInstanceView as RawMonitorInstanceView,
+  CredentialTypeInfo as RawCredentialTypeInfo,
 } from '@openwhaleorg/core'
 
 export type StrategyDefinition = Localized<RawStrategyDefinition>
@@ -34,3 +35,4 @@ export type ScriptInfo = Localized<RawScriptInfo>
 export type AccountImplementationInfo = Localized<RawAccountImplementationInfo>
 export type LoadedPluginInfo = Localized<RawLoadedPluginInfo>
 export type MonitorInstanceView = Localized<RawMonitorInstanceView>
+export type CredentialTypeInfo = Localized<RawCredentialTypeInfo>

@@ -10,7 +10,8 @@
  * still renders when the gateway is down — the SSE status dot goes red.
  */
 import { cookies } from 'next/headers'
-import type { StrategyInstance, StrategyInstanceView, CredentialInfo, CredentialTypeInfo, AccountView, AccountSnapshotRecord } from '@openwhaleorg/core'
+import type { StrategyInstance, StrategyInstanceView, CredentialInfo, AccountView, AccountSnapshotRecord } from '@openwhaleorg/core'
+import type { CredentialTypeInfo } from '@/lib/core-types'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, AccountImplementationInfo, MonitorInstanceView, LoadedPluginInfo } from '@/lib/core-types'
 import type { AuthUser } from './auth'
 

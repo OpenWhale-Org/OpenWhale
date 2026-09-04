@@ -85,7 +85,7 @@ export type AccountColumnFormat = 'text' | 'mono' | 'number' | 'usd' | 'pct' | '
 export interface AccountColumnDef {
   /** Field on each row. */
   key: string
-  label: string
+  label: Text
   format?: AccountColumnFormat
   /** Decimal places for number/usd/pct/signed. */
   digits?: number
@@ -97,7 +97,7 @@ export interface AccountColumnDef {
 export interface AccountSectionDef {
   /** Reader method to call — must return rows (table) or an object (keyvalue). */
   method: string
-  title: string
+  title: Text
   kind: 'table' | 'keyvalue'
   columns?: AccountColumnDef[]
   /** Show the row count on the tab. */

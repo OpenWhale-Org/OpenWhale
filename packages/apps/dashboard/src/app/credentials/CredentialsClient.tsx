@@ -5,7 +5,8 @@ import { Rail, RailItem } from '../../components/Rail'
 import { Modal } from '@/components/Modal'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
 import { TypeMark } from '@/components/TypeMark'
-import type { CredentialInfo, CredentialTypeInfo } from '@openwhaleorg/core'
+import type { CredentialInfo } from '@openwhaleorg/core'
+import type { CredentialTypeInfo } from '@/lib/core-types'
 import { Switch } from '@/components/Switch'
 
 interface Props {
