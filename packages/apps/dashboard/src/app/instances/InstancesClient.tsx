@@ -352,7 +352,28 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
  * can draw diagrams that react to what the user is typing. Scripts run, but
  * same-origin is denied — the page can't touch the dashboard or its cookies.
  */
-function IllustrationFrame({ ill, values, data, dataError, pending }: { ill: ParamIllustration; values: Record<string, string>; data?: Record<string, unknown> | undefined; dataError?: string | undefined; pending?: boolean | undefined }) {
+/**
+ * Credential-type → logo, once per page. An illustration that draws a venue
+ * wants its mark; the types endpoint already carries every logo the
+ * Accounts page shows, so the frame is handed the map and looks venues up
+ * by their credential type (`gate`, `hyperliquid`, `pendle/boros-agent`).
+ */
+let logosPromise: Promise<Record<string, string>> | undefined
+function useVenueLogos(): Record<string, string> {
+  const [logos, setLogos] = useState<Record<string, string>>({})
+  useEffect(() => {
+    logosPromise ??= fetch('/api/credential-types')
+      .then(r => r.json() as Promise<Array<{ type: string; logo?: string }>>)
+      .then(list => Object.fromEntries(list.filter(t => t.logo).map(t => [t.type, t.logo!])))
+      .catch(() => ({}))
+    let gone = false
+    void logosPromise.then(m => { if (!gone) setLogos(m) })
+    return () => { gone = true }
+  }, [])
+  return logos
+}
+
+function IllustrationFrame({ ill, values, data, dataError, pending, logos }: { ill: ParamIllustration; values: Record<string, string>; data?: Record<string, unknown> | undefined; dataError?: string | undefined; pending?: boolean | undefined; logos?: Record<string, string> | undefined }) {
   const ref = useRef<HTMLIFrameElement>(null)
   /* A page that reports its own height gets it: fixed heights clip a picture
      that reflows with the panel's width. Until it reports, the declared one. */
@@ -366,8 +387,8 @@ function IllustrationFrame({ ill, values, data, dataError, pending }: { ill: Par
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [])
-  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}), pending: pending === true }, '*')
-  useEffect(() => { post() }, [values, data, dataError, pending])   // eslint-disable-line react-hooks/exhaustive-deps
+  const post = () => ref.current?.contentWindow?.postMessage({ type: 'ow-params', values, ...(data ? { data } : {}), ...(dataError ? { dataError } : {}), pending: pending === true, logos: logos ?? {} }, '*')
+  useEffect(() => { post() }, [values, data, dataError, pending, logos])   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-1">
       {ill.title && <span className="text-xs" style={{ color: 'var(--muted)' }}>{ill.title}</span>}
@@ -502,6 +523,7 @@ export function ParamFieldsForm({
   const [illData, setIllData] = useState<Record<string, unknown> | undefined>(undefined)
   const [illError, setIllError] = useState<string | undefined>(undefined)
   const [illPending, setIllPending] = useState(false)
+  const venueLogos = useVenueLogos()
   const illParams = JSON.stringify(buildParamsFromFields(fields, values))
   const illAccounts = JSON.stringify(slotBindings ?? {})
   useEffect(() => {
@@ -850,7 +872,7 @@ export function ParamFieldsForm({
           </span>
         </div>
       )}
-      {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
+      {illsFor('').map((ill, i) => <IllustrationFrame key={`top-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} logos={venueLogos} />)}
       {baseFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Base Parameters</label>
@@ -859,7 +881,7 @@ export function ParamFieldsForm({
           </div>
         </div>
       )}
-      {illsPlaced('after-base').map((ill, i) => <IllustrationFrame key={`after-base-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
+      {illsPlaced('after-base').map((ill, i) => <IllustrationFrame key={`after-base-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} logos={venueLogos} />)}
       {tunableFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -914,7 +936,7 @@ export function ParamFieldsForm({
                   {!isCollapsed && (
                     <div className="flex flex-col gap-3 p-3" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
                       {fieldsIn(sec).map(renderField)}
-                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
+                      {sec !== '' && illsFor(sec).map((ill, i) => <IllustrationFrame key={`${sec}-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} logos={venueLogos} />)}
                     </div>
                   )}
                 </div>
@@ -923,7 +945,7 @@ export function ParamFieldsForm({
           </div>
         </div>
       )}
-      {illsPlaced('bottom').map((ill, i) => <IllustrationFrame key={`bottom-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} />)}
+      {illsPlaced('bottom').map((ill, i) => <IllustrationFrame key={`bottom-${i}`} ill={ill} values={values} data={illData} dataError={illError} pending={illPending} logos={venueLogos} />)}
     </div>
   )
 }

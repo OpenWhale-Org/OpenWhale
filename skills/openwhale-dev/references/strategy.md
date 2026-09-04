@@ -233,7 +233,9 @@ override async illustrationData(ctx: PresetContext): Promise<Record<string, unkn
 The Dashboard calls it, debounced, whenever the form changes, and posts the answer to every frame
 as `data` (a throw arrives as `dataError`; `pending: true` while a newer answer is on its way, so
 the page can dim what it shows). A page that posts `{ type: 'ow-size', height }` to its parent
-gets that height — do it after every render, so nothing is clipped at any panel width. Same probe rules as `presets()`: keyless adapters, no
+gets that height — do it after every render, so nothing is clipped at any panel width. The
+message also carries `logos`: credential type → logo URL (`gate`, `hyperliquid`,
+`pendle/boros-agent`, …), the marks the Accounts page draws, for a picture that names venues. Same probe rules as `presets()`: keyless adapters, no
 store; the runtime caches by form state for 15 s. Keep the arithmetic here and let the page only
 format — one estimator, the strategy's own, for the trace, the presets and the picture.
 
