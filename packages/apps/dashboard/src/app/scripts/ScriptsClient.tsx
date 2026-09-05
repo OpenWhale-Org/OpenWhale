@@ -595,6 +595,7 @@ function FieldInput({ field, value, onChange }: { field: ParamFieldDef; value: s
     <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }}>
       <span>
         {field.displayName ?? field.name}
+        {field.unit && <span style={{ color: 'var(--muted)' }}>（{field.unit}）</span>}
         {field.description && <span title={field.description}> ⓘ</span>}
       </span>
       {field.multiple && field.options ? (
