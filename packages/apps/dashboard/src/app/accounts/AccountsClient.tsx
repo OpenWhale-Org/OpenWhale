@@ -12,6 +12,7 @@ import { EquityChart } from './EquityChart'
 import { AccountDetail } from './AccountDetail'
 import { AccountPicker, eligibleCredentialsFor } from './AccountPicker'
 import { CredentialMark } from '@/components/TypeMark'
+import { useT, type MessageKey } from '@/i18n'
 
 interface Props {
   initialAccounts: AccountView[]
@@ -34,7 +35,8 @@ function formatUsd(v: number): string {
 type SortMode = 'manual' | 'equity' | 'name'
 const SORT_KEY = 'ow.accounts.sort'
 const ORDER_KEY = 'ow.accounts.order'
-const SORT_LABEL: Record<SortMode, string> = { manual: 'Manual', equity: 'Equity ↓', name: 'Name A–Z' }
+const SORT_LABEL: Record<SortMode, MessageKey> = { manual: 'accounts.sort.manual', equity: 'accounts.sort.equity', name: 'accounts.sort.name' }
+const STATUS_LABEL: Record<AccountView['status'], MessageKey> = { ready: 'accounts.status.ready', inactive: 'accounts.status.inactive', broken: 'accounts.status.broken' }
 
 function readSort(): SortMode {
   try {
@@ -91,6 +93,7 @@ function Sparkline({ account, tick, width, height }: { account: string; tick: nu
  * executors write them; an account without a credential exists but is inactive.
  */
 export function AccountsClient({ initialAccounts, initialSnapshots, implementations, credentials, credentialTypes }: Props) {
+  const t = useT()
   const [accounts, setAccounts] = useState(initialAccounts)
   const [snapshots, setSnapshots] = useState(initialSnapshots)
   /** Which account the right pane is showing. */
@@ -156,7 +159,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
     setError('')
     const res = await fetch(`/api/accounts/${encodeURIComponent(accountName)}`, { method: 'DELETE' })
     if (!res.ok) {
-      setError(((await res.json()) as { error?: string }).error ?? 'delete failed')
+      setError(((await res.json()) as { error?: string }).error ?? t('accounts.deleteFailed'))
       return
     }
     afterRemoved(accountName)
@@ -170,7 +173,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: account.name, implementation: account.implementation, ...(credentialName ? { credential: credentialName } : {}), ...(account.params !== undefined ? { params: account.params } : {}) }),
     })
-    if (!res.ok) setError(((await res.json()) as { error?: string }).error ?? 'rebind failed')
+    if (!res.ok) setError(((await res.json()) as { error?: string }).error ?? t('accounts.rebindFailed'))
     await refresh()
   }
 
@@ -183,7 +186,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         const data = await res.json() as { accounts: AccountView[]; snapshots: Record<string, AccountSnapshotRecord> }
         setAccounts(data.accounts)
         setSnapshots(data.snapshots)
-        setSparkTick(t => t + 1)
+        setSparkTick(n => n + 1)
         const failed = data.accounts.filter(a => a.snapshotError)
         if (failed.length > 0) {
           setError(failed.map(a => `${a.name}: ${a.snapshotError}`).join(' · '))
@@ -248,21 +251,21 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
           header={
             <div className="px-3 py-2.5 flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <div className="text-xs" style={{ color: 'var(--muted)' }}>Total equity · {accounts.length} accounts</div>
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.totalEquity', { n: accounts.length })}</div>
                 <div className="text-xl font-mono mt-0.5">{formatUsd(totalEquity)}</div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{SORT_LABEL[sort]}</span>
-                <KebabMenu title="Sort">
+                <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{t(SORT_LABEL[sort])}</span>
+                <KebabMenu title={t('accounts.sort')}>
                   {(close) => (
                     <>
-                      <div className="px-3 pt-1.5 pb-1 text-xs" style={{ color: 'var(--muted)' }}>SORT</div>
+                      <div className="px-3 pt-1.5 pb-1 text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.sortHeading')}</div>
                       {(Object.keys(SORT_LABEL) as SortMode[]).map(m => (
                         <button key={m} type="button" className={`${MENU_ITEM} flex items-center gap-2`} style={{ color: 'var(--foreground)' }}
                           onClick={() => { changeSort(m); close() }}>
                           <span style={{ color: m === sort ? 'var(--accent)' : 'var(--muted)' }}>{m === sort ? '●' : '○'}</span>
-                          {SORT_LABEL[m]}
-                          {m === 'manual' && <span className="ml-auto text-[11px]" style={{ color: 'var(--muted)' }}>drag rows</span>}
+                          {t(SORT_LABEL[m])}
+                          {m === 'manual' && <span className="ml-auto text-[11px]" style={{ color: 'var(--muted)' }}>{t('accounts.dragRows')}</span>}
                         </button>
                       ))}
                     </>
@@ -279,14 +282,14 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                 className="flex-1 h-8 rounded-md text-xs flex items-center justify-center gap-1.5"
                 style={{ background: 'var(--accent)', color: '#fff' }}
               >
-                ＋ New account
+                {t('accounts.new')}
               </button>
               <button
                 onClick={() => void sampleNow()}
                 disabled={busy}
                 className="h-8 px-2.5 rounded-md text-xs"
                 style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: busy ? 0.6 : 1 }}
-                title="Take an equity snapshot of every account right now (normally sampled every 5 minutes)"
+                title={t('accounts.snapshotNowTitle')}
               >
                 {busy ? '…' : '⟳'}
               </button>
@@ -295,7 +298,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         >
           {accounts.length === 0 && (
             <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
-              No accounts yet. Strategies read accounts; executors write them.
+              {t('accounts.empty')}
             </p>
           )}
           {ordered.map((a) => {
@@ -316,15 +319,15 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                       <span className="relative flex flex-col items-end justify-center gap-0.5" style={{ minWidth: 120, minHeight: 34 }}>
                         <Sparkline account={a.name} tick={sparkTick} width={120} height={34} />
                         <span className="relative text-sm font-mono" style={{ color: latest ? 'var(--foreground)' : 'var(--muted)' }}>{latest ? formatUsd(latest.equity) : '—'}</span>
-                        {a.status !== 'ready' && <span className="relative text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{a.status}</span>}
-                        {a.snapshotError && <span className="relative cursor-help" style={{ color: 'var(--danger)' }} title={`Last snapshot failed: ${a.snapshotError}`}>⚠</span>}
+                        {a.status !== 'ready' && <span className="relative text-[11px] px-1.5 rounded-full" style={statusStyle(a.status)}>{t(STATUS_LABEL[a.status])}</span>}
+                        {a.snapshotError && <span className="relative cursor-help" style={{ color: 'var(--danger)' }} title={t('accounts.lastSnapshotFailed', { error: a.snapshotError })}>⚠</span>}
                       </span>
                     }
                   />
                 </div>
                 {sort === 'manual' && (
                   <span className="flex items-center pr-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
-                    <DragHandle title="Drag to reorder" onPointerDown={(e) => beginDrag('folder', a.name, e)} />
+                    <DragHandle title={t('accounts.dragToReorder')} onPointerDown={(e) => beginDrag('folder', a.name, e)} />
                   </span>
                 )}
               </div>
@@ -339,7 +342,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         >
           {!selected ? (
             <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>
-              Pick an account.
+              {t('accounts.pickOne')}
             </div>
           ) : (
             <>
@@ -354,7 +357,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                   <div className="flex items-center gap-2">
                     <span className="text-base font-medium truncate">{selected.name}</span>
                     <span className="px-2 py-0.5 rounded-full text-xs shrink-0" style={statusStyle(selected.status)} title={selected.problem}>
-                      {selected.status}{selected.problem ? ' ⓘ' : ''}
+                      {t(STATUS_LABEL[selected.status])}{selected.problem ? ' ⓘ' : ''}
                     </span>
                   </div>
                   <div className="text-xs font-mono mt-0.5 truncate" style={{ color: 'var(--muted)' }}>
@@ -365,7 +368,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                   <div className="text-2xl font-mono">
                     {snapshots[selected.name] ? formatUsd(snapshots[selected.name]!.equity) : '—'}
                   </div>
-                  <div className="text-xs" style={{ color: 'var(--muted)' }}>equity</div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.equity')}</div>
                 </div>
               </div>
 
@@ -375,14 +378,14 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
               </div>
 
               <div className="shrink-0 flex items-center gap-2 px-4 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
-                <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>Credential</span>
+                <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>{t('accounts.credential')}</span>
                 <Select
                   size="sm"
                   className="flex-1 min-w-0"
                   value={selected.credential ?? ''}
                   onChange={(v) => void rebind(selected, v)}
                   options={[
-                    { value: '', label: '— unbound —' },
+                    { value: '', label: t('accounts.unbound') },
                     ...rebindableFor(selected).map(c => ({
                       value: c.name, label: c.name, hint: c.type,
                       mark: <CredentialMark credential={c.name} credentials={credentials} credentialTypes={credentialTypes} size={18} />,
@@ -403,7 +406,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
                     ? { color: '#fff', background: 'var(--danger, #ef4444)', border: '1px solid var(--danger, #ef4444)' }
                     : { color: 'var(--danger, #ef4444)', border: '1px solid var(--border)' }}
                 >
-                  {confirmDelete === selected.name ? 'Delete for good?' : 'Delete'}
+                  {confirmDelete === selected.name ? t('common.deleteConfirm') : t('common.delete')}
                 </button>
               </div>
             </>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ParamFieldCatalogue } from '@openwhaleorg/core'
 import { useAnchoredPlacement } from './popover'
+import { useT } from '@/i18n'
 
 /**
  * Searchable market picker — the symbol equivalent of a select, for a
@@ -89,6 +90,7 @@ export function SymbolPicker({
   /** Multi-select: value is a CSV of symbols, dropdown rows toggle with checkboxes. */
   multiple?: boolean
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [markets, setMarkets] = useState<MarketInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -213,7 +215,7 @@ export function SymbolPicker({
         onChange={(e) => { multiple ? setQuery(e.target.value) : onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder={multiple && chosen.length > 0 ? 'Search to add more…' : placeholder}
+        placeholder={multiple && chosen.length > 0 ? t('params.searchMore') : placeholder}
         title={title}
         required={required && !(multiple && chosen.length > 0)}
         autoComplete="off"

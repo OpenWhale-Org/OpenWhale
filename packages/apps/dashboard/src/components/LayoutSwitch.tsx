@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useT, type MessageKey } from '@/i18n'
 
 /**
  * Grid-or-list, remembered per page.
@@ -21,6 +22,18 @@ export const LAYOUTS: readonly LayoutOption[] = [
 ]
 
 export type LayoutId = string
+
+/**
+ * The catalogue entries for the layouts the app registers. LAYOUTS above is a
+ * module-level constant that pages extend before any hook can run, so the
+ * option carries its English and the switch looks the id up at render time;
+ * an id not listed here shows the option's own label and hint.
+ */
+const LAYOUT_TEXT: Record<string, { label: MessageKey; hint: MessageKey }> = {
+  grid: { label: 'ui.layout.grid', hint: 'ui.layout.gridHint' },
+  list: { label: 'ui.layout.list', hint: 'ui.layout.listHint' },
+  whale: { label: 'ui.layout.whale', hint: 'ui.layout.whaleHint' },
+}
 
 /**
  * `key` namespaces the preference per page, e.g. 'ow:instances-layout'.
@@ -48,13 +61,14 @@ export function LayoutSwitch({ value, onChange, options = LAYOUTS }: {
   onChange: (id: LayoutId) => void
   options?: readonly LayoutOption[]
 }) {
+  const t = useT()
   return (
     <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       {options.map(l => (
         <button
           key={l.id}
           onClick={() => onChange(l.id)}
-          title={l.hint}
+          title={LAYOUT_TEXT[l.id] ? t(LAYOUT_TEXT[l.id]!.hint) : l.hint}
           aria-pressed={value === l.id}
           className="px-2 py-1 text-xs flex items-center gap-1.5"
           style={{
@@ -63,7 +77,7 @@ export function LayoutSwitch({ value, onChange, options = LAYOUTS }: {
           }}
         >
           <span aria-hidden>{l.glyph}</span>
-          {l.label}
+          {LAYOUT_TEXT[l.id] ? t(LAYOUT_TEXT[l.id]!.label) : l.label}
         </button>
       ))}
     </div>

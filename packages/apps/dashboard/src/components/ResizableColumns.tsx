@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
+import { useT } from '@/i18n'
 
 /**
  * Column-width state for a fixed-layout table: drag the right edge of a
@@ -41,11 +42,12 @@ export function useColumnWidths(tableId: string, keys: string[], growKey: string
 
 /** The drag handle to drop at the right edge of a <th> (the th needs `position: relative`). */
 export function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }): ReactNode {
+  const t = useT()
   return (
     <span
       onMouseDown={onMouseDown}
       onClick={(e) => e.stopPropagation()}
-      title="Drag to resize"
+      title={t('ui.dragToResize')}
       className="absolute top-0 right-0 h-full cursor-col-resize select-none"
       style={{ width: 8 }}
       aria-hidden

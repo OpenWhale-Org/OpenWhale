@@ -5,6 +5,7 @@ import { Rail, RailItem } from '@/components/Rail'
 import type { CompileJob, DraftFile } from '@openwhaleorg/compiler'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { CodeEditor } from '@/components/CodeEditor'
+import { useT, type MessageKey } from '@/i18n'
 
 /**
  * The compiler as a workbench: sessions on the left (LLM settings tucked
@@ -16,14 +17,25 @@ import { CodeEditor } from '@/components/CodeEditor'
 
 const ACTIVE_STATUSES = new Set(['analyzing', 'generating', 'validating'])
 
-const STATUS_LABEL: Record<string, string> = {
-  analyzing: 'Analyzing…',
-  awaiting_confirmation: 'Awaiting confirmation',
-  generating: 'Generating…',
-  validating: 'Validating…',
-  draft: 'Draft ready',
-  failed: 'Failed',
-  approved: 'Registered',
+const STATUS_LABEL: Record<string, MessageKey> = {
+  analyzing: 'compiler.status.analyzing',
+  awaiting_confirmation: 'compiler.status.awaiting',
+  generating: 'compiler.status.generating',
+  validating: 'compiler.status.validating',
+  draft: 'compiler.status.draft',
+  failed: 'compiler.status.failed',
+  approved: 'compiler.status.approved',
+}
+
+type T = ReturnType<typeof useT>
+
+function statusLabel(t: T, status: string): string {
+  const key = STATUS_LABEL[status]
+  return key ? t(key) : status
+}
+
+function issuesLabel(t: T, n: number): string {
+  return n === 1 ? t('compiler.validation.issueOne') : t('compiler.validation.issueMany', { n })
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -34,10 +46,11 @@ const STATUS_COLOR: Record<string, string> = {
 
 /** Compiled output is categorized by kind — the tabs over the editor, one hue each. */
 const KIND_ORDER = ['strategies', 'monitors', 'executors'] as const
-const KIND_LABEL: Record<string, string> = { strategies: 'Strategy', monitors: 'Monitor', executors: 'Executor' }
+const KIND_LABEL: Record<string, MessageKey> = { strategies: 'compiler.kind.strategy', monitors: 'compiler.kind.monitor', executors: 'compiler.kind.executor' }
 const KIND_COLOR: Record<string, string> = { strategies: 'var(--accent)', monitors: 'var(--success)', executors: 'var(--warning)' }
 
 export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
+  const t = useT()
   const [jobs, setJobs] = useState(initialJobs)
   const [selectedId, setSelectedId] = useState<string | null>(initialJobs[0]?.id ?? null)
   const [creating, setCreating] = useState(false)
@@ -96,7 +109,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
         width="17rem"
         header={
           <div className="px-3 py-2 text-xs font-semibold flex items-center justify-between" style={{ color: 'var(--muted)' }}>
-            <span>SESSIONS</span>
+            <span>{t('compiler.sessions')}</span>
             <button
               onClick={() => { setSelectedId(null); setError('') }}
               className="px-2 py-0.5 rounded-md text-xs"
@@ -106,7 +119,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
                 background: selectedId === null ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
               }}
             >
-              + New
+              {t('compiler.new')}
             </button>
           </div>
         }
@@ -118,7 +131,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
           <>
             {jobs.length === 0 && (
               <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
-                No compile sessions yet — describe a strategy below.
+                {t('compiler.noSessions')}
               </p>
             )}
             {jobs.map(job => (
@@ -130,7 +143,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
                 subtitle={
                   <span style={{ color: STATUS_COLOR[job.status] ?? 'var(--muted)' }}>
                     {ACTIVE_STATUSES.has(job.status) && <span className="animate-pulse">● </span>}
-                    {STATUS_LABEL[job.status] ?? job.status}
+                    {statusLabel(t, job.status)}
                   </span>
                 }
               />
@@ -148,7 +161,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
             className="flex-1 rounded-lg grid place-items-center text-sm text-center px-8"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}
           >
-            Describe a strategy below — the AI analyzes it, you confirm, it writes and validates the code, you review and approve.
+            {t('compiler.emptyHint')}
           </div>
         )}
         <InputZone
@@ -220,6 +233,7 @@ function SettingsPanel({ state, onChange, centered }: {
   onChange: (next: LlmSettingsState) => void
   centered?: boolean
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState('')
   const llmCredentials = state.credentials.filter(c => state.llmTypes.includes(c.type))
@@ -245,7 +259,7 @@ function SettingsPanel({ state, onChange, centered }: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: state.model, ...(state.credentialName ? { credentialName: state.credentialName } : {}) }),
     })
-    setStatus(res.ok ? '✓ saved' : await res.text())
+    setStatus(res.ok ? t('compiler.llm.saved') : await res.text())
     if (res.ok) onChange({ ...state, saved: { model: state.model, credentialName: state.credentialName } })
   }
 
@@ -257,7 +271,7 @@ function SettingsPanel({ state, onChange, centered }: {
         className="rounded-md px-2 py-1.5 text-xs w-full"
         style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
       >
-        <option value="">{llmCredentials.length === 0 ? 'No LLM credential — add one on Credentials' : 'Choose an LLM credential…'}</option>
+        <option value="">{llmCredentials.length === 0 ? t('compiler.llm.noCredential') : t('compiler.llm.chooseCredential')}</option>
         {llmCredentials.map(c => <option key={c.name} value={c.name}>{c.name} · {c.type}</option>)}
       </select>
       <div className="flex gap-2">
@@ -266,7 +280,7 @@ function SettingsPanel({ state, onChange, centered }: {
           onChange={(e) => setModelName(e.target.value)}
           list="ow-llm-models"
           disabled={!provider}
-          placeholder={provider ? `model for ${provider}` : 'pick a credential first'}
+          placeholder={provider ? t('compiler.llm.modelFor', { provider }) : t('compiler.llm.pickCredentialFirst')}
           className="rounded-md px-2.5 py-1.5 font-mono text-xs flex-1 min-w-0"
           style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', opacity: provider ? 1 : 0.6 }}
         />
@@ -274,10 +288,10 @@ function SettingsPanel({ state, onChange, centered }: {
           {suggestions.map(m => <option key={m} value={m} />)}
         </datalist>
         <button onClick={() => void save()} disabled={!provider || !modelName} className="px-3 py-1.5 rounded-md text-xs shrink-0" style={{ background: 'var(--accent)', color: '#fff', opacity: !provider || !modelName ? 0.5 : 1 }}>
-          Save
+          {t('common.save')}
         </button>
       </div>
-      {status && <span className="text-xs truncate" style={{ color: status.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{status}</span>}
+      {status &&<span className="text-xs truncate" style={{ color: status.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{status}</span>}
     </div>
   )
 
@@ -286,8 +300,8 @@ function SettingsPanel({ state, onChange, centered }: {
       <div className="flex-1 min-h-0 grid place-items-center p-4">
         <div className="w-full flex flex-col gap-3">
           <div className="text-center">
-            <div className="text-sm font-medium">Set up the compiler LLM</div>
-            <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Pick a credential, then the model it should drive.</div>
+            <div className="text-sm font-medium">{t('compiler.llm.setupTitle')}</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{t('compiler.llm.setupHint')}</div>
           </div>
           {fields}
         </div>
@@ -316,6 +330,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
   onAct: (body: Record<string, unknown>) => Promise<void>
   onChanged: () => void
 }) {
+  const t = useT()
   const version = job.versions.at(-1)
   const [activeFile, setActiveFile] = useState(0)
   const [editing, setEditing] = useState<Record<string, string>>({})
@@ -397,10 +412,10 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
                   borderBottom: `2px solid ${active ? color : 'transparent'}`,
                   marginBottom: '-1px',
                 }}
-                title={`${f.kind}/${f.id}.ts${f.kind === 'executors' ? ' — write-capable code, review line by line' : ''}`}
+                title={`${f.kind}/${f.id}.ts${f.kind === 'executors' ? ` — ${t('compiler.file.executorWarn')}` : ''}`}
               >
                 <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-                <span className="font-medium">{KIND_LABEL[kind] ?? kind}</span>
+                <span className="font-medium">{KIND_LABEL[kind] ? t(KIND_LABEL[kind]) : kind}</span>
                 <span className="font-mono opacity-70">{f.id}</span>
                 {f.kind === 'executors' && <span style={{ color: 'var(--danger)' }}>⚠</span>}
                 {editing[`${f.kind}/${f.id}`] !== undefined && <span style={{ color }}>•</span>}
@@ -410,7 +425,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
         {!showCode && (
           <span className="px-1 py-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
             {ACTIVE_STATUSES.has(job.status) && <span className="animate-pulse" style={{ color: 'var(--accent)' }}>● </span>}
-            AGENT · {STATUS_LABEL[job.status] ?? job.status}
+            {t('compiler.agent')} · {statusLabel(t, job.status)}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2 py-1.5">
@@ -420,19 +435,19 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
               style={validation.passed
                 ? { background: 'var(--success-soft)', color: 'var(--success)' }
                 : { background: 'var(--danger-soft)', color: 'var(--danger)' }}
-              title={validation.passed ? 'L1–L4 validation passed' : validation.issues.map(i => `[${i.level}] ${i.message}`).join('\n')}
+              title={validation.passed ? t('compiler.validation.passed') : validation.issues.map(i => `[${i.level}] ${i.message}`).join('\n')}
             >
-              {validation.passed ? '✓ L1–L4' : `✗ ${validation.issues.length} issue${validation.issues.length === 1 ? '' : 's'}`}
+              {validation.passed ? t('compiler.validation.ok') : issuesLabel(t, validation.issues.length)}
             </span>
           )}
           {dirty && (
             <button onClick={revalidateEdits} disabled={busy} className="text-xs px-2.5 py-1 rounded-md" style={{ border: '1px solid var(--accent)', color: 'var(--foreground)' }}>
-              Re-validate edits
+              {t('compiler.revalidateEdits')}
             </button>
           )}
           {version && (
             <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-              {([['code', 'Code'], ['split', 'Split'], ['chat', 'Chat']] as const).map(([key, label]) => (
+              {([['code', 'compiler.view.code'], ['split', 'compiler.view.split'], ['chat', 'compiler.view.chat']] as const).map(([key, label]) => (
                 <button
                   key={key}
                   onClick={() => pickView(key)}
@@ -442,7 +457,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
                     color: view === key ? 'var(--foreground)' : 'var(--muted)',
                   }}
                 >
-                  {label}
+                  {t(label)}
                 </button>
               ))}
             </div>
@@ -450,7 +465,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
           {version && (
             <button
               onClick={() => setMaximized(true)}
-              title="Maximize the editor (Esc to return)"
+              title={t('compiler.maximize')}
               className="text-xs px-2 py-1 rounded-md"
               style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
             >
@@ -462,7 +477,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
             className="text-xs px-2 py-1 rounded-md"
             style={{ color: 'var(--danger)', border: '1px solid var(--border)' }}
           >
-            Delete
+            {t('common.delete')}
           </button>
         </div>
       </div>
@@ -498,14 +513,14 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
               ))}
             </div>
             <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
-              Edits are type-checked live; Re-validate runs L1–L4.
+              {t('compiler.editsHint')}
             </div>
           </aside>
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex items-center gap-2 px-3 shrink-0" style={{ height: 40, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
               <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: KIND_COLOR[file.kind] }} />
               <span className="text-xs font-mono">{file.kind}/{file.id}.ts</span>
-              {file.kind === 'executors' && <span className="text-xs" style={{ color: 'var(--danger)' }}>⚠ write-capable</span>}
+              {file.kind === 'executors' && <span className="text-xs" style={{ color: 'var(--danger)' }}>{t('compiler.writeCapable')}</span>}
               <div className="ml-auto flex items-center gap-2">
                 {validation && (
                   <span
@@ -513,19 +528,19 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
                     style={validation.passed
                       ? { background: 'var(--success-soft)', color: 'var(--success)' }
                       : { background: 'var(--danger-soft)', color: 'var(--danger)' }}
-                    title={validation.passed ? 'L1–L4 validation passed' : validation.issues.map(i => `[${i.level}] ${i.message}`).join('\n')}
+                    title={validation.passed ? t('compiler.validation.passed') : validation.issues.map(i => `[${i.level}] ${i.message}`).join('\n')}
                   >
-                    {validation.passed ? '✓ L1–L4' : `✗ ${validation.issues.length} issue${validation.issues.length === 1 ? '' : 's'}`}
+                    {validation.passed ? t('compiler.validation.ok') : issuesLabel(t, validation.issues.length)}
                   </span>
                 )}
                 {dirty && (
                   <button onClick={revalidateEdits} disabled={busy} className="text-xs px-2.5 py-1 rounded-md" style={{ border: '1px solid var(--accent)', color: 'var(--foreground)' }}>
-                    Re-validate edits
+                    {t('compiler.revalidateEdits')}
                   </button>
                 )}
                 <button
                   onClick={() => setMaximized(false)}
-                  title="Return to the workbench (Esc)"
+                  title={t('compiler.restore')}
                   className="text-xs px-2 py-1 rounded-md"
                   style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
                 >
@@ -572,7 +587,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
             onMouseDown={startDrag}
             className="shrink-0 group cursor-col-resize grid place-items-center"
             style={{ width: 8, background: 'var(--border)' }}
-            title="Drag to resize"
+            title={t('compiler.dragResize')}
           >
             <div className="w-0.5 h-8 rounded-full" style={{ background: 'var(--muted)', opacity: 0.6 }} />
           </div>
@@ -634,19 +649,20 @@ function AgentLog({ job }: { job: CompileJob }) {
 }
 
 function AnalysisCard({ analysis }: { analysis: NonNullable<CompileJob['analysis']> }) {
+  const t = useT()
   return (
     <div className="self-start max-w-[95%] rounded-lg px-3 py-2 text-sm flex flex-col gap-1.5" style={{ background: 'color-mix(in srgb, var(--border) 25%, transparent)', border: '1px solid var(--border)' }}>
-      <span className="text-[11px] font-semibold" style={{ color: 'var(--muted)' }}>ANALYSIS</span>
+      <span className="text-[11px] font-semibold" style={{ color: 'var(--muted)' }}>{t('compiler.analysis')}</span>
       <p className="whitespace-pre-wrap">{analysis.summary}</p>
       <div className="text-xs flex flex-col gap-0.5" style={{ color: 'var(--muted)' }}>
-        {analysis.reuse.monitors.map(m => <span key={m.id}>↺ monitor <b>{m.id}</b> — {m.reason}</span>)}
-        {analysis.reuse.executors.map(e => <span key={e.id}>↺ executor <b>{e.id}</b> ({e.actions.join(', ')}) — {e.reason}</span>)}
-        {analysis.reuse.accounts.map(a => <span key={a.label}>↺ reader <b>{a.readerClass}</b> ({a.kind}) as &apos;{a.label}&apos;</span>)}
-        {analysis.generate.monitors.map(m => <span key={m.id} style={{ color: 'var(--warning)' }}>+ NEW monitor <b>{m.id}</b> — {m.justification}</span>)}
-        {analysis.generate.executors.map(e => <span key={e.id} style={{ color: 'var(--danger)' }}>+ NEW EXECUTOR <b>{e.id}</b> — {e.justification}</span>)}
-        <span>Triggers: {analysis.triggers}</span>
-        <span>Params: {analysis.params}</span>
-        {analysis.gaps.map((g, i) => <span key={i} style={{ color: 'var(--warning)' }}>⚠ gap: {g}</span>)}
+        {analysis.reuse.monitors.map(m => <span key={m.id}>{t('compiler.analysis.reuseMonitor')} <b>{m.id}</b> — {m.reason}</span>)}
+        {analysis.reuse.executors.map(e => <span key={e.id}>{t('compiler.analysis.reuseExecutor')} <b>{e.id}</b> ({e.actions.join(', ')}) — {e.reason}</span>)}
+        {analysis.reuse.accounts.map(a => <span key={a.label}>{t('compiler.analysis.reuseReader')} <b>{a.readerClass}</b> ({a.kind}) {t('compiler.analysis.as')} &apos;{a.label}&apos;</span>)}
+        {analysis.generate.monitors.map(m => <span key={m.id} style={{ color: 'var(--warning)' }}>{t('compiler.analysis.newMonitor')} <b>{m.id}</b> — {m.justification}</span>)}
+        {analysis.generate.executors.map(e => <span key={e.id} style={{ color: 'var(--danger)' }}>{t('compiler.analysis.newExecutor')} <b>{e.id}</b> — {e.justification}</span>)}
+        <span>{t('compiler.analysis.triggers')} {analysis.triggers}</span>
+        <span>{t('compiler.analysis.params')} {analysis.params}</span>
+        {analysis.gaps.map((g, i) => <span key={i} style={{ color: 'var(--warning)' }}>{t('compiler.analysis.gap')} {g}</span>)}
       </div>
     </div>
   )
@@ -654,13 +670,16 @@ function AnalysisCard({ analysis }: { analysis: NonNullable<CompileJob['analysis
 
 // ── Input box: one place to talk — create, confirm, iterate, approve ─────────
 
-/** Starter prompts for an empty session — a chip fills the box, Enter sends. */
-const EXAMPLES: Array<{ label: string; prompt: string }> = [
-  { label: 'Ladder the dip', prompt: 'Every 5 minutes check BTC perp. Place a ladder of 5 limit buys below the current price, each 2% apart, 0.01 BTC per level. When a level fills, place a take-profit sell 1.5% above its entry. Cancel every open order if price falls 15% below the lowest level.' },
-  { label: 'Chase the funding', prompt: 'Watch Binance funding rates every minute. When a perp\'s funding is above 0.05% per 8h and settlement is within 30 minutes, open a short 2 minutes before settlement and close it 1 minute after, sized to 5% of equity.' },
-  { label: 'Trailing exit', prompt: 'Check my ETH perp position every minute. Track the highest price since entry; market-close the whole position if price drops 3% from that high, or if unrealized PnL is below -2%.' },
-  { label: 'Webhook signals', prompt: 'Build a monitor that receives TradingView-style webhook alerts with {symbol, side, size}, and a strategy that turns each alert into a market order on my Hyperliquid account, ignoring duplicates within 60 seconds.' },
-  { label: 'Ask the model', prompt: 'Every hour summarize the last 24h of BTC klines and funding with the LLM; if it judges the trend as strongly bullish with high confidence, open a small long (1% of equity) with a 2% stop.' },
+/**
+ * Starter prompts for an empty session — a chip fills the box, Enter sends.
+ * The prompts themselves go to the model verbatim and stay in English.
+ */
+const EXAMPLES: Array<{ label: MessageKey; prompt: string }> = [
+  { label: 'compiler.example.ladder', prompt: 'Every 5 minutes check BTC perp. Place a ladder of 5 limit buys below the current price, each 2% apart, 0.01 BTC per level. When a level fills, place a take-profit sell 1.5% above its entry. Cancel every open order if price falls 15% below the lowest level.' },
+  { label: 'compiler.example.funding', prompt: 'Watch Binance funding rates every minute. When a perp\'s funding is above 0.05% per 8h and settlement is within 30 minutes, open a short 2 minutes before settlement and close it 1 minute after, sized to 5% of equity.' },
+  { label: 'compiler.example.trailing', prompt: 'Check my ETH perp position every minute. Track the highest price since entry; market-close the whole position if price drops 3% from that high, or if unrealized PnL is below -2%.' },
+  { label: 'compiler.example.webhook', prompt: 'Build a monitor that receives TradingView-style webhook alerts with {symbol, side, size}, and a strategy that turns each alert into a market order on my Hyperliquid account, ignoring duplicates within 60 seconds.' },
+  { label: 'compiler.example.llm', prompt: 'Every hour summarize the last 24h of BTC klines and funding with the LLM; if it judges the trend as strongly bullish with high confidence, open a small long (1% of equity) with a 2% stop.' },
 ]
 
 function InputZone({ job, busy, error, onAct, onCreate }: {
@@ -671,6 +690,7 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
   onCreate: (description: string) => Promise<void>
   onNew: () => void
 }) {
+  const t = useT()
   const [text, setText] = useState('')
   const [ack, setAck] = useState(false)
   const version = job?.versions.at(-1)
@@ -685,28 +705,32 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
   if (!creating && !confirming && !iterating) return error ? <ErrorLine text={error} /> : null
 
   function send() {
-    const t = text.trim()
+    const trimmed = text.trim()
     if (creating) {
-      if (!t) return
+      if (!trimmed) return
       setText('')
-      void onCreate(t)
+      void onCreate(trimmed)
     } else if (confirming) {
       setText('')
-      void onAct({ action: 'confirm', ...(t ? { note: t } : {}) })
-    } else if (iterating && t) {
+      void onAct({ action: 'confirm', ...(trimmed ? { note: trimmed } : {}) })
+    } else if (iterating && trimmed) {
       setText('')
-      void onAct({ action: 'message', feedback: t })
+      void onAct({ action: 'message', feedback: trimmed })
     }
   }
 
-  const label = creating ? 'Your request' : confirming ? (job.status === 'failed' ? 'Retry — corrections (optional)' : 'Corrections (optional) — send to confirm & generate') : 'Feedback'
-  const placeholder = creating
-    ? 'Describe a strategy in natural language…'
+  const label = creating
+    ? t('compiler.input.request')
     : confirming
-      ? 'Anything the analysis got wrong? Send empty to confirm as-is.'
+      ? (job.status === 'failed' ? t('compiler.input.retryCorrections') : t('compiler.input.corrections'))
+      : t('compiler.input.feedback')
+  const placeholder = creating
+    ? t('compiler.input.describe')
+    : confirming
+      ? t('compiler.input.confirmPlaceholder')
       : job.status === 'approved'
-        ? 'Registered — keep iterating; the next version becomes a draft to approve again'
-        : 'Iterate in natural language, e.g. "make the take-profit threshold a parameter"'
+        ? t('compiler.input.approvedPlaceholder')
+        : t('compiler.input.iteratePlaceholder')
   const canSend = !busy && (confirming || text.trim().length > 0)
 
   const chip = (labelText: string, onClick: () => void, opts: { active?: boolean; danger?: boolean; disabled?: boolean; title?: string } = {}) => (
@@ -747,8 +771,8 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
           <button
             onClick={send}
             disabled={!canSend}
-            title={creating ? 'Compile (Enter)' : confirming ? 'Confirm & Generate (Enter)' : 'Send (Enter)'}
-            aria-label="Send"
+            title={creating ? t('compiler.input.compile') : confirming ? t('compiler.input.confirmGenerate') : t('compiler.input.send')}
+            aria-label={t('compiler.input.sendAria')}
             className="absolute right-3 top-1/2 -translate-y-1/2 grid place-items-center rounded-full"
             style={{
               width: 32, height: 32,
@@ -763,12 +787,12 @@ function InputZone({ job, busy, error, onAct, onCreate }: {
           </button>
         </div>
       <div className="flex flex-wrap gap-1.5 px-0.5">
-        {creating && EXAMPLES.map(ex => chip(ex.label, () => setText(ex.prompt), { active: text === ex.prompt }))}
+        {creating && EXAMPLES.map(ex => chip(t(ex.label), () => setText(ex.prompt), { active: text === ex.prompt }))}
         {iterating && (
           <>
-            {job.status === 'failed' && version && chip('Re-validate', () => void onAct({ action: 'code', files: version.files }), { disabled: busy, title: 'Re-run the validation ladder without calling the LLM' })}
-            {job.status === 'draft' && hasExecutor && chip(ack ? '✓ Executor reviewed line by line' : 'I have reviewed the EXECUTOR line by line', () => setAck(v => !v), { danger: !ack, active: ack })}
-            {job.status === 'draft' && chip('Approve & Register', () => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) }), { active: true, disabled: busy || (hasExecutor && !ack) })}
+            {job.status === 'failed' && version && chip(t('compiler.chip.revalidate'), () => void onAct({ action: 'code', files: version.files }), { disabled: busy, title: t('compiler.chip.revalidateTitle') })}
+            {job.status === 'draft' && hasExecutor && chip(ack ? t('compiler.chip.executorReviewed') : t('compiler.chip.executorReview'), () => setAck(v => !v), { danger: !ack, active: ack })}
+            {job.status === 'draft' && chip(t('compiler.chip.approve'), () => void onAct({ action: 'approve', ...(hasExecutor ? { acknowledgeExecutorRisk: ack } : {}) }), { active: true, disabled: busy || (hasExecutor && !ack) })}
           </>
         )}
         </div>

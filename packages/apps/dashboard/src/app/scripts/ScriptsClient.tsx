@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { ScriptInfo, ParamFieldDef } from '@/lib/core-types'
 import { TypeMark } from '../../components/TypeMark'
+import { useT } from '@/i18n'
 
 /**
  * Scripts — plugin-shipped operator utilities, run on click. A rail on the
@@ -31,6 +32,7 @@ function readSelection(): Set<string> {
 }
 
 export function ScriptsClient() {
+  const t = useT()
   const [scripts, setScripts] = useState<ScriptInfo[] | null>(null)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -79,15 +81,15 @@ export function ScriptsClient() {
 
   const header = (
     <div className="mb-4">
-      <h1 className="text-2xl font-semibold">Scripts</h1>
-      <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Plugin-shipped operator utilities, run on demand</p>
+      <h1 className="text-2xl font-semibold">{t('scripts.title')}</h1>
+      <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{t('scripts.subtitle')}</p>
     </div>
   )
 
-  if (error) return <div>{header}<div className="text-sm" style={{ color: 'var(--danger)' }}>Failed to load: {error}</div></div>
-  if (scripts === null) return <div>{header}<div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div></div>
+  if (error) return <div>{header}<div className="text-sm" style={{ color: 'var(--danger)' }}>{t('scripts.loadFailed', { error })}</div></div>
+  if (scripts === null) return <div>{header}<div className="text-sm" style={{ color: 'var(--muted)' }}>{t('common.loading')}</div></div>
   if (scripts.length === 0) {
-    return <div>{header}<div className="text-sm" style={{ color: 'var(--muted)' }}>No scripts registered — plugins provide them via `scripts: [...]`.</div></div>
+    return <div>{header}<div className="text-sm" style={{ color: 'var(--muted)' }}>{t('scripts.none')}</div></div>
   }
 
   return (
@@ -97,17 +99,17 @@ export function ScriptsClient() {
         {/* ── rail: scripts by package ─────────────────────────────────── */}
         <Rail
           width="18rem"
-          search={{ value: query, onChange: setQuery, placeholder: 'Search scripts…' }}
+          search={{ value: query, onChange: setQuery, placeholder: t('scripts.search') }}
           footer={
             <div className="px-3 py-2 text-[11px] flex items-center gap-2" style={{ color: 'var(--muted)' }}>
-              <span>{scripts.length} scripts · {groups.length} packages · {open.length} open</span>
+              <span>{t('scripts.footer', { scripts: scripts.length, packages: groups.length, open: open.length })}</span>
               {openIds.length > 0 && (
-                <button onClick={clearSelection} className="ml-auto px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>Clear</button>
+                <button onClick={clearSelection} className="ml-auto px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>{t('scripts.clear')}</button>
               )}
             </div>
           }
         >
-          {groups.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Nothing matches.</p>}
+          {groups.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('scripts.noMatch')}</p>}
           {groups.map(({ pkg, items }) => (
             <RailGroup
               key={pkg}
@@ -125,7 +127,7 @@ export function ScriptsClient() {
                     checkbox
                     active={active}
                     onClick={() => toggle(s.id)}
-                    title_={active ? 'Click to close' : 'Click to open alongside'}
+                    title_={active ? t('scripts.clickClose') : t('scripts.clickOpen')}
                     title={s.name}
                     subtitle={s.description}
                   />
@@ -141,7 +143,7 @@ export function ScriptsClient() {
             <ScriptCard key={s.id} script={s} />
           )) : (
             <div className="rounded-lg p-10 text-center text-sm" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-              Pick one or more scripts.
+              {t('scripts.pick')}
             </div>
           )}
         </div>
@@ -216,6 +218,7 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
 }
 
 function ScriptCard({ script }: { script: ScriptInfo }) {
+  const t = useT()
   const [values, setValues] = useState<Record<string, string>>(() => seedValues(script.paramsFields))
   const [running, setRunning] = useState(false)
   /** The in-flight stream; Stop aborts it, which the gateway relays to the script. */
@@ -301,14 +304,14 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
             try { frame = JSON.parse(part) } catch { continue }
             if (frame.type === 'line') { lines.push(frame.text ?? ''); setResult({ text: lines.join('\n') }) }
             else if (frame.type === 'result') done = { text: frame.text ?? '', ...(frame.json !== undefined ? { json: frame.json } : {}), ...(frame.files?.length ? { files: frame.files } : {}) }
-            else if (frame.type === 'error') failed = frame.error ?? 'script failed'
+            else if (frame.type === 'error') failed = frame.error ?? t('scripts.failed')
           }
         }
         if (failed !== undefined) throw new Error(failed)
-        if (stopped) { setResult({ text: [...lines, '', '— stopped by operator —'].join('\n') }); setRanAt(new Date()); return }
+        if (stopped) { setResult({ text: [...lines, '', t('scripts.stoppedByOperator')].join('\n') }); setRanAt(new Date()); return }
         // No terminal frame means the connection died mid-run. Keep whatever
         // was streamed — it is the only record of what actually happened.
-        if (done === undefined) throw new Error('connection closed before the script finished')
+        if (done === undefined) throw new Error(t('scripts.connectionClosed'))
         setResult(done)
         setRanAt(new Date())
       } else {
@@ -344,9 +347,9 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
               onClick={() => abortRef.current?.abort()}
               className="px-3 py-1.5 rounded-md text-sm"
               style={{ border: '1px solid var(--danger, #ef4444)', color: 'var(--danger, #ef4444)' }}
-              title="Stop the run; the script keeps what it streamed so far"
+              title={t('scripts.stopTitle')}
             >
-              ■ Stop
+              {t('scripts.stop')}
             </button>
           )}
           <button
@@ -355,7 +358,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
             className="px-4 py-1.5 rounded-md text-sm mr-1"
             style={{ background: running ? 'var(--border)' : 'var(--accent)', color: '#fff' }}
           >
-            {running ? 'Running…' : '▶ Run'}
+            {running ? t('scripts.running') : t('scripts.run')}
           </button>
         </div>
       </div>
@@ -372,7 +375,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         <div className="mt-3">
           <div className="flex items-center gap-3 mb-1">
             <span className="text-xs" style={{ color: 'var(--muted)' }}>
-              Output{ranAt ? ` · ${ranAt.toLocaleTimeString()}` : ''}
+              {t('scripts.output')}{ranAt ? ` · ${ranAt.toLocaleTimeString()}` : ''}
             </span>
             <div className="flex rounded overflow-hidden" style={{ border: '1px solid var(--border)' }}>
               {(['report', ...(htmlFile ? ['html'] as const : []), ...(result.json !== undefined ? ['json'] as const : [])] as const).map(v => (
@@ -385,7 +388,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                     color: view === v ? '#fff' : 'var(--muted)',
                   }}
                 >
-                  {v === 'report' ? 'Report' : v === 'html' ? 'HTML' : 'JSON'}
+                  {v === 'report' ? t('scripts.view.report') : v === 'html' ? 'HTML' : 'JSON'}
                 </button>
               ))}
             </div>
@@ -397,13 +400,13 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                   style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}
                   title={`${f.name} · ${f.mime ?? 'text/plain'} · ${sizeLabel(f.content)}`}
                 >
-                  ↗ Open
+                  {t('scripts.open')}
                 </button>
                 <button
                   onClick={() => downloadFile(f)}
                   className="text-xs px-2 py-0.5 rounded"
                   style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-                  title={`Save ${f.name} (${sizeLabel(f.content)})`}
+                  title={t('scripts.saveTitle', { name: f.name, size: sizeLabel(f.content) })}
                 >
                   ⤓
                 </button>
@@ -438,12 +441,12 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
               className="text-xs px-2 py-0.5 rounded"
               style={{ border: '1px solid var(--border)', color: copied ? 'var(--foreground)' : 'var(--muted)' }}
             >
-              {copied ? '✓ Copied' : '⧉ Copy'}
+              {copied ? t('scripts.copied') : t('scripts.copy')}
             </button>
             <button onClick={() => setExpanded(v => !v)} className="text-xs px-2 py-0.5 rounded" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
-              {expanded ? '⤡ Collapse' : '⤢ Expand all'}
+              {expanded ? t('scripts.collapse') : t('scripts.expandAll')}
             </button>
-            {!expanded && <span className="text-xs" style={{ color: 'var(--muted)' }}>(drag the corner to resize)</span>}
+            {!expanded && <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('scripts.dragHint')}</span>}
           </div>
           {view === 'html' && htmlFile ? (
             /*
@@ -508,6 +511,7 @@ function MultiSelect({ options, value, onChange }: {
   value: string
   onChange: (v: string) => void
 }) {
+  const t = useT()
   const chosen = value ? value.split(',').filter(Boolean) : []
   const toggle = (v: string) => {
     const next = chosen.includes(v) ? chosen.filter(x => x !== v) : [...chosen, v]
@@ -517,11 +521,11 @@ function MultiSelect({ options, value, onChange }: {
     <div className="rounded-md" style={{ background: 'var(--background)', border: '1px solid var(--border)', minWidth: '22rem' }}>
       <div className="flex items-center justify-between px-2 py-1" style={{ borderBottom: '1px solid var(--border)' }}>
         <span className="text-xs" style={{ color: 'var(--muted)' }}>
-          {chosen.length === 0 ? 'none selected — script picks its default' : `${chosen.length} selected`}
+          {chosen.length === 0 ? t('scripts.noneSelected') : t('scripts.nSelected', { n: chosen.length })}
         </span>
         {chosen.length > 0 && (
           <button type="button" onClick={() => onChange('')} className="text-xs px-1.5 py-0.5 rounded" style={{ color: 'var(--muted)' }}>
-            Clear
+            {t('scripts.clear')}
           </button>
         )}
       </div>

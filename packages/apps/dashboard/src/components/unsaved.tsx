@@ -110,7 +110,7 @@ export function UnsavedGuard() {
         <div>
           <h3 className="text-sm font-medium">{t('unsaved.leaveTitle')}</h3>
           <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-            {labels.join(' · ')} {labels.length > 1 ? 'have' : 'has'} unsaved changes. Leaving this page discards them.
+            {t(labels.length > 1 ? 'ui.unsavedMany' : 'ui.unsavedOne', { labels: labels.join(' · ') })}
           </p>
         </div>
         <div className="flex justify-end gap-2">
@@ -128,7 +128,7 @@ export function UnsavedGuard() {
               setTimeout(() => { leaving.current = false }, 0)
             }}
           >
-            Leave
+            {t('unsaved.leave')}
           </button>
         </div>
       </div>

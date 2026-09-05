@@ -14,11 +14,9 @@
  * the key, so an untranslated string is still a sentence.
  */
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
-import { en } from './en'
-import { zhCN } from './zh-CN'
+import { en, zhCN, fill, type Locale, type MessageKey } from './catalogue'
 
-export type Locale = 'en' | 'zh-CN'
-export type MessageKey = keyof typeof en
+export type { Locale, MessageKey }
 
 export const LOCALES: Array<{ id: Locale; label: string }> = [
   { id: 'en', label: 'English' },
@@ -36,12 +34,6 @@ export function readLocaleCookie(): Locale {
 
 export function writeLocaleCookie(locale: Locale): void {
   document.cookie = `ow_locale=${encodeURIComponent(locale)}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`
-}
-
-/** Replace `{name}` in a message with the values given. */
-function fill(message: string, values?: Record<string, string | number>): string {
-  if (!values) return message
-  return message.replace(/\{(\w+)\}/g, (_, k: string) => (values[k] !== undefined ? String(values[k]) : `{${k}}`))
 }
 
 interface I18n {

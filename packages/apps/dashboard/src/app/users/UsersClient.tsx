@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { AuthUser } from '@/lib/auth'
+import { useT } from '@/i18n'
 
 /**
  * Account management. Every user here can do everything — there are no roles,
@@ -10,6 +11,7 @@ import type { AuthUser } from '@/lib/auth'
  * theatre. Add accounts for people you would hand the API keys to.
  */
 export function UsersClient({ initialUsers, currentUserId }: { initialUsers: AuthUser[]; currentUserId?: string }) {
+  const t = useT()
   const [users, setUsers] = useState(initialUsers)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -73,10 +75,9 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: '46rem' }}>
       <div>
-        <h1 className="text-lg font-semibold">Users</h1>
+        <h1 className="text-lg font-semibold">{t('users.title')}</h1>
         <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-          Everyone listed here has full control of the gateway: credentials, strategies and live orders.
-          There are no read-only roles.
+          {t('users.intro')}
         </p>
       </div>
 
@@ -90,10 +91,10 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
             <div className="flex flex-col min-w-0 flex-1">
               <span className="text-sm">
                 {u.username}
-                {u.id === currentUserId && <span className="text-xs ml-2" style={{ color: 'var(--accent)' }}>you</span>}
+                {u.id === currentUserId && <span className="text-xs ml-2" style={{ color: 'var(--accent)' }}>{t('users.you')}</span>}
               </span>
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                since {new Date(u.createdAt).toLocaleDateString()}
+                {t('users.since', { date: new Date(u.createdAt).toLocaleDateString() })}
               </span>
             </div>
             {resetFor === u.id ? (
@@ -102,7 +103,7 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="new password"
+                  placeholder={t('users.newPassword')}
                   className="rounded-md px-2 py-1 text-xs"
                   style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
                 />
@@ -112,14 +113,14 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
                   className="text-xs px-2 py-1 rounded-md"
                   style={{ background: 'var(--accent)', color: '#fff', opacity: busy || newPassword.length < 8 ? 0.5 : 1 }}
                 >
-                  save
+                  {t('users.save')}
                 </button>
                 <button
                   onClick={() => { setResetFor(null); setNewPassword('') }}
                   className="text-xs px-2 py-1 rounded-md"
                   style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
                 >
-                  cancel
+                  {t('users.cancel')}
                 </button>
               </div>
             ) : (
@@ -129,16 +130,16 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
                   className="text-xs px-2 py-1 rounded-md"
                   style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
                 >
-                  set password
+                  {t('users.setPassword')}
                 </button>
                 <button
                   onClick={() => void remove(u.id)}
                   disabled={busy || users.length <= 1}
-                  title={users.length <= 1 ? 'the last account cannot be removed' : undefined}
+                  title={users.length <= 1 ? t('users.lastAccount') : undefined}
                   className="text-xs px-2 py-1 rounded-md"
                   style={{ border: '1px solid var(--border)', color: 'var(--danger)', opacity: users.length <= 1 ? 0.4 : 1 }}
                 >
-                  remove
+                  {t('users.remove')}
                 </button>
               </div>
             )}
@@ -147,12 +148,12 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
       </section>
 
       <form onSubmit={addUser} className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>ADD USER</span>
+        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>{t('users.addUser')}</span>
         <div className="flex gap-2 flex-wrap">
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="username"
+            placeholder={t('users.username')}
             required
             className="rounded-md px-3 py-2 text-sm flex-1"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
@@ -161,7 +162,7 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="password (min 8)"
+            placeholder={t('users.password')}
             required
             minLength={8}
             className="rounded-md px-3 py-2 text-sm flex-1"
@@ -173,7 +174,7 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
             className="rounded-md px-3 py-2 text-sm"
             style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}
           >
-            Add
+            {t('users.add')}
           </button>
         </div>
       </form>

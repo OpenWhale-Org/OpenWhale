@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '@/i18n'
 
 /**
  * The kebab menu every card header ends with, and the folder picker inside it.
@@ -16,11 +17,12 @@ import { useEffect, useRef, useState } from 'react'
 export const MENU_ITEM = 'menu-item w-full text-left px-3 py-1.5 text-xs'
 
 /** ⋯ trigger plus the popover it opens. Closes on click-away. */
-export function KebabMenu({ children, title = 'More' }: {
+export function KebabMenu({ children, title }: {
   /** Receives `close` so an item can dismiss the menu after acting. */
   children: (close: () => void) => React.ReactNode
   title?: string
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -40,8 +42,8 @@ export function KebabMenu({ children, title = 'More' }: {
         onClick={() => setOpen(v => !v)}
         className="w-6 h-6 rounded-md flex items-center justify-center leading-none"
         style={{ color: 'var(--muted)' }}
-        title={title}
-        aria-label="More actions"
+        title={title ?? t('ui.more')}
+        aria-label={t('ui.moreActions')}
       >
         ⋯
       </button>
@@ -64,10 +66,11 @@ export function FolderSection({ current, folders, onPick, close }: {
   onPick: (name: string) => void
   close: () => void
 }) {
+  const t = useT()
   const [draft, setDraft] = useState('')
   return (
     <>
-      <div className="px-3 pt-2 pb-1 text-xs" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>FOLDER</div>
+      <div className="px-3 pt-2 pb-1 text-xs" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>{t('ui.folder')}</div>
       {folders.map(f => (
         <button key={f} type="button" className={`${MENU_ITEM} flex items-center gap-2`} style={{ color: 'var(--foreground)' }}
           onClick={() => { onPick(f); close() }}>
@@ -78,15 +81,15 @@ export function FolderSection({ current, folders, onPick, close }: {
       {current && (
         <button type="button" className={MENU_ITEM} style={{ color: 'var(--muted)' }}
           onClick={() => { onPick(''); close() }}>
-          Remove from folder
+          {t('ui.removeFromFolder')}
         </button>
       )}
       <form className="flex gap-1 px-2 py-1"
         onSubmit={(e) => { e.preventDefault(); if (draft.trim()) { onPick(draft.trim()); setDraft(''); close() } }}>
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="New folder…"
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t('ui.newFolder')}
           className="flex-1 min-w-0 rounded px-2 py-1 text-xs"
           style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }} />
-        <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Add</button>
+        <button type="submit" className="text-xs px-2 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>{t('ui.add')}</button>
       </form>
     </>
   )

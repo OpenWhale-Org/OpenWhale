@@ -8,6 +8,9 @@ import { TypeMark } from '@/components/TypeMark'
 import type { CredentialInfo } from '@openwhaleorg/core'
 import type { CredentialTypeInfo } from '@/lib/core-types'
 import { Switch } from '@/components/Switch'
+import { useT } from '@/i18n'
+
+type T = ReturnType<typeof useT>
 
 interface Props {
   initialCredentials: CredentialInfo[]
@@ -56,7 +59,7 @@ function fieldsFromJsonSchema(jsonSchema: Record<string, unknown>): FieldSpec[] 
 }
 
 /** Flat string state → typed credential data. Empty optional fields are omitted. */
-function buildData(fields: FieldSpec[], values: Record<string, string>): { data: Record<string, unknown>; error?: string } {
+function buildData(fields: FieldSpec[], values: Record<string, string>, t: T): { data: Record<string, unknown>; error?: string } {
   const data: Record<string, unknown> = {}
   for (const field of fields) {
     if (field.type === 'boolean') {
@@ -65,14 +68,14 @@ function buildData(fields: FieldSpec[], values: Record<string, string>): { data:
     }
     const raw = (values[field.name] ?? '').trim()
     if (raw === '') {
-      if (field.required) return { data, error: `${field.displayName} is required` }
+      if (field.required) return { data, error: t('credentials.field.required', { field: field.displayName }) }
       continue
     }
     if (field.pattern && !new RegExp(field.pattern).test(raw))
-      return { data, error: `${field.displayName} does not match the expected format` }
+      return { data, error: t('credentials.field.format', { field: field.displayName }) }
     if (field.type === 'number') {
       const n = parseFloat(raw)
-      if (isNaN(n)) return { data, error: `${field.displayName} must be a number` }
+      if (isNaN(n)) return { data, error: t('credentials.field.number', { field: field.displayName }) }
       data[field.name] = n
     } else {
       data[field.name] = raw
@@ -100,6 +103,7 @@ function SchemaCredentialForm({
   /** Raised by the caller's POST. Shown in the footer, beside the button it belongs to. */
   submitError?: string
 }) {
+  const t = useT()
   const fields = typeInfo.jsonSchema ? fieldsFromJsonSchema(typeInfo.jsonSchema) : []
   const [name, setName] = useState(initialName ?? '')
   const [values, setValues] = useState<Record<string, string>>(initialValues ?? {})
@@ -126,7 +130,7 @@ function SchemaCredentialForm({
   }, [])
 
   function assemble(): Record<string, unknown> | null {
-    const { data, error: buildError } = buildData(fields, values)
+    const { data, error: buildError } = buildData(fields, values, t)
     if (buildError) { setError(buildError); return null }
     return data
   }
@@ -158,7 +162,7 @@ function SchemaCredentialForm({
       }
     } catch (err) {
       setTestState('failed')
-      setTestMessage(err instanceof Error ? err.message : 'Network error')
+      setTestMessage(err instanceof Error ? err.message : t('credentials.networkError'))
     }
   }
 
@@ -177,13 +181,13 @@ function SchemaCredentialForm({
           ))}
           {typeInfo.documentationUrl && (
             <a href={typeInfo.documentationUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--accent)' }}>
-              docs ↗
+              {t('credentials.docs')}
             </a>
           )}
         </div>
       )}
 
-      <InputField label="Name" value={name} onChange={setName} placeholder={`e.g. ${typeInfo.displayName ?? typeInfo.type} Main`} required />
+      <InputField label={t('credentials.name')} value={name} onChange={setName} placeholder={t('credentials.namePlaceholder', { example: typeInfo.displayName ?? typeInfo.type })} required />
 
       {fields.map((field) =>
         field.type === 'boolean' ? (
@@ -212,12 +216,12 @@ function SchemaCredentialForm({
       {error && <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
       {testState === 'ok' && (
         <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#1a3a24', color: 'var(--success, #4ade80)' }}>
-          ✓ Connection test passed
+          {t('credentials.testPassed')}
         </p>
       )}
       {testState === 'failed' && (
         <p className="text-xs px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>
-          Connection test failed: {testMessage}
+          {t('credentials.testFailed', { message: testMessage })}
         </p>
       )}
 
@@ -237,7 +241,7 @@ function SchemaCredentialForm({
             className="px-4 py-2 rounded-md text-sm"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', opacity: testState === 'running' ? 0.6 : 1 }}
           >
-            {testState === 'running' ? 'Testing…' : 'Test connection'}
+            {testState === 'running' ? t('credentials.testing') : t('credentials.test')}
           </button>
         )}
         <button
@@ -246,7 +250,7 @@ function SchemaCredentialForm({
           className="px-4 py-2 rounded-md text-sm"
           style={{ background: 'var(--accent)', color: '#fff', opacity: loading ? 0.6 : 1 }}
         >
-          {loading ? 'Saving…' : 'Save'}
+          {loading ? t('common.saving') : t('common.save')}
         </button>
       </div>
     </form>
@@ -267,6 +271,7 @@ function GenericCredentialForm({
   /** When set, the type is known but has no schema — only the data is free-form. */
   fixedType?: string
 }) {
+  const t = useT()
   const [name, setName] = useState('')
   const [customType, setCustomType] = useState('')
   const [rawData, setRawData] = useState('{}')
@@ -280,7 +285,7 @@ function GenericCredentialForm({
     try {
       data = JSON.parse(rawData) as Record<string, unknown>
     } catch {
-      setJsonError('Invalid JSON')
+      setJsonError(t('credentials.invalidJson'))
       return
     }
     await onSubmit(name, data, type)
@@ -289,19 +294,19 @@ function GenericCredentialForm({
   return (
     <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3 px-5 py-4">
-      <InputField label="Name" value={name} onChange={setName} placeholder="e.g. My Account" required />
+      <InputField label={t('credentials.name')} value={name} onChange={setName} placeholder={t('credentials.generic.namePlaceholder')} required />
       {!fixedType && (
         <InputField
-          label="Type"
+          label={t('credentials.type')}
           value={customType}
           onChange={setCustomType}
-          placeholder="credential type a plugin registers, e.g. 'bybit'"
+          placeholder={t('credentials.typePlaceholder')}
           required
           mono
         />
       )}
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--muted)' }}>Data (JSON)</label>
+        <label className="text-xs" style={{ color: 'var(--muted)' }}>{t('credentials.dataJson')}</label>
         <textarea
           value={rawData}
           onChange={(e) => { setRawData(e.target.value); setJsonError('') }}
@@ -331,7 +336,7 @@ function GenericCredentialForm({
           className="px-4 py-2 rounded-md text-sm"
           style={{ background: 'var(--accent)', color: '#fff', opacity: loading ? 0.6 : 1 }}
         >
-          {loading ? 'Saving…' : 'Save'}
+          {loading ? t('common.saving') : t('common.save')}
         </button>
       </div>
     </form>
@@ -354,30 +359,31 @@ function TypePicker({
   selected: string
   onSelect: (type: string) => void
 }) {
+  const t = useT()
   const [category, setCategory] = useState<string>('All')
   const [query, setQuery] = useState('')
 
   const entries: TypeEntry[] = [
     // Managed types (created by a script/flow, e.g. a venue's agent key) are
     // not offered for hand entry — the flow that makes them is the entry point.
-    ...credentialTypes.filter((t) => !t.managed).map((t) => ({
-      id: t.type,
-      label: t.displayName ?? t.type,
+    ...credentialTypes.filter((ct) => !ct.managed).map((ct) => ({
+      id: ct.type,
+      label: ct.displayName ?? ct.type,
       // The registering package is only the default answer; a type that says
       // what it actually is wins.
-      category: t.category ?? t.pluginName ?? 'core',
-      kinds: t.kinds,
-      ...(t.logo !== undefined ? { logo: t.logo } : {}),
-      ...(t.icon !== undefined ? { icon: t.icon } : {}),
-      ...(t.description !== undefined ? { description: t.description } : {}),
+      category: ct.category ?? ct.pluginName ?? 'core',
+      kinds: ct.kinds,
+      ...(ct.logo !== undefined ? { logo: ct.logo } : {}),
+      ...(ct.icon !== undefined ? { icon: ct.icon } : {}),
+      ...(ct.description !== undefined ? { description: ct.description } : {}),
     })),
     {
       id: 'other',
-      label: 'Other (free-form)',
+      label: t('credentials.other'),
       category: 'custom',
       kinds: [] as string[],
       icon: '📄',
-      description: 'Store any JSON under a name. No schema, no form, no test.',
+      description: t('credentials.otherDesc'),
     },
   ]
 
@@ -402,7 +408,7 @@ function TypePicker({
               key={c}
               active={category === c}
               onClick={() => setCategory(c)}
-              title={c}
+              title={c === 'All' ? t('credentials.all') : c}
               right={count}
             />
           )
@@ -415,14 +421,14 @@ function TypePicker({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search credential types…"
+            placeholder={t('credentials.searchTypes')}
             className="w-full rounded-md px-3 py-1.5 text-sm"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
           />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
           {visible.length === 0 && (
-            <p className="text-xs px-3 py-4 text-center" style={{ color: 'var(--muted)' }}>No types match “{query}”.</p>
+            <p className="text-xs px-3 py-4 text-center" style={{ color: 'var(--muted)' }}>{t('credentials.noTypesMatch', { query })}</p>
           )}
           {visible.map((e) => (
             <TypeRow key={e.id} entry={e} active={selected === e.id} onSelect={() => onSelect(e.id)} />
@@ -445,6 +451,7 @@ interface TypeEntry {
 
 /** One row: mark, name, the kinds it can materialize into, and its blurb. */
 function TypeRow({ entry, active, onSelect }: { entry: TypeEntry; active: boolean; onSelect: () => void }) {
+  const t = useT()
   const [showDescription, setShowDescription] = useState(false)
 
   return (
@@ -474,7 +481,7 @@ function TypeRow({ entry, active, onSelect }: { entry: TypeEntry; active: boolea
             onClick={(ev) => { ev.stopPropagation(); setShowDescription(v => !v) }}
             className="shrink-0 w-4 h-4 grid place-items-center rounded-full text-xs"
             style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
-            title={showDescription ? 'Hide description' : 'What is this?'}
+            title={showDescription ? t('credentials.hideDesc') : t('credentials.whatIsThis')}
           >
             ?
           </span>
@@ -503,13 +510,14 @@ function AddCredentialForm({
   onSuccess: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   const [step, setStep] = useState<'type' | 'fields'>('type')
   const [type, setType] = useState(credentialTypes[0]?.type ?? 'other')
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  const selected = credentialTypes.find((t) => t.type === type)
-  const label = selected?.displayName ?? (type === 'other' ? 'Other (free-form)' : type)
+  const selected = credentialTypes.find((ct) => ct.type === type)
+  const label = selected?.displayName ?? (type === 'other' ? t('credentials.other') : type)
 
   async function submit(name: string, data: Record<string, unknown>, typeOverride?: string) {
     setLoading(true)
@@ -523,10 +531,10 @@ function AddCredentialForm({
       if (res.ok) {
         onSuccess()
       } else {
-        setSubmitError(await res.text() || `Failed to save credential (HTTP ${res.status})`)
+        setSubmitError(await res.text() || t('credentials.saveFailed', { status: res.status }))
       }
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Network error')
+      setSubmitError(err instanceof Error ? err.message : t('credentials.networkError'))
     } finally {
       setLoading(false)
     }
@@ -541,24 +549,24 @@ function AddCredentialForm({
             onClick={() => setStep('type')}
             className="w-7 h-7 rounded-md flex items-center justify-center leading-none shrink-0"
             style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
-            title="Back to types"
-            aria-label="Back to types"
+            title={t('credentials.backToTypes')}
+            aria-label={t('credentials.backToTypes')}
           >
             ‹
           </button>
         )}
         <h2 className="font-semibold text-base flex-1 min-w-0 truncate">
-          {step === 'type' ? 'Add Credential' : `Add ${label}`}
+          {step === 'type' ? t('credentials.add') : t('credentials.addType', { label })}
         </h2>
         <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
-          {step === 'type' ? 'Step 1 of 2' : 'Step 2 of 2'}
+          {t('instance.step', { n: step === 'type' ? 1 : 2, total: 2 })}
         </span>
         <button
           type="button"
           onClick={onCancel}
           className="w-7 h-7 rounded-md flex items-center justify-center leading-none shrink-0"
           style={{ color: 'var(--muted)' }}
-          aria-label="Close"
+          aria-label={t('common.close')}
         >
           ✕
         </button>
@@ -567,12 +575,12 @@ function AddCredentialForm({
       {step === 'type' ? (
         <div data-tour="credential-dialog" className="flex-1 min-h-0 flex flex-col gap-3 px-5 py-4">
           <p className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
-            Pick what this credential is for. The next step is its form.
+            {t('credentials.pickPurpose')}
           </p>
           <TypePicker
             credentialTypes={credentialTypes}
             selected={type}
-            onSelect={(t) => { setType(t); setSubmitError(''); setStep('fields') }}
+            onSelect={(next) => { setType(next); setSubmitError(''); setStep('fields') }}
           />
         </div>
       ) : (
@@ -600,7 +608,7 @@ function AddCredentialForm({
                 className="ml-auto text-xs shrink-0 underline"
                 style={{ color: 'var(--muted)' }}
               >
-                Docs ↗
+                {t('credentials.docsLink')}
               </a>
             )}
           </div>
@@ -621,6 +629,7 @@ function AddCredentialForm({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function CredentialsClient({ initialCredentials, credentialTypes }: Props) {
+  const t = useT()
   const [credentials, setCredentials] = useState(initialCredentials)
   const [showForm, setShowForm] = useState(false)
   const [duplicating, setDuplicating] = useState<CredentialWithPublic | null>(null)
@@ -661,7 +670,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
                 border: '1px solid var(--border)',
               }}
             >
-              {c}
+              {c === 'All' ? t('credentials.all') : c}
               {c !== 'All' && <span className="ml-1 opacity-70">{credentials.filter(x => categoryOf(x.type) === c).length}</span>}
             </button>
           ))}
@@ -673,7 +682,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
             className="px-4 py-2 rounded-md text-sm"
             style={{ background: 'var(--accent)', color: '#fff' }}
           >
-            + Add Credential
+            {t('credentials.addButton')}
           </button>
         </div>
       </div>
@@ -700,7 +709,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
           className="rounded-lg p-8 text-center text-sm"
           style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px dashed var(--border)' }}
         >
-          No credentials stored yet.
+          {t('credentials.empty')}
         </div>
       ) : (
         /* Rows only. A credential is a name, a few public fields and a date —
@@ -719,7 +728,7 @@ export function CredentialsClient({ initialCredentials, credentialTypes }: Props
           ))}
           {visibleCredentials.length === 0 && (
             <p className="text-sm text-center py-6" style={{ color: 'var(--muted)' }}>
-              No {listCategory} credentials.
+              {t('credentials.noneInCategory', { category: listCategory })}
             </p>
           )}
         </div>
@@ -742,9 +751,10 @@ function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel 
   onSuccess: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const typeInfo = credentialTypes.find(t => t.type === source.type)
+  const typeInfo = credentialTypes.find(ct => ct.type === source.type)
   const seeded: Record<string, string> = {}
   for (const [k, v] of Object.entries(source.publicData ?? {})) seeded[k] = String(v)
 
@@ -758,9 +768,9 @@ function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel 
         body: JSON.stringify({ name, type: typeOverride || source.type, data }),
       })
       if (res.ok) onSuccess()
-      else setSubmitError(await res.text() || `Failed to save credential (HTTP ${res.status})`)
+      else setSubmitError(await res.text() || t('credentials.saveFailed', { status: res.status }))
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Network error')
+      setSubmitError(err instanceof Error ? err.message : t('credentials.networkError'))
     } finally {
       setLoading(false)
     }
@@ -775,13 +785,13 @@ function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel 
           label={typeInfo?.displayName ?? source.type}
           size={26}
         />
-        <h2 className="font-semibold text-base flex-1 min-w-0 truncate">Duplicate {source.name}</h2>
+        <h2 className="font-semibold text-base flex-1 min-w-0 truncate">{t('credentials.duplicate', { name: source.name })}</h2>
         <button
           type="button"
           onClick={onCancel}
           className="w-7 h-7 rounded-md flex items-center justify-center leading-none shrink-0"
           style={{ color: 'var(--muted)' }}
-          aria-label="Close"
+          aria-label={t('common.close')}
         >
           ✕
         </button>
@@ -789,8 +799,7 @@ function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel 
 
       <div className="px-5 pt-3 shrink-0">
         <p className="text-xs" style={{ color: 'var(--muted)' }}>
-          Same type and the same public fields. Secrets are stored encrypted and were
-          never sent to this page, so they have to be entered again.
+          {t('credentials.duplicateHint')}
         </p>
       </div>
 
@@ -800,7 +809,7 @@ function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel 
           onSubmit={submit}
           loading={loading}
           submitError={submitError}
-          initialName={`${source.name} copy`}
+          initialName={t('credentials.copySuffix', { name: source.name })}
           initialValues={seeded}
         />
       ) : (
@@ -913,6 +922,7 @@ function CredentialMenu({ canEdit, onEdit, onDuplicate, onDelete }: {
   onDuplicate: () => void
   onDelete: () => void
 }) {
+  const t = useT()
   const [confirming, setConfirming] = useState(false)
   return (
     <KebabMenu>
@@ -921,7 +931,7 @@ function CredentialMenu({ canEdit, onEdit, onDuplicate, onDelete }: {
           {canEdit && (
             <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
               onClick={() => { onEdit(); close() }}>
-              Edit
+              {t('common.edit')}
             </button>
           )}
           {/* Copies the type and every public field; the secrets stay behind,
@@ -929,8 +939,8 @@ function CredentialMenu({ canEdit, onEdit, onDuplicate, onDelete }: {
               them. "Same venue, another key" is the case this serves. */}
           <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
             onClick={() => { onDuplicate(); close() }}
-            title="New credential of the same type, public fields carried over — secrets must be re-entered">
-            Duplicate
+            title={t('credentials.duplicateTitle')}>
+            {t('credentials.duplicateAction')}
           </button>
           <button
             type="button"
@@ -941,7 +951,7 @@ function CredentialMenu({ canEdit, onEdit, onDuplicate, onDelete }: {
               onDelete(); close(); setConfirming(false)
             }}
           >
-            {confirming ? 'Delete for good?' : 'Delete'}
+            {confirming ? t('common.deleteConfirm') : t('common.delete')}
           </button>
         </>
       )}
@@ -962,6 +972,7 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
   onDone: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   const fields = typeInfo.jsonSchema ? fieldsFromJsonSchema(typeInfo.jsonSchema) : []
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {}
@@ -976,7 +987,7 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
 
   async function save() {
     setError('')
-    const { data, error: buildError } = buildData(fields, values)
+    const { data, error: buildError } = buildData(fields, values, t)
     if (buildError) { setError(buildError); return }
     setSaving(true)
     const res = await fetch(`/api/credentials/${credential.id}`, {
@@ -992,7 +1003,7 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
   return (
     <div className="mt-2 rounded-md p-3 flex flex-col gap-2" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
       <span className="text-xs" style={{ color: 'var(--warning)' }}>
-        Secret fields must be re-entered — saving replaces the stored encrypted data.
+        {t('credentials.edit.warning')}
       </span>
       {fields.map((field) =>
         field.type === 'boolean' ? (
@@ -1008,7 +1019,7 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
             label={field.displayName}
             value={values[field.name] ?? ''}
             onChange={(v) => setValues(prev => ({ ...prev, [field.name]: v }))}
-            placeholder={field.password ? 're-enter to keep this credential working' : field.placeholder}
+            placeholder={field.password ? t('credentials.edit.secretPlaceholder') : field.placeholder}
             required={field.required || field.password === true}
             type={field.password ? 'password' : field.type === 'number' ? 'number' : 'text'}
             hint={field.description}
@@ -1019,10 +1030,10 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
       {error && <p className="text-xs px-3 py-2 rounded-md" style={{ background: '#3f1f1f', color: 'var(--danger)' }}>{error}</p>}
       <div className="flex gap-2 justify-end">
         <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
-          Cancel
+          {t('common.cancel')}
         </button>
         <button onClick={() => void save()} disabled={saving} className="px-3 py-1.5 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff', opacity: saving ? 0.6 : 1 }}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
       </div>
     </div>

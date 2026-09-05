@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { useT } from '@/i18n'
 
 /**
  * Overlay shell for dialogs: backdrop, Esc, and a scroll-locked page beneath.
@@ -22,15 +23,17 @@ const ChromeContext = createContext<ModalChrome | null>(null)
  * it unconditionally.
  */
 export function ModalMaximizeButton({ className = '' }: { className?: string }) {
+  const t = useT()
   const chrome = useContext(ChromeContext)
   if (!chrome) return null
   const { maximized, toggleMaximized } = chrome
+  const label = maximized ? t('ui.restore') : t('ui.maximize')
   return (
     <button
       type="button"
       onClick={toggleMaximized}
-      title={maximized ? 'Restore' : 'Maximize'}
-      aria-label={maximized ? 'Restore' : 'Maximize'}
+      title={label}
+      aria-label={label}
       className={`btn btn-secondary btn-sm shrink-0 ${className}`}
       style={{ padding: '0 0.5rem' }}
     >

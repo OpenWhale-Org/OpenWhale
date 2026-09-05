@@ -6,6 +6,7 @@ import type { CredentialInfo } from '@openwhaleorg/core'
 import type { CredentialTypeInfo } from '@/lib/core-types'
 import { LogsPanel } from '@/components/LogsPanel'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
+import { useT } from '@/i18n'
 
 interface ExecutorStatus {
   id: string
@@ -36,6 +37,7 @@ function splitId(id: string): { pkg: string; short: string } {
 }
 
 export function ExecutorsClient({ initialExecutors, credentials, credentialTypes }: Props) {
+  const t = useT()
   const [selectedId, setSelectedId] = useState<string | null>(initialExecutors[0]?.id ?? null)
   const selected = initialExecutors.find(e => e.id === selectedId) ?? null
 
@@ -51,7 +53,7 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
       {/* ── Left: executors grouped by package ── */}
       <Rail width="18rem">
         {initialExecutors.length === 0 && (
-          <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No executors registered.</p>
+          <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('executors.none')}</p>
         )}
         {[...groups.entries()].map(([pkg, items]) => (
           <RailGroup key={pkg} label={pkg} count={items.length}>
@@ -63,7 +65,7 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
                 title={splitId(e.id).short}
                 subtitle={e.description}
                 right={e.credentialSlots.length > 0
-                  ? <span className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }} title="Holds write-capable sessions">write</span>
+                  ? <span className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }} title={t('executors.writeTitle')}>{t('executors.write')}</span>
                   : undefined}
               />
             ))}
@@ -76,7 +78,7 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
         {selected ? (
           <ExecutorDetail key={selected.id} executor={selected} credentials={credentials} credentialTypes={credentialTypes} />
         ) : (
-          <p className="text-sm p-8 text-center" style={{ color: 'var(--muted)' }}>Select an executor.</p>
+          <p className="text-sm p-8 text-center" style={{ color: 'var(--muted)' }}>{t('executors.select')}</p>
         )}
       </main>
     </div>
@@ -99,6 +101,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
   credentials: CredentialInfo[]
   credentialTypes: CredentialTypeInfo[]
 }) {
+  const t = useT()
   const [action, setAction] = useState(executor.supportedActions[0] ?? '')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [slotCreds, setSlotCreds] = useState<Record<string, string>>({})
@@ -158,7 +161,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
         continue
       }
       if (kind === 'array' || kind === 'object') {
-        try { params[name] = JSON.parse(raw) } catch { setError(`"${name}" must be valid JSON`); setBusy(false); return }
+        try { params[name] = JSON.parse(raw) } catch { setError(t('executors.mustBeJson', { name })); setBusy(false); return }
       } else {
         params[name] = kind === 'number' || kind === 'integer' ? Number(raw) : kind === 'boolean' ? raw === 'true' : raw
       }
@@ -190,7 +193,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">{executor.id}</h2>
             {executor.credentialSlots.length > 0 && (
-              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>write-capable</span>
+              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{t('executors.writeCapable')}</span>
             )}
           </div>
           {executor.description && <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{executor.description}</p>}
@@ -198,7 +201,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
       </div>
 
       <div className="flex rounded-md overflow-hidden self-start shrink-0" style={{ border: '1px solid var(--border)' }}>
-        {([['fire', 'Manual fire'], ['split', 'Split'], ['records', 'Records & logs']] as const).map(([key, label]) => (
+        {([['fire', t('executors.view.fire')], ['split', t('executors.view.split')], ['records', t('executors.view.records')]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => pickView(key)}
@@ -227,10 +230,10 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           <div className="min-w-0 min-h-0 overflow-y-auto scroll-hidden" style={{ flexBasis: showRecords ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
       {/* Manual fire console */}
       <section className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>MANUAL FIRE</span>
+        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>{t('executors.manualFire')}</span>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--muted)' }}>Action</label>
+          <label className="text-xs" style={{ color: 'var(--muted)' }}>{t('executors.action')}</label>
           <select
             value={action}
             onChange={(e) => { setAction(e.target.value); setFieldValues({}) }}
@@ -251,7 +254,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
                 <label className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
                   {(prop['displayName'] as string) ?? name}
                   {required.has(name) && !('default' in prop) && <span style={{ color: 'var(--danger)' }}> *</span>}
-                  {'default' in prop && <span className="ml-1" style={{ color: 'var(--muted)' }}>(default: {JSON.stringify(prop['default'])})</span>}
+                  {'default' in prop && <span className="ml-1" style={{ color: 'var(--muted)' }}>{t('executors.default', { value: JSON.stringify(prop['default']) })}</span>}
                 </label>
                 {(prop['description'] as string) && (
                   <span className="text-xs" style={{ color: 'var(--muted)' }}>{prop['description'] as string}</span>
@@ -296,7 +299,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           return (
             <div key={slot.label} className="flex flex-col gap-0.5">
               <label className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>
-                Credential slot: {slot.label} <span style={{ color: 'var(--muted)' }}>{slot.raw ? `raw ${slot.type}` : slot.kind}</span>
+                {t('executors.slot', { label: slot.label })} <span style={{ color: 'var(--muted)' }}>{slot.raw ? `raw ${slot.type}` : slot.kind}</span>
               </label>
               <select
                 value={slotCreds[slot.label] ?? ''}
@@ -304,7 +307,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
                 className="rounded-md px-2 py-1.5 text-xs self-start"
                 style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
               >
-                <option value="">{eligible.length === 0 ? 'no eligible credential' : 'choose credential…'}</option>
+                <option value="">{eligible.length === 0 ? t('executors.noEligible') : t('executors.chooseCredential')}</option>
                 {eligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
               </select>
             </div>
@@ -314,8 +317,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
         {executor.credentialSlots.length > 0 && (
           <label className="flex items-start gap-2 text-xs px-3 py-2 rounded-md cursor-pointer" style={{ background: '#3a2e1a', color: 'var(--warning)' }}>
             <input type="checkbox" checked={armed} onChange={(e) => setArmed(e.target.checked)} className="mt-0.5" />
-            I understand this fires a REAL instruction with the selected credential — orders placed here are live
-            (use a testnet credential to rehearse).
+            {t('executors.armWarning')}
           </label>
         )}
 
@@ -329,7 +331,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
             opacity: busy || (executor.credentialSlots.length > 0 && (!armed || missingCreds)) ? 0.4 : 1,
           }}
         >
-          {busy ? 'Firing…' : 'Fire'}
+          {busy ? t('executors.firing') : t('executors.fire')}
         </button>
 
         {error && <p className="text-xs px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{error}</p>}
@@ -342,7 +344,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           </div>
         )}
         {showFire && showRecords && (
-          <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center mx-1" style={{ width: 8 }} title="Drag to resize">
+          <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center mx-1" style={{ width: 8 }} title={t('executors.dragResize')}>
             <div className="w-0.5 h-8 rounded-full" style={{ background: 'var(--muted)', opacity: 0.6 }} />
           </div>
         )}
@@ -350,20 +352,20 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
           <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scroll-hidden flex flex-col gap-3">
             <div className="rounded-lg overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
               <div className="px-3 py-2 text-xs font-semibold flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-                <span>RECORDS{records ? ` · ${records.length}` : ''}</span>
+                <span>{t('executors.records')}{records ? ` · ${records.length}` : ''}</span>
                 <button onClick={() => void loadRecords()} className="px-2 py-0.5 rounded-md" style={{ border: '1px solid var(--border)' }}>⟳</button>
               </div>
               <div className="max-h-[50vh] overflow-y-auto scroll-hidden font-mono text-xs">
                 {records === null ? (
-                  <p className="p-3" style={{ color: 'var(--muted)' }}>Loading…</p>
+                  <p className="p-3" style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>
                 ) : records.length === 0 ? (
-                  <p className="p-3" style={{ color: 'var(--muted)' }}>No execution records.</p>
+                  <p className="p-3" style={{ color: 'var(--muted)' }}>{t('executors.noRecords')}</p>
                 ) : records.map((r, i) => (
                   <div key={`${r.executedAt}-${i}`} className="px-3 py-1.5 flex gap-2 items-center" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
                     <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.executedAt).toLocaleString()}</span>
                     <span className="shrink-0" style={{ color: r.status === 'success' ? 'var(--success)' : r.status === 'failed' ? 'var(--danger)' : 'var(--warning)' }}>{r.status}</span>
                     <span className="shrink-0" style={{ color: 'var(--accent)' }}>{r.instruction?.action}</span>
-                    <button onClick={() => setRecordModal(r)} className="flex-1 min-w-0 text-left truncate" title="Open full record" style={{ color: 'var(--muted)', background: 'transparent' }}>
+                    <button onClick={() => setRecordModal(r)} className="flex-1 min-w-0 text-left truncate" title={t('executors.openRecord')} style={{ color: 'var(--muted)', background: 'transparent' }}>
                       {JSON.stringify(r.instruction?.params)}{r.error ? ` — ${r.error}` : ''}{r.data ? ` → ${JSON.stringify(r.data)}` : ''}
                     </button>
                     <CopyButton value={r} />

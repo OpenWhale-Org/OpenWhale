@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useT } from '@/i18n'
 
 interface ContractEntry { monitor: string; keys: number; bytes: number }
 interface KeyEntry { key: string; bytes: number; updatedAt: number }
@@ -20,6 +21,7 @@ function formatTime(ts?: number): string {
 }
 
 export function ExplorerClient() {
+  const t = useT()
   const [contracts, setContracts] = useState<ContractEntry[]>([])
   const [dataDir, setDataDir] = useState('')
   const [disk, setDisk] = useState<{ freeBytes: number; totalBytes: number } | null>(null)
@@ -67,7 +69,7 @@ export function ExplorerClient() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(target ? { monitor: target } : {}),
     })
-    if (!res.ok) setError(((await res.json()) as { error?: string }).error ?? 'open failed')
+    if (!res.ok) setError(((await res.json()) as { error?: string }).error ?? t('explorer.openFailed'))
   }
 
   return (
@@ -86,16 +88,16 @@ export function ExplorerClient() {
           return (
             <div
               className="flex items-center gap-2.5 shrink-0 text-xs"
-              title={`Monitors hold ${formatBytes(collected)}. Disk: ${formatBytes(disk.freeBytes)} free of ${formatBytes(disk.totalBytes)}.`}
+              title={t('explorer.diskTitle', { collected: formatBytes(collected), free: formatBytes(disk.freeBytes), total: formatBytes(disk.totalBytes) })}
             >
               <span style={{ color: 'var(--muted)' }}>
-                monitors <span style={{ color: 'var(--foreground)' }}>{formatBytes(collected)}</span>
+                {t('explorer.monitors')} <span style={{ color: 'var(--foreground)' }}>{formatBytes(collected)}</span>
               </span>
               <div className="rounded-full overflow-hidden" style={{ width: 88, height: 6, background: 'var(--background)', border: '1px solid var(--border)' }}>
                 <div style={{ width: `${Math.min(100, usedFrac * 100).toFixed(1)}%`, height: '100%', background: tone }} />
               </div>
               <span style={{ color: tight < 0.15 ? tone : 'var(--muted)' }}>
-                {formatBytes(disk.freeBytes)} free
+                {t('explorer.free', { free: formatBytes(disk.freeBytes) })}
               </span>
             </div>
           )
@@ -105,7 +107,7 @@ export function ExplorerClient() {
           className="text-xs px-3 py-1.5 rounded-md shrink-0"
           style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
         >
-          ⌘ Open data folder
+          {t('explorer.openDataFolder')}
         </button>
       </div>
 
@@ -129,13 +131,13 @@ export function ExplorerClient() {
         {/* Contracts */}
         <div className="rounded-lg overflow-hidden flex flex-col" style={panelStyle}>
           <div className="px-3 py-2 text-xs font-medium shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            Contracts ({contracts.length})
+            {t('explorer.contracts', { n: contracts.length })}
           </div>
           {/* min-h-0 is what lets a flex child actually shrink and scroll — its
               default min-height:auto makes it grow to fit instead. */}
           <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
           {contracts.length === 0 && (
-            <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No data yet — watch something first.</p>
+            <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('explorer.noData')}</p>
           )}
           {contracts.map(c => (
             <button
@@ -148,7 +150,7 @@ export function ExplorerClient() {
               }}
             >
               <div className="font-mono text-xs">{c.monitor}</div>
-              <div className="text-xs" style={{ color: 'var(--muted)' }}>{c.keys} keys · {formatBytes(c.bytes)}</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>{t('explorer.keysBytes', { n: c.keys, bytes: formatBytes(c.bytes) })}</div>
             </button>
           ))}
           </div>
@@ -157,15 +159,15 @@ export function ExplorerClient() {
         {/* Keys */}
         <div className="rounded-lg overflow-hidden flex flex-col" style={panelStyle}>
           <div className="px-3 py-2 text-xs font-medium flex items-center justify-between shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>Keys {monitor ? `(${keys.length})` : ''}</span>
+            <span>{monitor ? t('explorer.keysCount', { n: keys.length }) : t('explorer.keys')}</span>
             {monitor && (
               <button onClick={() => void openFolder(monitor)} className="text-xs underline" style={{ color: 'var(--muted)' }}>
-                open folder
+                {t('explorer.openFolder')}
               </button>
             )}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
-          {!monitor && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Pick a contract.</p>}
+          {!monitor && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('explorer.pickContract')}</p>}
           {monitor && keys.map(k => (
             <button
               key={k.key}
@@ -186,7 +188,7 @@ export function ExplorerClient() {
         {/* Records */}
         <div className="rounded-lg overflow-hidden flex flex-col" style={panelStyle}>
           <div className="px-3 py-2 text-xs font-medium flex items-center gap-2 shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span className="flex-1 font-mono truncate">{selectedKey ? `${monitor} / ${selectedKey}` : 'Records'}</span>
+            <span className="flex-1 font-mono truncate">{selectedKey ? `${monitor} / ${selectedKey}` : t('explorer.records')}</span>
             {selectedKey && (
               <>
                 {LIMITS.map(n => (
@@ -208,9 +210,9 @@ export function ExplorerClient() {
             )}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden">
-            {!selectedKey && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Pick a key.</p>}
-            {selectedKey && records === null && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Loading…</p>}
-            {selectedKey && records?.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>Empty file.</p>}
+            {!selectedKey && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('explorer.pickKey')}</p>}
+            {selectedKey && records === null && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>}
+            {selectedKey && records?.length === 0 && <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('explorer.emptyFile')}</p>}
             {records?.map((r, i) => {
               const payload = r.data !== undefined ? r.data : r
               const oneLine = JSON.stringify(payload)

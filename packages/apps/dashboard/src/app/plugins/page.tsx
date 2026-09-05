@@ -1,22 +1,24 @@
 import { PluginsClient } from './PluginsClient'
 import { fetchInstalledPlugins, fetchRegistry, fetchCredentialTypes, fetchScripts, fetchAccountsData } from '@/lib/data'
+import { serverT } from '@/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 export default async function PluginsPage() {
-  const [plugins, registry, credentialTypes, scripts, accountsData] = await Promise.all([
+  const [plugins, registry, credentialTypes, scripts, accountsData, t] = await Promise.all([
     fetchInstalledPlugins(),
     fetchRegistry(),
     fetchCredentialTypes(),
     fetchScripts(),
     fetchAccountsData(),
+    serverT(),
   ])
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Plugins</h1>
+        <h1 className="text-2xl font-semibold">{t('plugins.title')}</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          Everything the engine knows comes from a plugin — browse what each one declares, or install more
+          {t('plugins.subtitle')}
         </p>
       </div>
       <PluginsClient

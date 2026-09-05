@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { BreakerRule } from '@openwhaleorg/core'
 import { Switch } from '@/components/Switch'
 import { Select } from '@/components/Select'
+import { useT } from '@/i18n'
 
 /**
  * The circuit breaker tiers.
@@ -19,13 +20,15 @@ interface LedgerHealth { live: boolean; oldestMarkTs: number | null; pairs: numb
 interface WindowRead { ruleId: string; windowMin: number; metric: string; observed: number | null; threshold: number; tripped: boolean }
 interface BreakerStatus { enabled: boolean; rules: number; ledger: LedgerHealth; windows?: WindowRead[] }
 
-const METRICS = [
-  { value: 'netPnl', label: 'net PnL', hint: 'realized + funding − fees, quote currency' },
-  { value: 'winRate', label: 'win rate', hint: 'share of closing fills in profit' },
+type T = ReturnType<typeof useT>
+
+const metricOptions = (t: T) => [
+  { value: 'netPnl', label: t('breaker.metric.netPnl'), hint: t('breaker.metric.netPnlHint') },
+  { value: 'winRate', label: t('breaker.metric.winRate'), hint: t('breaker.metric.winRateHint') },
 ]
-const ACTIONS = [
-  { value: 'alert', label: 'Alert', hint: 'send a notification, keep trading' },
-  { value: 'deactivate', label: 'Stop', hint: 'deactivate the instance; its onDeactivate hook decides what happens to open positions' },
+const actionOptions = (t: T) => [
+  { value: 'alert', label: t('breaker.action.alert'), hint: t('breaker.action.alertHint') },
+  { value: 'deactivate', label: t('breaker.action.stop'), hint: t('breaker.action.stopHint') },
 ]
 
 const num = { background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' } as const
@@ -40,6 +43,9 @@ export function BreakerRules({ instanceId, enabled, rules, onChange }: {
   rules: BreakerRule[]
   onChange: (next: { breakerEnabled: boolean; breaker: BreakerRule[] }) => void
 }) {
+  const t = useT()
+  const METRICS = metricOptions(t)
+  const ACTIONS = actionOptions(t)
   const [status, setStatus] = useState<BreakerStatus | null>(null)
 
   const loadStatus = useCallback(async () => {
@@ -57,19 +63,17 @@ export function BreakerRules({ instanceId, enabled, rules, onChange }: {
       <Switch
         checked={enabled}
         onChange={on => onChange({ breakerEnabled: on, breaker: rules.length > 0 ? rules : on ? [newRule()] : [] })}
-        label="Circuit breaker"
+        label={t('breaker.title')}
         hint={<>
-          Watches this instance&apos;s own ledger and alerts, or stops it, when the numbers turn.
-          It reads realized PnL only — an open position moving against you is not a trip.
-          {' '}<b>It abstains whenever the ledger is not being kept up to date</b>, because a stopped
-          collector and a stopped strategy look identical from here.
+          {t('breaker.hint')}
+          {' '}<b>{t('breaker.hintAbstain')}</b>{t('breaker.hintAbstainWhy')}
         </>}
       />
 
       {enabled && (
         <div className="ml-7 mt-2 flex flex-col gap-2">
           {rules.length === 0 && (
-            <span className="text-xs" style={{ color: 'var(--muted)' }}>No tiers yet — nothing is being watched.</span>
+            <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('breaker.noTiers')}</span>
           )}
 
           {rules.map((r, i) => {
@@ -81,14 +85,14 @@ export function BreakerRules({ instanceId, enabled, rules, onChange }: {
                   <div style={{ width: 96 }}>
                     <Select size="sm" value={r.action} options={ACTIONS} onChange={v => set(i, { action: v as BreakerRule['action'] })} />
                   </div>
-                  <span style={{ color: 'var(--muted)' }}>when</span>
+                  <span style={{ color: 'var(--muted)' }}>{t('breaker.when')}</span>
                   <div style={{ width: 110 }}>
                     <Select size="sm" value={r.metric} options={METRICS} onChange={v => set(i, { metric: v as BreakerRule['metric'] })} />
                   </div>
-                  <span style={{ color: 'var(--muted)' }}>over</span>
+                  <span style={{ color: 'var(--muted)' }}>{t('breaker.over')}</span>
                   <input type="number" min={1} value={r.windowMin} onChange={e => set(i, { windowMin: Number(e.target.value) })}
                          className="px-1.5 py-1 rounded text-xs mono" style={{ ...num, width: 64 }} />
-                  <span style={{ color: 'var(--muted)' }}>min is below</span>
+                  <span style={{ color: 'var(--muted)' }}>{t('breaker.minIsBelow')}</span>
                   <input type="number" value={r.below} onChange={e => set(i, { below: Number(e.target.value) })}
                          className="px-1.5 py-1 rounded text-xs mono" style={{ ...num, width: 80 }} />
                   <span style={{ color: 'var(--muted)' }}>{r.metric === 'winRate' ? '%' : ''}</span>
@@ -101,25 +105,25 @@ export function BreakerRules({ instanceId, enabled, rules, onChange }: {
                 <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--muted)' }}>
                   {r.metric === 'winRate' && (
                     <label className="flex items-center gap-1">
-                      hold until
+                      {t('breaker.holdUntil')}
                       <input type="number" min={0} value={r.minSamples ?? 10} onChange={e => set(i, { minSamples: Number(e.target.value) })}
                              className="px-1 py-0.5 rounded mono" style={{ ...num, width: 52 }} />
-                      closes
+                      {t('breaker.closes')}
                     </label>
                   )}
                   {r.action === 'alert' && (
                     <label className="flex items-center gap-1">
-                      repeat at most every
+                      {t('breaker.repeatAtMostEvery')}
                       <input type="number" min={0} value={r.cooldownMin ?? 60} onChange={e => set(i, { cooldownMin: Number(e.target.value) })}
                              className="px-1 py-0.5 rounded mono" style={{ ...num, width: 52 }} />
-                      min
+                      {t('breaker.min')}
                     </label>
                   )}
                   {read && (
                     <span className="ml-auto mono" style={{ color: read.tripped ? 'var(--danger)' : 'var(--muted)' }}>
-                      now: {read.observed === null ? 'not enough data' : read.observed.toFixed(2)}
+                      {t('breaker.now', { value: read.observed === null ? t('breaker.notEnoughData') : read.observed.toFixed(2) })}
                       {read.metric === 'winRate' && read.observed !== null ? '%' : ''}
-                      {read.tripped ? ' — tripped' : ''}
+                      {read.tripped ? t('breaker.tripped') : ''}
                     </span>
                   )}
                 </div>
@@ -130,11 +134,11 @@ export function BreakerRules({ instanceId, enabled, rules, onChange }: {
           <div className="flex items-center gap-2">
             <button onClick={() => onChange({ breakerEnabled: enabled, breaker: [...rules, newRule()] })}
                     className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
-              + Add tier
+              {t('breaker.addTier')}
             </button>
             <button onClick={() => void loadStatus()} className="text-xs px-2 py-1 rounded-md"
                     style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
-              ⟳ Re-read
+              {t('breaker.reread')}
             </button>
 
             {/* The blind case is the one worth shouting about: a safety net
@@ -143,10 +147,10 @@ export function BreakerRules({ instanceId, enabled, rules, onChange }: {
             {status && (
               status.ledger.live
                 ? <span className="text-xs" style={{ color: 'var(--success)' }}>
-                    ledger live · {status.ledger.pairs} symbols tracked
+                    {t('breaker.ledgerLive', { n: status.ledger.pairs })}
                   </span>
                 : <span className="text-xs" style={{ color: 'var(--warning)' }}>
-                    not watching — {status.ledger.reason ?? 'ledger is not live'}
+                    {t('breaker.notWatching', { reason: status.ledger.reason ?? t('breaker.ledgerNotLive') })}
                   </span>
             )}
           </div>

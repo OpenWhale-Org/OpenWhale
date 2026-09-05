@@ -82,7 +82,7 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
 
       {missing ? (
         <div className="text-sm" style={{ color: 'var(--muted)' }}>
-          Instance <span className="font-mono">{instanceId}</span> not found.
+          {t('board.notFound', { id: instanceId })}
         </div>
       ) : !instance ? (
         <div className="text-sm" style={{ color: 'var(--muted)' }}>{t('common.loading')}</div>
@@ -133,13 +133,13 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
                   <>
                     <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('board.deactivateConfirm')}</span>
                     <button onClick={() => setConfirmStop(false)} className="px-3 py-1.5 rounded-md text-xs"
-                      style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>Cancel</button>
+                      style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>{t('common.cancel')}</button>
                     <button onClick={() => void act('deactivate')} disabled={acting} className="px-3 py-1.5 rounded-md text-xs"
                       style={{ background: 'var(--danger)', color: '#fff' }}>{acting ? '…' : 'Confirm'}</button>
                   </>
                 ) : (
                   <button onClick={() => setConfirmStop(true)} className="px-3 py-1.5 rounded-md text-xs"
-                    style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}>Deactivate</button>
+                    style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}>{t('board.deactivate')}</button>
                 )
               ) : (
                 <button onClick={() => void act('activate')} disabled={acting} className="px-3 py-1.5 rounded-md text-xs"
@@ -441,7 +441,7 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
             className="btn btn-danger btn-sm shrink-0"
             title={instance.active ? t('board.clearBlockedTitle') : t('board.clearTitle')}
           >
-            Clear state
+            {t('board.clearState')}
           </button>
         )}
       </div>
@@ -645,7 +645,7 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
           <div className="flex justify-end items-center gap-3 mt-3">
             {instance.active && dirty && (
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                Saving rebuilds the running instance from these values.
+                {t('board.saveRebuilds')}
               </span>
             )}
             <button

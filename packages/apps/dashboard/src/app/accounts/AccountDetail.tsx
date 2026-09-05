@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useColumnWidths, ResizeHandle } from '@/components/ResizableColumns'
+import { useT } from '@/i18n'
 
 /** Shapes follow the exchange read-view interfaces (IAccountBalance/IPosition/IOrder). */
 interface TokenBalance { token: string; free: number; locked: number; total: number; usdValue?: number }
@@ -52,10 +53,11 @@ function fmtCell(value: unknown, col: ColumnDef): { text: string; color?: string
 
 /** A declared table section: rows by the implementation's own columns, widths draggable and remembered. */
 function DeclaredTable({ rows, def }: { rows: Array<Record<string, unknown>>; def: SectionDef }) {
+  const t = useT()
   const columns: ColumnDef[] = def.columns ?? Object.keys(rows[0] ?? {}).map(key => ({ key, label: key }))
   const growKey = columns.find(c => c.grow)?.key ?? columns[0]?.key
   const { widthOf, startResize } = useColumnWidths(`account.${def.method}.${columns.map(c => c.key).join('|')}`, columns.map(c => c.key), growKey)
-  if (rows.length === 0) return <p className="text-xs" style={{ color: 'var(--muted)' }}>{def.empty ?? `No ${def.title.toLowerCase()}.`}</p>
+  if (rows.length === 0) return <p className="text-xs" style={{ color: 'var(--muted)' }}>{def.empty ?? t('accounts.detail.noRows', { title: def.title.toLowerCase() })}</p>
   return (
     <div className="overflow-x-auto scroll-hidden">
       <table className="w-full text-xs" style={{ tableLayout: 'fixed', minWidth: '17rem' }}>
@@ -131,6 +133,7 @@ function DeclaredKeyValue({ data, def }: { data: Record<string, unknown>; def: S
  * clipped the uPnL column. One section at full width reads instead.
  */
 export function AccountDetail({ account }: { account: string }) {
+  const t = useT()
   const [detail, setDetail] = useState<DetailPayload | null>(null)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<Tab>('positions')
@@ -140,11 +143,11 @@ export function AccountDetail({ account }: { account: string }) {
     setError('')
     const res = await fetch(`/api/accounts/${encodeURIComponent(account)}/detail`)
     if (!res.ok) {
-      setError(((await res.json()) as { error?: string }).error ?? 'failed to load')
+      setError(((await res.json()) as { error?: string }).error ?? t('accounts.detail.loadFailed'))
       return
     }
     setDetail(await res.json() as DetailPayload)
-  }, [account])
+  }, [account, t])
 
   useEffect(() => { void load() }, [load])
 
@@ -152,7 +155,7 @@ export function AccountDetail({ account }: { account: string }) {
     return <p className="text-xs px-3 py-4" style={{ color: 'var(--danger, #ef4444)' }}>{error}</p>
   }
   if (!detail) {
-    return <p className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>Loading account detail…</p>
+    return <p className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>{t('accounts.detail.loading')}</p>
   }
 
   if (detail.layout && detail.layout.length > 0) {
@@ -163,30 +166,30 @@ export function AccountDetail({ account }: { account: string }) {
 
   const tabs: { key: Tab; label: string }[] = []
   if (positions !== undefined || detail.errors['positions'])
-    tabs.push({ key: 'positions', label: `Positions${positions ? ` (${positions.length})` : ''}` })
-  tabs.push({ key: 'balance', label: 'Balance' })
-  tabs.push({ key: 'orders', label: `Open Orders${orders ? ` (${orders.length})` : ''}` })
+    tabs.push({ key: 'positions', label: positions ? t('accounts.detail.positionsN', { n: positions.length }) : t('accounts.detail.positions') })
+  tabs.push({ key: 'balance', label: t('accounts.detail.balance') })
+  tabs.push({ key: 'orders', label: orders ? t('accounts.detail.ordersN', { n: orders.length }) : t('accounts.detail.orders') })
 
   // A spot account has no positions tab, so the default can point at a tab
   // that isn't there — fall back rather than render an empty pane.
-  const active = tabs.some(t => t.key === tab) ? tab : tabs[0]!.key
+  const active = tabs.some(tb => tb.key === tab) ? tab : tabs[0]!.key
 
   return (
     <div className="flex flex-col mt-3">
       <div className="flex items-end justify-between gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex">
-          {tabs.map(t => (
+          {tabs.map(tb => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={tb.key}
+              onClick={() => setTab(tb.key)}
               className="px-3 py-2 text-xs"
               style={{
-                color: active === t.key ? 'var(--foreground)' : 'var(--muted)',
-                borderBottom: active === t.key ? '2px solid var(--accent)' : '2px solid transparent',
+                color: active === tb.key ? 'var(--foreground)' : 'var(--muted)',
+                borderBottom: active === tb.key ? '2px solid var(--accent)' : '2px solid transparent',
                 marginBottom: '-1px',
               }}
             >
-              {t.label}
+              {tb.label}
             </button>
           ))}
         </div>
@@ -195,7 +198,7 @@ export function AccountDetail({ account }: { account: string }) {
           className="text-xs px-2 py-1 mb-1.5 rounded-md shrink-0"
           style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
         >
-          ⟳ Refresh
+          {t('accounts.detail.refresh')}
         </button>
       </div>
 
@@ -204,16 +207,16 @@ export function AccountDetail({ account }: { account: string }) {
         {active === 'positions' && (
           <>
             {detail.errors['positions'] && <p className="text-xs" style={{ color: 'var(--danger, #ef4444)' }}>{detail.errors['positions']}</p>}
-            {positions?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>No open positions.</p>}
+            {positions?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.detail.noPositions')}</p>}
             {positions && positions.length > 0 && (
               <div className="overflow-x-auto scroll-hidden">
                 <table className="w-full text-xs" style={{ minWidth: '17rem' }}>
                   <thead>
                     <tr style={{ color: 'var(--muted)' }}>
-                      <th className="text-left py-1 font-medium">Symbol</th>
-                      <th className="text-left py-1 font-medium">Side</th>
-                      <th className="text-right py-1 font-medium">Value</th>
-                      <th className="text-right py-1 font-medium">uPnL</th>
+                      <th className="text-left py-1 font-medium">{t('accounts.col.symbol')}</th>
+                      <th className="text-left py-1 font-medium">{t('accounts.col.side')}</th>
+                      <th className="text-right py-1 font-medium">{t('accounts.col.value')}</th>
+                      <th className="text-right py-1 font-medium">{t('accounts.col.upnl')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -243,26 +246,26 @@ export function AccountDetail({ account }: { account: string }) {
             {balance && (
               <>
                 <div className="flex gap-4 mb-2 text-sm">
-                  <span>Total <span className="font-mono">{usd(balance.usd.total)}</span></span>
-                  <span style={{ color: 'var(--muted)' }}>Available <span className="font-mono">{usd(balance.usd.available)}</span></span>
+                  <span>{t('accounts.detail.total')} <span className="font-mono">{usd(balance.usd.total)}</span></span>
+                  <span style={{ color: 'var(--muted)' }}>{t('accounts.detail.available')} <span className="font-mono">{usd(balance.usd.available)}</span></span>
                 </div>
                 <div className="overflow-x-auto scroll-hidden">
                   <table className="w-full text-xs" style={{ minWidth: '15rem' }}>
                     <thead>
                       <tr style={{ color: 'var(--muted)' }}>
-                        <th className="text-left py-1 font-medium">Token</th>
-                        <th className="text-right py-1 font-medium">Free</th>
-                        <th className="text-right py-1 font-medium">Locked</th>
-                        <th className="text-right py-1 font-medium">Total</th>
+                        <th className="text-left py-1 font-medium">{t('accounts.col.token')}</th>
+                        <th className="text-right py-1 font-medium">{t('accounts.col.free')}</th>
+                        <th className="text-right py-1 font-medium">{t('accounts.col.locked')}</th>
+                        <th className="text-right py-1 font-medium">{t('accounts.col.total')}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {balance.tokens.filter(t => t.total !== 0).map(t => (
-                        <tr key={t.token} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td className="py-1 font-mono">{t.token}</td>
-                          <td className="py-1 text-right font-mono">{t.free.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
-                          <td className="py-1 text-right font-mono">{t.locked.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
-                          <td className="py-1 text-right font-mono">{t.total.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
+                      {balance.tokens.filter(tk => tk.total !== 0).map(tk => (
+                        <tr key={tk.token} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td className="py-1 font-mono">{tk.token}</td>
+                          <td className="py-1 text-right font-mono">{tk.free.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
+                          <td className="py-1 text-right font-mono">{tk.locked.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
+                          <td className="py-1 text-right font-mono">{tk.total.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -277,16 +280,16 @@ export function AccountDetail({ account }: { account: string }) {
         {active === 'orders' && (
           <>
             {detail.errors['orders'] && <p className="text-xs" style={{ color: 'var(--danger, #ef4444)' }}>{detail.errors['orders']}</p>}
-            {orders?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>No open orders.</p>}
+            {orders?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.detail.noOrders')}</p>}
             {orders && orders.length > 0 && (
               <div className="overflow-x-auto scroll-hidden">
                 <table className="w-full text-xs" style={{ minWidth: '16rem' }}>
                   <thead>
                     <tr style={{ color: 'var(--muted)' }}>
-                      <th className="text-left py-1 font-medium">Order</th>
-                      <th className="text-left py-1 font-medium">Side</th>
-                      <th className="text-right py-1 font-medium">Value</th>
-                      <th className="text-left py-1 pl-3 font-medium">Status</th>
+                      <th className="text-left py-1 font-medium">{t('accounts.col.order')}</th>
+                      <th className="text-left py-1 font-medium">{t('accounts.col.side')}</th>
+                      <th className="text-right py-1 font-medium">{t('accounts.col.value')}</th>
+                      <th className="text-left py-1 pl-3 font-medium">{t('accounts.col.status')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -312,6 +315,7 @@ export function AccountDetail({ account }: { account: string }) {
 
 /** The panel for an implementation that declares its own sections. */
 function DeclaredDetail({ detail, layout, onReload }: { detail: DetailPayload; layout: SectionDef[]; onReload: () => void }) {
+  const t = useT()
   const [tab, setTab] = useState<string>(layout.find(sec => sec.default)?.method ?? layout[0]!.method)
   const active = layout.some(sec => sec.method === tab) ? tab : layout[0]!.method
   const current = layout.find(sec => sec.method === active)!
@@ -343,12 +347,12 @@ function DeclaredDetail({ detail, layout, onReload }: { detail: DetailPayload; l
           })}
         </div>
         <button onClick={onReload} className="text-xs px-2 py-1 mb-1.5 rounded-md shrink-0" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
-          ⟳ Refresh
+          {t('accounts.detail.refresh')}
         </button>
       </div>
       <div className="pt-3">
         {detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--danger)' }}>{detail.errors[current.method]}</p>}
-        {data === undefined && !detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--muted)' }}>No data.</p>}
+        {data === undefined && !detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.detail.noData')}</p>}
         {data !== undefined && current.kind === 'table' && Array.isArray(data) && <DeclaredTable rows={data as Array<Record<string, unknown>>} def={current} />}
         {data !== undefined && current.kind === 'keyvalue' && typeof data === 'object' && data !== null && !Array.isArray(data) && <DeclaredKeyValue data={data as Record<string, unknown>} def={current} />}
       </div>

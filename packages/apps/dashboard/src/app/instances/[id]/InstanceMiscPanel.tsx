@@ -98,7 +98,7 @@ export function InstanceMiscPanel({ instance, onSaved }: {
           )}
           {dryRun && (
             <span className="text-xs px-1.5 py-0.5 rounded" style={{ border: '1px solid var(--warning)', color: 'var(--warning)' }}>
-              DRY RUN
+              {t('board.dryRun')}
             </span>
           )}
           {dirty && <span className="text-xs" style={{ color: 'var(--warning)' }}>{t('board.unsaved')}</span>}
@@ -134,7 +134,7 @@ export function InstanceMiscPanel({ instance, onSaved }: {
               <div className="flex flex-wrap gap-1.5 mt-2 ml-7">
                 {actions.length === 0 ? (
                   <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                    This strategy declares no executor, so there is no action to choose.
+                    {t('board.noExecutor')}
                   </span>
                 ) : actions.map(a => (
                   <button

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { JsonTree } from './JsonTree'
+import { useT } from '@/i18n'
 
 /**
  * One strategy run, rendered as what it actually is: a list of steps the
@@ -30,6 +31,7 @@ export interface RunTrace {
 }
 
 export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpen?: boolean }) {
+  const t = useT()
   const [open, setOpen] = useState(defaultOpen)
   const color = run.error ? 'var(--danger)' : run.instructions > 0 ? 'var(--success)' : 'var(--muted)'
   return (
@@ -41,9 +43,9 @@ export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpe
       <div className="flex gap-2 items-start cursor-pointer" onClick={() => setOpen(o => !o)}>
         <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'} {new Date(run.startedAt).toLocaleTimeString()}</span>
         <span className="px-1 rounded text-xs" style={{ background: color + '22', color }}>
-          {run.error ? 'error' : `${run.instructions} instruction${run.instructions === 1 ? '' : 's'}`}
+          {run.error ? t('ui.error') : run.instructions === 1 ? t('ui.instructionsOne') : t('ui.instructionsN', { n: run.instructions })}
         </span>
-        <span style={{ color: 'var(--muted)' }}>{run.durationMs}ms · {run.steps.length} steps · {run.triggerId}</span>
+        <span style={{ color: 'var(--muted)' }}>{run.durationMs}ms · {run.steps.length === 1 ? t('ui.stepsOne') : t('ui.stepsN', { n: run.steps.length })} · {run.triggerId}</span>
         {run.error && <span className="truncate" style={{ color: 'var(--danger)' }}>{run.error.slice(0, 60)}</span>}
       </div>
       {open && <RunSteps run={run} />}
@@ -53,10 +55,11 @@ export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpe
 
 /** The steps alone, for a view that has already said which run this is. */
 export function RunSteps({ run, className = 'ml-4' }: { run: RunTrace; className?: string }) {
+  const t = useT()
   return (
     <div className={`${className} font-mono text-xs flex flex-col gap-1 p-2 rounded`} style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
       {run.steps.length === 0
-        ? <span className="text-xs" style={{ color: 'var(--muted)' }}>No steps recorded for this run.</span>
+        ? <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('ui.noSteps')}</span>
         : run.steps.map((s, i) => <RunStep key={i} step={s} startedAt={run.startedAt} />)}
     </div>
   )

@@ -10,7 +10,7 @@ import { useT } from '@/i18n'
 /** Monaco is ~1 MB and only the JSON view needs it — loaded when asked for. */
 const CodeEditor = dynamic(() => import('./CodeEditor').then(m => m.CodeEditor), {
   ssr: false,
-  loading: () => <div className="text-xs p-4" style={{ color: 'var(--muted)' }}>Loading editor…</div>,
+  loading: function LoadingEditor() { const t = useT(); return <div className="text-xs p-4" style={{ color: 'var(--muted)' }}>{t('params.loadingEditor')}</div> },
 })
 
 /**
@@ -188,7 +188,7 @@ function ImportDialog({ fields, values, onClose, onApply }: {
                   </span>
                   {skipped.size > 0 && (
                     <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => setSkipped(new Set())}>
-                      Restore all
+                      {t('params.restoreAll')}
                     </button>
                   )}
                 </div>

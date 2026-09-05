@@ -1,6 +1,7 @@
 'use client'
 
 import Editor, { type Monaco } from '@monaco-editor/react'
+import { useT } from '@/i18n'
 
 /**
  * Monaco wired to the framework: the gateway serves every .d.ts of
@@ -64,6 +65,7 @@ export function CodeEditor({ path, value, onChange, readOnly, height, language }
   /** Defaults to TypeScript; 'json' for parameter documents. */
   language?: 'typescript' | 'json'
 }) {
+  const t = useT()
   return (
     <Editor
       path={`file:///work/${path}`}
@@ -89,7 +91,7 @@ export function CodeEditor({ path, value, onChange, readOnly, height, language }
         folding: true,
         tabSize: 2,
       }}
-      loading={<div className="text-xs p-4" style={{ color: 'var(--muted)' }}>Loading editor…</div>}
+      loading={<div className="text-xs p-4" style={{ color: 'var(--muted)' }}>{t('params.loadingEditor')}</div>}
     />
   )
 }

@@ -8,6 +8,7 @@ import type { StrategyInstanceView } from '@openwhaleorg/core'
 import { Select } from '@/components/Select'
 import { RunSteps, type RunTrace } from '@/components/RunTrace'
 import { subscribeLiveEvents } from '@/lib/live-events'
+import { useT } from '@/i18n'
 
 /**
  * Every instance's executions, newest first, with the run behind each one.
@@ -45,7 +46,21 @@ const STATUS_COLOR: Record<string, string> = {
 /** Live rows accumulate; this caps what the page holds between reloads. */
 const MAX_ROWS = 500
 
+type T = ReturnType<typeof useT>
+
+/** The status word, translated; an unknown status is shown as the API sent it. */
+function statusLabel(t: T, status: string): string {
+  switch (status) {
+    case 'success': return t('executions.status.success')
+    case 'failed': return t('executions.status.failed')
+    case 'skipped': return t('executions.status.skipped')
+    case 'dry-run': return t('executions.status.dryRun')
+    default: return status
+  }
+}
+
 export function ExecutionsClient({ instances }: { instances: StrategyInstanceView[] }) {
+  const t = useT()
   const [rows, setRows] = useState<ExecutionRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [live, setLive] = useState(false)
@@ -91,18 +106,18 @@ export function ExecutionsClient({ instances }: { instances: StrategyInstanceVie
     <div>
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
-          <h1 className="text-2xl font-semibold">Executions</h1>
+          <h1 className="text-2xl font-semibold">{t('executions.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            What every instance actually sent, newest first — and the run that decided it.
+            {t('executions.intro')}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
             <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: live ? 'var(--success)' : 'var(--muted)' }} />
-            {live ? 'live' : 'offline'}
+            {live ? t('ui.live') : t('ui.offline')}
           </span>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={loading}>
-            {loading ? 'Loading…' : 'Refresh'}
+            {loading ? t('common.loading') : t('common.refresh')}
           </button>
         </div>
       </div>
@@ -111,25 +126,25 @@ export function ExecutionsClient({ instances }: { instances: StrategyInstanceVie
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by action, executor, instance, error…"
+          placeholder={t('executions.filterPlaceholder')}
           className="rounded-md px-3 py-2 text-sm flex-1 min-w-64"
           style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
         />
         <Select
           value={instanceId}
           onChange={setInstanceId}
-          options={[{ value: '', label: 'All instances' }, ...instances.map(i => ({ value: i.id, label: i.name }))]}
+          options={[{ value: '', label: t('ui.allInstances') }, ...instances.map(i => ({ value: i.id, label: i.name }))]}
           className="min-w-52"
         />
         <Select
           value={status}
           onChange={setStatus}
           options={[
-            { value: '', label: 'Any status' },
-            { value: 'success', label: 'success' },
-            { value: 'failed', label: 'failed' },
-            { value: 'skipped', label: 'skipped' },
-            { value: 'dry-run', label: 'dry-run' },
+            { value: '', label: t('executions.anyStatus') },
+            { value: 'success', label: statusLabel(t, 'success') },
+            { value: 'failed', label: statusLabel(t, 'failed') },
+            { value: 'skipped', label: statusLabel(t, 'skipped') },
+            { value: 'dry-run', label: statusLabel(t, 'dry-run') },
           ]}
           className="min-w-36"
         />
@@ -137,11 +152,11 @@ export function ExecutionsClient({ instances }: { instances: StrategyInstanceVie
 
       <div className="rounded-lg overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="grid gap-2 px-3 py-2 text-xs" style={{ gridTemplateColumns: '9rem 1fr 12rem 8rem 6rem', color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-          <span>Time</span><span>Action</span><span>Instance</span><span>Executor</span><span>Status</span>
+          <span>{t('executions.col.time')}</span><span>{t('executions.col.action')}</span><span>{t('executions.col.instance')}</span><span>{t('executions.col.executor')}</span><span>{t('executions.col.status')}</span>
         </div>
         {shown.length === 0 ? (
           <div className="px-3 py-6 text-sm" style={{ color: 'var(--muted)' }}>
-            {loading ? 'Loading…' : 'No executions recorded yet. A strategy writes one here every time an instruction reaches an executor.'}
+            {loading ? t('common.loading') : t('executions.empty')}
           </div>
         ) : shown.map((row, i) => (
           <ExecutionRow
@@ -165,6 +180,7 @@ function ExecutionRow({ row, instanceName, open, onToggle }: {
   open: boolean
   onToggle: () => void
 }) {
+  const t = useT()
   const color = STATUS_COLOR[row.status] ?? 'var(--muted)'
   const instanceId = row.instruction?.instanceId
   return (
@@ -183,7 +199,7 @@ function ExecutionRow({ row, instanceName, open, onToggle }: {
         </span>
         <span className="truncate" style={{ color: 'var(--muted)' }}>{instanceName ?? instanceId ?? '—'}</span>
         <span className="truncate mono" style={{ color: 'var(--muted)' }}>{row.executorId || row.instruction?.executorId}</span>
-        <span className="px-1.5 py-0.5 rounded text-xs justify-self-start" style={{ background: color + '22', color }}>{row.status}</span>
+        <span className="px-1.5 py-0.5 rounded text-xs justify-self-start" style={{ background: color + '22', color }}>{statusLabel(t, row.status)}</span>
       </div>
       {open && <ExecutionDetail row={row} instanceName={instanceName} />}
     </div>
@@ -191,6 +207,7 @@ function ExecutionRow({ row, instanceName, open, onToggle }: {
 }
 
 function ExecutionDetail({ row, instanceName }: { row: ExecutionRecord; instanceName?: string }) {
+  const t = useT()
   const instanceId = row.instruction?.instanceId
   const runId = row.instruction?.runId
   const [run, setRun] = useState<RunTrace | null>(null)
@@ -209,49 +226,50 @@ function ExecutionDetail({ row, instanceName }: { row: ExecutionRecord; instance
       if (res.ok) setRun(await res.json() as RunTrace)
       // A no-op run older than the sampler's heartbeat is genuinely not on
       // disk; say that rather than showing an empty trace as if it were one.
-      else setRunError('This run is no longer on disk — traces are kept for the recent days only.')
+      else setRunError(t('executions.runGone'))
     })()
     return () => { gone = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, runId])
 
   return (
     <div className="px-3 pb-3 flex flex-col gap-3">
       <div className="grid gap-3 text-xs" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))' }}>
-        <JsonField label="Instruction" data={row.instruction ?? {}} />
+        <JsonField label={t('executions.instruction')} data={row.instruction ?? {}} />
         {/* An error is a message, not a document — a tree of one string node
             would be worse than the string. Only the success payload is JSON. */}
         {row.error ? (
-          <Field label="Error">
+          <Field label={t('executions.error')}>
             <pre className="p-2 rounded overflow-x-auto max-h-64 overflow-y-auto scroll-hidden leading-snug"
                  style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--danger)' }}>
               {row.error}
             </pre>
           </Field>
         ) : (
-          <JsonField label="Result" data={row.data ?? {}} />
+          <JsonField label={t('executions.result')} data={row.data ?? {}} />
         )}
       </div>
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted)' }}>
-          <span>Run</span>
-          {run && <span className="mono">{run.triggerId} · {run.durationMs}ms · {run.instructions} instruction{run.instructions === 1 ? '' : 's'}</span>}
+          <span>{t('executions.run')}</span>
+          {run && <span className="mono">{run.triggerId} · {run.durationMs}ms · {run.instructions === 1 ? t('ui.instructionsOne') : t('ui.instructionsN', { n: run.instructions })}</span>}
           {instanceId && (
             <Link href={`/instances/${instanceId}`} className="ml-auto" style={{ color: 'var(--accent)' }}>
-              Open {instanceName ?? instanceId} →
+              {t('ui.openInstance', { name: instanceName ?? instanceId })}
             </Link>
           )}
         </div>
         {!runId ? (
           <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            This instruction carries no run id — it was emitted before executions were linked to runs, or pushed outside a strategy run.
+            {t('executions.noRunId')}
           </span>
         ) : runError ? (
           <span className="text-xs" style={{ color: 'var(--muted)' }}>{runError}</span>
         ) : run ? (
           <RunSteps run={run} className="" />
         ) : (
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>Loading the run…</span>
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('executions.loadingRun')}</span>
         )}
       </div>
     </div>
@@ -267,6 +285,7 @@ function ExecutionDetail({ row, instanceName }: { row: ExecutionRecord; instance
  * is there for when the inline box's 16rem is genuinely not enough.
  */
 function JsonField({ label, data }: { label: string; data: unknown }) {
+  const t = useT()
   const [zoom, setZoom] = useState(false)
   return (
     <div className="flex flex-col gap-1">
@@ -276,7 +295,7 @@ function JsonField({ label, data }: { label: string; data: unknown }) {
           <CopyButton value={data} />
           <button
             onClick={() => setZoom(true)}
-            title="Open full screen"
+            title={t('ui.openFullScreen')}
             className="text-xs px-1.5 py-0.5 rounded shrink-0"
             style={{ color: 'var(--muted)', border: '1px solid var(--border)', background: 'transparent' }}
           >

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Select } from '@/components/Select'
 import { Switch } from '@/components/Switch'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
+import { useT } from '@/i18n'
 
 interface ContractEntry { monitor: string; keys: number; bytes: number }
 interface MatchedFile { monitor: string; key: string; bytes: number; updatedAt: number }
@@ -38,11 +39,12 @@ function formatBytes(n: number): string {
   return `${n} B`
 }
 
-function formatWhen(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString() : 'never'
+function formatWhen(iso: string | undefined, never: string): string {
+  return iso ? new Date(iso).toLocaleString() : never
 }
 
 export function RetentionClient() {
+  const t = useT()
   const [contracts, setContracts] = useState<ContractEntry[]>([])
   const [disk, setDisk] = useState<{ freeBytes: number; totalBytes: number } | null>(null)
   const [policies, setPolicies] = useState<Policy[]>([])
@@ -108,10 +110,10 @@ export function RetentionClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(draft),
       })
-      if (!res.ok) { setError(((await res.json()) as { error?: string }).error ?? 'save failed'); return }
+      if (!res.ok) { setError(((await res.json()) as { error?: string }).error ?? t('retention.saveFailed')); return }
       const { policy } = await res.json() as { policy: Policy }
       if (andRun) await run(policy.id)
-      else { setNotice(`Saved — ${policy.monitor} / ${policy.keyPattern}, keep ${policy.keepDays}d`); await load() }
+      else { setNotice(t('retention.saved', { monitor: policy.monitor, pattern: policy.keyPattern, days: policy.keepDays })); await load() }
       setDraft({ ...BLANK })
     } finally { setBusy('') }
   }
@@ -124,28 +126,28 @@ export function RetentionClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(id ? { id } : {}),
       })
-      if (!res.ok) { setError(((await res.json()) as { error?: string }).error ?? 'run failed'); return }
+      if (!res.ok) { setError(((await res.json()) as { error?: string }).error ?? t('retention.runFailed')); return }
       const { summaries } = await res.json() as { summaries: RunSummary[] }
       const freed = summaries.reduce((n, s) => n + s.bytesFreed, 0)
       const dropped = summaries.reduce((n, s) => n + s.droppedRecords, 0)
       const errs = summaries.flatMap(s => s.errors)
-      setNotice(dropped === 0 ? 'Nothing to prune — everything matched is inside its horizon.'
-        : `Freed ${formatBytes(freed)} — ${dropped.toLocaleString()} records across ${summaries.reduce((n, s) => n + s.files, 0)} files.`)
+      setNotice(dropped === 0 ? t('retention.nothingToPrune')
+        : t('retention.freed', { bytes: formatBytes(freed), records: dropped.toLocaleString(), files: summaries.reduce((n, s) => n + s.files, 0) }))
       if (errs.length) setError(errs.join(' · '))
       await load()
     } finally { setBusy('') }
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this retention policy? Data already pruned does not come back.')) return
+    if (!confirm(t('retention.deleteConfirm'))) return
     await fetch(`/api/monitor-retention/${encodeURIComponent(id)}`, { method: 'DELETE' })
     await load()
   }
 
   const options = useMemo(() => [
-    { value: '*', label: 'Every monitor', hint: 'all stores below' },
-    ...contracts.map(c => ({ value: c.monitor, label: c.monitor, hint: `${c.keys} keys · ${formatBytes(c.bytes)}` })),
-  ], [contracts])
+    { value: '*', label: t('retention.everyMonitor'), hint: t('retention.allStores') },
+    ...contracts.map(c => ({ value: c.monitor, label: c.monitor, hint: t('retention.keysBytes', { n: c.keys, bytes: formatBytes(c.bytes) }) })),
+  ], [contracts, t])
 
   const collected = contracts.reduce((n, c) => n + c.bytes, 0)
   const matchedBytes = (matched ?? []).reduce((n, m) => n + m.bytes, 0)
@@ -155,17 +157,17 @@ export function RetentionClient() {
       {/* Totals and free space: the same question asked twice. */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="text-xs" style={{ color: 'var(--muted)' }}>
-          monitors <span style={{ color: 'var(--foreground)' }}>{formatBytes(collected)}</span>
-          {disk && <> · disk <span style={{ color: 'var(--foreground)' }}>{formatBytes(disk.freeBytes)}</span> free</>}
+          {t('retention.monitors')} <span style={{ color: 'var(--foreground)' }}>{formatBytes(collected)}</span>
+          {disk && <> · {t('retention.disk')} <span style={{ color: 'var(--foreground)' }}>{formatBytes(disk.freeBytes)}</span> {t('retention.free')}</>}
         </span>
         <button
           onClick={() => void run()}
           disabled={busy !== '' || policies.filter(p => p.enabled).length === 0}
           className="text-xs px-3 py-1.5 rounded-md"
           style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: busy ? 0.6 : 1 }}
-          title="Run every enabled policy now, without waiting for the hourly sweep"
+          title={t('retention.runAllTitle')}
         >
-          {busy === 'all' ? 'Running…' : '⟳ Run all now'}
+          {busy === 'all' ? t('retention.running') : t('retention.runAll')}
         </button>
       </div>
 
@@ -184,13 +186,13 @@ export function RetentionClient() {
         {/* ── saved policies ─────────────────────────────────────────────── */}
         <div className="rounded-lg flex flex-col" style={{ ...panelStyle, height: '30rem' }}>
           <div className="px-3 py-2 text-xs font-medium shrink-0 flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>Policies ({policies.length})</span>
-            <span>swept hourly</span>
+            <span>{t('retention.policies', { n: policies.length })}</span>
+            <span>{t('retention.sweptHourly')}</span>
           </div>
           <div className="flex-1 overflow-y-auto scroll-hidden">
             {policies.length === 0 && (
               <p className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>
-                No policies yet — nothing is being pruned. Build one on the right.
+                {t('retention.noPolicies')}
               </p>
             )}
             {policies.map(p => (
@@ -200,12 +202,12 @@ export function RetentionClient() {
                     {p.monitor} <span style={{ color: 'var(--muted)' }}>/</span> {p.keyPattern}
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                    keep {p.keepDays}d · last run {formatWhen(p.lastRunAt)}
-                    {p.lastResult && p.lastResult.files > 0 && <> · freed {formatBytes(p.lastResult.bytesFreed)}</>}
+                    {t('retention.policyLine', { days: p.keepDays, when: formatWhen(p.lastRunAt, t('retention.never')) })}
+                    {p.lastResult && p.lastResult.files > 0 && t('retention.freedShort', { bytes: formatBytes(p.lastResult.bytesFreed) })}
                   </div>
                   {p.lastResult?.errors.length ? (
                     <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--danger, #ef4444)' }} title={p.lastResult.errors.join('\n')}>
-                      {p.lastResult.errors.length} error(s)
+                      {t('retention.errors', { n: p.lastResult.errors.length })}
                     </div>
                   ) : null}
                 </div>
@@ -213,9 +215,9 @@ export function RetentionClient() {
                 <KebabMenu>
                   {close => (
                     <>
-                      <button className={MENU_ITEM} onClick={() => { close(); setDraft({ id: p.id, monitor: p.monitor, keyPattern: p.keyPattern, keepDays: p.keepDays, enabled: p.enabled }) }}>Edit</button>
-                      <button className={MENU_ITEM} onClick={() => { close(); void run(p.id) }}>Run now</button>
-                      <button className={MENU_ITEM} style={{ color: 'var(--danger, #ef4444)' }} onClick={() => { close(); void remove(p.id) }}>Delete</button>
+                      <button className={MENU_ITEM} onClick={() => { close(); setDraft({ id: p.id, monitor: p.monitor, keyPattern: p.keyPattern, keepDays: p.keepDays, enabled: p.enabled }) }}>{t('common.edit')}</button>
+                      <button className={MENU_ITEM} onClick={() => { close(); void run(p.id) }}>{t('retention.runNow')}</button>
+                      <button className={MENU_ITEM} style={{ color: 'var(--danger, #ef4444)' }} onClick={() => { close(); void remove(p.id) }}>{t('common.delete')}</button>
                     </>
                   )}
                 </KebabMenu>
@@ -227,16 +229,16 @@ export function RetentionClient() {
         {/* ── editor ─────────────────────────────────────────────────────── */}
         <div className="rounded-lg flex flex-col" style={{ ...panelStyle, height: '30rem' }}>
           <div className="px-3 py-2 text-xs font-medium shrink-0" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            {draft.id ? 'Edit policy' : 'New policy'}
+            {draft.id ? t('retention.editPolicy') : t('retention.newPolicy')}
           </div>
           <div className="flex-1 overflow-y-auto scroll-hidden p-3 flex flex-col gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>Monitor</span>
-              <Select value={draft.monitor} options={options} placeholder="Pick a monitor" onChange={v => setDraft(d => ({ ...d, monitor: v }))} />
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('retention.monitor')}</span>
+              <Select value={draft.monitor} options={options} placeholder={t('retention.pickMonitor')} onChange={v => setDraft(d => ({ ...d, monitor: v }))} />
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>Key pattern</span>
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('retention.keyPattern')}</span>
               <input
                 value={draft.keyPattern}
                 onChange={e => setDraft(d => ({ ...d, keyPattern: e.target.value }))}
@@ -245,12 +247,12 @@ export function RetentionClient() {
                 style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
               />
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                <code>*</code> spans any characters, <code>?</code> exactly one. Everything else is literal.
+                <code>*</code> {t('retention.patternStar')} <code>?</code> {t('retention.patternQ')}
               </span>
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>Keep the last</span>
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('retention.keepLast')}</span>
               <div className="flex items-center gap-2">
                 <input
                   type="number" min={0.5} step={0.5} value={draft.keepDays}
@@ -258,7 +260,7 @@ export function RetentionClient() {
                   className="text-xs px-2 py-1.5 rounded-md"
                   style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', width: 96 }}
                 />
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>days — older records are dropped</span>
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('retention.daysOlderDropped')}</span>
               </div>
             </label>
 
@@ -266,17 +268,17 @@ export function RetentionClient() {
                 floor on what survives, never an over-estimate of what goes. */}
             {draft.monitor && (
               <div className="rounded-md p-2.5 text-xs" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
-                {previewing && <span style={{ color: 'var(--muted)' }}>Measuring…</span>}
+                {previewing && <span style={{ color: 'var(--muted)' }}>{t('retention.measuring')}</span>}
                 {!previewing && preview && (
                   <>
                     <div>
-                      Matches <span style={{ color: 'var(--foreground)' }}>{matched?.length ?? 0}</span> file(s),{' '}
-                      {formatBytes(matchedBytes)} on disk.
+                      {t('retention.matchesPrefix')} <span style={{ color: 'var(--foreground)' }}>{matched?.length ?? 0}</span>{' '}
+                      {t('retention.matchesSuffix', { bytes: formatBytes(matchedBytes) })}
                     </div>
                     <div className="mt-1">
                       {preview.droppedRecords === 0
-                        ? <span style={{ color: 'var(--muted)' }}>Nothing older than the horizon — this would free nothing today.</span>
-                        : <>Would drop <span style={{ color: 'var(--danger, #ef4444)' }}>{preview.droppedRecords.toLocaleString()}</span> records from {preview.files} file(s), freeing <span style={{ color: 'var(--accent)' }}>{formatBytes(preview.bytesFreed)}</span>.</>}
+                        ? <span style={{ color: 'var(--muted)' }}>{t('retention.nothingOlder')}</span>
+                        : <>{t('retention.wouldDrop')} <span style={{ color: 'var(--danger, #ef4444)' }}>{preview.droppedRecords.toLocaleString()}</span> {t('retention.wouldDropMid', { files: preview.files })} <span style={{ color: 'var(--accent)' }}>{formatBytes(preview.bytesFreed)}</span>{t('retention.wouldDropEnd')}</>}
                     </div>
                     {matched && matched.length > 0 && (
                       <div className="mt-2 flex flex-col gap-0.5" style={{ maxHeight: '7rem', overflowY: 'auto' }}>
@@ -286,7 +288,7 @@ export function RetentionClient() {
                             <span className="shrink-0">{formatBytes(m.bytes)}</span>
                           </div>
                         ))}
-                        {matched.length > 40 && <span style={{ color: 'var(--muted)' }}>+{matched.length - 40} more…</span>}
+                        {matched.length > 40 && <span style={{ color: 'var(--muted)' }}>{t('retention.more', { n: matched.length - 40 })}</span>}
                       </div>
                     )}
                   </>
@@ -294,7 +296,7 @@ export function RetentionClient() {
               </div>
             )}
 
-            <Switch checked={draft.enabled} onChange={v => setDraft(d => ({ ...d, enabled: v }))} label="Enabled" hint="Included in the hourly sweep" />
+            <Switch checked={draft.enabled} onChange={v => setDraft(d => ({ ...d, enabled: v }))} label={t('retention.enabled')} hint={t('retention.hourlyHint')} />
           </div>
 
           <div className="px-3 py-2.5 shrink-0 flex items-center gap-2" style={{ borderTop: '1px solid var(--border)' }}>
@@ -304,7 +306,7 @@ export function RetentionClient() {
               className="text-xs px-3 py-1.5 rounded-md"
               style={{ background: 'var(--accent)', color: '#fff', opacity: !draft.monitor || busy ? 0.5 : 1 }}
             >
-              {draft.id ? 'Save changes' : 'Add policy'}
+              {draft.id ? t('retention.saveChanges') : t('retention.addPolicy')}
             </button>
             <button
               onClick={() => void save(true)}
@@ -312,11 +314,11 @@ export function RetentionClient() {
               className="text-xs px-3 py-1.5 rounded-md"
               style={{ border: '1px solid var(--border)', color: 'var(--muted)', opacity: !draft.monitor || busy ? 0.5 : 1 }}
             >
-              Save &amp; run now
+              {t('retention.saveRun')}
             </button>
             {draft.id && (
               <button onClick={() => setDraft({ ...BLANK })} className="text-xs px-3 py-1.5 rounded-md" style={{ color: 'var(--muted)' }}>
-                Cancel
+                {t('common.cancel')}
               </button>
             )}
           </div>
@@ -329,26 +331,26 @@ export function RetentionClient() {
           answered by each policy's last-run line above. */}
       <div className="rounded-lg flex flex-col" style={{ ...panelStyle, maxHeight: '22rem' }}>
         <div className="px-3 py-2 text-xs font-medium shrink-0 flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-          <span>Run history</span>
-          <span>passes that deleted something · newest first</span>
+          <span>{t('retention.runHistory')}</span>
+          <span>{t('retention.runHistoryHint')}</span>
         </div>
         <div className="flex-1 overflow-y-auto scroll-hidden">
           {runs.length === 0 && (
             <p className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>
-              Nothing pruned yet.
+              {t('retention.nothingPruned')}
             </p>
           )}
           {runs.length > 0 && (
             <table className="w-full text-xs" style={{ minWidth: '40rem' }}>
               <thead>
                 <tr style={{ color: 'var(--muted)' }}>
-                  <th className="text-left font-medium px-3 py-1.5">When</th>
-                  <th className="text-left font-medium py-1.5">Target</th>
-                  <th className="text-right font-medium py-1.5">Kept</th>
-                  <th className="text-right font-medium py-1.5">Files</th>
-                  <th className="text-right font-medium py-1.5">Records</th>
-                  <th className="text-right font-medium py-1.5 pr-3">Freed</th>
-                  <th className="text-left font-medium py-1.5 pr-3">By</th>
+                  <th className="text-left font-medium px-3 py-1.5">{t('retention.col.when')}</th>
+                  <th className="text-left font-medium py-1.5">{t('retention.col.target')}</th>
+                  <th className="text-right font-medium py-1.5">{t('retention.col.kept')}</th>
+                  <th className="text-right font-medium py-1.5">{t('retention.col.files')}</th>
+                  <th className="text-right font-medium py-1.5">{t('retention.col.records')}</th>
+                  <th className="text-right font-medium py-1.5 pr-3">{t('retention.col.freed')}</th>
+                  <th className="text-left font-medium py-1.5 pr-3">{t('retention.col.by')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,7 +366,7 @@ export function RetentionClient() {
                     <td className="py-1.5 text-right font-mono pr-3" style={{ color: 'var(--accent)' }}>{formatBytes(r.bytesFreed)}</td>
                     <td className="py-1.5 pr-3" style={{ color: r.errors.length ? 'var(--danger, #ef4444)' : 'var(--muted)' }}
                         title={r.errors.join('\n')}>
-                      {r.trigger}{r.errors.length ? ` · ${r.errors.length} error(s)` : ''}
+                      {r.trigger === 'manual' ? t('retention.trigger.manual') : t('retention.trigger.scheduled')}{r.errors.length ? ` · ${t('retention.errors', { n: r.errors.length })}` : ''}
                     </td>
                   </tr>
                 ))}

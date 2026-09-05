@@ -14,14 +14,17 @@ const WhaleField = dynamic(
   () => import('../../components/WhaleField').then(m => m.WhaleField),
   {
     ssr: false,
-    loading: () => (
-      <div
-        className="w-full rounded-lg grid place-items-center text-xs"
-        style={{ height: 'calc(100vh - 22rem)', minHeight: 420, color: 'var(--muted)', border: '1px solid var(--border)' }}
-      >
-        Diving…
-      </div>
-    ),
+    loading: function Diving() {
+      const t = useT()
+      return (
+        <div
+          className="w-full rounded-lg grid place-items-center text-xs"
+          style={{ height: 'calc(100vh - 22rem)', minHeight: 420, color: 'var(--muted)', border: '1px solid var(--border)' }}
+        >
+          {t('inst.diving')}
+        </div>
+      )
+    },
   },
 )
 import { KebabMenu, FolderSection, MENU_ITEM } from '../../components/CardMenu'
@@ -160,7 +163,7 @@ export function IconMenu({ current, onPick, children }: {
             className="w-full text-left text-xs mt-1 px-1 py-1"
             style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}
           >
-            Reset to default (random)
+            {t('inst.iconReset')}
           </button>
         </div>
       )}
@@ -338,7 +341,7 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
             )
           })}
           <button type="button" onClick={() => commit(rows.filter((_, j) => j !== i))}
-            className="text-xs" style={{ color: 'var(--muted)' }} title="Remove row">✕</button>
+            className="text-xs" style={{ color: 'var(--muted)' }} title={t('params.removeRow')}>✕</button>
         </div>
       ))}
       <button type="button" onClick={addRow}
@@ -1107,7 +1110,7 @@ export function InstancesClient({ initialInstances }: Props) {
         <div>
           <h1 className="text-2xl font-semibold">{t('inst.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            Activate and manage running strategy instances
+            {t('inst.subtitle')}
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
@@ -1201,7 +1204,7 @@ export function InstancesClient({ initialInstances }: Props) {
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDeletingFolder(null)} autoFocus>{t('common.cancel')}</button>
                 <button type="button" className="btn btn-danger-solid btn-sm" onClick={() => void deleteFolder(deletingFolder)}>
-                  Delete folder
+                  {t('inst.folder.deleteButton')}
                 </button>
               </div>
             </div>
@@ -1242,14 +1245,14 @@ export function InstancesClient({ initialInstances }: Props) {
           className="rounded-lg p-8 mt-4 text-center text-sm"
           style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px dashed var(--border)' }}
         >
-          No instance matches this filter.
+          {t('inst.noMatch')}
           <button
             type="button"
             onClick={() => { setQuery(''); setStatus('all') }}
             className="ml-2 underline"
             style={{ color: 'var(--accent)' }}
           >
-            Clear it
+            {t('inst.clearFilter')}
           </button>
         </div>
       ) : layout === 'whale' ? (
@@ -1677,7 +1680,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
             <Link href={`/instances/${chosen.id}`} className={`${CTRL} px-3 gap-1.5`}
               style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
               <span className="text-sm leading-none">↗</span>
-              Full page
+              {t('inst.fullPage')}
             </Link>
           </div>
         </div>
@@ -1882,7 +1885,7 @@ function TopTraders({ onPick, current }: { onPick: (address: string) => void; cu
           {rows === null && <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>{t('inst.leaderboardLoading')}</p>}
           {rows === 'error' && (
             <p className="text-xs px-3 py-3" style={{ color: 'var(--muted)' }}>
-              Could not reach the leaderboard. Paste an address instead.
+              {t('inst.leaderboardUnreachable')}
             </p>
           )}
           {Array.isArray(rows) && rows.map((t) => {
@@ -2244,9 +2247,9 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
           <Modal onClose={() => setConfirmDiscard(false)} maxWidth="26rem">
             <div className="p-4 flex flex-col gap-3">
               <div>
-                <h3 className="text-sm font-medium">Discard this {initial ? 'edit' : 'instance'}?</h3>
+                <h3 className="text-sm font-medium">{initial ? t('inst.discardEdit') : t('inst.discardInstance')}</h3>
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                  Closing loses everything filled in here. Nothing has been saved yet.
+                  {t('inst.discardBody')}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
@@ -2705,7 +2708,7 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
           <Link href={onEdit} className={MENU_ITEM} style={{ color: 'var(--foreground)' }}>{t('common.edit')}</Link>
           <button type="button" className={MENU_ITEM} style={{ color: 'var(--foreground)' }}
             onClick={() => { onDuplicate(); close() }}>
-            Duplicate
+            {t('inst.duplicate')}
           </button>
 
           {onSetFolder && (
@@ -2895,18 +2898,18 @@ function RunControl({ instance, onActivate, onDeactivate }: {
         title={t('inst.openBoard')}
       >
         <span className="text-sm leading-none">↗</span>
-        Open
+        {t('inst.open')}
       </Link>
       {instance.active ? (
         confirmStop ? (
           <div className="flex items-center gap-1">
             <button onClick={() => setConfirmStop(false)} className={`${CTRL} px-2.5`}
               style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button onClick={() => { onDeactivate(); setConfirmStop(false) }} className={`${CTRL} px-2.5`}
               style={{ background: 'var(--danger)', color: '#fff' }}>
-              Stop
+              {t('inst.stop')}
             </button>
           </div>
         ) : (
@@ -2917,7 +2920,7 @@ function RunControl({ instance, onActivate, onDeactivate }: {
             title={t('inst.runningStop')}
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
-            Running
+            {t('inst.running')}
           </button>
         )
       ) : (
@@ -3129,7 +3132,7 @@ function FolderMenu({ current, folders, onPick }: {
               className="text-left px-3 py-1.5 text-xs"
               style={{ color: 'var(--danger)', borderTop: '1px solid var(--border)' }}
             >
-              Remove from folder
+              {t('inst.folder.remove')}
             </button>
           )}
         </div>

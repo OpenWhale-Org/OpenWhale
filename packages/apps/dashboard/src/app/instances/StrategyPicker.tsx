@@ -147,7 +147,7 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
           <div className="flex-1 min-w-0 flex flex-col">
             {!current ? (
               <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>
-                No strategy selected
+                {t('picker.noneSelected')}
               </div>
             ) : (
               <>
@@ -199,7 +199,7 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
                   <Section title={t('picker.paramsSummary', { required: required.length, tunable: tunable.length })}>
                     {params.length === 0 ? (
                       <div className="text-xs" style={{ color: 'var(--muted)' }}>
-                        No declared fields; this strategy takes raw JSON params.
+                        {t('picker.rawJson')}
                       </div>
                     ) : (
                       <div className="card-inset divide-y" style={{ borderColor: 'var(--border)' }}>
@@ -229,7 +229,7 @@ export function StrategyBrowser({ strategies, selectedId, onPick, onCancel, canc
                 <div className="flex justify-end gap-2 px-5 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
                   <button type="button" onClick={onCancel} className="btn btn-secondary">{cancelLabel ?? t('common.cancel')}</button>
                   <button type="button" onClick={() => onPick(current.id)} className="btn btn-primary">
-                    Use this strategy →
+                    {t('picker.use')}
                   </button>
                 </div>
               </>

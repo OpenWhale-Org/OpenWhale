@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useT } from '@/i18n'
 
 /**
  * Per-instance PnL — realized / fees / funding from the order-claim
@@ -50,11 +51,12 @@ function PnlCurve({ points, up, height = 132 }: {
   up: boolean
   height?: number
 }) {
+  const t = useT()
   if (points === undefined) {
-    return <div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>loading…</div>
+    return <div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>{t('pnl.loading')}</div>
   }
   if (points === null || points.length === 0) {
-    return <div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>No fills or funding attributed to this instance yet.</div>
+    return <div className="text-xs grid place-items-center" style={{ height, color: 'var(--muted)' }}>{t('pnl.noSeries')}</div>
   }
   const colour = up ? 'var(--success, #4ade80)' : 'var(--danger)'
   const W = 600, H = 140
@@ -70,7 +72,7 @@ function PnlCurve({ points, up, height = 132 }: {
   const area = `0,${y(lo)} ${line} ${W},${y(lo)}`
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', width: '100%', height }} role="img" aria-label="Realized PnL over time">
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', width: '100%', height }} role="img" aria-label={t('pnl.curveTitle')}>
       <defs>
         <linearGradient id="pnl-fill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={colour} stopOpacity="0.28" />
@@ -121,13 +123,14 @@ function SortableTh({ label, sortKey, numeric, sort, onSort }: {
   sort: SortState
   onSort: (s: SortState) => void
 }) {
+  const t = useT()
   const active = sort?.key === sortKey
   return (
     <th
       className={`px-2 py-1 cursor-pointer select-none whitespace-nowrap ${numeric ? 'text-right' : 'text-left'}`}
       style={{ color: active ? 'var(--foreground)' : 'var(--muted)' }}
       onClick={() => onSort(active ? { key: sortKey, desc: !sort!.desc } : { key: sortKey, desc: Boolean(numeric) })}
-      title="Click to sort"
+      title={t('pnl.sortTitle')}
     >
       {label}<span style={{ opacity: active ? 1 : 0.25 }}>{active ? (sort!.desc ? ' ▾' : ' ▴') : ' ⇅'}</span>
     </th>
@@ -135,6 +138,7 @@ function SortableTh({ label, sortKey, numeric, sort, onSort }: {
 }
 
 export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
+  const t = useT()
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<'summary' | 'fills' | 'positions'>('summary')
   // One state per table: switching tabs must not carry a key the next table
@@ -189,7 +193,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
       <div className="w-full flex items-center gap-2 px-4 py-3 text-sm font-medium">
         <button className="flex items-center gap-2" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>
-          <span>PnL</span>
+          <span>{t('pnl.title')}</span>
         </button>
         {summary && (
           <span className="text-sm font-mono" style={{ color: pnlColor(summary.net) }}>
@@ -197,7 +201,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
           </span>
         )}
         <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
-          attributed from claimed orders · funding split by exposure share
+          {t('pnl.attribution')}
         </span>
         <button
           onClick={() => void refresh()}
@@ -205,7 +209,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
           className="ml-auto text-xs px-2 py-0.5 rounded"
           style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
         >
-          {refreshing ? 'Collecting…' : '⟳ Collect now'}
+          {refreshing ? t('pnl.collecting') : t('pnl.collectNow')}
         </button>
       </div>
 
@@ -216,11 +220,11 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
                 {([
-                  ['Realized', summary.realized],
-                  ['Fees', summary.fees],
-                  ['Funding', summary.funding],
-                  ['Net', summary.net],
-                  ['Unrealized', positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)],
+                  [t('pnl.realized'), summary.realized],
+                  [t('pnl.fees'), summary.fees],
+                  [t('pnl.funding'), summary.funding],
+                  [t('pnl.net'), summary.net],
+                  [t('pnl.unrealized'), positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)],
                 ] as const).map(([label, value]) => (
                   <div key={label} className="rounded-md p-3" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
                     <div className="text-xs" style={{ color: 'var(--muted)' }}>{label}</div>
@@ -234,11 +238,11 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                   diverge by exactly the unrealized tile while one is open. */}
               <div className="rounded-md p-3 mb-3" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
                 <div className="flex items-baseline justify-between mb-1">
-                  <span className="text-xs" style={{ color: 'var(--muted)' }}>Realized PnL over time</span>
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('pnl.curveTitle')}</span>
                   {series && series.length > 0 && (
                     <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
                       {new Date(series[0]!.ts).toLocaleDateString()} → {new Date(series[series.length - 1]!.ts).toLocaleDateString()}
-                      {' · '}{series.length} events
+                      {' · '}{series.length === 1 ? t('pnl.eventsOne') : t('pnl.eventsN', { n: series.length })}
                     </span>
                   )}
                 </div>
@@ -246,18 +250,18 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
               </div>
 
               <div className="flex gap-2 mb-2">
-                {(['summary', 'fills', 'positions'] as const).map(t => (
+                {(['summary', 'fills', 'positions'] as const).map(tabId => (
                   <button
-                    key={t}
-                    onClick={() => setTab(t)}
+                    key={tabId}
+                    onClick={() => setTab(tabId)}
                     className="px-2 py-0.5 rounded text-xs capitalize"
                     style={{
-                      background: tab === t ? 'var(--accent)' : 'var(--background)',
-                      color: tab === t ? '#fff' : 'var(--muted)',
+                      background: tab === tabId ? 'var(--accent)' : 'var(--background)',
+                      color: tab === tabId ? '#fff' : 'var(--muted)',
                       border: '1px solid var(--border)',
                     }}
                   >
-                    {t === 'summary' ? `By symbol (${summary.bySymbol.length})` : t === 'fills' ? `Fills (${summary.fillCount})` : `Positions (${positions.length})`}
+                    {tabId === 'summary' ? t('pnl.tab.bySymbol', { n: summary.bySymbol.length }) : tabId === 'fills' ? t('pnl.tab.fills', { n: summary.fillCount }) : t('pnl.tab.positions', { n: positions.length })}
                   </button>
                 ))}
               </div>
@@ -267,12 +271,12 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                   <table className="w-full">
                     <thead>
                       <tr>
-                        <SortableTh label="symbol" sortKey="symbol" sort={symSort} onSort={setSymSort} />
-                        <SortableTh label="realized" sortKey="realized" numeric sort={symSort} onSort={setSymSort} />
-                        <SortableTh label="fees" sortKey="fees" numeric sort={symSort} onSort={setSymSort} />
-                        <SortableTh label="funding" sortKey="funding" numeric sort={symSort} onSort={setSymSort} />
-                        <SortableTh label="net" sortKey="net" numeric sort={symSort} onSort={setSymSort} />
-                        <SortableTh label="fills" sortKey="fills" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label={t('pnl.h.symbol')} sortKey="symbol" sort={symSort} onSort={setSymSort} />
+                        <SortableTh label={t('pnl.h.realized')} sortKey="realized" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label={t('pnl.h.fees')} sortKey="fees" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label={t('pnl.h.funding')} sortKey="funding" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label={t('pnl.h.net')} sortKey="net" numeric sort={symSort} onSort={setSymSort} />
+                        <SortableTh label={t('pnl.h.fills')} sortKey="fills" numeric sort={symSort} onSort={setSymSort} />
                       </tr>
                     </thead>
                     <tbody>
@@ -288,7 +292,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                       ))}
                       {summary.bySymbol.length === 0 && (
                         <tr><td colSpan={6} className="px-2 py-4 text-center" style={{ color: 'var(--muted)' }}>
-                          No attributed activity yet — the collector joins venue fills to this instance&apos;s orders within ~30s of an execution.
+                          {t('pnl.noActivity')}
                         </td></tr>
                       )}
                     </tbody>
@@ -299,13 +303,13 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                   <table className="w-full">
                     <thead>
                       <tr>
-                        <SortableTh label="time" sortKey="ts" numeric sort={fillSort} onSort={setFillSort} />
-                        <SortableTh label="symbol" sortKey="symbol" sort={fillSort} onSort={setFillSort} />
-                        <SortableTh label="side" sortKey="side" sort={fillSort} onSort={setFillSort} />
-                        <SortableTh label="qty" sortKey="qty" numeric sort={fillSort} onSort={setFillSort} />
-                        <SortableTh label="price" sortKey="price" numeric sort={fillSort} onSort={setFillSort} />
-                        <SortableTh label="pnl" sortKey="realizedPnl" numeric sort={fillSort} onSort={setFillSort} />
-                        <SortableTh label="fee" sortKey="fee" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.time')} sortKey="ts" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.symbol')} sortKey="symbol" sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.side')} sortKey="side" sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.qty')} sortKey="qty" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.price')} sortKey="price" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.pnl')} sortKey="realizedPnl" numeric sort={fillSort} onSort={setFillSort} />
+                        <SortableTh label={t('pnl.h.fee')} sortKey="fee" numeric sort={fillSort} onSort={setFillSort} />
                       </tr>
                     </thead>
                     <tbody>
@@ -321,7 +325,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                         </tr>
                       ))}
                       {fills.length === 0 && (
-                        <tr><td colSpan={7} className="px-2 py-4 text-center" style={{ color: 'var(--muted)' }}>No fills recorded yet.</td></tr>
+                        <tr><td colSpan={7} className="px-2 py-4 text-center" style={{ color: 'var(--muted)' }}>{t('pnl.noFills')}</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -331,12 +335,12 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                   <table className="w-full">
                     <thead>
                       <tr>
-                        <SortableTh label="symbol" sortKey="symbol" sort={posSort} onSort={setPosSort} />
-                        <SortableTh label="net qty" sortKey="qty" numeric sort={posSort} onSort={setPosSort} />
-                        <SortableTh label="avg entry" sortKey="avgEntry" numeric sort={posSort} onSort={setPosSort} />
-                        <SortableTh label="mark" sortKey="markPrice" numeric sort={posSort} onSort={setPosSort} />
-                        <SortableTh label="unrealized" sortKey="unrealizedPnl" numeric sort={posSort} onSort={setPosSort} />
-                        <SortableTh label="account" sortKey="account" sort={posSort} onSort={setPosSort} />
+                        <SortableTh label={t('pnl.h.symbol')} sortKey="symbol" sort={posSort} onSort={setPosSort} />
+                        <SortableTh label={t('pnl.h.netQty')} sortKey="qty" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label={t('pnl.h.avgEntry')} sortKey="avgEntry" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label={t('pnl.h.mark')} sortKey="markPrice" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label={t('pnl.h.unrealized')} sortKey="unrealizedPnl" numeric sort={posSort} onSort={setPosSort} />
+                        <SortableTh label={t('pnl.h.account')} sortKey="account" sort={posSort} onSort={setPosSort} />
                       </tr>
                     </thead>
                     <tbody>
@@ -354,7 +358,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                       ))}
                       {positions.length === 0 && (
                         <tr><td colSpan={6} className="px-2 py-4 text-center" style={{ color: 'var(--muted)' }}>
-                          Flat — no open exposure derived from this instance&apos;s fills.
+                          {t('pnl.flat')}
                         </td></tr>
                       )}
                     </tbody>
