@@ -1016,6 +1016,17 @@ export class OpenWhaleRuntime implements IRuntime {
     return out
   }
 
+  /**
+   * A script's option lists for the form's current values — the dependent
+   * half of `paramOptions` (a symbol list drawn from the chosen account).
+   */
+  async scriptOptions(id: string, params: Record<string, unknown>): Promise<Record<string, Array<{ value: string; label: string }>>> {
+    const rec = this.scriptRegistry.get(id)
+    if (!rec) throw new Error(`Unknown script: "${id}"`)
+    if (rec.def.paramOptions === undefined) return {}
+    return rec.def.paramOptions(this, params)
+  }
+
   /** Validate params against the script's schema and run it against this runtime. */
   async runScript(
     id: string,

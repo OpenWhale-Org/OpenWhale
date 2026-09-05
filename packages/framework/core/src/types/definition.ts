@@ -111,6 +111,12 @@ export interface ParamFieldMeta {
    * (add-button label) live here.
    */
   list?: Omit<ListParamDef, 'columns'>
+  /**
+   * Names of sibling fields this field's option list is computed from. The
+   * form re-asks the script's `paramOptions` with the current values whenever
+   * one of them changes — a symbol list drawn from the chosen account, say.
+   */
+  optionsDependOn?: string[]
 }
 
 /**
@@ -227,6 +233,8 @@ export interface ParamFieldDef {
   catalogue?: ParamFieldCatalogue
   /** Verify the chosen value(s) against the bound account's venue (see ParamAvailability). */
   availability?: ParamAvailability
+  /** Sibling fields whose values this field's options are computed from (see ParamFieldMeta). */
+  optionsDependOn?: string[]
   /** Field accepts several values — the form renders a multi-select. */
   multiple?: boolean
   /** Render this number as a drag slider with the given range. */

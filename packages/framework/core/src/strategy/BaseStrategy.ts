@@ -327,6 +327,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
           ...(meta.multiple ? { multiple: true } : {}),
           ...(meta.slider ? { slider: meta.slider } : {}),
           ...(meta.unit ? { unit: meta.unit } : {}),
+          ...(meta.optionsDependOn ? { optionsDependOn: meta.optionsDependOn } : {}),
           ...(list ? { list } : {}),
         })
       }

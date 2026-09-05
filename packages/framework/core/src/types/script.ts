@@ -78,7 +78,12 @@ export interface ScriptDefinition {
    * on every listing, so the dropdown always reflects the current world;
    * the param itself stays a plain string in the schema.
    */
-  paramOptions?(runtime: unknown): Promise<Record<string, Array<{ value: string; label: string }>>>
+  /**
+   * Live option lists for `options` fields. Called on every listing with no
+   * params, and again with the form's current values whenever a field that
+   * declares `optionsDependOn` sees one of its dependencies change.
+   */
+  paramOptions?(runtime: unknown, params?: Record<string, unknown>): Promise<Record<string, Array<{ value: string; label: string }>>>
   run(ctx: ScriptContext): Promise<ScriptResult>
 }
 

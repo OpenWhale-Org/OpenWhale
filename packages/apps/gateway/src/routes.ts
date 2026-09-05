@@ -332,6 +332,18 @@ export function buildRouter(): Router {
     res.json(await getScriptShelf().put(req.body))
   }))
 
+  /* Option lists that depend on other fields (a symbol list drawn from the
+     chosen account). The form asks with its current values. */
+  router.post('/api/scripts/:owner/:sid/options', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
+      res.json(await runtime.scriptOptions(`${req.params['owner']}/${req.params['sid']}`, params))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   router.post('/api/scripts/:owner/:sid/run', h(async (req, res) => {
     const runtime = await ensureStarted()
     try {

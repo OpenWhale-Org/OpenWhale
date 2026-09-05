@@ -230,7 +230,46 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const fields = script.paramsFields ?? []
+  // Option lists can depend on other fields (a symbol list drawn from the
+  // chosen account), so the fields are state: the form re-asks the script
+  // whenever a dependency changes and swaps the affected lists in place.
+  const [fields, setFields] = useState<ParamFieldDef[]>(script.paramsFields ?? [])
+  useEffect(() => { setFields(script.paramsFields ?? []) }, [script.paramsFields])
+  const valuesRef = useRef(values)
+  valuesRef.current = values
+  const dependent = useMemo(() => fields.filter(f => (f.optionsDependOn?.length ?? 0) > 0), [fields])
+  const depKey = dependent.map(f => f.optionsDependOn!.map(d => values[d] ?? '').join('\u0000')).join('\u0001')
+  useEffect(() => {
+    if (dependent.length === 0) return
+    const current = valuesRef.current
+    const params: Record<string, unknown> = {}
+    for (const f of dependent) for (const d of f.optionsDependOn ?? []) if (current[d] !== undefined && current[d] !== '') params[d] = current[d]
+    let gone = false
+    const timer = setTimeout(async () => {
+      const [owner, ...rest] = script.id.split('/')
+      try {
+        const res = await fetch(`/api/scripts/${encodeURIComponent(owner!)}/${encodeURIComponent(rest.join('/'))}/options`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),
+        })
+        if (!res.ok || gone) return
+        const resolved = await res.json() as Record<string, Array<{ value: string; label: string }>>
+        if (gone) return
+        setFields(prev => prev.map(f => resolved[f.name] !== undefined ? { ...f, type: 'options' as const, options: resolved[f.name]! } : f))
+        setValues(prev => {
+          const next = { ...prev }
+          let changed = false
+          for (const f of dependent) {
+            const opts = resolved[f.name]
+            if (!opts) continue
+            if (!opts.some(o => String(o.value) === (next[f.name] ?? ''))) { next[f.name] = String(opts[0]?.value ?? ''); changed = true }
+          }
+          return changed ? next : prev
+        })
+      } catch { /* the list keeps what it had */ }
+    }, 300)
+    return () => { gone = true; clearTimeout(timer) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- depKey stands in for the dependency values
+  }, [depKey, dependent, script.id])
   const htmlFile = result?.files?.find(f => (f.mime ?? '').includes('html') || f.name.endsWith('.html'))
 
   // A rerun can take away the view you were on (HTML off, or a script that
