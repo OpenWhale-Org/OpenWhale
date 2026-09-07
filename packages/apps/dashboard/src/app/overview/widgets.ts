@@ -10,22 +10,29 @@
 
 export type Widget =
   /** The built-ins, as they were. */
-  | { id: string; kind: 'equity'; span?: Span }
-  | { id: string; kind: 'pnl-today'; span?: Span }
-  | { id: string; kind: 'running'; span?: Span }
-  | { id: string; kind: 'runs-24h'; span?: Span }
-  | { id: string; kind: 'portfolio-chart'; span?: Span }
-  | { id: string; kind: 'agents'; span?: Span }
-  | { id: string; kind: 'activity'; span?: Span }
-  | { id: string; kind: 'health'; span?: Span }
+  | { id: string; kind: 'equity'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'pnl-today'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'running'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'runs-24h'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'portfolio-chart'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'agents'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'activity'; span?: Span; rows?: Rows }
+  | { id: string; kind: 'health'; span?: Span; rows?: Rows }
   /** One chart from one monitor's board. */
-  | { id: string; kind: 'monitor-panel'; monitorId: string; panelId: string; dataKey?: string; title?: string; span?: Span }
+  | { id: string; kind: 'monitor-panel'; monitorId: string; panelId: string; dataKey?: string; title?: string; span?: Span; rows?: Rows }
   /** One strategy instance: status, today's PnL, its last few executions. */
-  | { id: string; kind: 'instance'; instanceId: string; span?: Span }
+  | { id: string; kind: 'instance'; instanceId: string; span?: Span; rows?: Rows }
 
 export type WidgetKind = Widget['kind']
 /** Columns out of four. The grid is four wide at desktop and collapses below. */
 export type Span = 1 | 2 | 3 | 4
+/**
+ * Rows of a fixed-height track. Like span, a handful of presets rather than
+ * free pixels: two widgets that both claim two rows line up, and a resize
+ * handle that snaps to the same stops reads as a grid instead of a smear.
+ * One row is the KPI card; four is a full chart.
+ */
+export type Rows = 1 | 2 | 3 | 4
 
 export interface OverviewLayout {
   version: 1
@@ -38,21 +45,22 @@ interface KindMeta {
   label: string
   description: string
   defaultSpan: Span
+  defaultRows: Rows
   /** Only one of these makes sense on a page. */
   singleton?: boolean
 }
 
 export const KINDS: Record<WidgetKind, KindMeta> = {
-  'equity': { label: 'Total equity', description: 'Every account\'s equity, with the portfolio sparkline.', defaultSpan: 1, singleton: true },
-  'pnl-today': { label: 'Today\'s PnL', description: 'Net, with realized underneath.', defaultSpan: 1, singleton: true },
-  'running': { label: 'Running strategies', description: 'How many of the configured instances are live.', defaultSpan: 1, singleton: true },
-  'runs-24h': { label: '24h runs', description: 'Strategy evaluations and the instructions they emitted.', defaultSpan: 1, singleton: true },
-  'portfolio-chart': { label: 'Portfolio equity', description: 'The equity curve across every account.', defaultSpan: 2, singleton: true },
-  'agents': { label: 'Active agents', description: 'The first few instances and whether they are running.', defaultSpan: 2, singleton: true },
-  'activity': { label: 'Recent activity', description: 'Monitor emits, runs and snapshots, at a glance.', defaultSpan: 2, singleton: true },
-  'health': { label: 'System health', description: 'Gateway and runtime.', defaultSpan: 2, singleton: true },
-  'monitor-panel': { label: 'Monitor panel', description: 'One chart from one monitor\'s board, for one key.', defaultSpan: 2 },
-  'instance': { label: 'Strategy', description: 'One instance: status, today\'s PnL, its last executions.', defaultSpan: 2 },
+  'equity': { label: 'Total equity', description: 'Every account\'s equity, with the portfolio sparkline.', defaultSpan: 1, defaultRows: 1, singleton: true },
+  'pnl-today': { label: 'Today\'s PnL', description: 'Net, with realized underneath.', defaultSpan: 1, defaultRows: 1, singleton: true },
+  'running': { label: 'Running strategies', description: 'How many of the configured instances are live.', defaultSpan: 1, defaultRows: 1, singleton: true },
+  'runs-24h': { label: '24h runs', description: 'Strategy evaluations and the instructions they emitted.', defaultSpan: 1, defaultRows: 1, singleton: true },
+  'portfolio-chart': { label: 'Portfolio equity', description: 'The equity curve across every account.', defaultSpan: 2, defaultRows: 3, singleton: true },
+  'agents': { label: 'Active agents', description: 'The first few instances and whether they are running.', defaultSpan: 2, defaultRows: 3, singleton: true },
+  'activity': { label: 'Recent activity', description: 'Monitor emits, runs and snapshots, at a glance.', defaultSpan: 2, defaultRows: 2, singleton: true },
+  'health': { label: 'System health', description: 'Gateway and runtime.', defaultSpan: 2, defaultRows: 2, singleton: true },
+  'monitor-panel': { label: 'Monitor panel', description: 'One chart from one monitor\'s board, for one key.', defaultSpan: 2, defaultRows: 3 },
+  'instance': { label: 'Strategy', description: 'One instance: status, today\'s PnL, its last executions.', defaultSpan: 2, defaultRows: 2 },
 }
 
 /**
@@ -86,6 +94,7 @@ export function parseLayout(raw: unknown): OverviewLayout {
 }
 
 export const spanOf = (w: Widget): Span => w.span ?? KINDS[w.kind].defaultSpan
+export const rowsOf = (w: Widget): Rows => w.rows ?? KINDS[w.kind].defaultRows
 
 /** The title a widget carries in the editor and in its own header. */
 export function titleOf(w: Widget, names: { instances?: Record<string, string>; monitors?: Record<string, string> } = {}): string {

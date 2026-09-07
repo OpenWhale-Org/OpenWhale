@@ -17,7 +17,7 @@ import { getAlertService, type AlertSettings } from './notify/alerts.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
-import { ensureStarted, getRuntime } from './runtime.js'
+import { ensureStarted, getRuntime, getDatabase } from './runtime.js'
 import { getRetentionService } from './maintenance/retention.js'
 import { getBreakerService } from './maintenance/breaker.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
@@ -444,6 +444,33 @@ export function buildRouter(): Router {
       runs: { ...runs, windowHours: 24 },
       events: activityMeter.read(24),
       pnl: totals,
+    })
+  }))
+
+  /**
+   * What the engine can attest to about itself. Not a latency table — there
+   * is no ping to measure, and the card that showed one was inventing it.
+   * Each field is a count or a timestamp with a source behind it; whether
+   * that adds up to "healthy" is the dashboard's reading, not this route's.
+   */
+  router.get('/api/health', h(async (_req, res) => {
+    const runtime = await ensureStarted()
+    activityMeter.sync(runtime)
+    const since = Date.now() - 24 * 3_600_000
+    const views = await runtime.listInstanceViews()
+    // Newest trace per instance, then the newest of those. Metrics live on
+    // the strategy object and are private; the trace store is the record.
+    const latest = await Promise.all(views.map(v => runtime.readInstanceRuns(v.id, 1).then(rs => rs[0]?.startedAt ?? null)))
+    const lastRunAt = latest.reduce<number | null>((m, t) => (t !== null && (m === null || t > m) ? t : m), null)
+    const t0 = Date.now()
+    let dbOk = true
+    try { await getDatabase().get('SELECT 1 AS ok') } catch { dbOk = false }
+    const runs = await runtime.countRuns(since)
+    res.json({
+      monitors: { total: runtime.listMonitors().length, lastEmitAt: activityMeter.lastEmitAt() },
+      engine: { runs24h: runs.runs, lastRunAt },
+      executors: { total: runtime.listExecutors().length },
+      database: { ok: dbOk, latencyMs: Date.now() - t0 },
     })
   }))
 

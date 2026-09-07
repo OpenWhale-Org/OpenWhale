@@ -16,6 +16,7 @@ export class ActivityMeter {
   private readonly buckets = new Map<number, number>()
   private readonly hooked = new Set<object>()
   private readonly startedAt = Date.now()
+  private lastEmit: number | null = null
 
   private static readonly MINUTE = 60_000
   private static readonly WINDOW_MINUTES = 24 * 60
@@ -30,7 +31,11 @@ export class ActivityMeter {
     }
   }
 
+  /** When any monitor last emitted; null until one has since the gateway started. */
+  lastEmitAt(): number | null { return this.lastEmit }
+
   private tick(): void {
+    this.lastEmit = Date.now()
     const minute = Math.floor(Date.now() / ActivityMeter.MINUTE)
     this.buckets.set(minute, (this.buckets.get(minute) ?? 0) + 1)
     if (this.buckets.size > ActivityMeter.WINDOW_MINUTES + 60) this.prune(minute)
