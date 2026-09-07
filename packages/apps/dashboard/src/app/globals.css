@@ -383,6 +383,43 @@ body {
 .aurora-widget-grid > [data-span="3"] { grid-column: span 3; }
 .aurora-widget-grid > [data-span="4"] { grid-column: span 4; }
 
+/* Edit mode, modelled on a phone home screen.
+   The widget is the grip, its content is inert, the badges live on its face,
+   and it jiggles so the mode is unmistakable without a banner saying so. */
+.aurora-widget { position: relative; }
+.aurora-widget-shell { position: relative; }
+.aurora-widget.is-editing .aurora-widget-shell { animation: aurora-jiggle .26s ease-in-out infinite alternate; transform-origin: 50% 50%; }
+.aurora-widget.is-editing .aurora-widget-shell > :first-child { pointer-events: none; user-select: none; }
+.aurora-widget-face { position: absolute; inset: 0; z-index: 2; cursor: grab; border-radius: 12px;
+  outline: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1.5px; }
+.aurora-widget-face:active { cursor: grabbing; }
+.aurora-widget-remove { position: absolute; top: -8px; left: -8px; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; line-height: 1;
+  background: var(--surface); color: var(--danger); border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0,0,0,.35); cursor: pointer; }
+.aurora-widget-remove:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+.aurora-widget-size { position: absolute; right: 6px; bottom: 6px; display: flex; gap: 3px; padding: 3px;
+  border-radius: 8px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); }
+.aurora-widget-size button { display: flex; gap: 1.5px; padding: 3px 4px; border-radius: 5px; border: 1px solid transparent; background: transparent; cursor: pointer; }
+.aurora-widget-size button i { display: block; width: 5px; height: 9px; border-radius: 1.5px; background: var(--border); }
+.aurora-widget-size button i.on { background: var(--muted); }
+.aurora-widget-size button:hover i.on { background: var(--foreground); }
+.aurora-widget-size button.is-active { border-color: var(--accent); }
+.aurora-widget-size button.is-active i.on { background: var(--accent); }
+@keyframes aurora-jiggle { from { rotate: -.55deg; } to { rotate: .55deg; } }
+
+/* The layout button: fixed bottom-right, clear of the assistant bar, and
+   nearly invisible until hovered — a control most visits never need. */
+.aurora-layout-fab { position: fixed; right: 22px; bottom: 84px; z-index: 30; display: flex; gap: 6px; align-items: center;
+  padding: 4px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border); backdrop-filter: blur(8px); opacity: .55; transition: opacity 160ms; }
+.aurora-layout-fab:hover, .aurora-layout-fab.is-editing { opacity: 1; }
+.aurora-fab-btn { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; line-height: 1;
+  background: transparent; color: var(--muted); border: 1px solid transparent; cursor: pointer; transition: background 120ms, color 120ms; }
+.aurora-fab-btn:hover { background: var(--background); color: var(--foreground); }
+.aurora-fab-btn.is-primary { background: var(--accent); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .aurora-widget.is-editing .aurora-widget-shell { animation: none; } }
+
 .aurora-overview-grid { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr); gap: 10px; margin-top: 10px; }.aurora-dashboard-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: linear-gradient(145deg, rgba(18,23,40,.97), rgba(12,16,28,.97)); }.aurora-card-header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 13px 17px; border-bottom: 1px solid rgba(220,214,255,.07); }.aurora-card-header h2 { margin: 0; font-size: 14px; font-weight: 600; }.aurora-card-header p { margin-top: 3px; color: var(--muted); font-size: 11px; }.aurora-card-header > a { color: #a993ff; font-size: 12px; }.aurora-time-tabs { display: flex; gap: 3px; }.aurora-time-tabs button { border-radius: 6px; padding: 5px 7px; color: var(--muted); font-size: 11px; }.aurora-time-tabs button.active { background: rgba(130,103,245,.18); color: #e7e1ff; }
 .aurora-equity-chart { position: relative; height: 260px; padding: 12px 17px 25px; }.aurora-equity-chart svg { position: relative; z-index: 1; width: 100%; height: 210px; }.aurora-chart-grid { position: absolute; inset: 18px 17px 36px; background: repeating-linear-gradient(to bottom, transparent 0 42px, rgba(220,214,255,.07) 43px), repeating-linear-gradient(to right, transparent 0 110px, rgba(220,214,255,.035) 111px); }.aurora-chart-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
 .aurora-portfolio-header p { font-variant-numeric: tabular-nums; }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { startTour, tourWasSeen } from '@/components/Tour'
-import { useSortable, DragHandle } from '@/components/Sortable'
+import { useSortable } from '@/components/Sortable'
 import { useT } from '@/i18n'
 import type { AccountSnapshotRecord, AccountView, StrategyInstanceView } from '@openwhaleorg/core'
 import { PortfolioEquityChart, PortfolioEquitySparkline, usePortfolioEquity } from './PortfolioEquityChart'
@@ -251,30 +251,13 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
         <Link href="/instances" className="aurora-new-strategy">{t('overview.newStrategy')} <span>＋</span></Link>
       </section>
 
-      <div className="flex items-center gap-2 mb-3">
-        {editing && (
-          <>
-            <button onClick={() => setPicking(true)} className="btn btn-primary btn-sm">＋ Add widget</button>
-            <button onClick={() => void resetLayout()} className="btn btn-secondary btn-sm" title="Back to the built-in arrangement">
-              Reset
-            </button>
-            <span className="text-xs" style={{ color: 'var(--muted)' }}>drag a grip to reorder · every change saves</span>
-          </>
-        )}
-        <button
-          onClick={() => setEditing(v => !v)}
-          className={`btn btn-sm ml-auto ${editing ? 'btn-primary' : 'btn-secondary'}`}
-        >
-          {editing ? 'Done' : 'Edit layout'}
-        </button>
-      </div>
 
       {layout === null ? (
-        <div className="text-sm py-10 text-center" style={{ color: 'var(--muted)' }}>Loading…</div>
+        <div className="text-sm py-10 text-center" style={{ color: 'var(--muted)' }}>{t('overview.loading')}</div>
       ) : widgets.length === 0 ? (
         <div className="text-sm py-10 text-center rounded-lg" style={{ color: 'var(--muted)', border: '1px dashed var(--border)' }}>
-          Nothing on the page. <button onClick={() => { setEditing(true); setPicking(true) }} style={{ color: 'var(--accent)' }}>Add a widget</button>
-          {' or '}<button onClick={() => void resetLayout()} style={{ color: 'var(--accent)' }}>restore the default</button>.
+          {t('overview.empty.nothing')} <button onClick={() => { setEditing(true); setPicking(true) }} style={{ color: 'var(--accent)' }}>{t('overview.empty.add')}</button>
+          {t('overview.empty.or')}<button onClick={() => void resetLayout()} style={{ color: 'var(--accent)' }}>{t('overview.empty.restore')}</button>.
         </div>
       ) : (
         /* One four-column grid for everything, so a figure and a chart can sit
@@ -283,47 +266,56 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
            many columns it wants can be collapsed to one by the media query
            without knowing anything about the viewport. */
         <div className="aurora-widget-grid" data-cards="">
-          {widgets.map((w) => (
+          {widgets.map((w, i) => (
             <div
               key={w.id}
               data-card-id={w.id}
               data-folder-id={w.id}
               data-span={spanOf(w)}
               style={cardStyle(w.id)}
-              className="min-w-0"
+              className={`aurora-widget min-w-0${editing ? ' is-editing' : ''}`}
             >
-              {editing && (
-                <div
-                  className="flex items-center gap-1 mb-1 px-1 py-0.5 rounded-md"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-                >
-                  <DragHandle onPointerDown={(e) => beginDrag('folder', w.id, e)} title="Drag to reorder" />
-                  <span className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-                    {titleOf(w, { instances: instanceNames })}
-                  </span>
-                  <span className="ml-auto flex items-center gap-0.5">
-                    {([1, 2, 3, 4] as Span[]).map(n => (
-                      <button
-                        key={n}
-                        onClick={() => resize(w.id, n)}
-                        title={`${n} of 4 columns`}
-                        className="text-xs w-5 h-5 rounded"
-                        style={{
-                          border: `1px solid ${spanOf(w) === n ? 'var(--accent)' : 'var(--border)'}`,
-                          color: spanOf(w) === n ? 'var(--accent)' : 'var(--muted)',
-                        }}
-                      >{n}</button>
-                    ))}
+              {/* The jiggle lives on an inner shell, never on the card: the
+                  card's transform is how the sortable places it, and a rotate
+                  keyframe on the same element would stomp that. Staggered
+                  delays so the page shimmers rather than marches. */}
+              <div className="aurora-widget-shell" style={{ animationDelay: `${(i % 5) * -0.07}s` }}>
+                {body(w)}
+                {editing && (
+                  /* Phone home-screen rules: in edit mode the widget's own
+                     content is inert and the whole face is the grip. The
+                     badges sit on the face and swallow their pointer-down so
+                     tapping ✕ or a size never starts a drag. */
+                  <div
+                    className="aurora-widget-face"
+                    onPointerDown={(e) => beginDrag('folder', w.id, e)}
+                    title={t('overview.edit.hint')}
+                  >
                     <button
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => remove(w.id)}
-                      title="Remove from the page"
-                      className="text-xs w-5 h-5 rounded ml-1"
-                      style={{ border: '1px solid var(--border)', color: 'var(--danger)' }}
+                      className="aurora-widget-remove"
+                      title={t('overview.edit.remove')}
+                      aria-label={t('overview.edit.remove')}
                     >✕</button>
-                  </span>
-                </div>
-              )}
-              {body(w)}
+                    <div className="aurora-widget-size" onPointerDown={(e) => e.stopPropagation()}>
+                      {([1, 2, 3, 4] as Span[]).map(n => (
+                        <button
+                          key={n}
+                          onClick={() => resize(w.id, n)}
+                          className={spanOf(w) === n ? 'is-active' : ''}
+                          title={t('overview.edit.width', { n })}
+                          aria-label={t('overview.edit.width', { n })}
+                        >
+                          {/* Four cells, the first n filled — the width as a
+                              picture of itself, because "3" meant nothing. */}
+                          {[1, 2, 3, 4].map(c => <i key={c} className={c <= n ? 'on' : ''} />)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -337,6 +329,31 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
           onClose={() => setPicking(false)}
         />
       )}
+
+      {/* Bottom-right, fixed, and quiet until it matters. At rest it is one
+          low-contrast pencil; in edit mode it grows into the three actions the
+          old toolbar held, anchored where the eye already is. */}
+      <div className={`aurora-layout-fab${editing ? ' is-editing' : ''}`}>
+        {editing && (
+          <>
+            <button onClick={() => setPicking(true)} className="aurora-fab-btn" title={t('overview.edit.add')} aria-label={t('overview.edit.add')}>＋</button>
+            <button onClick={() => void resetLayout()} className="aurora-fab-btn" title={t('overview.edit.resetTitle')} aria-label={t('overview.edit.reset')}>↺</button>
+          </>
+        )}
+        <button
+          onClick={() => setEditing(v => !v)}
+          className={`aurora-fab-btn${editing ? ' is-primary' : ''}`}
+          title={editing ? t('overview.edit.done') : t('overview.edit.open')}
+          aria-label={editing ? t('overview.edit.done') : t('overview.edit.open')}
+        >
+          {editing ? '✓' : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="5" rx="1.5" />
+              <rect x="13" y="11" width="8" height="10" rx="1.5" /><rect x="3" y="14" width="8" height="7" rx="1.5" />
+            </svg>
+          )}
+        </button>
+      </div>
 
       <Link href="/assistant" className="aurora-assistant-bar"><span className="aurora-assistant-orb" /><span>{t('overview.askAssistant')}</span><kbd>⌘ K</kbd><b>↑</b></Link>
     </div>
