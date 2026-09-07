@@ -12,7 +12,8 @@ const RANGES = [
   { value: '30d', label: '30D' },
 ] as const
 
-const HEIGHT = 210
+/* The chart used to be 210px tall whatever cell it sat in; now it fills whatever the widget gives it. */
+const MIN_HEIGHT = 120
 const PAD = { top: 16, right: 68, bottom: 28, left: 10 }
 
 export type PortfolioRange = typeof RANGES[number]['value']
@@ -141,14 +142,20 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
   const wrapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [width, setWidth] = useState(800)
+  const [height, setHeight] = useState(210)
   const [hover, setHover] = useState<number | null>(null)
 
   useEffect(() => {
     const element = wrapRef.current
     if (!element) return
+    // Both axes: the widget's row count decides the height, and a fixed SVG
+    // height under a variable cell either clipped the axis labels or left a
+    // band of nothing under the line.
     const observer = new ResizeObserver(entries => {
-      const nextWidth = entries[0]?.contentRect.width
-      if (nextWidth && nextWidth > 160) setWidth(Math.round(nextWidth))
+      const rect = entries[0]?.contentRect
+      if (!rect) return
+      if (rect.width > 160) setWidth(Math.round(rect.width))
+      if (rect.height > MIN_HEIGHT) setHeight(Math.round(rect.height))
     })
     observer.observe(element)
     return () => observer.disconnect()
@@ -172,7 +179,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
     }
 
     const x = (ts: number) => PAD.left + ((ts - data.from) / Math.max(1, data.to - data.from)) * (width - PAD.left - PAD.right)
-    const y = (value: number) => PAD.top + (1 - (value - valueMin) / (valueMax - valueMin)) * (HEIGHT - PAD.top - PAD.bottom)
+    const y = (value: number) => PAD.top + (1 - (value - valueMin) / (valueMax - valueMin)) * (height - PAD.top - PAD.bottom)
     const coordinates = data.points.map(point => ({ x: x(point.ts), y: y(point.equity), point }))
     const groups: Array<{ coordinates: typeof coordinates; partial: boolean }> = []
     let group: typeof coordinates = []
@@ -199,7 +206,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
     const gridValues = [0, 1 / 3, 2 / 3, 1].map(fraction => valueMin + fraction * (valueMax - valueMin))
     const timeTicks = [0, 0.25, 0.5, 0.75, 1].map(fraction => data.from + fraction * (data.to - data.from))
     return { coordinates, gridValues, groups, timeTicks, x, y }
-  }, [data, width])
+  }, [data, width, height])
 
   const completePoints = data?.points.filter(point => point.accountCount === point.expectedAccountCount) ?? []
   const first = completePoints[0]
@@ -271,7 +278,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
             </div>
             <svg
               ref={svgRef}
-              viewBox={`0 0 ${width} ${HEIGHT}`}
+              viewBox={`0 0 ${width} ${height}`}
               preserveAspectRatio="none"
               onPointerMove={onPointerMove}
               onPointerLeave={() => setHover(null)}
@@ -303,7 +310,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
               {geometry.groups.map(({ coordinates, partial: partialGroup }, index) => {
                 const line = coordinates.map((coordinate, pointIndex) => `${pointIndex === 0 ? 'M' : 'L'}${coordinate.x.toFixed(1)},${coordinate.y.toFixed(1)}`).join(' ')
                 const area = coordinates.length > 1 && !partialGroup
-                  ? `${line} L${coordinates[coordinates.length - 1]!.x.toFixed(1)},${HEIGHT - PAD.bottom} L${coordinates[0]!.x.toFixed(1)},${HEIGHT - PAD.bottom} Z`
+                  ? `${line} L${coordinates[coordinates.length - 1]!.x.toFixed(1)},${height - PAD.bottom} L${coordinates[0]!.x.toFixed(1)},${height - PAD.bottom} Z`
                   : ''
                 return (
                   <g key={index}>
@@ -320,7 +327,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
                 <text
                   key={ts}
                   x={geometry.x(ts)}
-                  y={HEIGHT - 6}
+                  y={height - 6}
                   textAnchor={index === 0 ? 'start' : index === geometry.timeTicks.length - 1 ? 'end' : 'middle'}
                   className="aurora-chart-label"
                 >
@@ -330,7 +337,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
 
               {hovered && (
                 <g>
-                  <line x1={hovered.x} x2={hovered.x} y1={PAD.top} y2={HEIGHT - PAD.bottom} className="aurora-chart-crosshair" />
+                  <line x1={hovered.x} x2={hovered.x} y1={PAD.top} y2={height - PAD.bottom} className="aurora-chart-crosshair" />
                   <circle cx={hovered.x} cy={hovered.y} r="4" className="aurora-chart-hover-point" />
                 </g>
               )}

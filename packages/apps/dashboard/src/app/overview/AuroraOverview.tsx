@@ -45,6 +45,27 @@ function ago(t: ReturnType<typeof useT>, ts: number | null): string {
   return t('overview.time.hoursAgo', { n: Math.floor(m / 60) })
 }
 
+/**
+ * Hands a child the height its cell allows. The row track decides how tall a
+ * widget is; the content inside cannot know that from props, so it asks the
+ * box. Charts are the only children that care — everything else flows.
+ */
+function MeasuredBody({ children }: { children: (height: number) => React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [h, setH] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const next = entries[0]?.contentRect.height
+      if (next && next > 0) setH(Math.round(next))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return <div ref={ref} className="aurora-card-body" style={{ padding: '6px 10px 8px' }}>{h > 0 ? children(h) : null}</div>
+}
+
 function usd(value: number): string {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: value >= 100_000 ? 0 : 2 })
 }
@@ -343,14 +364,21 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
               <div><h2>{titleOf(w)}</h2><p className="mono">{w.dataKey ?? 'no key'}</p></div>
               <Link href={`/monitor?id=${encodeURIComponent(w.monitorId)}`}>Open</Link>
             </div>
-            <MonitorBoards
-              monitorId={w.monitorId}
-              keys={w.dataKey ? [w.dataKey] : []}
-              emitCount={0}
-              only={[w.panelId]}
-              {...(w.dataKey ? { initialKey: w.dataKey } : {})}
-              bare
-            />
+            <MeasuredBody>
+              {(h) => (
+                <MonitorBoards
+                  monitorId={w.monitorId}
+                  keys={w.dataKey ? [w.dataKey] : []}
+                  emitCount={0}
+                  only={[w.panelId]}
+                  {...(w.dataKey ? { initialKey: w.dataKey } : {})}
+                  bare
+                  /* The chart's own chrome (toolbar, legend, axis) takes ~70px
+                     of the body; the rest is plot. */
+                  height={Math.max(120, h - 70)}
+                />
+              )}
+            </MeasuredBody>
           </article>
         )
       case 'instance':

@@ -314,7 +314,7 @@ function PlotTable({ series, columns, unit }: { series: ChartSeries[]; columns: 
   )
 }
 
-export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, bare }: {
+export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, bare, height }: {
   monitorId: string
   /** Keys with data or live subscriptions — the board's key picker. */
   keys: string[]
@@ -330,6 +330,8 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
   initialKey?: string
   /** Drop the frame and the toolbar — the host card already has both. */
   bare?: boolean
+  /** Chart height in px. Widgets pass what their cell allows; the page keeps its own two sizes. */
+  height?: number
 }) {
   const t = useT()
   const [plots, setPlots] = useState<PlotInfo[] | null>(null)
@@ -517,7 +519,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
               ) : (
                 <SeriesChart
                   series={series[p.id] ?? []}
-                  height={isExpanded ? 380 : 230}
+                  height={height ?? (isExpanded ? 380 : 230)}
                   /* Monitor and panel together: the same panel of two monitors
                      is two charts, and each keeps its own marks. */
                   storageKey={`${monitorId}:${p.id}`}
