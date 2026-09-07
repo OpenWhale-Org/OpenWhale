@@ -394,6 +394,8 @@ body {
 .aurora-widget-shell > article > .aurora-card-header { flex: none; }
 .aurora-card-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: none; padding: 4px 16px 14px; }
 .aurora-card-body::-webkit-scrollbar { display: none; }
+.aurora-health-card .aurora-card-body { display: flex; flex-direction: column; justify-content: space-evenly; }
+.aurora-health-card .aurora-health-summary { margin-top: auto; }
 .aurora-widget-shell > article > .aurora-agent-list { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: none; }
 .aurora-widget-grid > [data-span="1"] { grid-column: span 1; }
 .aurora-widget-grid > [data-span="2"] { grid-column: span 2; }
