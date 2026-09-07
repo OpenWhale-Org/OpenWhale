@@ -1,3 +1,4 @@
+import type { LanguagePack, Locale, Text } from '../i18n.js'
 import type { OpenWhalePlugin, PluginFactory } from './PluginManager.js'
 import type { CredentialTypeDefinition, AdapterRegistration } from '../types/materialization.js'
 import type { AccountImplementation } from '../types/account.js'
@@ -26,8 +27,16 @@ import {
 export interface PluginManifest {
   name: string
   version: string
-  /** Markdown README shown on the dashboard's Plugins page. */
-  readme?: string
+  /** Markdown README shown on the dashboard's Plugins page — one per locale, or one for all. */
+  readme?: Text
+  /**
+   * Language packs: locale → dotted path → string, folded into every
+   * component's text at load. `strategies.<id>.name`,
+   * `strategies.<id>.params.<field>.displayName`, `monitors.<id>.description`,
+   * `scripts.<id>.params.<p>.hint`, `readme`. For a plugin that keeps its
+   * source in one language and ships the others beside it.
+   */
+  i18n?: Record<Locale, LanguagePack>
   /** Brand mark for the plugin list (https URL or data: URI). */
   logo?: string
   /** Single-glyph fallback mark. */
@@ -93,6 +102,7 @@ export function lowerMonitorEntry(entry: MonitorClass | MonitorImplementation, p
     ...(meta.name !== undefined ? { displayName: meta.name } : {}),
     ...(meta.description !== undefined ? { description: meta.description } : {}),
     ...(meta.credential !== undefined ? { credential: meta.credential } : {}),
+    ...(meta.venue !== undefined ? { venue: meta.venue } : {}),
     ...(meta.params !== undefined ? { params: meta.params } : {}),
     create: (ctx) => new (entry as MonitorClass)(ctx),
   }
@@ -152,6 +162,7 @@ export function definePlugin(manifest: PluginManifest): PluginFactory<Record<str
       name: manifest.name,
       version: manifest.version,
       ...(manifest.readme !== undefined ? { readme: manifest.readme } : {}),
+      ...(manifest.i18n !== undefined ? { i18n: manifest.i18n } : {}),
       ...(manifest.logo !== undefined ? { logo: manifest.logo } : {}),
       ...(manifest.icon !== undefined ? { icon: manifest.icon } : {}),
       ...(manifest.credentialTypes ? { credentialTypes: manifest.credentialTypes } : {}),

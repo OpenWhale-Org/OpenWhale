@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { RawCredentialData } from './credential.js'
 
@@ -94,7 +95,7 @@ export interface ReaderClass<T = unknown> {
 export interface CredentialTypeDefinition {
   /** Credential type id, e.g. 'binance', 'telegram'. */
   type: string
-  displayName?: string
+  displayName?: Text
   /**
    * Brand mark for the picker: an https URL, or a `data:` URI to keep it
    * self-contained. A data URI is the better default — it survives offline,
@@ -113,7 +114,7 @@ export interface CredentialTypeDefinition {
    */
   icon?: string
   /** One line on what this credential is for, shown under the name. */
-  description?: string
+  description?: Text
   /**
    * Which group the picker files this under. Defaults to the registering
    * plugin, which is the right answer for a venue — "binance" is both who
@@ -155,14 +156,14 @@ export interface CredentialTypeDefinition {
  */
 export interface CredentialTypeInfo {
   type: string
-  displayName?: string
+  displayName?: Text
   /** Picker group; absent means "use pluginName". */
   category?: string
   /** Brand mark (URL or data: URI). Falls back to `icon`, then the first letter. */
   logo?: string
   /** Single glyph for the picker; absent means "derive one from the name". */
   icon?: string
-  description?: string
+  description?: Text
   /** Registering plugin (the dashboard's picker groups by this); built-ins are 'core'. */
   pluginName: string
   documentationUrl?: string

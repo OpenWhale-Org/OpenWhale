@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useT } from '@/i18n'
 import { type Drawing, type Tool, type ChartRegion, type ChartYRange, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings, rangeMarks } from './chartTools'
 
 export interface ChartCandle { x: number; o: number; h: number; l: number; c: number }
@@ -67,6 +68,21 @@ function decimalsFromValues(values: number[], fallback: number): number {
   return Math.min(8, Math.max(0, Math.ceil(-Math.log10(minDiff * 1.0001))))
 }
 
+/**
+ * A single instant, at the precision the data actually has.
+ *
+ * Axis ticks describe a span and round to it; a tooltip describes ONE sample,
+ * and rounding that to the minute hides which of a minute's forty samples is
+ * being read. Milliseconds appear only when the timestamp carries them, so a
+ * second-aligned series is not dressed in three zeroes it does not own.
+ */
+export function formatInstant(ts: number): string {
+  const d = new Date(ts)
+  const hms = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const ms = ts % 1000
+  return ms === 0 ? hms : `${hms}.${String(Math.abs(ms)).padStart(3, '0')}`
+}
+
 function formatTime(ts: number, spanMs: number): string {
   const d = new Date(ts)
   // Millisecond-candle territory: show HH:MM:SS.mmm once the window is tight
@@ -118,6 +134,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
   /** Identity for the reader's own drawings, which persist per chart. Absent = nothing is remembered. */
   storageKey?: string
 }) {
+  const t = useT()
   const [hoverX, setHoverX] = useState<number | null>(null)
   const [hoverY, setHoverY] = useState<number | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set())
@@ -323,6 +340,9 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
     ? formatTime(x, geom ? geom.x1 - geom.x0 : 0)
     : xUnit ? `${x.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${xUnit}` : x.toLocaleString(undefined, { maximumFractionDigits: 2 })
 
+  /** Tooltip x: one sample, so full precision — unlike an axis tick, which labels a span. */
+  const formatXExact = (x: number) => xKind === 'time' ? formatInstant(x) : formatX(x)
+
   /**
    * The point a series contributes AT the hovered instant — or null when the
    * series simply has no data there. Nearest-match alone listed every series
@@ -338,6 +358,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
     const medianGap = gaps[Math.floor(gaps.length / 2)] ?? 0
     return Math.abs(nearest.x - x) <= medianGap / 2 + 1e-9 ? nearest : null
   }
+
 
   // Hover: nearest x across every visible series, within the window
   const refXs = useMemo(() => {
@@ -554,11 +575,11 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
             action rather than a level. */}
         <div className="flex items-center gap-0.5 shrink-0">
           {([
-            ['cursor', '↖', 'Cursor — drag to pan, shift-drag to select'],
-            ...(hasCandles ? [['trend', '╱', 'Trend line — drag between two points'] as const,
-                              ['measure', '⇅', 'Measure — drag over a move for its size, % and duration'] as const] : []),
-            ['hline', '─', 'Horizontal guide — click a level'],
-            ['vline', '│', 'Vertical guide — click an instant'],
+            ['cursor', '↖', t('chart.tool.cursor')],
+            ...(hasCandles ? [['trend', '╱', t('chart.tool.trend')] as const,
+                              ['measure', '⇅', t('chart.tool.measure')] as const] : []),
+            ['hline', '─', t('chart.tool.hline')],
+            ['vline', '│', t('chart.tool.vline')],
           ] as ReadonlyArray<readonly [Tool, string, string]>).map(([t, glyph, title]) => (
             <button
               key={t}
@@ -574,7 +595,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
           ))}
           <button
             onClick={() => { setFnOpen(v => !v); setTool('cursor') }}
-            title="Function guide — a formula in x"
+            title={t('chart.tool.fn')}
             className="text-xs h-6 px-1.5 rounded cursor-pointer leading-none italic"
             style={{
               border: `1px solid ${fnOpen ? INK : 'var(--border)'}`,
@@ -585,7 +606,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
           {drawings.length > 0 && (
             <button
               onClick={() => { setDrawings([]); setSelected(null) }}
-              title={`Remove all ${drawings.length} drawing(s)`}
+              title={t('chart.removeDrawings', { n: drawings.length })}
               className="text-xs h-6 px-1.5 rounded cursor-pointer leading-none"
               style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
             >✕ {drawings.length}</button>
@@ -601,7 +622,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
               onClick={() => toggle(s.label)}
               className="flex items-center gap-1.5 text-xs cursor-pointer select-none"
               style={{ color: off ? 'var(--border)' : 'var(--muted)', textDecoration: off ? 'line-through' : 'none' }}
-              title={off ? 'Show series' : 'Hide series'}
+              title={off ? t('chart.showSeries') : t('chart.hideSeries')}
             >
               <span style={{ width: 14, height: 3, borderRadius: 2, background: off ? 'var(--border)' : SERIES_COLORS[i % SERIES_COLORS.length], display: 'inline-block' }} />
               {s.label}
@@ -618,20 +639,20 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
             onClick={() => setView(null)}
             className="ml-auto text-xs px-2 py-0.5 rounded-full cursor-pointer"
             style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}
-            title="Restore the full window (or double-click the chart)"
+            title={t('chart.resetZoomTitle')}
           >
-            ⟲ Reset zoom
+            {t('chart.resetZoom')}
           </button>
         ) : (
           // Drag-to-pan is invisible until tried, and shift-drag would never be
           // guessed at all — so the chart says so while it is fully zoomed out.
           <span className="ml-auto text-xs" style={{ color: 'var(--border)' }}>
-            {tool === 'trend' ? 'drag between two points · esc to cancel'
-              : tool === 'measure' ? 'drag over a move · the box goes when you let go'
-              : tool === 'hline' ? 'click a level'
-              : tool === 'vline' ? 'click an instant'
-              : selected ? 'delete removes the selected drawing'
-              : 'scroll to zoom · drag to pan · shift-drag to select'}
+            {tool === 'trend' ? t('chart.hint.trend')
+              : tool === 'measure' ? t('chart.hint.measure')
+              : tool === 'hline' ? t('chart.hint.hline')
+              : tool === 'vline' ? t('chart.hint.vline')
+              : selected ? t('chart.hint.selected')
+              : t('chart.hint.default')}
           </span>
         )}
       </div>
@@ -648,7 +669,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
               if (e.key === 'Enter') addFn()
               if (e.key === 'Escape') { setFnOpen(false); setFnText('') }
             }}
-            placeholder={xKind === 'time' ? 'e.g. 100 + 0.5*x   (x = hours since the first sample)' : 'e.g. 2*x + 3'}
+            placeholder={xKind === 'time' ? t('chart.fnPlaceholderTime') : t('chart.fnPlaceholder')}
             className="flex-1 min-w-0 text-xs px-2 py-1 rounded-md font-mono"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: `1px solid ${fnError ? CANDLE_DOWN : 'var(--border)'}` }}
           />
@@ -657,7 +678,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
             disabled={!!fnError || !fnText.trim()}
             className="text-xs px-2 py-1 rounded-md cursor-pointer shrink-0"
             style={{ border: `1px solid ${fnError || !fnText.trim() ? 'var(--border)' : INK}`, color: fnError || !fnText.trim() ? 'var(--border)' : INK }}
-          >Add</button>
+          >{t('chart.add')}</button>
           {fnError && fnText.trim() && (
             <span className="text-xs shrink-0" style={{ color: CANDLE_DOWN }}>{fnError}</span>
           )}
@@ -665,7 +686,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
       )}
 
       {!geom ? (
-        <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>No data in window.</p>
+        <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>{t('chart.noData')}</p>
       ) : (
         <>
           <svg
@@ -1043,7 +1064,7 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
                 <span style={{ color: 'var(--muted)' }}>{hoverPt.label}</span>
               </div>
               <div className="font-mono mt-0.5">{formatValue(hoverPt.y, unit, geom.tickDecimals)}</div>
-              <div style={{ color: 'var(--muted)' }}>{formatX(hoverPt.x)}</div>
+              <div style={{ color: 'var(--muted)' }}>{formatXExact(hoverPt.x)}</div>
             </div>
           )}
 
@@ -1060,7 +1081,9 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
                 zIndex: 10,
               }}
             >
-              <div className="mb-1 font-medium" style={{ color: 'var(--muted)' }}>{formatX(hoveredX)}</div>
+              {/* hoveredX is snapped to a real sample (see refXs), so this is
+                  an observation's own timestamp — worth showing in full. */}
+              <div className="mb-1 font-medium" style={{ color: 'var(--muted)' }}>{formatXExact(hoveredX)}</div>
               {visible.map((s) => {
                 if (s.candles?.length) {
                   const c = s.candles.reduce((best, cc) => Math.abs(cc.x - hoveredX!) < Math.abs(best.x - hoveredX!) ? cc : best, s.candles[0]!)

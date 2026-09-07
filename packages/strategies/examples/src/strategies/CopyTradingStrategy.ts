@@ -27,7 +27,7 @@ const decls = {
 } as const satisfies StrategyDeclarations
 
 @OwStrategy({
-  name: 'Copy Trading',
+  name: { en: 'Copy Trading', 'zh-CN': '跟单' },
   description: "Mirrors another trader's perpetual fills at a configurable ratio — feed from Hyperliquid, execution on any bound perp venue",
 })
 export class CopyTradingStrategy extends BaseStrategy<typeof decls> {
@@ -40,18 +40,18 @@ export class CopyTradingStrategy extends BaseStrategy<typeof decls> {
   readonly baseParamsSchema = z.object({
     targetAddress: z.string()
       .regex(/^0x[0-9a-fA-F]{40}$/, 'Must be a valid EVM address')
-      .meta({ displayName: 'Target Address', placeholder: '0x...', description: 'Wallet address to copy trades from' }),
+      .meta({ displayName: 'Target Address', placeholder: '0x...', description: 'Wallet address to copy trades from', i18n: { 'zh-CN': { displayName: '目标地址', description: '要跟单的钱包地址' } } }),
     ratio: z.number().positive().max(10)
       .meta({ displayName: 'Ratio', placeholder: '0.5', description: "Fraction of the target's trade size to replicate (0.5 = half)" }),
     maxPositionUsd: z.number().positive()
-      .meta({ displayName: 'Max Position (USD)', placeholder: '1000', description: 'Hard cap on |exposure| per symbol' }),
+      .meta({ displayName: 'Max Position (USD)', placeholder: '1000', description: 'Hard cap on |exposure| per symbol', i18n: { 'zh-CN': { displayName: '最大仓位（USD）', description: '每个合约 |敞口| 的硬上限' } } }),
   })
 
   readonly tunableParamsSchema = z.object({
     minTradeUsd: z.number().positive().default(10)
-      .meta({ displayName: 'Min Trade (USD)', description: 'Ignore mirrored notionals below this — noise filter for new exposure only' }),
+      .meta({ displayName: 'Min Trade (USD)', description: 'Ignore mirrored notionals below this — noise filter for new exposure only', i18n: { 'zh-CN': { displayName: '最小交易（USD）', description: '忽略低于此值的镜像名义——只对新增敞口做噪声过滤' } } }),
     slippage: z.number().min(0).max(1).default(0.005)
-      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders' }),
+      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders', i18n: { 'zh-CN': { displayName: '滑点容忍', description: '市价单的最大滑点比例' } } }),
   })
 
   triggers(params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {

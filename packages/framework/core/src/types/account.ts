@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from './materialization.js'
 
@@ -41,7 +42,7 @@ export interface AccountEntity {
 export interface AccountImplementation {
   /** Short id; qualified to '<plugin>/<id>' at load. */
   id: string
-  displayName?: string
+  displayName?: Text
   /** The kind this implementation's accounts expose. */
   kind: NamespacedKind
   /**
@@ -84,7 +85,7 @@ export type AccountColumnFormat = 'text' | 'mono' | 'number' | 'usd' | 'pct' | '
 export interface AccountColumnDef {
   /** Field on each row. */
   key: string
-  label: string
+  label: Text
   format?: AccountColumnFormat
   /** Decimal places for number/usd/pct/signed. */
   digits?: number
@@ -96,7 +97,7 @@ export interface AccountColumnDef {
 export interface AccountSectionDef {
   /** Reader method to call — must return rows (table) or an object (keyvalue). */
   method: string
-  title: string
+  title: Text
   kind: 'table' | 'keyvalue'
   columns?: AccountColumnDef[]
   /** Show the row count on the tab. */
@@ -115,7 +116,7 @@ export function implementationVenue(impl: Pick<AccountImplementation, 'venue' | 
 /** Serializable implementation view (dashboard implementation picker). */
 export interface AccountImplementationInfo {
   id: string
-  displayName?: string
+  displayName?: Text
   kind: NamespacedKind
   /** Venue pin (legacy field name kept for the dashboard wire format). */
   type?: string
@@ -131,8 +132,22 @@ export interface AccountImplementationInfo {
 /** Serializable account view with derived facts (dashboard Accounts page). */
 export interface AccountView extends AccountEntity {
   kind?: NamespacedKind
-  /** Concrete credential type once a credential is bound. */
+  /**
+   * Concrete credential type once a credential is bound.
+   *
+   * NOT the venue, though on a CEX the two coincide — a Boros account binds a
+   * `pendle/boros-agent` credential and trades on `boros`. Anything asking
+   * "which venue?" (catalogue pickers, adapter lookups) wants `venue` below;
+   * this answers "which secret?".
+   */
   type?: string
+  /**
+   * The venue this account is on: the implementation's pin, or for a
+   * kind-generic implementation the bound credential's type — the rule the
+   * binding resolver applies. Absent only while no credential is bound to a
+   * kind-generic implementation, when there is no venue to name yet.
+   */
+  venue?: string
   /** 'inactive' until a credential is bound. */
   status: 'ready' | 'inactive' | 'broken'
   /** Populated when status is 'broken' (missing impl/credential, type mismatch). */

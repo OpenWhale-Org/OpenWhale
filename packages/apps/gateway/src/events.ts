@@ -39,6 +39,13 @@ export function sseHandler(runtime: OpenWhaleRuntime, compiler: CompilerService)
     const strategyRunHandler = (event: StrategyRunEvent) => send({ type: 'strategy_run', ...event })
     runtime.addStrategyRunHandler(strategyRunHandler)
 
+    /* Executions. The page that lists them wants to see one land, not to poll
+       for it; the record sent here is the same one appended to the log, so a
+       live row and a reloaded row are the same object. */
+    const unsubscribeExecutions = runtime.onExecution((result) => {
+      send({ type: 'execution', execution: { ...result, executedAt: new Date(result.executedAt).toISOString() } })
+    })
+
     // AI compiler job progress
     const compilerHandler = (event: CompilerEvent) => send({ type: 'compiler', event })
     compiler.on('event', compilerHandler)
@@ -62,6 +69,7 @@ export function sseHandler(runtime: OpenWhaleRuntime, compiler: CompilerService)
     req.on('close', () => {
       clearInterval(heartbeat)
       for (const { monitor, handler } of monitorHandlers) monitor.removeEmitHandler(handler)
+      unsubscribeExecutions()
       runtime.removeStrategyRunHandler(strategyRunHandler)
       compiler.off('event', compilerHandler)
       unsubscribeLogs()

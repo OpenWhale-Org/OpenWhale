@@ -68,7 +68,7 @@ if [ -n "$DEPLOY_BLACKOUT" ]; then
   if { [ "$FROM" -le "$TO" ] && [ "$MIN" -ge "$FROM" ] && [ "$MIN" -le "$TO" ]; } \
   || { [ "$FROM" -gt "$TO" ] && { [ "$MIN" -ge "$FROM" ] || [ "$MIN" -le "$TO" ]; }; }; then
     if [ "$FORCE_WINDOW" = 0 ]; then
-      echo "⛔ It is UTC $(date -u +%H:%M), inside the blackout window XX:$FROM–XX:$TO."
+      echo "⛔ It is UTC $(date -u +%H:%M), inside the blackout window XX:${FROM}–XX:${TO}."
       echo "   Wait, or pass --force-window when you know nothing is mid-cycle."
       exit 1
     fi

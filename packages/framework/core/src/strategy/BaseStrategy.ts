@@ -1,5 +1,5 @@
 import type { ExecutionInstruction, ExecutionResult } from '../types/executor.js'
-import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace, DynamicSourceHooks } from '../types/strategy.js'
+import type { IStrategy, StrategyContext, StrategyMetrics, StrategyOptions, MonitorDeclaration, ExecutorDeclaration, LlmDeclaration, LlmSlotBinding, AccountSlotMeta, StrategyRunTrace, DynamicSourceHooks, LifecycleReason, LifecycleContext } from '../types/strategy.js'
 import type { MonitorDataReader } from '../types/monitor.js'
 import type { CredentialStore, CredentialData } from '../types/credential.js'
 import type { IStrategyStore } from './StrategyStore.js'
@@ -7,12 +7,13 @@ import type { ZodType, ZodRawShape } from 'zod'
 import type { Trigger, MonitorSource } from '../types/trigger.js'
 import type { StrategyParams } from '../types/instance.js'
 import type { AccountSlot, ReaderClass } from '../types/materialization.js'
-import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset } from '../types/definition.js'
+import type { AvailabilityChecker, ListColumnDef, ListParamDef, ParamFieldDef, ParamFieldMeta, ParamFieldType, ParamPreset, PresetContext, PresetSource, PickerOption } from '../types/definition.js'
+import type { Text } from '../i18n.js'
 import type { IPortfolioJournal } from '../types/portfolio.js'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
 import { getDataDir } from '../utils/paths.js'
-import { createLogger , subscribeLogs } from '../utils/logger.js'
+import { createLogger, runInLogScope, subscribeLogs } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
 import type { CoreMessage, LlmCallOptions, LlmCallSettings } from './llm.js'
 import type { LanguageModel } from 'ai'
@@ -183,6 +184,14 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
    * configurations worth naming ('conservative', 'paper').
    */
   readonly paramPresets?: ParamPreset[]
+  /** Heading, blurb and cache life of live presets — see IStrategy.presetSource. */
+  readonly presetSource?: PresetSource
+  /** Compute presets live — see IStrategy.presets(). Absent by default. */
+  presets?(ctx: PresetContext): Promise<ParamPreset[]>
+  /** Live figures for the illustrations — see IStrategy.illustrationData(). Absent by default. */
+  illustrationData?(ctx: PresetContext): Promise<Record<string, unknown>>
+  /** Options for a picker field — see IStrategy.pickerOptions(). Absent by default. */
+  pickerOptions?(pickerId: string, ctx: PresetContext): Promise<PickerOption[]>
 
   /**
    * Derived from baseParamsSchema + tunableParamsSchema via .meta() annotations.
@@ -256,20 +265,31 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
           : zt === 'number' ? 'number' as const
           : zt === 'boolean' ? 'boolean' as const
           : 'string' as const
+        const placeholder = textOf(col.meta, 'placeholder')
+        const description = textOf(col.meta, 'description')
         return {
           name,
-          displayName: col.meta.displayName ?? name,
+          displayName: textOf(col.meta, 'displayName') ?? name,
           type,
           ...(col.meta.options ? { options: col.meta.options } : {}),
           ...(col.meta.slider ? { slider: col.meta.slider } : {}),
           ...(col.meta.catalogue ? { catalogue: col.meta.catalogue } : {}),
           ...(col.meta.unit ? { unit: col.meta.unit } : {}),
-          ...(col.meta.placeholder ? { placeholder: col.meta.placeholder } : {}),
-          ...(col.meta.description ? { description: col.meta.description } : {}),
+          ...(placeholder ? { placeholder } : {}),
+          ...(description ? { description } : {}),
           ...(col.defaultValue !== undefined ? { default: col.defaultValue } : {}),
         }
       })
       return { columns, ...(meta.list ?? {}) }
+    }
+
+    /** A field's text with its per-locale translations folded in — one Text table, or the string as written. */
+    function textOf(m: ParamFieldMeta, key: 'displayName' | 'description' | 'hint' | 'placeholder' | 'section'): Text | undefined {
+      const base = m[key]
+      const extra = Object.entries(m.i18n ?? {}).flatMap(([locale, t]) => (t?.[key] !== undefined ? [[locale, t[key]!] as const] : []))
+      if (extra.length === 0) return base
+      const en = typeof base === 'string' ? base : base?.en ?? extra[0]![1]
+      return { ...(typeof base === 'object' ? base : {}), en, ...Object.fromEntries(extra) }
     }
 
     function processShape(shape: ZodRawShape, group: 'base' | 'tunable') {
@@ -284,24 +304,30 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
         const enumValues = zodType === 'enum' ? (field as unknown as { options?: readonly (string | number)[] }).options : undefined
         const options = meta.options ?? enumValues?.map(v => ({ value: v, label: String(v) }))
 
+        const description = textOf(meta, 'description')
+        const hint = textOf(meta, 'hint')
+        const section = textOf(meta, 'section')
+        const placeholder = textOf(meta, 'placeholder')
         fields.push({
           name,
-          displayName: meta.displayName ?? name,
+          displayName: textOf(meta, 'displayName') ?? name,
           type: fieldType,
           group,
           ...(defaultValue !== undefined ? { default: defaultValue } : {}),
           ...(required ? { required: true } : {}),
-          ...(meta.description ? { description: meta.description } : {}),
-          ...(meta.hint ? { hint: meta.hint } : {}),
-          ...(meta.section ? { section: meta.section } : {}),
-          ...(meta.placeholder ? { placeholder: meta.placeholder } : {}),
+          ...(description ? { description } : {}),
+          ...(hint ? { hint } : {}),
+          ...(section ? { section } : {}),
+          ...(placeholder ? { placeholder } : {}),
           ...(options ? { options } : {}),
           ...(meta.displayOptions ? { displayOptions: meta.displayOptions } : {}),
           ...(meta.catalogue ? { catalogue: meta.catalogue } : {}),
           ...(meta.availability ? { availability: meta.availability } : {}),
+          ...(meta.picker ? { picker: meta.picker } : {}),
           ...(meta.multiple ? { multiple: true } : {}),
           ...(meta.slider ? { slider: meta.slider } : {}),
           ...(meta.unit ? { unit: meta.unit } : {}),
+          ...(meta.optionsDependOn ? { optionsDependOn: meta.optionsDependOn } : {}),
           ...(list ? { list } : {}),
         })
       }
@@ -320,6 +346,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
       case 'number': return 'number'
       case 'boolean': return 'boolean'
       case 'array': return 'list'
+      case 'object': return 'object'
       default: return 'string'
     }
   }
@@ -551,23 +578,77 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
     this.metrics.runsTotal++
     this.metrics.lastRunAt = Date.now()
     this.stepCache.clear()
-    this.log.debug({ triggerId: context.triggerId }, 'Strategy run started')
+    return this.traced(context.triggerId, async () => {
+      this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
+      try {
+        const instructions = await this.evaluate(context)
+        this.metrics.instructionsEmitted += instructions.length
+        this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
+        return instructions
+      } catch (err) {
+        this.metrics.errors++
+        this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
+        throw err
+      }
+    })
+  }
+
+  /**
+   * The strategy's own moment at the start — after every setter, before the
+   * first trigger. Override to take a baseline, set leverage, settle a quote
+   * left over from the last activation. Returned instructions are fired
+   * inline and awaited; a throw fails the activation.
+   */
+  async onActivate(_ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {}
+
+  /**
+   * The strategy's own moment at the end — no run in flight, executor slots
+   * still materialized. Override to cancel what rests. A throw is logged and
+   * teardown continues.
+   */
+  async onDeactivate(_ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {}
+
+  /**
+   * A lifecycle hook, traced like a run.
+   *
+   * What activation and deactivation did is evidence of the same kind as what
+   * a run did — the cancel that went out at stop, the baseline taken at start
+   * — so it lands in the same run list, under `lifecycle:<reason>`.
+   */
+  async lifecycle(reason: LifecycleReason, work: () => Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void): Promise<ExecutionInstruction[]> {
+    return this.traced(`lifecycle:${reason}`, async () => (await work()) ?? [])
+  }
+
+  /**
+   * One run's worth of tracing around `work`: a scope for the log lines it
+   * causes, a trace record when it finishes, and the run id stamped on every
+   * instruction it returns.
+   *
+   * Logs this run CAUSED land in the trace; logs that merely happened at the
+   * same moment do not. Timestamps cannot tell those apart — a dozen monitor
+   * feeds and every other instance are logging too — and the difference is
+   * not cosmetic: a trace claiming an Aster pair read Binance order books for
+   * symbols it has never traded is worse than no logs at all, because it is
+   * read as evidence. The scope follows the async work started inside it.
+   */
+  private async traced(triggerId: string, work: () => Promise<ExecutionInstruction[]>): Promise<ExecutionInstruction[]> {
     const startedAt = Date.now()
     this.activeTraceSteps = []
-    // Everything the process logs to the console during this run lands in the
-    // trace too — over-inclusive by design (concurrent runs of OTHER instances
-    // will interleave, each line carries its module), because a silent trace
-    // is worse than a noisy one.
+    /* One id, three jobs: it scopes the logs, names the trace, and stamps the
+       instructions. Anything less and an execution could only be matched to a
+       run by timestamp — which is a guess the moment two runs overlap. */
+    const scope = `run:${this.instanceId ?? 'strategy'}:${startedAt}:${this.metrics.runsTotal}:${triggerId}`
     const unsubLogs = subscribeLogs((rec) => {
+      if (rec.scope !== scope) return
       this.activeTraceSteps?.push({
         ts: rec.ts, step: `log:${rec.level}`,
         data: { ...(rec.module !== undefined ? { module: rec.module } : {}), msg: rec.msg, ...rec.extra },
       })
     })
-    this.trace('run:triggered', { triggerId: context.triggerId, monitorData: Object.keys(context.monitorData ?? {}) })
     const finish = (instructions: number, error?: string) => {
       const rec: StrategyRunTrace = {
-        startedAt, triggerId: context.triggerId, durationMs: Date.now() - startedAt,
+        runId: scope,
+        startedAt, triggerId, durationMs: Date.now() - startedAt,
         instructions, ...(error !== undefined ? { error } : {}),
         steps: this.activeTraceSteps ?? [],
       }
@@ -577,18 +658,19 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
       unsubLogs()
       try { this.runSink?.(rec) } catch { /* persistence must not fail the run */ }
     }
-    try {
-      const instructions = await this.evaluate(context)
-      this.metrics.instructionsEmitted += instructions.length
-      this.log.debug({ triggerId: context.triggerId, instructionCount: instructions.length }, 'Strategy run completed')
-      finish(instructions.length)
-      return instructions
-    } catch (err) {
-      this.metrics.errors++
-      this.log.error({ triggerId: context.triggerId, err }, 'Strategy run failed')
-      finish(0, err instanceof Error ? err.message : String(err))
-      throw err
-    }
+    return runInLogScope(scope, async () => {
+      try {
+        const emitted = await work()
+        // Stamped here, the one place every instruction of every strategy
+        // passes through on its way to the queue.
+        const instructions = emitted.map(i => (i.runId === undefined ? { ...i, runId: scope } : i))
+        finish(instructions.length)
+        return instructions
+      } catch (err) {
+        finish(0, err instanceof Error ? err.message : String(err))
+        throw err
+      }
+    })
   }
 
   abstract evaluate(context: StrategyContext): Promise<ExecutionInstruction[]>

@@ -10,6 +10,14 @@ export interface ExecutionInstruction {
   /** Strategy instance that emitted this instruction. Injected by TriggerManager. */
   instanceId?: string
   /**
+   * The run that decided this instruction — `StrategyRunTrace.runId`. Stamped
+   * by BaseStrategy on the way out, so an execution can be read back against
+   * the reasoning that produced it instead of a timestamp that merely lands
+   * nearby. Absent on instructions emitted before this existed, and on any
+   * pushed outside a run.
+   */
+  runId?: string
+  /**
    * Credential names of accounts to use for this instruction, in the order declared by
    * the executor's accountTypes. Validated against accountTypes at execution time.
    */
@@ -27,7 +35,12 @@ export interface IExecutor {
 
 export interface ExecutionResult<TInstruction extends ExecutionInstruction = ExecutionInstruction> {
   instruction: TInstruction
-  status: 'success' | 'failed' | 'skipped'
+  /**
+   * 'dry-run' is written by the framework, not an executor: the instruction was
+   * held back before the queue and never reached one. It is a record of what
+   * the strategy decided, and is excluded from PnL attribution.
+   */
+  status: 'success' | 'failed' | 'skipped' | 'dry-run'
   data?: Record<string, unknown>
   error?: string
   executedAt: Date

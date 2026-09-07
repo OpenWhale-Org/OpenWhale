@@ -5,7 +5,7 @@ description: Write runnable OpenWhale components — strategies, monitors, execu
 
 # OpenWhale Plugin Development
 
-> **Calibrated against `@openwhaleorg/core` v0.2.2 on main (re-verified 2026-08-29: every template signature
+> **Calibrated against `@openwhaleorg/core` v0.2.3 on main (re-verified 2026-09-03: every template signature
 > checked against `packages/framework/core/src`).** If the installed core is newer, verify signatures against
 > the framework source before trusting a template verbatim.
 
@@ -60,6 +60,32 @@ before writing: they show the account-slot / `accountVenue` idiom, `store`-based
 the discipline that risk limits live in code even when a model produces the signal.
 
 ## Since 2026-08-26 (newest first)
+
+- **Text in more than one language** (core ≥ 0.2.3). Every user-facing string in a manifest, a
+  decorator or a param's `.meta()` is a `Text`: a string, or `{ en, 'zh-CN' }`. The gateway resolves
+  it per request; our strategies carry both languages on every string; a plugin may ship language
+  packs (`definePlugin({ i18n })`) instead. (`references/strategy.md` §Text)
+- **Picker fields** (core ≥ 0.2.3). An object param with `meta({ picker: { source: 'strategy', id } })`
+  renders as a button and a card dialog whose options `pickerOptions(id, ctx)` computes — for a
+  value that is a whole decision (the four legs of a carry), where a preset would scatter it over
+  fields. (`references/strategy.md` §Picker fields)
+- **Illustrations get live figures** (core ≥ 0.2.3). `illustrationData(ctx)` on a strategy is called,
+  debounced, for the form's current values, and its answer reaches every `paramsIllustrations`
+  frame as `data` in the `ow-params` message — quotes, an estimate, a venue limit, drawn live as
+  the operator types. (`references/strategy.md` §Illustrations)
+- **Live presets with cards** (core ≥ 0.2.3). A strategy may compute its presets — `presets(ctx)`
+  with keyless adapters, the bound slots and the form's current values — and give each a `card`
+  (title, headline figure, rows, badges, tone; or `html` for a custom drawing). The Dashboard
+  then offers a picker dialog laid out in the order returned; static `paramPresets` without cards
+  stay a dropdown. Results are cached by `presetSource.ttlMs`. (`references/strategy.md` §Presets)
+- **Lifecycle hooks — `onActivate` / `onDeactivate`** (core ≥ 0.2.3). A strategy gets a moment of
+  its own at each end: `onActivate(ctx)` after every setter and before the first trigger (take a
+  baseline, set leverage, settle a quote left from the last activation); `onDeactivate(ctx)` after
+  the run in flight has finished and BEFORE executor slots are removed (cancel what rests).
+  Both may return instructions, which are fired inline and awaited — never queued. `ctx.reason`
+  names the transition: `activate | boot | restart | rollback | stop | delete | shutdown`. A
+  throwing `onActivate` fails the activation; a throwing `onDeactivate` is logged and teardown
+  continues. Both show on the instance board as runs `lifecycle:<reason>`. (`references/strategy.md`)
 
 - **The framework version is settled at install.** A plugin's `peerDependencies` range for
   `@openwhaleorg/*` is checked against the running engine before anything is staged; a mismatch is

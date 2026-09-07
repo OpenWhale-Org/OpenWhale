@@ -1,3 +1,4 @@
+import type { LanguagePack, Locale, Text } from '../i18n.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { BaseExecutor } from '../executor/BaseExecutor.js'
@@ -14,7 +15,9 @@ export interface OpenWhalePlugin {
   name: string
   version: string
   /** Markdown README shown on the dashboard's Plugins page. */
-  readme?: string
+  readme?: Text
+  /** Language packs — see PluginManifest.i18n. */
+  i18n?: Record<Locale, LanguagePack>
   /** Brand mark for the plugin list (https URL or data: URI). */
   logo?: string
   /** Single-glyph fallback mark. */

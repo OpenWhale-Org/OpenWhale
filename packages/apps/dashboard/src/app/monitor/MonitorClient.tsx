@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Rail, RailGroup, RailItem, StatusDot } from '../../components/Rail'
-import type { MonitorDefinition, ParamFieldCatalogue, MonitorInstanceView, CredentialInfo } from '@openwhaleorg/core'
+import type { ParamFieldCatalogue, CredentialInfo } from '@openwhaleorg/core'
+import type { MonitorDefinition, MonitorInstanceView } from '@/lib/core-types'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { MonitorBoards } from './MonitorBoards'
 import { MonitorInstancesPanel, type ImplementationInfo } from './MonitorInstancesPanel'
@@ -11,6 +12,8 @@ import { LogsPanel } from '@/components/LogsPanel'
 import { Modal } from '@/components/Modal'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
 import { SymbolPicker } from '@/components/SymbolPicker'
+import { effectiveValue } from '@/components/venue'
+import { useT } from '@/i18n'
 
 interface SseEvent {
   type: string
@@ -27,6 +30,8 @@ interface MonitorStatus {
   mode: string
   activeKeys: Array<{ key: string; refCount: number }>
   wildcardSubscribers: number
+  /** The venue this monitor's keys live on, when it has exactly one. */
+  venue?: string
   /** This monitor reconstructs history on a key's first subscribe. */
   supportsBackfill?: boolean
   /** Keys whose history is landing right now — live collection starts after. */
@@ -57,6 +62,7 @@ function splitId(id: string): { pkg: string; short: string } {
 }
 
 export function MonitorClient({ monitors, instances: initialInstances, implementations, pendingKeys: initialPending, credentials }: Props) {
+  const t = useT()
   const [statuses, setStatuses] = useState<MonitorStatus[]>([])
   const [instances, setInstances] = useState(initialInstances)
   const [pendingKeys, setPendingKeys] = useState(initialPending)
@@ -116,7 +122,7 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
       {/* ── Left: monitors grouped by package ── */}
       <Rail width="18rem">
         {statuses.length === 0 && monitors.length === 0 && (
-          <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>No monitors registered.</p>
+          <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>{t('monitor.noneRegistered')}</p>
         )}
         {[...groups.entries()].map(([pkg, items]) => (
           <RailGroup key={pkg} label={pkg} count={items.length}>
@@ -128,18 +134,21 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
                  failure the dot/badge pair exposes. */
               const mine = instances.filter(i => i.contract === m.id)
               const running = mine.filter(i => i.active).length
+              const markTitle = running > 0
+                ? (mine.length > 1 ? t('monitor.instRunning', { running, total: mine.length }) : t('monitor.instRunningOne'))
+                : (mine.length > 1 ? t('monitor.instNoneRunning', { total: mine.length }) : t('monitor.instNoneRunningOne'))
               return (
                 <RailItem
                   key={m.id}
                   active={m.id === selectedId}
                   onClick={() => setSelectedId(m.id)}
                   mark={mine.length > 0
-                    ? <StatusDot color={running > 0 ? 'var(--success)' : 'var(--muted)'} title={running > 0 ? `${running} of ${mine.length} instance${mine.length > 1 ? 's' : ''} running` : `${mine.length} instance${mine.length > 1 ? 's' : ''}, none running`} />
+                    ? <StatusDot color={running > 0 ? 'var(--success)' : 'var(--muted)'} title={markTitle} />
                     : <StatusDot color="transparent" />}
                   title={splitId(m.id).short}
                   subtitle={m.description}
                   right={m.activeKeys.length > 0
-                    ? <span className="px-1.5 rounded-full text-[11px]" style={{ background: 'var(--accent)', color: '#fff' }} title={`${m.activeKeys.length} key${m.activeKeys.length > 1 ? 's' : ''} subscribed`}>{m.activeKeys.length}</span>
+                    ? <span className="px-1.5 rounded-full text-[11px]" style={{ background: 'var(--accent)', color: '#fff' }} title={m.activeKeys.length > 1 ? t('monitor.keysSubscribed', { n: m.activeKeys.length }) : t('monitor.keySubscribedOne')}>{m.activeKeys.length}</span>
                     : undefined}
                 />
               )
@@ -163,7 +172,7 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
             credentials={credentials}
           />
         ) : (
-          <p className="text-sm p-8 text-center" style={{ color: 'var(--muted)' }}>Select a monitor.</p>
+          <p className="text-sm p-8 text-center" style={{ color: 'var(--muted)' }}>{t('monitor.select')}</p>
         )}
       </main>
     </div>
@@ -182,6 +191,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
   pendingKeys: Record<string, string[]>
   credentials: CredentialInfo[]
 }) {
+  const t = useT()
   /* Board is what you open this page FOR; Manage is the plumbing you set up
      once. Both can be on screen (Split), but Board is the default alone. */
   const [view, setView] = useState<'board' | 'split' | 'manage'>(() => {
@@ -266,15 +276,15 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
               {status.mode}
             </span>
             {status.wildcardSubscribers > 0 && (
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>wildcard ×{status.wildcardSubscribers}</span>
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('monitor.wildcard', { n: status.wildcardSubscribers })}</span>
             )}
             {status.supportsBackfill && (
               <span
                 className="text-xs px-1.5 py-0.5 rounded"
                 style={{ background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-                title="Reconstructs history from the venue on a key's first subscribe, incrementally from what is already stored"
+                title={t('monitor.backfillTitle')}
               >
-                backfill
+                {t('monitor.backfill')}
               </span>
             )}
           </div>
@@ -284,7 +294,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
 
       <div className="flex items-center gap-2">
         <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-          {([['board', 'Board'], ['split', 'Split'], ['manage', 'Manage']] as const).map(([key, label]) => (
+          {([['board', t('monitor.view.board')], ['split', t('monitor.view.split')], ['manage', t('monitor.view.manage')]] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => pickView(key)}
@@ -298,7 +308,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
             </button>
           ))}
         </div>
-        <span className="text-xs" style={{ color: 'var(--muted)' }}>{mine.length} inst · {status.activeKeys.length} watched</span>
+        <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('monitor.summary', { inst: mine.length, watched: status.activeKeys.length })}</span>
       </div>
 
       {/* Two tabs, not a stack of boxes.
@@ -320,7 +330,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
         </div>
       )}
       {showBoard && showManage && (
-        <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center self-stretch mx-1" style={{ width: 8, minHeight: 200 }} title="Drag to resize">
+        <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center self-stretch mx-1" style={{ width: 8, minHeight: 200 }} title={t('monitor.dragResize')}>
           <div className="w-0.5 h-8 rounded-full" style={{ background: 'var(--muted)', opacity: 0.6 }} />
         </div>
       )}
@@ -338,27 +348,26 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           <section className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>
-                SUBSCRIPTIONS ({status.activeKeys.length})
+                {t('monitor.subscriptions', { n: status.activeKeys.length })}
               </span>
               <button
                 onClick={() => setWatching(true)}
                 className="hoverable hoverable-flat ml-auto h-8 px-2.5 rounded-md text-xs"
                 style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
               >
-                ＋ Watch a key
+                {t('monitor.watchKey')}
               </button>
             </div>
 
             {status.backfillingKeys && status.backfillingKeys.length > 0 && (
               <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                Backfilling {status.backfillingKeys.join(', ')} — live collection starts when it lands.
+                {t('monitor.backfilling', { keys: status.backfillingKeys.join(', ') })}
               </p>
             )}
 
             {status.activeKeys.length === 0 ? (
               <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                Nothing subscribed. A strategy instance subscribes what it needs when it activates;
-                use Watch to collect a key without one.
+                {t('monitor.nothingSubscribed')}
               </p>
             ) : (
               <div className="flex flex-col gap-1">
@@ -378,10 +387,10 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
                       style={{ background: 'var(--background)', border: `1px solid ${unresolved ? 'var(--danger)' : 'var(--border)'}` }}
                     >
                       <span className="font-mono text-xs min-w-0 flex-1 truncate" style={unresolved ? { color: 'var(--danger)' } : undefined}>
-                        {unresolved ? '⚠ unresolved key' : k}
+                        {unresolved ? t('monitor.unresolvedKey') : k}
                       </span>
                       <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
-                        {by.length > 0 ? by.join(' · ') : manual ? 'manual watch' : `×${refCount}`}
+                        {by.length > 0 ? by.join(' · ') : manual ? t('monitor.manualWatch') : `×${refCount}`}
                       </span>
                       {manual && (
                         <button
@@ -389,9 +398,9 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
                           disabled={busy}
                           className="text-xs shrink-0 h-6 px-2 rounded-md"
                           style={{ color: 'var(--danger)', border: '1px solid var(--border)' }}
-                          title="Stop this manual watch"
+                          title={t('monitor.stopManualWatch')}
                         >
-                          Unwatch
+                          {t('monitor.unwatch')}
                         </button>
                       )}
                     </div>
@@ -413,11 +422,11 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
             <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
               <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} />
-              Live feed · {events.length} emits
+              {t('monitor.liveFeed', { n: events.length })}
             </summary>
             <div className="max-h-80 overflow-y-auto scroll-hidden font-mono text-xs" style={{ borderTop: '1px solid var(--border)' }}>
               {events.length === 0 ? (
-                <p className="p-4" style={{ color: 'var(--muted)' }}>Waiting for emits…</p>
+                <p className="p-4" style={{ color: 'var(--muted)' }}>{t('monitor.waitingEmits')}</p>
               ) : events.map((event, i) => (
                 <div key={`${event.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
                   <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(event.ts).toLocaleTimeString()}</span>
@@ -431,7 +440,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           <details className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
             <summary className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2" style={{ color: 'var(--muted)' }}>
               <span className="w-2 h-2 rounded-full" style={{ background: 'var(--muted)' }} />
-              Logs
+              {t('monitor.logs')}
             </summary>
             <div style={{ borderTop: '1px solid var(--border)' }}>
               <LogsPanel id={status.id} logsUrl={`/api/monitor/${encodeURIComponent(status.id)}/logs?n=200`} sseType="monitor_log" />
@@ -444,13 +453,12 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
       {watching && (
         <Modal onClose={() => setWatching(false)} maxWidth="34rem">
           <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-            <h2 className="font-semibold text-base flex-1">Watch a key</h2>
-            <button type="button" onClick={() => setWatching(false)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+            <h2 className="font-semibold text-base flex-1">{t('monitor.watchKeyTitle')}</h2>
+            <button type="button" onClick={() => setWatching(false)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: 'var(--muted)' }} aria-label={t('common.close')}>✕</button>
           </div>
           <div className="px-5 py-4 flex flex-col gap-3">
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
-              Collects this key without a strategy asking for it. An instance of {status.id} has to
-              be running to serve it.
+              {t('monitor.watchHint', { id: status.id })}
             </p>
             <WatchForm status={status} onChanged={() => { setWatching(false); onChanged() }} />
           </div>
@@ -476,6 +484,7 @@ function KeyStrip({ status, events, connected, subscribers }: {
   connected: boolean
   subscribers: Record<string, string[]>
 }) {
+  const t = useT()
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [records, setRecords] = useState<{ key: string; total: number; rows: Array<{ ts: number; data: unknown }> } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -503,7 +512,7 @@ function KeyStrip({ status, events, connected, subscribers }: {
   return (
     <div className="rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
-        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} title={connected ? 'Live stream connected' : 'Live stream disconnected'} />
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: connected ? 'var(--success)' : 'var(--danger)' }} title={connected ? t('monitor.streamConnected') : t('monitor.streamDisconnected')} />
         {keys.map((k) => {
           const running = status.activeKeys.some(a => a.key === k)
           const seen = lastSeen.get(k)
@@ -519,12 +528,12 @@ function KeyStrip({ status, events, connected, subscribers }: {
                 background: open ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'var(--background)',
                 border: `1px solid ${open || running ? 'var(--accent)' : 'var(--border)'}`,
               }}
-              title={by.length > 0 ? `Subscribed by ${by.join(', ')} — click for recent events` : 'Click for recent events'}
+              title={by.length > 0 ? t('monitor.subscribedBy', { names: by.join(', ') }) : t('monitor.clickRecent')}
             >
               <span className="font-mono">{k}</span>
-              {by.length > 0 && <span style={{ color: 'var(--muted)' }}>{by.length === 1 ? by[0] : `${by.length} strategies`}</span>}
+              {by.length > 0 && <span style={{ color: 'var(--muted)' }}>{by.length === 1 ? by[0] : t('monitor.nStrategies', { n: by.length })}</span>}
               <span style={{ color: 'var(--muted)' }}>
-                {seen ? new Date(seen).toLocaleTimeString() : running ? 'waiting' : 'stored'}
+                {seen ? new Date(seen).toLocaleTimeString() : running ? t('monitor.waiting') : t('monitor.stored')}
               </span>
             </button>
           )
@@ -534,18 +543,18 @@ function KeyStrip({ status, events, connected, subscribers }: {
         <div style={{ borderTop: '1px solid var(--border)' }}>
           <div className="px-3 py-1.5 flex items-center gap-2 text-xs" style={{ color: 'var(--muted)' }}>
             <span className="font-mono">{openKey}</span>
-            <span>· {loading ? 'loading…' : `last ${records?.rows.length ?? 0} of ${records?.total ?? 0} records`}</span>
+            <span>· {loading ? t('monitor.loading') : t('monitor.lastRecords', { shown: records?.rows.length ?? 0, total: records?.total ?? 0 })}</span>
             <a
               href={`/monitor-data?monitor=${encodeURIComponent(status.id)}&key=${encodeURIComponent(openKey)}`}
               className="ml-auto px-2 py-0.5 rounded-md"
               style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}
             >
-              Open in Explorer ↗
+              {t('monitor.openExplorer')}
             </a>
           </div>
           <div className="max-h-72 overflow-y-auto scroll-hidden font-mono text-xs" style={{ borderTop: '1px solid var(--border)' }}>
             {!loading && records?.key === openKey && records.rows.length === 0 && (
-              <p className="p-3" style={{ color: 'var(--muted)' }}>No stored records for this key yet.</p>
+              <p className="p-3" style={{ color: 'var(--muted)' }}>{t('monitor.noStoredRecords')}</p>
             )}
             {records?.key === openKey && records.rows.map((r, i) => (
               <div key={`${r.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
@@ -568,22 +577,28 @@ function KeyStrip({ status, events, connected, subscribers }: {
  * default, then first option) — otherwise the picker looks unset while the
  * form shows a venue.
  */
+/**
+ * Which venue this key field's catalogue should list.
+ *
+ * Two sources, both definite. A monitor pinned to one venue declares it, and
+ * that is the end of it — `market-watch` lives on Boros and has no venue field
+ * to read. A multi-venue monitor carries the venue as a sibling key field, and
+ * what that field HOLDS is the answer (`effectiveValue`, the same reading the
+ * submit path uses, so the catalogue and the subscription can never disagree).
+ */
 function resolveVenue(
+  monitorVenue: string | undefined,
   catalogue: ParamFieldCatalogue,
   fields: Array<{ name: string; default?: unknown; options?: Array<{ value: unknown }> }>,
   values: Record<string, string>,
 ): string | undefined {
+  if (monitorVenue) return monitorVenue
   if (!catalogue.venueField) return undefined
-  const typed = (values[catalogue.venueField] ?? '').trim()
-  if (typed) return typed
-  const field = fields.find(f => f.name === catalogue.venueField)
-  if (!field) return undefined
-  if (field.default !== undefined) return String(field.default)
-  const first = field.options?.[0]
-  return first ? String(first.value) : undefined
+  return effectiveValue(fields.find(f => f.name === catalogue.venueField), values) || undefined
 }
 
 function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: () => void }) {
+  const t = useT()
   const [key, setKey] = useState('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
@@ -608,10 +623,9 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
     const params: Record<string, unknown> = {}
     for (const f of fields ?? []) {
       // Untouched selects display their first option while state stays '' —
-      // submit must match what the user SEES: schema default, then first option.
-      const raw = (fieldValues[f.name] ?? '').trim()
-        || (f.default !== undefined ? String(f.default) : '')
-        || (f.options?.[0] !== undefined ? String(f.options[0].value) : '')
+      // submit must match what the user SEES (effectiveValue), which is also
+      // what the catalogue pickers were listing against.
+      const raw = effectiveValue(f, fieldValues)
       if (raw === '') continue
       params[f.name] = f.type === 'number' ? Number(raw) : f.type === 'boolean' ? raw === 'true' : raw
     }
@@ -630,7 +644,7 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
                 </label>
                 {f.options && f.options.length > 0 ? (
                   <select
-                    value={fieldValues[f.name] ?? String(f.default ?? f.options[0]?.value ?? '')}
+                    value={effectiveValue(f, fieldValues)}
                     onChange={(e) => setFieldValues((v) => ({ ...v, [f.name]: e.target.value }))}
                     title={f.description}
                     className="rounded-md px-2 py-1.5 text-xs font-mono"
@@ -642,9 +656,9 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
                   <SymbolPicker
                     value={fieldValues[f.name] ?? ''}
                     onChange={(v) => setFieldValues((prev) => ({ ...prev, [f.name]: v }))}
-                    // The venue lives in a sibling key field; until it is
-                    // picked the dropdown says so instead of guessing.
-                    venue={resolveVenue(f.catalogue, fields ?? [], fieldValues)}
+                    // The monitor's own pin, else the sibling venue field.
+                    // With neither, the dropdown says so instead of guessing.
+                    venue={resolveVenue(status.venue, f.catalogue, fields ?? [], fieldValues)}
                     catalogue={f.catalogue}
                     placeholder={f.placeholder ?? f.name}
                     title={f.description}
@@ -669,7 +683,7 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
               className="px-3 py-1.5 rounded-md text-xs"
               style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}
             >
-              Watch
+              {t('monitor.watch')}
             </button>
           </>
         ) : (
@@ -678,7 +692,7 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
               <input
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
-                placeholder="key to watch"
+                placeholder={t('monitor.keyPlaceholder')}
                 className="flex-1 rounded-md px-3 py-1.5 text-xs font-mono"
                 style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
               />
@@ -689,7 +703,7 @@ function WatchForm({ status, onChanged }: { status: MonitorStatus; onChanged: ()
               className="px-3 py-1.5 rounded-md text-xs"
               style={{ background: 'var(--accent)', color: '#fff', opacity: busy || (!standalone && !key.trim()) ? 0.5 : 1 }}
             >
-              {standalone ? 'Start' : 'Watch'}
+              {standalone ? t('monitor.start') : t('monitor.watch')}
             </button>
           </>
         )}

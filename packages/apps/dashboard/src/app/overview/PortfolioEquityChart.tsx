@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CombinedAccountEquityPoint, CombinedAccountEquitySeries } from '@openwhaleorg/core'
+import { useT } from '@/i18n'
+
+type T = ReturnType<typeof useT>
 
 const RANGES = [
   { value: '24h', label: '24H' },
@@ -41,16 +44,17 @@ function formatAxisTime(ts: number, range: PortfolioRange): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function relativeTime(ts: number): string {
+function relativeTime(t: T, ts: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - ts) / 1_000))
-  if (seconds < 60) return 'just now'
+  if (seconds < 60) return t('overview.time.justNow')
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return t('overview.time.minutesAgo', { n: minutes })
   const hours = Math.round(minutes / 60)
-  return `${hours}h ago`
+  return t('overview.time.hoursAgo', { n: hours })
 }
 
 export function usePortfolioEquity(): PortfolioEquityState {
+  const t = useT()
   const [range, setRange] = useState<PortfolioRange>('7d')
   const [data, setData] = useState<PortfolioEquityResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -75,7 +79,7 @@ export function usePortfolioEquity(): PortfolioEquityState {
         }
       } catch (cause) {
         if (!disposed && !controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : 'Unable to load portfolio history')
+          setError(cause instanceof Error ? cause.message : t('overview.chart.loadError'))
         }
       } finally {
         if (!disposed) setLoading(false)
@@ -91,7 +95,7 @@ export function usePortfolioEquity(): PortfolioEquityState {
       controller.abort()
       window.clearInterval(refreshTimer)
     }
-  }, [range, requestVersion])
+  }, [range, requestVersion, t])
 
   return {
     data,
@@ -104,8 +108,9 @@ export function usePortfolioEquity(): PortfolioEquityState {
 }
 
 export function PortfolioEquitySparkline({ points }: { points: CombinedAccountEquityPoint[] }) {
+  const t = useT()
   const completePoints = points.filter(point => point.accountCount === point.expectedAccountCount)
-  if (completePoints.length < 2) return <span className="aurora-sparkline-empty">No history</span>
+  if (completePoints.length < 2) return <span className="aurora-sparkline-empty">{t('overview.chart.sparkEmpty')}</span>
   const values = completePoints.slice(-20).map(point => point.equity)
   const min = Math.min(...values)
   const max = Math.max(...values)
@@ -131,6 +136,7 @@ export function PortfolioEquitySparkline({ points }: { points: CombinedAccountEq
 }
 
 export function PortfolioEquityChart({ state }: { state: PortfolioEquityState }) {
+  const t = useT()
   const { data, error, loading, range, refresh, setRange } = state
   const wrapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -225,12 +231,12 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
     <article className="aurora-dashboard-card aurora-performance-card">
       <div className="aurora-card-header aurora-portfolio-header">
         <div>
-          <h2>Portfolio Equity</h2>
+          <h2>{t('overview.chart.title')}</h2>
           <p>
-            {latest ? `${formatUsd(latest.equity)} · ${change !== null && change >= 0 ? '+' : ''}${change !== null ? formatUsd(change) : '—'}${changePct !== null ? ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)` : ''}` : 'Combined account equity'}
+            {latest ? `${formatUsd(latest.equity)} · ${change !== null && change >= 0 ? '+' : ''}${change !== null ? formatUsd(change) : '—'}${changePct !== null ? ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)` : ''}` : t('overview.chart.subtitle')}
           </p>
         </div>
-        <div className="aurora-time-tabs" aria-label="Portfolio equity range">
+        <div className="aurora-time-tabs" aria-label={t('overview.chart.rangeLabel')}>
           {RANGES.map(option => (
             <button
               key={option.value}
@@ -247,21 +253,21 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
 
       <div className="aurora-equity-chart aurora-real-equity-chart" ref={wrapRef}>
         {loading ? (
-          <div className="aurora-chart-message"><span className="aurora-chart-loader" /> Loading equity history…</div>
+          <div className="aurora-chart-message"><span className="aurora-chart-loader" /> {t('overview.chart.loading')}</div>
         ) : error ? (
           <div className="aurora-chart-message is-error">
-            <span>Portfolio history is temporarily unavailable.</span>
-            <button type="button" onClick={refresh}>Retry</button>
+            <span>{t('overview.chart.unavailable')}</span>
+            <button type="button" onClick={refresh}>{t('overview.chart.retry')}</button>
           </div>
         ) : !data || data.expectedAccounts.length === 0 ? (
-          <div className="aurora-chart-message">Connect a ready account to start recording portfolio equity.</div>
+          <div className="aurora-chart-message">{t('overview.chart.connect')}</div>
         ) : data.points.length === 0 ? (
-          <div className="aurora-chart-message">No equity history yet. The first samples are collected while the runtime is online.</div>
+          <div className="aurora-chart-message">{t('overview.chart.noHistory')}</div>
         ) : geometry && latestSample ? (
           <>
             <div className="aurora-chart-freshness">
-              <span className={stale ? 'is-stale' : ''}>{latest ? `${stale ? 'Stale' : 'Updated'} ${relativeTime(latest.ts)}` : 'No complete samples'}</span>
-              <span className={partial ? 'is-partial' : ''}>{latestSample.accountCount}/{latestSample.expectedAccountCount} accounts</span>
+              <span className={stale ? 'is-stale' : ''}>{latest ? t(stale ? 'overview.chart.stale' : 'overview.chart.updated', { ago: relativeTime(t, latest.ts) }) : t('overview.chart.noComplete')}</span>
+              <span className={partial ? 'is-partial' : ''}>{t('overview.chart.accounts', { n: latestSample.accountCount, total: latestSample.expectedAccountCount })}</span>
             </div>
             <svg
               ref={svgRef}
@@ -269,7 +275,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
               preserveAspectRatio="none"
               onPointerMove={onPointerMove}
               onPointerLeave={() => setHover(null)}
-              aria-label={`Portfolio equity for the last ${range}`}
+              aria-label={t('overview.chart.aria', { range })}
               role="img"
             >
               <defs>
@@ -346,10 +352,10 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
                 }}
               >
                 <strong>{formatUsd(hovered.point.equity)}</strong>
-                {hovered.point.unrealizedPnl !== undefined && <span>uPnL {formatUsd(hovered.point.unrealizedPnl)}</span>}
-                {hovered.point.available !== undefined && <span>Available {formatUsd(hovered.point.available)}</span>}
-                <span>{hovered.point.accountCount}/{hovered.point.expectedAccountCount} accounts</span>
-                {hovered.point.missingAccounts.length > 0 && <span className="is-warning">Missing: {hovered.point.missingAccounts.join(', ')}</span>}
+                {hovered.point.unrealizedPnl !== undefined && <span>{t('overview.chart.uPnl', { v: formatUsd(hovered.point.unrealizedPnl) })}</span>}
+                {hovered.point.available !== undefined && <span>{t('overview.chart.available', { v: formatUsd(hovered.point.available) })}</span>}
+                <span>{t('overview.chart.accounts', { n: hovered.point.accountCount, total: hovered.point.expectedAccountCount })}</span>
+                {hovered.point.missingAccounts.length > 0 && <span className="is-warning">{t('overview.chart.missing', { list: hovered.point.missingAccounts.join(', ') })}</span>}
                 <time>{new Date(hovered.point.ts).toLocaleString()}</time>
               </div>
             )}

@@ -1,9 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import { useT } from '@/i18n'
 
 /** Signed-in identity plus sign-out. */
 export function UserMenu({ username }: { username?: string }) {
+  const t = useT()
   const [busy, setBusy] = useState(false)
 
   async function signOut() {
@@ -20,7 +22,7 @@ export function UserMenu({ username }: { username?: string }) {
     <div className="aurora-user-menu">
       <span className="aurora-avatar">{username.slice(0, 2).toUpperCase()}</span>
       <button onClick={signOut} disabled={busy} className="aurora-signout" style={{ opacity: busy ? 0.5 : 1 }}>
-        Sign out
+        {t('ui.signOut')}
       </button>
     </div>
   )

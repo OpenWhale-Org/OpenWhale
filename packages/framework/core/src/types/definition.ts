@@ -1,11 +1,12 @@
+import type { Locale, Text } from '../i18n.js'
 // ── Param field UI schema ─────────────────────────────────────────────────────
 
-export type ParamFieldType = 'string' | 'number' | 'boolean' | 'options' | 'list'
+export type ParamFieldType = 'string' | 'number' | 'boolean' | 'options' | 'list' | 'object'
 
 export interface ParamFieldOption {
-  label: string
+  label: Text
   value: string | number | boolean
-  description?: string
+  description?: Text
 }
 
 /**
@@ -27,7 +28,7 @@ export interface ParamFieldSlider {
  */
 export interface ListColumnDef {
   name: string
-  displayName: string
+  displayName: Text
   type: 'string' | 'number' | 'boolean' | 'options'
   options?: ParamFieldOption[]
   slider?: ParamFieldSlider
@@ -35,8 +36,8 @@ export interface ListColumnDef {
   catalogue?: ParamFieldCatalogue
   /** Short unit suffix rendered after the input ('σ', '%', '$'). */
   unit?: string
-  placeholder?: string
-  description?: string
+  placeholder?: Text
+  description?: Text
   /** Value a freshly added row starts with. */
   default?: unknown
 }
@@ -61,11 +62,24 @@ export interface ListParamDef {
  */
 export interface ParamFieldMeta {
   /** Display section within the group — dashboard renders a header per section. */
-  section?: string
-  displayName?: string
-  description?: string
-  hint?: string
-  placeholder?: string
+  section?: Text
+  /**
+   * Render a picker dialog whose options the strategy computes — see
+   * ParamPicker. For a field whose value is a whole decision (an object
+   * naming several legs at once) rather than a symbol from a catalogue.
+   */
+  picker?: ParamPicker
+  displayName?: Text
+  description?: Text
+  hint?: Text
+  placeholder?: Text
+  /**
+   * Translations of this field's text, per locale — the form zod's `.meta()`
+   * accepts, since zod types `description` and `title` as strings:
+   * `.meta({ displayName: 'Notional', description: '…', i18n: { 'zh-CN': { displayName: '名义仓位', description: '…' } } })`.
+   * Folded into the same Text tables as a table written inline.
+   */
+  i18n?: Record<string, Partial<Record<'displayName' | 'description' | 'hint' | 'placeholder' | 'section', string>>>
   options?: ParamFieldOption[]
   displayOptions?: {
     show?: Record<string, (string | number | boolean)[]>
@@ -97,6 +111,12 @@ export interface ParamFieldMeta {
    * (add-button label) live here.
    */
   list?: Omit<ListParamDef, 'columns'>
+  /**
+   * Names of sibling fields this field's option list is computed from. The
+   * form re-asks the script's `paramOptions` with the current values whenever
+   * one of them changes — a symbol list drawn from the chosen account, say.
+   */
+  optionsDependOn?: string[]
 }
 
 /**
@@ -180,7 +200,7 @@ export interface ParamFieldDef {
   /** Field key in the params object */
   name: string
   /** Human-readable label shown in the UI */
-  displayName: string
+  displayName: Text
   /** Field type — controls which input widget is rendered */
   type: ParamFieldType
   /** Which params group this field belongs to */
@@ -188,13 +208,13 @@ export interface ParamFieldDef {
   /** Default value (used as placeholder hint and Zod default) */
   default?: unknown
   /** Short description shown below the field */
-  description?: string
+  description?: Text
   /** Inline hint shown next to the label */
-  hint?: string
+  hint?: Text
   /** Display section within the group — the dashboard renders a header per section, in first-appearance order. */
-  section?: string
+  section?: Text
   /** Input placeholder text */
-  placeholder?: string
+  placeholder?: Text
   /** Whether the field is required */
   required?: boolean
   /** Options for type='options' */
@@ -208,9 +228,13 @@ export interface ParamFieldDef {
     hide?: Record<string, (string | number | boolean)[]>
   }
   /** Render a live catalogue picker (see ParamFieldCatalogue); degrades to a text input. */
+  /** Render a picker dialog with strategy-computed options — see ParamPicker. */
+  picker?: ParamPicker
   catalogue?: ParamFieldCatalogue
   /** Verify the chosen value(s) against the bound account's venue (see ParamAvailability). */
   availability?: ParamAvailability
+  /** Sibling fields whose values this field's options are computed from (see ParamFieldMeta). */
+  optionsDependOn?: string[]
   /** Field accepts several values — the form renders a multi-select. */
   multiple?: boolean
   /** Render this number as a drag slider with the given range. */
@@ -225,13 +249,20 @@ export interface ParamFieldDef {
 
 export interface MonitorDefinition {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   source: 'builtin' | 'plugin' | 'compiled'
   pluginName?: string
   compiledPath?: string
   /** Key structure fields — derived from the monitor's keySchema at registration. */
   keyFields?: ParamFieldDef[]
+  /**
+   * The venue this monitor's keys live on, when it has exactly one — declared
+   * by the implementation behind the contract. Catalogue pickers need it:
+   * without a venue there is no market list to fetch. Absent on multi-venue
+   * monitors, whose key carries the venue as a field of its own.
+   */
+  venue?: string
   /** This monitor can reconstruct history on first subscribe (see BaseMonitor.backfill). */
   supportsBackfill?: boolean
   createdAt: string
@@ -240,8 +271,8 @@ export interface MonitorDefinition {
 
 export interface ExecutorDefinition {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   source: 'builtin' | 'plugin' | 'compiled'
   pluginName?: string
   compiledPath?: string
@@ -265,7 +296,21 @@ export interface ExecutorDefinition {
 export interface ParamIllustration {
   /** Render after this section's fields (matches ParamFieldMeta.section); top of the form when omitted. */
   section?: string
-  title?: string
+  /**
+   * Where a section-less illustration sits: 'top' (default) above the fields,
+   * 'after-base' between the base and tunable params, 'bottom' after the
+   * last field — for a picture that reads as a preview of what the fields
+   * add up to rather than an explanation of them.
+   */
+  placement?: 'top' | 'after-base' | 'bottom'
+  title?: Text
+  /**
+   * The page. It receives `{ type: 'ow-params', values, data?, dataError? }`
+   * by postMessage on load and on every change: `values` are the form's
+   * fields as strings; `data` is what IStrategy.illustrationData() returned
+   * for them, when the strategy implements it — live quotes, an estimate,
+   * anything the picture needs that the form does not hold.
+   */
   html: string
   /** iframe height in px. Default 220. */
   height?: number
@@ -284,19 +329,122 @@ export interface ParamPreset {
   /** Stable identifier — what the Dashboard remembers; never shown as-is. */
   id: string
   /** Dropdown label. */
-  label: string
+  label: Text
   /** One line under the label: who this preset is for. */
-  description?: string
+  description?: Text
   /** Values for `baseParamsSchema` fields. */
   base?: Record<string, unknown>
   /** Values for `tunableParamsSchema` fields. */
   tunable?: Record<string, unknown>
+  /**
+   * A card, for a preset that is a live opportunity rather than a named
+   * configuration. A list of presets with no cards is a dropdown; once any
+   * preset carries one, the Dashboard offers a picker dialog and lays the
+   * cards out in the order given — so the order IS the ranking.
+   */
+  card?: PresetCard
+}
+
+/** Colour of a figure or badge — theme tokens, never a literal colour. */
+export type PresetTone = 'positive' | 'negative' | 'neutral' | 'muted'
+
+export interface PresetFigure {
+  label: Text
+  value: string
+  tone?: PresetTone
+}
+
+/**
+ * What a preset looks like in the picker.
+ *
+ * The declarative fields cover the opportunity card every scan produces —
+ * a name, the number it is ranked by, a few facts, a badge or two — and
+ * render in the Dashboard's own type and colours, in both themes. `html` is
+ * the escape hatch for a card that needs its own drawing: it is rendered
+ * verbatim in a sandboxed frame, like a ParamIllustration, and the
+ * declarative fields are then ignored.
+ */
+export interface PresetCard {
+  /** Big text, top left — the underlying, the market, the pair. */
+  title: Text
+  /** One line under the title — the venues, the maturity. */
+  subtitle?: Text
+  /** The number the card is ranked by, set large, top right. */
+  headline?: PresetFigure
+  /** Small label/value pairs below. */
+  rows?: PresetFigure[]
+  /** Short flags — "executable", "at ceiling". */
+  badges?: Array<{ text: Text; tone?: PresetTone }>
+  /** Cards with the same group render under one heading, in the order given. */
+  group?: Text
+  /** Custom body; sandboxed iframe. Height in px via `height` (default 160). */
+  html?: string
+  height?: number
+}
+
+/**
+ * Declares that a strategy computes presets live — see IStrategy.presets().
+ * Derived onto the StrategyDefinition at registration; its presence is what
+ * tells the Dashboard to ask for presets rather than read the static list.
+ */
+export interface PresetSource {
+  /** Heading of the picker dialog, e.g. "Fixed-rate opportunities". */
+  title?: Text
+  /** One line under the heading — what the ranking is and how it was made. */
+  description?: Text
+  /** How long a computed list is served before it is recomputed. Default 60 000. */
+  ttlMs?: number
+}
+
+/**
+ * A field whose options the strategy computes live, each drawn as a card.
+ *
+ * A catalogue answers "which symbol"; a picker answers "which decision" —
+ * the four legs of a carry, a market with its size — where the value is an
+ * object and choosing it is a comparison of live figures. The Dashboard
+ * shows the field as a button naming the current choice and opens a card
+ * dialog on click; the options come from IStrategy.pickerOptions(id, ctx),
+ * cached like presets.
+ */
+export interface ParamPicker {
+  source: 'strategy'
+  /** The id pickerOptions() is asked for — one strategy may serve several pickers. */
+  id: string
+  /** Dialog heading and blurb. */
+  title?: Text
+  description?: Text
+  /** How long a computed list is served before it is recomputed. Default 60 000. */
+  ttlMs?: number
+}
+
+export interface PickerOption {
+  /** Stable identifier — what the picker remembers; never shown as-is. */
+  id: string
+  label: Text
+  description?: Text
+  /** What the field is set to when this option is chosen. */
+  value: unknown
+  /** The card the dialog draws; a plain row without one. */
+  card?: PresetCard
+}
+
+/** What IStrategy.presets() is given to compute with. */
+export interface PresetContext {
+  /** Keyless adapter cells — market catalogues, public quotes, funding. */
+  adapters: import('./materialization.js').AdapterResolver
+  /** Slot label → bound account name, for the slots the operator has bound so far. */
+  accounts: Record<string, string>
+  /** The form's current values, parsed where they parse; a preset may build on them. */
+  params: { base: Record<string, unknown>; tunable: Record<string, unknown> }
+  /** The reader's locale — what cards and figures should be written in. */
+  locale?: Locale
+  signal?: AbortSignal
 }
 
 export interface StrategyDefinition {
   id: string
-  name: string
-  description?: string
+  name: Text
+  description?: Text
   source: 'builtin' | 'plugin' | 'compiled'
   pluginName?: string
   compiledPath?: string
@@ -323,6 +471,10 @@ export interface StrategyDefinition {
   paramsIllustrations?: ParamIllustration[]
   /** Named parameter starting points the form offers. Derived from the strategy class at registration. */
   paramPresets?: ParamPreset[]
+  /** Present when the strategy computes presets live — see IStrategy.presets(). */
+  presetSource?: PresetSource
+  /** True when the strategy serves live figures to its illustrations — see IStrategy.illustrationData(). */
+  illustrationData?: boolean
   createdAt: string
   updatedAt: string
 }

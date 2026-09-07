@@ -8,7 +8,7 @@ import type { Trigger, MonitorSource } from './trigger.js'
 import type { StrategyParams } from './instance.js'
 import type { AccountSlot } from './materialization.js'
 import type { ZodObject, ZodRawShape } from 'zod'
-import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset } from './definition.js'
+import type { AvailabilityChecker, ParamFieldDef, ParamIllustration, ParamPreset, PickerOption, PresetContext, PresetSource } from './definition.js'
 import type { IPortfolioJournal, PortfolioMode } from './portfolio.js'
 import type { PortfolioUpdate } from './portfolio.js'
 
@@ -35,6 +35,13 @@ export interface StrategyContext {
    */
   monitorData: Record<string, Record<string, unknown>>
   timestamp: number
+  /**
+   * True when the instance runs with the framework's Dry run option: what
+   * this run returns is recorded and not sent, and no result comes back.
+   * A strategy declares no dry-run switch of its own; it reads this only
+   * where its own memory depends on whether an order actually went out.
+   */
+  dryRun?: boolean
   /**
    * Retrieve trigger data for a specific monitor label and key.
    * Returns undefined if this monitor/key did not contribute to the trigger.
@@ -134,8 +141,25 @@ export interface AccountSlotMeta {
   kind: string
 }
 
+/** Why a lifecycle hook is running — the same word the runtime uses for the transition. */
+export type LifecycleReason = 'activate' | 'boot' | 'restart' | 'rollback' | 'stop' | 'delete' | 'shutdown'
+
+export interface LifecycleContext {
+  instanceId: string
+  reason: LifecycleReason
+  /** The instance's Dry run option — see StrategyContext.dryRun. */
+  dryRun?: boolean
+}
+
 /** Trace of one finished run — what the strategy saw, decided, and emitted. */
 export interface StrategyRunTrace {
+  /**
+   * Identity of this run, unique per instance and stable on disk. The SAME
+   * string scopes the run's log lines and stamps the instructions it emitted,
+   * so an execution leads back to exactly one trace. Absent on traces written
+   * before it existed.
+   */
+  runId?: string
   startedAt: number
   triggerId: string
   durationMs: number
@@ -182,6 +206,30 @@ export interface IStrategy {
   readonly paramsIllustrations?: ParamIllustration[]
   /** Named parameter starting points the form offers — see ParamPreset. */
   readonly paramPresets?: ParamPreset[]
+  /** Heading, blurb and cache life of the live presets, when `presets()` is implemented. */
+  readonly presetSource?: PresetSource
+  /**
+   * Compute presets live — the opportunities a scan would rank, each one a
+   * card with the params that take it. Called on a probe instance (no store,
+   * no accounts materialized) with keyless adapters; the result is cached
+   * by the runtime for `presetSource.ttlMs`. Static `paramPresets`, if any,
+   * are listed first.
+   */
+  presets?(ctx: PresetContext): Promise<ParamPreset[]>
+  /**
+   * Live figures for the param illustrations: called with the form's current
+   * values (and keyless adapters) whenever they change, debounced; whatever
+   * it returns is posted to every illustration frame as `data`. A probe
+   * instance, like presets(). Throw to have the frame told `dataError`.
+   */
+  illustrationData?(ctx: PresetContext): Promise<Record<string, unknown>>
+  /**
+   * Options for a field declared with `meta({ picker: { source: 'strategy', id } })`:
+   * the decisions an operator may choose between, each with the value that
+   * takes it and a card to compare by. Probe rules as presets(); cached by
+   * the runtime for the picker's ttl.
+   */
+  pickerOptions?(pickerId: string, ctx: PresetContext): Promise<PickerOption[]>
   /**
    * Availability checkers this strategy provides, keyed by the name a field's
    * `meta({ availability: { checker } })` refers to. Pure functions over the
@@ -219,6 +267,29 @@ export interface IStrategy {
    * happens to be active.
    */
   onExecutionResult?(result: ExecutionResult, ctx: { instanceId: string }): Promise<void> | void
+  /**
+   * The strategy's own moment at the start: every setter has run, triggers
+   * are registered, nothing has fired yet. Baselines, leverage, a leftover
+   * quote from the last activation — housekeeping that would otherwise spend
+   * the first trigger. Returned instructions are fired inline and awaited
+   * before the first trigger may fire. A throw fails the activation.
+   */
+  onActivate?(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void
+  /**
+   * The strategy's own moment at the end: no run is in flight and no new one
+   * can start, executor slots are still materialized. Returned instructions
+   * are fired inline and awaited — a resting quote cancelled here is cancelled
+   * by the slots that are about to be removed. A throw or a failed instruction
+   * is logged; teardown continues, because an instance that cannot be
+   * deactivated would resume trading on the next boot.
+   */
+  onDeactivate?(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void
+  /**
+   * Run a lifecycle hook under the strategy's trace machinery, so the
+   * instance board shows what activation and deactivation did. Provided by
+   * BaseStrategy; the runtime calls the hook directly when absent.
+   */
+  lifecycle?(reason: LifecycleReason, work: () => Promise<ExecutionInstruction[] | void> | ExecutionInstruction[] | void): Promise<ExecutionInstruction[]>
   getMetrics(): StrategyMetrics
   setMonitorReader(label: string, reader: MonitorDataReader): void
   setCredentialStore(store: CredentialStore): void

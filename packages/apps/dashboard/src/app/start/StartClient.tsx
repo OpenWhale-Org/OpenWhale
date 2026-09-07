@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { startTour } from '@/components/Tour'
+import { useT } from '@/i18n'
 
 /**
  * First run: from nothing to a strategy that is actually trading.
@@ -26,7 +27,22 @@ interface Credential { id: string; name: string; type: string; publicData?: Reco
 interface Account { name: string; type?: string; status: string; credential?: string; kind?: string }
 interface Instance { id: string; name: string; strategyId: string; active: boolean }
 
+/** Render `**bold**` and `` `code` `` markers in a catalogue string, so a sentence stays one key. */
+function Rich({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean)
+  return (
+    <>
+      {parts.map((part, i) => part.startsWith('**')
+        ? <b key={i}>{part.slice(2, -2)}</b>
+        : part.startsWith('`')
+          ? <code key={i}>{part.slice(1, -1)}</code>
+          : <span key={i}>{part}</span>)}
+    </>
+  )
+}
+
 export function StartClient() {
+  const t = useT()
   const [creds, setCreds] = useState<Credential[] | null>(null)
   const [accounts, setAccounts] = useState<Account[] | null>(null)
   const [instances, setInstances] = useState<Instance[] | null>(null)
@@ -67,118 +83,82 @@ export function StartClient() {
 
   const steps = [
     {
-      title: 'A testnet credential',
+      title: t('start.cred.title'),
       done: testnetCred !== undefined,
       body: (
         <>
-          <p>
-            Hyperliquid&apos;s testnet is a full copy of the exchange with worthless money in it.
-            Everything below behaves exactly as it will on mainnet, and a mistake costs nothing.
-          </p>
+          <p>{t('start.cred.p1')}</p>
           <ol className="list-decimal ml-4 flex flex-col gap-1.5">
             <li>
-              Open{' '}
+              {t('start.cred.li1.before')}
               <a href="https://app.hyperliquid-testnet.xyz/drip" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--accent)' }}>
                 app.hyperliquid-testnet.xyz/drip
-              </a>{' '}
-              and connect a wallet — the faucet sends mock USDC to it.
+              </a>
+              {t('start.cred.li1.after')}
             </li>
-            <li>
-              In that wallet, export the private key of the address you just funded, or generate an
-              API wallet from the testnet UI (Settings → API). An API wallet is the safer of the two:
-              it can trade but cannot withdraw.
-            </li>
-            <li>
-              On the Credentials page choose <b>Hyperliquid</b>, paste the wallet address and private
-              key, and <b>turn Testnet on</b>. That toggle is the whole difference between this
-              tutorial and real money.
-            </li>
+            <li>{t('start.cred.li2')}</li>
+            <li><Rich text={t('start.cred.li3')} /></li>
           </ol>
           {testnetCred && (
             <p style={{ color: 'var(--success, #4ade80)' }}>
-              Found <b>{testnetCred.name}</b> — a Hyperliquid credential with testnet on.
+              <Rich text={t('start.cred.found', { name: testnetCred.name })} />
             </p>
           )}
         </>
       ),
-      action: { href: '/credentials', label: testnetCred ? 'Credentials' : 'Add the credential' },
+      action: { href: '/credentials', label: testnetCred ? t('start.cred.go') : t('start.cred.add') },
     },
     {
-      title: 'An account',
+      title: t('start.account.title'),
       done: testnetAccount !== undefined,
       body: (
         <>
-          <p>
-            A credential is a key; an <b>account</b> is what strategies actually read and executors
-            write. It is an implementation (what kind of account) bound to a credential (whose).
-          </p>
-          <p>
-            On the Accounts page create one with <b>Perp Account</b> and bind it to your testnet
-            credential. It should come up <b>ready</b> — if it does not, the credential is wrong and
-            nothing further will work.
-          </p>
+          <p><Rich text={t('start.account.p1')} /></p>
+          <p><Rich text={t('start.account.p2')} /></p>
           {testnetAccount && (
             <p style={{ color: 'var(--success, #4ade80)' }}>
-              Found <b>{testnetAccount.name}</b>, bound to {testnetAccount.credential} · {testnetAccount.status}.
+              <Rich text={t('start.account.found', { name: testnetAccount.name, credential: testnetAccount.credential ?? '', status: testnetAccount.status })} />
             </p>
           )}
         </>
       ),
-      action: { href: '/accounts', label: testnetAccount ? 'Accounts' : 'Create the account' },
+      action: { href: '/accounts', label: testnetAccount ? t('start.account.go') : t('start.account.create') },
       blocked: testnetCred === undefined,
     },
     {
-      title: 'A strategy instance',
+      title: t('start.instance.title'),
       done: tutorialInstance !== undefined,
       body: (
         <>
-          <p>
-            <b>Copy trading</b> is the one to start with: it mirrors another Hyperliquid address&apos;s
-            fills at a fraction of their size. Hyperliquid publishes every account&apos;s trades, so it
-            needs no signal of its own — you can watch it work within minutes instead of waiting for
-            a mean-reversion setup that may not come today.
-          </p>
-          <p>
-            New Instance → <b>copy-trading</b>, bind the account from step 2, and set{' '}
-            <code>traderAddress</code> to whichever address you want to follow. Keep{' '}
-            <code>maxNotionalUsd</code> small — the point right now is to see an order appear, not to
-            size a position.
-          </p>
+          <p><Rich text={t('start.instance.p1')} /></p>
+          <p><Rich text={t('start.instance.p2')} /></p>
           {tutorialInstance && (
             <p style={{ color: 'var(--success, #4ade80)' }}>
-              Found <b>{tutorialInstance.name}</b>.
+              <Rich text={t('start.instance.found', { name: tutorialInstance.name })} />
             </p>
           )}
         </>
       ),
-      action: { href: '/instances', label: tutorialInstance ? 'Strategies' : 'Create the instance' },
+      action: { href: '/instances', label: tutorialInstance ? t('start.instance.go') : t('start.instance.create') },
       blocked: testnetAccount === undefined,
     },
     {
-      title: 'Start it',
+      title: t('start.run.title'),
       done: running,
       body: (
         <>
-          <p>
-            Activating subscribes the monitors the strategy declared and puts its executors under the
-            queue. Watch it on the instance&apos;s own board: runs, the instructions each run produced,
-            and the fills that came back.
-          </p>
-          <p style={{ color: 'var(--muted)' }}>
-            Nothing here trades until the address you are following does. A quiet board is the
-            strategy working, not a strategy broken.
-          </p>
+          <p>{t('start.run.p1')}</p>
+          <p style={{ color: 'var(--muted)' }}>{t('start.run.p2')}</p>
           {running && (
             <p style={{ color: 'var(--success, #4ade80)' }}>
-              <b>{tutorialInstance?.name}</b> is running. That is the whole loop — credential,
-              account, strategy, live.
+              <Rich text={t('start.run.running', { name: tutorialInstance?.name ?? '' })} />
             </p>
           )}
         </>
       ),
       action: tutorialInstance
-        ? { href: `/instances/${tutorialInstance.id}`, label: running ? 'Open its board' : 'Activate it' }
-        : { href: '/instances', label: 'Strategies' },
+        ? { href: `/instances/${tutorialInstance.id}`, label: running ? t('start.run.board') : t('start.run.activate') }
+        : { href: '/instances', label: t('start.instance.go') },
       blocked: tutorialInstance === undefined,
     },
   ]
@@ -188,10 +168,8 @@ export function StartClient() {
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-semibold">Getting started</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          From an empty install to a strategy that is trading — on a testnet, so the first mistake is free.
-        </p>
+        <h1 className="text-2xl font-semibold">{t('start.title')}</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{t('start.subtitle')}</p>
       </div>
 
       <button
@@ -201,11 +179,8 @@ export function StartClient() {
       >
         <span className="text-lg">▶</span>
         <span className="flex-1">
-          <span className="block text-sm font-medium">Take the guided tour</span>
-          <span className="block text-xs" style={{ opacity: 0.85 }}>
-            Walks you through the real controls, one at a time, and waits until each step has
-            actually happened. Skippable at any point.
-          </span>
+          <span className="block text-sm font-medium">{t('start.tour.title')}</span>
+          <span className="block text-xs" style={{ opacity: 0.85 }}>{t('start.tour.body')}</span>
         </span>
       </button>
 
@@ -214,7 +189,7 @@ export function StartClient() {
           <div style={{ width: `${(doneCount / steps.length) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 240ms ease' }} />
         </div>
         <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
-          {loading ? 'checking…' : `${doneCount} of ${steps.length}`}
+          {loading ? t('start.checking') : t('start.progress', { done: doneCount, total: steps.length })}
         </span>
       </div>
 
@@ -254,10 +229,7 @@ export function StartClient() {
         </section>
       ))}
 
-      <p className="text-xs" style={{ color: 'var(--muted)' }}>
-        Both this checklist and the tour read the real state — nothing is ticked off because you
-        clicked it. Reachable any time from Getting started in the sidebar.
-      </p>
+      <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('start.footer')}</p>
     </div>
   )
 }

@@ -524,7 +524,12 @@ export async function stage(packageName: string, hint?: string): Promise<{ entry
 /** Drop this package's earlier staging directories, keeping the live one. */
 export async function pruneStaged(packageName: string, keep: string): Promise<void> {
   const root = path.join(getPluginsDir(), STAGE_DIR)
-  const prefix = `${stageName(packageName)}-`
+  /* This package's generations and no other's: a generation is the stage
+     name plus a timestamp and nothing else. A prefix test read
+     `@openwhaleorg-crossex-strategy-…` as a generation of
+     `@openwhaleorg/crossex` and removed the strategy package's live copy
+     whenever its venue package was reinstalled. */
+  const generation = new RegExp(`^${stageName(packageName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d+$`)
   let entries: string[]
   try {
     entries = await fs.promises.readdir(root)
@@ -533,7 +538,7 @@ export async function pruneStaged(packageName: string, keep: string): Promise<vo
   }
   for (const name of entries) {
     const dir = path.join(root, name)
-    if (!name.startsWith(prefix) || dir === keep) continue
+    if (!generation.test(name) || dir === keep) continue
     // The module graph is already in memory; the files are only disk
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
   }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountSnapshotRecord } from '@openwhaleorg/core'
+import { useT } from '@/i18n'
 
 const RANGES = [
   { label: '24h', hours: 24 },
@@ -31,6 +32,7 @@ function formatTime(ts: number, rangeHours: number): string {
  * on hover; last value direct-labeled at the line's end.
  */
 export function EquityChart({ account }: { account: string }) {
+  const t = useT()
   const [hours, setHours] = useState<number>(24)
   const [series, setSeries] = useState<AccountSnapshotRecord[] | null>(null)
   const [hover, setHover] = useState<number | null>(null)   // index into series
@@ -140,15 +142,15 @@ export function EquityChart({ account }: { account: string }) {
         </div>
         <button
           onClick={async () => {
-            if (!confirm(`Clear ALL equity history for "${account}"? (e.g. samples taken under a wrong recipe)`)) return
+            if (!confirm(t('accounts.chart.clearConfirm', { account }))) return
             await fetch(`/api/accounts/${encodeURIComponent(account)}/snapshots`, { method: 'DELETE' })
             setSeries([])
           }}
           className="text-xs px-2 py-1 rounded-md"
           style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-          title="Drop this account's snapshot history"
+          title={t('accounts.chart.clearTitle')}
         >
-          Clear history
+          {t('accounts.chart.clear')}
         </button>
         {last && (
           <span className="text-sm">
@@ -160,7 +162,7 @@ export function EquityChart({ account }: { account: string }) {
             )}
             {last.unrealizedPnl !== undefined && (
               <span className="ml-2 text-xs" style={{ color: 'var(--muted)' }}>
-                uPnL {formatUsd(last.unrealizedPnl)}
+                {t('accounts.chart.upnl', { value: formatUsd(last.unrealizedPnl) })}
               </span>
             )}
           </span>
@@ -168,10 +170,10 @@ export function EquityChart({ account }: { account: string }) {
       </div>
 
       {series === null ? (
-        <p className="text-xs py-8 text-center" style={{ color: 'var(--muted)' }}>Loading…</p>
+        <p className="text-xs py-8 text-center" style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>
       ) : series.length === 0 ? (
         <p className="text-xs py-8 text-center" style={{ color: 'var(--muted)' }}>
-          No snapshots yet — equity is sampled every few minutes while the runtime is up.
+          {t('accounts.chart.empty')}
         </p>
       ) : (
         <div className="relative" ref={wrapRef}>
@@ -233,7 +235,7 @@ export function EquityChart({ account }: { account: string }) {
               }}
             >
               <div>{formatUsd(hovered.equity)}</div>
-              {hovered.unrealizedPnl !== undefined && <div style={{ color: 'var(--muted)' }}>uPnL {formatUsd(hovered.unrealizedPnl)}</div>}
+              {hovered.unrealizedPnl !== undefined && <div style={{ color: 'var(--muted)' }}>{t('accounts.chart.upnl', { value: formatUsd(hovered.unrealizedPnl) })}</div>}
               <div style={{ color: 'var(--muted)' }}>{new Date(hovered.ts).toLocaleString()}</div>
             </div>
           )}

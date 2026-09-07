@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
+import { useT } from '@/i18n'
 
 /**
  * A JSON viewer with syntax colors and collapsible objects/arrays — the thing
@@ -55,6 +56,7 @@ function Node({ name, value, depth, openDepth, last }: {
   openDepth: number
   last: boolean
 }) {
+  const t = useT()
   const [open, setOpen] = useState(depth < openDepth)
   const comma = last ? null : <span style={{ color: COLORS.punct }}>,</span>
   const label = name !== undefined
@@ -67,7 +69,7 @@ function Node({ name, value, depth, openDepth, last }: {
   const isArr = Array.isArray(value)
   const entries: Array<[string, unknown]> = isArr ? value.map((x, i) => [String(i), x]) : Object.entries(value)
   const [openB, closeB] = isArr ? ['[', ']'] : ['{', '}']
-  const size = isArr ? `${entries.length}` : `${entries.length} key${entries.length === 1 ? '' : 's'}`
+  const size = isArr ? `${entries.length}` : entries.length === 1 ? t('ui.keysOne') : t('ui.keysN', { n: entries.length })
 
   return (
     <div>
@@ -77,7 +79,7 @@ function Node({ name, value, depth, openDepth, last }: {
           onClick={() => setOpen(v => !v)}
           className="shrink-0 w-3 text-left"
           style={{ color: 'var(--muted)' }}
-          aria-label={open ? 'Collapse' : 'Expand'}
+          aria-label={open ? t('ui.collapse') : t('ui.expand')}
         >
           {open ? '▾' : '▸'}
         </button>

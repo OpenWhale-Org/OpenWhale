@@ -22,12 +22,14 @@ export type {
   CustomProviderConfig,
   IStrategy,
   StrategyRunTrace,
+  LifecycleReason,
+  LifecycleContext,
   StrategyPortfolioSnapshot,
   MonitorDeclaration,
   ExecutorDeclaration,
   AccountSlotMeta,
 } from './strategy.js'
-export type { StrategyInstance, StrategyInstanceView, StrategyParams } from './instance.js'
+export type { StrategyInstance, StrategyInstanceView, StrategyParams, InstanceOptions, BreakerRule } from './instance.js'
 export type {
   PortfolioMode,
   PortfolioFillIntent,
@@ -67,7 +69,7 @@ export type {
 export { AdapterError, RetryableAdapterError, TerminalAdapterError } from './adapter/index.js'
 export type { RuntimeOptions, IRuntime, LoadedPluginInfo, PluginDependents, PluginReplaceResult, PluginGlobalConflict } from './runtime.js'
 export { PluginAlreadyLoadedError } from './runtime.js'
-export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamFieldDef, ParamFieldType, ParamFieldOption, ParamFieldMeta, ParamIllustration, ParamPreset,
+export type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ParamFieldDef, ParamFieldType, ParamFieldOption, ParamFieldMeta, ParamIllustration, ParamPreset, PresetCard, PresetFigure, PresetTone, PresetSource, PresetContext, ParamPicker, PickerOption,
   ParamAvailability,
   AvailabilityVerdict,
   AvailabilityChecker, ParamFieldCatalogue,

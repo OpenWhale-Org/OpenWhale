@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { AdapterResolver } from './materialization.js'
 import type { RawCredentialData } from './credential.js'
@@ -33,8 +34,8 @@ export interface MonitorImplementation {
    * specialize another plugin's contract.
    */
   contract: string
-  displayName?: string
-  description?: string
+  displayName?: Text
+  description?: Text
   /**
    * Credential requirement for instances of this implementation.
    * Absent = credential-less. The credential's raw data is handed to
@@ -42,6 +43,12 @@ export interface MonitorImplementation {
    * executor raw slots: venue packages own both sides and opt in knowingly).
    */
   credential?: { type: string; level: 'optional' | 'required' }
+  /**
+   * The venue this implementation's keys live on, when it has exactly one.
+   * Reaches the dashboard on the contract's definition, where catalogue
+   * pickers read it. See OwMonitorMeta.venue.
+   */
+  venue?: string
   /**
    * Top-level tuning parameters (throttles, poll intervals, thresholds).
    * Filled per INSTANCE on the dashboard at creation and editable at any
@@ -91,7 +98,7 @@ export interface MonitorInstanceEntity {
 
 /** Serializable instance view (dashboard Monitor Instances page). */
 export interface MonitorInstanceView extends MonitorInstanceEntity {
-  implementationDisplayName?: string
+  implementationDisplayName?: Text
   credentialLevel?: 'optional' | 'required'
   /** Param form fields derived from the implementation's schema. */
   paramsFields?: ParamFieldDef[]

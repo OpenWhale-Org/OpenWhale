@@ -1,10 +1,13 @@
-export default function AssistantPage() {
+import { serverT } from '@/i18n/server'
+
+export default async function AssistantPage() {
+  const t = await serverT()
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Assistant</h1>
+        <h1 className="text-2xl font-semibold">{t('assistant.title')}</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          AI-powered strategy assistant for building and optimizing trading logic
+          {t('assistant.tagline')}
         </p>
       </div>
       <div
@@ -12,9 +15,9 @@ export default function AssistantPage() {
         style={{ borderColor: 'var(--border)' }}
       >
         <span className="text-4xl mb-4">🚧</span>
-        <p className="text-lg font-medium">Coming Soon</p>
+        <p className="text-lg font-medium">{t('assistant.comingSoon')}</p>
         <p className="text-sm mt-2" style={{ color: 'var(--muted)' }}>
-          The assistant UI is under development.
+          {t('assistant.underDevelopment')}
         </p>
       </div>
     </div>

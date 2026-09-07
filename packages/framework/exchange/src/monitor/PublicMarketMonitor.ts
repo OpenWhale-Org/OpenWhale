@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { BaseMonitor, MonitorMode, createLogger } from '@openwhaleorg/core'
 import type { AdapterResolver, MonitorContext } from '@openwhaleorg/core'
 import type { PerpExchangeAdapter } from '../types/perp.js'
+import { streamWithWarmup, pollForWindow, DEFAULT_WATCH_WARMUP_MS, DEFAULT_POLL_WINDOW_MS } from './watchdog.js'
 
 /**
  * Shared machinery for venue-agnostic market-data monitors.
@@ -97,6 +98,32 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
     signal: AbortSignal,
   ): Promise<void>
 
+  /**
+   * REST equivalent of `feed`, for venues whose websocket says it works and
+   * then says nothing at all.
+   *
+   * `has.watchOrderBook` is the venue's claim, not a guarantee: Aster answers
+   * every REST book instantly while its stream delivers zero frames and never
+   * errors — the await simply never settles, so there is no throw to restart
+   * on, no log line, and a strategy waits on a feed that will never speak.
+   * A monitor that implements this gets a watchdog: no first emit within
+   * `watchWarmupMs` and the key moves to polling, once, with a line saying so.
+   *
+   * Left unimplemented, nothing changes — the feed is watch-only as before.
+   */
+  protected pollFeed?(
+    parsed: ParsedMarketKey,
+    session: PerpExchangeAdapter,
+    emit: (data: TData) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void>
+
+  /** How long a websocket may stay silent before the key falls back to polling. */
+  protected get watchWarmupMs(): number { return DEFAULT_WATCH_WARMUP_MS }
+
+  /** How long a demoted key polls before the stream is retried. */
+  protected get pollWindowMs(): number { return DEFAULT_POLL_WINDOW_MS }
+
   protected override startSubscribe(key: string): void {
     if (this.feeds.has(key)) return
     const controller = new AbortController()
@@ -120,16 +147,30 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
     // in-flight pushes can otherwise land out of order — a strategy must never
     // see an older price after a newer one.
     let chain: Promise<void> = Promise.resolve()
+    let emits = 0
     const emit = (data: TData): Promise<void> => {
+      emits++
       chain = chain.then(() => this.push(key, data))
       return chain
     }
     let attempt = 0
+    /** Set when the watch has been proven mute; cleared when the poll window is up. */
+    let polling = false
 
     while (!signal.aborted) {
       try {
         const session = await this.adapters.resolve<PerpExchangeAdapter>('exchange/perp', parsed.venue)
-        await this.feed(parsed, session, emit, signal)
+        if (this.pollFeed === undefined) {
+          await this.feed(parsed, session, emit, signal)
+        } else if (polling) {
+          // Bounded: when the window is up the stream gets another chance, so a
+          // key demoted during a quiet hour is not stuck polling for ever.
+          await pollForWindow(pollSignal => this.pollFeed!(parsed, session, emit, pollSignal), signal, this.pollWindowMs)
+          polling = false
+        } else {
+          const before = emits
+          polling = !(await this.watchOrPoll(key, parsed, session, emit, signal, () => emits > before))
+        }
         attempt = 0   // a clean return means the venue closed the stream — reconnect promptly
       } catch (err) {
         if (signal.aborted) return
@@ -139,6 +180,35 @@ export abstract class PublicMarketMonitor<TData> extends BaseMonitor<string, TDa
       if (signal.aborted) return
       await sleep(Math.min(1_000 * 2 ** Math.min(attempt, 5), 30_000), signal)
     }
+  }
+
+  /**
+   * Run the websocket feed under a first-emit watchdog.
+   *
+   * @returns true while the stream is worth keeping, false once it has been
+   * silent past the warmup — the caller then polls this key for good rather
+   * than re-testing a venue that has already answered the question.
+   */
+  private async watchOrPoll(
+    key: string,
+    parsed: ParsedMarketKey,
+    session: PerpExchangeAdapter,
+    emit: (data: TData) => Promise<void>,
+    signal: AbortSignal,
+    hasEmitted: () => boolean,
+  ): Promise<boolean> {
+    const live = await streamWithWarmup({
+      stream: watchSignal => this.feed(parsed, session, emit, watchSignal),
+      hasEmitted,
+      signal,
+      warmupMs: this.watchWarmupMs,
+    })
+    if (live) return true
+    this.logger.info(
+      { key, venue: parsed.venue, warmupMs: this.watchWarmupMs },
+      'Venue websocket delivered nothing — polling this key over REST instead',
+    )
+    return false
   }
 }
 

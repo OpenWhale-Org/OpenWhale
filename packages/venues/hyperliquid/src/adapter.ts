@@ -1,6 +1,6 @@
 import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
 import { createLogger, TerminalAdapterError } from '@openwhaleorg/core'
-import type { ExchangeFill, ExchangeOrder, ExchangePosition, FundingRateData, PerpOrderParams } from '@openwhaleorg/exchange'
+import type { ExchangeFill, ExchangeOrder, ExchangePosition, FundingRateData, PerpOrderParams, Ticker } from '@openwhaleorg/exchange'
 import { decidePriority, isPriorityBalanceRejection, priorityP } from './priority.js'
 
 /**
@@ -79,6 +79,81 @@ export const BUILDER_MAX_FEE_RATE = '0.01%'
  */
 export const HIP3_DEX_LIMIT = 64
 
+/**
+ * Venue-global caches, deliberately not per adapter.
+ *
+ * The dex roster and the funding table describe the VENUE, not a credential —
+ * but this engine holds one adapter per account plus a keyless one, and each
+ * used to fetch both for itself. That multiplies the cost of the most expensive
+ * read on the exchange: `fetchFundingRates` fans out over every HIP-3 dex, and
+ * Hyperliquid prices each of those `metaAndAssetCtxs` calls at weight 20 — one
+ * invocation is ~220 of an IP budget of 1200 a minute.
+ *
+ * Measured on 2026-09-02, before this cache: metaAndAssetCtxs ×62 a minute =
+ * 1240 weight, 91% of everything this process spent on Hyperliquid, while the
+ * orders it exists to place cost 1 apiece. Funding settles hourly; asking five
+ * times a minute bought nothing and cost every read that queued behind it.
+ */
+interface Cached<T> { value: T; at: number; inFlight?: Promise<T> }
+const DEX_TTL_MS = 6 * 3_600_000
+/** Funding settles hourly. Half a minute is fresh by any measure that matters. */
+const FUNDING_TTL_MS = 30_000
+let dexCache: Cached<string[]> | undefined
+let fundingCache: Cached<FundingRateData[]> | undefined
+/**
+ * Mid prices per dex, refreshed at most once a second.
+ *
+ * ccxt's `fetchTicker` builds its answer from `fetchTickers`, which rebuilds
+ * the MARKET MAP first — on Hyperliquid that walks every HIP-3 dex at weight 20
+ * apiece: 13 requests, ~260 weight, for one price, on every call, cache or no
+ * cache. Read at trigger rate that is the whole IP budget several times over,
+ * and it is what put /info into a permanent 429 while orders queued behind it
+ * (measured 2026-09-02: metaAndAssetCtxs ×62/min = 1240 of 1200 allowed).
+ *
+ * `allMids` answers the same question for a whole dex at weight 2.
+ */
+const midsByDex = new Map<string, Cached<Record<string, string>>>()
+/** Tick-rate readers collapse onto one fetch; a second is fresher than the venue's own book snapshots. */
+const MIDS_TTL_MS = 1_000
+/** Last time a symbol was reported as missing from allMids — one warning a minute per symbol. */
+const expensiveTickerWarnedAt = new Map<string, number>()
+
+/**
+ * How long a failed refresh holds before the next attempt.
+ *
+ * Without it a refresh that fails fast — a 429 does — is retried by the very
+ * next caller, and callers arrive at tick rate. For the funding fan-out that is
+ * ~220 weight per retry, several a minute: the cache would re-create the storm
+ * it exists to prevent, on exactly the day the venue is already saying no.
+ */
+const FAILED_REFRESH_HOLD_MS = 5_000
+
+/** One in-flight fetch shared by every caller, then a TTL. */
+async function shared<T>(
+  cache: Cached<T> | undefined,
+  ttlMs: number,
+  fetch: () => Promise<T>,
+  store: (next: Cached<T>) => void,
+): Promise<T> {
+  if (cache && Date.now() - cache.at < ttlMs) return cache.value
+  if (cache?.inFlight) return cache.inFlight
+  const inFlight = fetch().then((value) => {
+    store({ value, at: Date.now() })
+    return value
+  }).catch((err) => {
+    // A failed refresh must not poison the cache: serve the stale value if
+    // there is one, since a rate limit is exactly when the old table is most
+    // useful, and only raise when there is nothing to serve. Either way the
+    // next attempt waits — see FAILED_REFRESH_HOLD_MS.
+    const at = Date.now() - ttlMs + FAILED_REFRESH_HOLD_MS
+    if (cache && cache.at > 0) { store({ value: cache.value, at }); return cache.value }
+    store(undefined as never)
+    throw err
+  })
+  store({ value: cache?.value as T, at: cache?.at ?? 0, inFlight })
+  return inFlight
+}
+
 export interface HyperliquidCredentials {
   walletAddress: string
   privateKey?: string
@@ -115,7 +190,26 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * actually charged.
    */
   override async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
-    const fills = await super.fetchFills(symbol, since, limit)
+    return this.netBuilderFee(await super.fetchFills(symbol, since, limit))
+  }
+
+  /**
+   * Every symbol's fills in one call.
+   *
+   * Hyperliquid's trade history is addressed by ACCOUNT, not by market:
+   * `userFills`/`userFillsByTime` take a wallet and answer for every coin it
+   * traded. Asking per symbol — which the generic path must, because Binance's
+   * endpoint requires one — spent an `info` request of weight 20 per symbol,
+   * seventeen of them on one account here, against an IP budget of 1200 a
+   * minute shared with every other read the engine makes.
+   */
+  async fetchFillsAll(since?: number, limit = 2000): Promise<ExchangeFill[]> {
+    return this.netBuilderFee(this.mapFills(
+      await this.guard(() => this.exchange.fetchMyTrades(undefined, since, limit)),
+    ))
+  }
+
+  private netBuilderFee(fills: ExchangeFill[]): ExchangeFill[] {
     return fills.map((f) => {
       const builder = Number((f as { info?: Record<string, unknown> }).info?.['builderFee'])
       if (f.fee === undefined || !Number.isFinite(builder) || builder === 0) return f
@@ -159,8 +253,6 @@ export class HyperliquidAdapter extends CcxtAdapter {
   }
 
   /** perpDexs list cache — the builder-dex roster changes rarely. */
-  private hip3Dexes: string[] | undefined
-  private hip3DexesFetchedAt = 0
 
   /**
    * Quirk: ccxt's fetchFundingRates hits metaAndAssetCtxs WITHOUT a dex
@@ -172,7 +264,18 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * failure is non-fatal (a broken builder dex must not blind the main
    * universe).
    */
+  /**
+   * Every market's funding rate — main dex plus each HIP-3 dex.
+   *
+   * Shared across adapters and cached: see the note on the venue-global caches.
+   * The fan-out is the single most expensive thing this process asks of
+   * Hyperliquid, and its answer is identical for every credential.
+   */
   override async fetchFundingRates(): Promise<FundingRateData[]> {
+    return shared(fundingCache, FUNDING_TTL_MS, () => this.fetchFundingRatesUncached(), (next) => { fundingCache = next })
+  }
+
+  private async fetchFundingRatesUncached(): Promise<FundingRateData[]> {
     // HIP-3 symbol mapping (hip3TokensByName) is built during loadMarkets —
     // without it parseFundingRates would emit raw ids for builder-dex coins.
     // ccxt caches the result, so this is a no-op after the first call.
@@ -191,29 +294,82 @@ export class HyperliquidAdapter extends CcxtAdapter {
     return [...main, ...perDex.flat()]
   }
 
+  /** The venue's HIP-3 dex roster — one fetch for the whole process, see the cache note. */
   private async listHip3Dexes(): Promise<string[]> {
-    if (this.hip3Dexes && Date.now() - this.hip3DexesFetchedAt < 6 * 3_600_000) return this.hip3Dexes
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = await this.guard(() => (this.exchange as any).publicPostInfo({ type: 'perpDexs' })) as Array<{ name?: string } | null>
-      this.hip3Dexes = raw
-        .map(d => d?.name)
-        .filter((name): name is string => typeof name === 'string' && name.length > 0)
-      this.hip3DexesFetchedAt = Date.now()
-      // Same roster ccxt walks when it builds the market map, so this is the
-      // one place that can tell us HIP3_DEX_LIMIT has been outgrown. ccxt's
-      // loop runs 1..limit-1, so it covers limit-1 dexes; past that, symbols
-      // on the overflow dexes resolve nowhere and orders on them fail.
-      if (this.hip3Dexes.length > HIP3_DEX_LIMIT - 1) {
-        this.log.warn(
-          { dexes: this.hip3Dexes.length, limit: HIP3_DEX_LIMIT },
-          'More HIP-3 dexes than the market map loads — raise HIP3_DEX_LIMIT',
-        )
+    return shared(dexCache, DEX_TTL_MS, async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = await this.guard(() => (this.exchange as any).publicPostInfo({ type: 'perpDexs' })) as Array<{ name?: string } | null>
+        const names = raw
+          .map(d => d?.name)
+          .filter((name): name is string => typeof name === 'string' && name.length > 0)
+        // Same roster ccxt walks when it builds the market map, so this is the
+        // one place that can tell us HIP3_DEX_LIMIT has been outgrown. ccxt's
+        // loop runs 1..limit-1, so it covers limit-1 dexes; past that, symbols
+        // on the overflow dexes resolve nowhere and orders on them fail.
+        if (names.length > HIP3_DEX_LIMIT - 1) {
+          this.log.warn(
+            { dexes: names.length, limit: HIP3_DEX_LIMIT },
+            'More HIP-3 dexes than the market map loads — raise HIP3_DEX_LIMIT',
+          )
+        }
+        return names
+      } catch {
+        return []
       }
-    } catch {
-      this.hip3Dexes = this.hip3Dexes ?? []
+    }, (next) => { dexCache = next })
+  }
+
+  /**
+   * One market's price, for two weight instead of two hundred and sixty.
+   *
+   * `last` carries the venue's mid, and bid/ask are left at zero: `allMids` has
+   * no book in it, and inventing a spread from a mid would be worse than
+   * admitting there is none — every caller here treats a zero bid as "no quote"
+   * and falls back to `last`. A caller that needs a real book should read one;
+   * the order-book monitor already streams it.
+   */
+  override async fetchTicker(symbol: string): Promise<Ticker> {
+    const dex = this.hip3DexOf(symbol) ?? ''
+    const mids = await this.midsFor(dex)
+    const id = this.coinIdOf(symbol)
+    const mid = Number(id !== undefined ? mids[id] : undefined)
+    if (!Number.isFinite(mid) || mid <= 0) {
+      // No mid for this coin — fall back to ccxt rather than invent a price.
+      // Said out loud, because the fallback is the 13-request path this exists
+      // to avoid: a symbol that lands here on every tick is the storm coming
+      // back quietly, and the meter alone cannot say which symbol.
+      const now = Date.now()
+      if (now - (expensiveTickerWarnedAt.get(symbol) ?? 0) > 60_000) {
+        expensiveTickerWarnedAt.set(symbol, now)
+        this.log.warn({ symbol, dex: dex || 'main', coin: id }, 'No mid for this market in allMids — ticker read through the full market walk instead')
+      }
+      return super.fetchTicker(symbol)
     }
-    return this.hip3Dexes
+    return {
+      symbol, timestamp: Date.now(), last: mid, bid: 0, ask: 0,
+      high: 0, low: 0, volume: 0, quoteVolume: 0,
+    }
+  }
+
+  /** The venue's own name for a market ('xyz:MU', 'BTC'), which is how allMids keys it. */
+  private coinIdOf(symbol: string): string | undefined {
+    try {
+      return (this.exchange.market(symbol) as { info?: { name?: string } }).info?.name
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Mids for one dex, shared by every adapter and every caller within the TTL. */
+  private async midsFor(dex: string): Promise<Record<string, string>> {
+    return shared(
+      midsByDex.get(dex),
+      MIDS_TTL_MS,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => this.guard(() => (this.exchange as any).publicPostInfo({ type: 'allMids', ...(dex ? { dex } : {}) })) as Promise<Record<string, string>>,
+      (next) => { midsByDex.set(dex, next) },
+    )
   }
 
   /** The builder dex a market lives on ('xyz:SKHX' → 'xyz'), undefined for the main universe. */
@@ -242,20 +398,41 @@ export class HyperliquidAdapter extends CcxtAdapter {
       ? [...new Set(symbols.map(s => this.hip3DexOf(s)).filter((d): d is string => d !== undefined))]
       : await this.listHip3Dexes()
     const needMain = !symbols?.length || symbols.some(s => this.hip3DexOf(s) === undefined)
+    /*
+     * A per-dex failure is the whole read's failure. Swallowing it returned
+     * the account as FLAT on that dex — a 429 on the xyz clearinghouse and a
+     * strategy holding two XYZ legs reconciled against an empty list. A read
+     * that fails is retried next minute; a read that lies is acted on now.
+     */
     const [main, ...perDex] = await Promise.all([
-      needMain ? super.fetchPositions(symbols) : Promise.resolve([] as ExchangePosition[]),
-      ...wantedDexes.map(async (dex) => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const raw = await this.guard(() => this.exchange.fetchPositions(undefined, { dex })) as any[]
-          return raw.map(this.mapPosition)
-        } catch {
-          return [] as ExchangePosition[]
-        }
-      }),
+      needMain ? this.clearinghouse('', () => super.fetchPositions(symbols)) : Promise.resolve([] as ExchangePosition[]),
+      ...wantedDexes.map((dex) => this.clearinghouse(dex, async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = await this.guard(() => this.exchange.fetchPositions(undefined, { dex })) as any[]
+        return raw.map(this.mapPosition)
+      })),
     ])
     const all = [...main, ...perDex.flat()]
     return symbols?.length ? all.filter(p => symbols.includes(p.symbol)) : all
+  }
+
+  /**
+   * One clearinghouse read in flight per dex, per account.
+   *
+   * A two-leg strategy on one account reconciles both legs at once — two
+   * identical `clearinghouseState` requests in the same millisecond, and the
+   * account snapshot adds a third. Callers that arrive while one is in flight
+   * share its answer; nothing is ever served from the past — the next caller
+   * after it settles asks the venue again. Position reads must be current;
+   * they need not be duplicated.
+   */
+  private readonly clearinghouseInFlight = new Map<string, Promise<ExchangePosition[]>>()
+  private clearinghouse(dex: string, read: () => Promise<ExchangePosition[]>): Promise<ExchangePosition[]> {
+    const pending = this.clearinghouseInFlight.get(dex)
+    if (pending) return pending
+    const p = read().finally(() => { this.clearinghouseInFlight.delete(dex) })
+    this.clearinghouseInFlight.set(dex, p)
+    return p
   }
 
   /**

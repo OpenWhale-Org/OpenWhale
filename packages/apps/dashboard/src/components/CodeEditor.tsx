@@ -1,6 +1,7 @@
 'use client'
 
 import Editor, { type Monaco } from '@monaco-editor/react'
+import { useT } from '@/i18n'
 
 /**
  * Monaco wired to the framework: the gateway serves every .d.ts of
@@ -54,18 +55,21 @@ function wireMonaco(monaco: Monaco): void {
   })
 }
 
-export function CodeEditor({ path, value, onChange, readOnly, height }: {
+export function CodeEditor({ path, value, onChange, readOnly, height, language }: {
   /** Model path — one model per file, e.g. 'strategies/my-strategy.ts'. */
   path: string
   value: string
   onChange?: (code: string) => void
   readOnly?: boolean
   height?: string | number
+  /** Defaults to TypeScript; 'json' for parameter documents. */
+  language?: 'typescript' | 'json'
 }) {
+  const t = useT()
   return (
     <Editor
       path={`file:///work/${path}`}
-      defaultLanguage="typescript"
+      defaultLanguage={language ?? 'typescript'}
       theme="openwhale-dark"
       value={value}
       onChange={(v) => onChange?.(v ?? '')}
@@ -87,7 +91,7 @@ export function CodeEditor({ path, value, onChange, readOnly, height }: {
         folding: true,
         tabSize: 2,
       }}
-      loading={<div className="text-xs p-4" style={{ color: 'var(--muted)' }}>Loading editor…</div>}
+      loading={<div className="text-xs p-4" style={{ color: 'var(--muted)' }}>{t('params.loadingEditor')}</div>}
     />
   )
 }

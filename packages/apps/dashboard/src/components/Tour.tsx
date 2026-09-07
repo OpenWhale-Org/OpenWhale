@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { usePathname, useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
+import { useT, type MessageKey } from '@/i18n'
+
+type T = ReturnType<typeof useT>
 
 /**
  * The guided tour: a spotlight on a real control, and a step that only ends
@@ -31,8 +34,8 @@ interface Step {
   route: string
   /** `data-tour` value to spotlight. Absent = a step about the page as a whole. */
   target?: string
-  title: string
-  body: string
+  title: MessageKey
+  body: MessageKey
   /** Polled; true means the operator did the thing and the tour moves on. */
   done?: (w: World) => boolean
   /**
@@ -45,9 +48,9 @@ interface Step {
    */
   until?: string
   /** Shown while waiting, so a step that cannot self-advance is never a dead end. */
-  waitingFor?: string
+  waitingFor?: MessageKey
   /** A button on the card that does part of the step for the operator. Returns what to show: a note, and a secret shown once. */
-  action?: { label: string; run: () => ActionResult }
+  action?: { label: MessageKey; run: (t: T) => ActionResult }
 }
 
 interface ActionResult {
@@ -79,44 +82,44 @@ const STEPS: Step[] = [
   {
     route: '/credentials',
     target: 'nav-credentials',
-    title: 'Credentials come first',
-    body: 'A credential is a key to a venue. Everything else — accounts, strategies, orders — hangs off one. This is where they live.',
+    title: 'tour.creds.title',
+    body: 'tour.creds.body',
   },
   {
     route: '/credentials',
     target: 'add-credential',
-    title: 'Get a testnet key first',
-    body: 'Before pressing this: fund a wallet at app.hyperliquid-testnet.xyz/drip — the faucet gives mock USDC to any address. Then export that address’s key, or generate an API wallet from the testnet UI. An API wallet can trade but cannot withdraw, which is the one you want.',
+    title: 'tour.testnetKey.title',
+    body: 'tour.testnetKey.body',
     until: 'credential-dialog',
-    waitingFor: 'Press + Add Credential when you have a key…',
+    waitingFor: 'tour.testnetKey.waiting',
   },
   {
     route: '/credentials',
     target: 'credential-type-list',
-    title: 'Choose Hyperliquid',
-    body: 'This list is every venue and model provider the install knows about. Find Hyperliquid — the search box narrows it — and click it.',
+    title: 'tour.chooseHl.title',
+    body: 'tour.chooseHl.body',
     until: 'credential-form',
-    waitingFor: 'Waiting for you to pick a type…',
+    waitingFor: 'tour.chooseHl.waiting',
   },
   {
     route: '/credentials',
     target: 'credential-form',
-    title: 'Fill it in, and turn Testnet ON',
-    body: 'Generate a wallet here — it fills the form with a fresh key and Testnet on — or paste your own. Fund the address at app.hyperliquid-testnet.xyz/drip (mock USDC, any address), then Save. Testnet is the entire difference between this tutorial and real money.',
+    title: 'tour.fillCred.title',
+    body: 'tour.fillCred.body',
     done: w => testnetCred(w) !== undefined,
-    waitingFor: 'Waiting for a Hyperliquid credential with Testnet on…',
+    waitingFor: 'tour.fillCred.waiting',
     action: {
-      label: 'Generate a testnet wallet',
-      run: () => {
+      label: 'tour.gen.label',
+      run: t => {
         const privateKey = generatePrivateKey()
         const address = privateKeyToAccount(privateKey).address
         window.dispatchEvent(new CustomEvent('ow-tour-fill', {
-          detail: { name: 'Tutorial testnet', values: { walletAddress: address, privateKey, testnet: 'true' } },
+          detail: { name: t('tour.gen.name'), values: { walletAddress: address, privateKey, testnet: 'true' } },
         }))
         return {
-          note: `Filled in ${address}. Fund it at the testnet faucet, then Save.`,
-          link: { label: 'Open the faucet (app.hyperliquid-testnet.xyz/drip)', href: 'https://app.hyperliquid-testnet.xyz/drip' },
-          secret: { label: 'Private key — copy it now; it is shown only here, and the credential store never reveals it again', value: privateKey },
+          note: t('tour.gen.note', { address }),
+          link: { label: t('tour.gen.link'), href: 'https://app.hyperliquid-testnet.xyz/drip' },
+          secret: { label: t('tour.gen.secret'), value: privateKey },
         }
       },
     },
@@ -124,79 +127,79 @@ const STEPS: Step[] = [
   {
     route: '/accounts',
     target: 'nav-accounts',
-    title: 'Now an account',
-    body: 'A credential is a key; an account is the thing strategies read and executors write. It is an implementation bound to a credential.',
+    title: 'tour.account.title',
+    body: 'tour.account.body',
   },
   {
     route: '/accounts',
     target: 'new-account',
-    title: 'Open the account form',
-    body: 'Press ＋ New account. The form takes over the right-hand pane.',
+    title: 'tour.accountForm.title',
+    body: 'tour.accountForm.body',
     until: 'account-form',
-    waitingFor: 'Press ＋ New account…',
+    waitingFor: 'tour.accountForm.waiting',
   },
   {
     route: '/accounts',
     target: 'account-form',
-    title: 'Name it and bind the key',
-    body: 'Any name you will recognise. Leave the implementation on Perp Account, and in the last dropdown pick the testnet credential you just created — that is what turns an empty shell into an account that can trade. Then Create.',
+    title: 'tour.bindKey.title',
+    body: 'tour.bindKey.body',
     done: w => testnetAccount(w) !== undefined,
-    waitingFor: 'Waiting for an account bound to that credential…',
+    waitingFor: 'tour.bindKey.waiting',
   },
   {
     route: '/instances',
     target: 'nav-instances',
-    title: 'Strategies',
-    body: 'A strategy is code plus parameters plus an account. One strategy can run many instances, each on its own account and settings.',
+    title: 'tour.strategies.title',
+    body: 'tour.strategies.body',
   },
   {
     route: '/instances',
     target: 'new-instance',
-    title: 'Open the strategy picker',
-    body: 'Press + New Instance. Choosing the strategy comes first, configuring it second.',
+    title: 'tour.picker.title',
+    body: 'tour.picker.body',
     until: 'strategy-picker',
-    waitingFor: 'Press + New Instance…',
+    waitingFor: 'tour.picker.waiting',
   },
   {
     route: '/instances',
     target: 'strategy-picker',
-    title: 'Pick copy-trading',
-    body: 'It mirrors another Hyperliquid address at a fraction of their size. Hyperliquid publishes every account’s fills, so it needs no signal of its own — which is why it is the one to learn on: you can watch it work within minutes instead of waiting for a setup that may not come today.',
+    title: 'tour.copyTrading.title',
+    body: 'tour.copyTrading.body',
     until: 'instance-form',
-    waitingFor: 'Waiting for you to choose a strategy…',
+    waitingFor: 'tour.copyTrading.waiting',
   },
   {
     route: '/instances',
     target: 'field-targetAddress',
-    title: 'Who are you copying?',
-    body: 'The one decision copy trading actually makes. Press “Suggest a trader” for the top of Hyperliquid’s public leaderboard over the last 30 days, or paste any address you already follow. The list is a shortcut, not a whitelist — and one good month is not a good trader.',
+    title: 'tour.target.title',
+    body: 'tour.target.body',
   },
   {
     route: '/instances',
     target: 'field-ratio',
-    title: 'How much of their size',
-    body: '0.5 mirrors half of every trade they make. Their account is almost certainly far larger than your testnet one, so start smaller than feels interesting — you are checking that orders appear, not competing with them.',
+    title: 'tour.ratio.title',
+    body: 'tour.ratio.body',
   },
   {
     route: '/instances',
     target: 'field-maxPositionUsd',
-    title: 'And a hard ceiling',
-    body: 'The cap on |exposure| per symbol, regardless of what the ratio works out to. This is the line the strategy cannot cross however wrong everything else goes — the one number worth setting deliberately even on a testnet.',
+    title: 'tour.ceiling.title',
+    body: 'tour.ceiling.body',
   },
   {
     route: '/instances',
     target: 'instance-form',
-    title: 'Bind the account and save',
-    body: 'Pick your testnet account in the Accounts slot near the top, then Activate. Everything else already has a sensible default.',
+    title: 'tour.bindAccount.title',
+    body: 'tour.bindAccount.body',
     done: w => tutorialInstance(w) !== undefined,
-    waitingFor: 'Waiting for a copy-trading instance…',
+    waitingFor: 'tour.bindAccount.waiting',
   },
   {
     route: '/instances',
-    title: 'Start it',
-    body: 'Activate the instance. That subscribes the monitors it declared and puts its executors under the queue. Nothing trades until the address you follow does — a quiet board is the strategy working, not a strategy broken. One caveat worth knowing now: the fills you copy come from MAINNET, while your orders go to testnet, and testnet lists 27 fewer contracts (XRP, LINK, UNI, DOT and others). A trade in one of those produces a run and an instruction but no fill. That is the venue, not your setup.',
+    title: 'tour.activate.title',
+    body: 'tour.activate.body',
     done: w => tutorialInstance(w)?.active === true,
-    waitingFor: 'Waiting for the instance to go active…',
+    waitingFor: 'tour.activate.waiting',
   },
 ]
 
@@ -210,6 +213,7 @@ export function tourWasSeen(): boolean {
 }
 
 export function Tour() {
+  const t = useT()
   const [state, setState] = useState<TourState>('idle')
   const [i, setI] = useState(0)
   const [world, setWorld] = useState<World>(EMPTY)
@@ -324,20 +328,14 @@ export function Tour() {
         <div className="ow-tour-dim" />
         {blockers(null).map((b, k) => <div key={k} className="ow-tour-block" style={b} />)}
         <div className="ow-tour-card ow-tour-welcome" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 420 }}>
-          <div className="ow-tour-step">Welcome</div>
-          <h3>Welcome to OpenWhale</h3>
-          <p>
-            An engine that runs trading strategies: a credential opens a venue, an account binds it,
-            a strategy instance trades on it.
-          </p>
-          <p>
-            The guided tour walks through that loop once, end to end, with a copy-trading strategy on
-            the Hyperliquid testnet — {STEPS.length} steps, no real funds. You can leave it at any point.
-          </p>
+          <div className="ow-tour-step">{t('tour.welcome.kicker')}</div>
+          <h3>{t('tour.welcome.title')}</h3>
+          <p>{t('tour.welcome.p1')}</p>
+          <p>{t('tour.welcome.p2', { n: STEPS.length })}</p>
           <div className="ow-tour-actions">
-            <button onClick={() => stop('skipped')}>Skip</button>
+            <button onClick={() => stop('skipped')}>{t('tour.skip')}</button>
             <span className="ow-tour-spacer" />
-            <button className="ow-tour-primary" onClick={begin}>Start the tour</button>
+            <button className="ow-tour-primary" onClick={begin}>{t('tour.start')}</button>
           </div>
         </div>
       </div>,
@@ -376,21 +374,21 @@ export function Tour() {
       <div className="ow-tour-card" style={card}>
         {finished ? (
           <>
-            <div className="ow-tour-step">Done</div>
-            <h3>That is the whole loop</h3>
-            <p>Credential, account, strategy, live. Everything else in OpenWhale is a variation on those four.</p>
+            <div className="ow-tour-step">{t('tour.done.kicker')}</div>
+            <h3>{t('tour.done.title')}</h3>
+            <p>{t('tour.done.body')}</p>
             <div className="ow-tour-actions">
-              <button className="ow-tour-primary" onClick={() => stop('done')}>Finish</button>
+              <button className="ow-tour-primary" onClick={() => stop('done')}>{t('tour.finish')}</button>
             </div>
           </>
         ) : (
           <>
-            <div className="ow-tour-step">Step {i + 1} of {STEPS.length}</div>
-            <h3>{step!.title}</h3>
-            <p>{step!.body}</p>
+            <div className="ow-tour-step">{t('tour.stepOf', { n: i + 1, total: STEPS.length })}</div>
+            <h3>{t(step!.title)}</h3>
+            <p>{t(step!.body)}</p>
             {step!.action && (
               <p>
-                <button className="btn btn-soft btn-sm" onClick={() => { setActionNote(step!.action!.run()); setCopied(false) }}>{step!.action.label}</button>
+                <button className="btn btn-soft btn-sm" onClick={() => { setActionNote(step!.action!.run(t)); setCopied(false) }}>{t(step!.action.label)}</button>
               </p>
             )}
             {actionNote && (
@@ -404,27 +402,24 @@ export function Tour() {
                 <div className="ow-tour-secret-label">{actionNote.secret.label}</div>
                 <code>{actionNote.secret.value}</code>
                 <button onClick={() => { void navigator.clipboard.writeText(actionNote.secret!.value).then(() => setCopied(true)) }}>
-                  {copied ? 'Copied' : 'Copy'}
+                  {copied ? t('tour.copied') : t('tour.copy')}
                 </button>
               </div>
             )}
             {step!.done && !step!.done(world) && (
-              <p className="ow-tour-waiting">{step!.waitingFor}</p>
+              <p className="ow-tour-waiting">{step!.waitingFor ? t(step!.waitingFor) : null}</p>
             )}
             {step!.target && !rect && (
-              <p className="ow-tour-waiting">
-                Cannot find “{step!.target}” on this page — the tour is out of step with the UI.
-                Nothing is blocked; press Next to move on.
-              </p>
+              <p className="ow-tour-waiting">{t('tour.lost', { target: step!.target })}</p>
             )}
             <div className="ow-tour-actions">
-              <button onClick={() => stop('skipped')}>Skip tour</button>
+              <button onClick={() => stop('skipped')}>{t('tour.skipTour')}</button>
               <span className="ow-tour-spacer" />
-              {i > 0 && <button onClick={() => setI(n => n - 1)}>Back</button>}
+              {i > 0 && <button onClick={() => setI(n => n - 1)}>{t('tour.back')}</button>}
               {/* Always skippable forward. A step whose check cannot see what you
                   did is a trap if the only way on is that check. */}
               <button className="ow-tour-primary" onClick={() => setI(n => n + 1)}>
-                {step!.done ? 'Skip step' : 'Next'}
+                {step!.done ? t('tour.skipStep') : t('tour.next')}
               </button>
             </div>
           </>

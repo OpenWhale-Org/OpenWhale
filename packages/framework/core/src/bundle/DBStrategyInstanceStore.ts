@@ -11,6 +11,7 @@ interface InstanceRow {
   credentials: string | null
   llm: string | null
   params: string | null
+  options: string | null
   enabled: number
   icon: string | null
   folder: string | null
@@ -33,6 +34,7 @@ function rowToInstance(row: InstanceRow): StrategyInstance {
   if (row.credentials !== null) instance.credentials = JSON.parse(row.credentials) as NonNullable<StrategyInstance['credentials']>
   if (row.llm !== null) instance.llm = JSON.parse(row.llm) as NonNullable<StrategyInstance['llm']>
   if (row.params !== null) instance.params = JSON.parse(row.params) as NonNullable<StrategyInstance['params']>
+  if (row.options !== null && row.options !== undefined) instance.options = JSON.parse(row.options) as NonNullable<StrategyInstance['options']>
   if (row.icon !== null && row.icon !== undefined) instance.icon = row.icon
   if (row.folder !== null && row.folder !== undefined) instance.folder = row.folder
   if (row.sort_order !== null && row.sort_order !== undefined) instance.sortOrder = row.sort_order
@@ -44,8 +46,8 @@ export class DBStrategyInstanceStore {
 
   async save(instance: StrategyInstance): Promise<void> {
     await this.db.run(
-      `INSERT INTO strategy_instances (id, name, description, strategy_id, accounts, credentials, llm, params, enabled, icon, folder, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO strategy_instances (id, name, description, strategy_id, accounts, credentials, llm, params, options, enabled, icon, folder, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name        = excluded.name,
          description = excluded.description,
@@ -54,6 +56,7 @@ export class DBStrategyInstanceStore {
          credentials = excluded.credentials,
          llm         = excluded.llm,
          params      = excluded.params,
+         options     = excluded.options,
          enabled     = excluded.enabled,
          icon        = excluded.icon,
          folder      = excluded.folder,
@@ -68,6 +71,7 @@ export class DBStrategyInstanceStore {
         instance.credentials ? JSON.stringify(instance.credentials) : null,
         instance.llm ? JSON.stringify(instance.llm) : null,
         instance.params ? JSON.stringify(instance.params) : null,
+        instance.options ? JSON.stringify(instance.options) : null,
         instance.enabled ? 1 : 0,
         instance.icon ?? null,
         instance.folder ?? null,

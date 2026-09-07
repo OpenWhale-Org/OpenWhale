@@ -6,6 +6,8 @@ import type {
   FundingRateData, OpenInterestData, PerpOrderParams,
 } from '@openwhaleorg/exchange'
 import { RetryableAdapterError, TerminalAdapterError, createLogger } from '@openwhaleorg/core'
+import { meterRequests } from './requestMeter.js'
+import { shareMarketMap } from './marketMap.js'
 
 /**
  * Generic PerpExchangeAdapter over any ccxt.pro exchange.
@@ -106,6 +108,38 @@ const PROXY_OFF = new Set(['off', 'none', 'direct', 'false', '0'])
  * point of it — otherwise "everything through the proxy except the venue I can
  * reach directly" has no way to be said.
  */
+/**
+ * Client-side pacing, in milliseconds of budget per unit of request weight.
+ *
+ * An operator's override, per venue or across all of them, because the right
+ * number is a property of the ACCOUNT's traffic and the venue's published
+ * limits — not of the code. It cannot sensibly live on an executor: sessions
+ * are cached per credential, so every executor, monitor and reader on that
+ * credential shares one ccxt instance and one bucket. A per-executor setting
+ * would be a global wearing a local name, decided by whoever built the session
+ * first.
+ *
+ *   OPENWHALE_RATE_LIMIT_MS_ASTER=25   one venue
+ *   OPENWHALE_RATE_LIMIT_MS=40         every venue that has no venue-specific value
+ *   …=0                                no client queue at all — the caller then
+ *                                      owns staying inside the venue's limits,
+ *                                      and a 429 repeated is an hours-long IP ban
+ */
+function resolveRateLimitMs(options: CcxtAdapterOptions): number | undefined {
+  const suffix = options.exchangeId.toUpperCase().replace(/[^A-Z0-9]/g, '_')
+  const raw = (process.env[`OPENWHALE_RATE_LIMIT_MS_${suffix}`] ?? process.env['OPENWHALE_RATE_LIMIT_MS'] ?? '').trim()
+  if (raw === '') return options.rateLimitMs
+  const ms = Number(raw)
+  if (!Number.isFinite(ms) || ms < 0) {
+    createLogger('CcxtAdapter').warn(
+      { venue: options.exchangeId, value: raw },
+      'Ignoring OPENWHALE_RATE_LIMIT_MS — expected a number of milliseconds, 0 to disable the queue',
+    )
+    return options.rateLimitMs
+  }
+  return ms
+}
+
 function resolveProxy(options: CcxtAdapterOptions): string {
   if (options.proxy !== undefined) return options.proxy.trim()
   const suffix = options.exchangeId.toUpperCase().replace(/[^A-Z0-9]/g, '_')
@@ -142,8 +176,35 @@ export function canFetchPositionMode(exchangeId: string, advertised: unknown): b
   return advertised === true || exchangeId === 'okx'
 }
 
+/**
+ * How long a read of the account's position mode stands before it is read again.
+ *
+ * Long, because the mode is account state a person changes deliberately in the
+ * venue's UI — perhaps twice in the life of an account — and asking is dear:
+ * Aster prices GET /fapi/v3/positionSide/dual at weight 30, which its ccxt
+ * leaky bucket charges as ~10 seconds of budget, paid by the NEXT request in
+ * the queue. Asked before every close, that wait landed on the closing order.
+ *
+ * A short TTL would keep paying it: these strategies close every twenty or
+ * forty minutes. What makes a long one safe is that the belief is self-
+ * correcting — a mode changed underneath us is answered by the venue rejecting
+ * the order's shape, which drops the cache and lets the caller's retry read it
+ * again. Both directions are caught: positionSide on a one-way account and
+ * reduceOnly on a hedged one are each rejected.
+ */
+const POSITION_MODE_TTL_MS = 6 * 60 * 60_000
+
+/** The venue saying an order's shape does not match the account's mode. */
+function isPositionModeMismatch(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /-4061|position\s*side\s*does\s*not\s*match|posSide|position mode/i.test(msg)
+}
+
 export class CcxtAdapter implements PerpExchangeAdapter {
   protected readonly exchange: ccxt.Exchange
+  /** Cached position mode, and the in-flight read that concurrent callers share. */
+  private positionMode: { hedged: boolean; readAt: number } | undefined
+  private positionModeInFlight: Promise<{ hedged: boolean }> | undefined
 
   constructor(options: CcxtAdapterOptions) {
     // ccxt.pro holds the WebSocket-capable constructors; typed as the base Exchange
@@ -151,9 +212,12 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     if (!Ctor) throw new TerminalAdapterError(`Unknown ccxt exchange id: "${options.exchangeId}"`)
 
     const opts: Record<string, unknown> = { enableRateLimit: true, ...options.ccxtOptions }
-    // After the spread so an explicit setting wins over a raw ccxtOptions one
-    if (options.rateLimitMs === 0) opts.enableRateLimit = false   // no client-side queue at all
-    else if (options.rateLimitMs !== undefined && options.rateLimitMs > 0) opts.rateLimit = options.rateLimitMs
+    // After the spread so an explicit setting wins over a raw ccxtOptions one.
+    // The environment outranks the venue's own default: the operator knows what
+    // else shares this IP, and the venue package does not.
+    const rateLimitMs = resolveRateLimitMs(options)
+    if (rateLimitMs === 0) opts.enableRateLimit = false   // no client-side queue at all
+    else if (rateLimitMs !== undefined && rateLimitMs > 0) opts.rateLimit = rateLimitMs
     if (options.apiKey) opts.apiKey = options.apiKey
     if (options.secret) opts.secret = options.secret
     if (options.password) opts.password = options.password
@@ -189,7 +253,13 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     }
 
     this.exchange = new Ctor(opts)
+    // Counts what this process asks of the venue, per endpoint, per minute.
+    // Measurement only — it paces nothing and delays nothing.
+    meterRequests(this.exchange as unknown as Parameters<typeof meterRequests>[0])
     if (options.testnet) this.exchange.setSandboxMode(true)
+    // One market walk per venue, shared by every adapter on it; a failed walk
+    // is retried, not memoised. Keyed after sandbox mode: testnet has its own map.
+    shareMarketMap(this.exchange as unknown as Parameters<typeof shareMarketMap>[0], `${options.exchangeId}:${options.testnet ? 'testnet' : 'mainnet'}`)
     // Symbol-less fetchOpenOrders is a deliberate adapter capability (the
     // account detail view wants ALL open orders); ccxt otherwise throws a
     // warning-as-error about the heavier rate-limit weight — acknowledged.
@@ -334,7 +404,10 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    * realizedPnl in the raw payload; venues without it leave it undefined).
    */
   async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
-    const trades = await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit))
+    return this.mapFills(await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit)), symbol)
+  }
+
+  protected mapFills(trades: Awaited<ReturnType<ccxt.Exchange['fetchMyTrades']>>, symbol?: string): ExchangeFill[] {
     return trades
       .map((t): ExchangeFill => {
         const info = (t.info ?? {}) as Record<string, unknown>
@@ -342,7 +415,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
         return {
           id: String(t.id),
           orderId: String(t.order ?? ''),
-          symbol: t.symbol ?? symbol,
+          symbol: t.symbol ?? symbol ?? '',
           side: t.side === 'sell' ? 'sell' : 'buy',
           qty: t.amount ?? 0,
           price: t.price ?? 0,
@@ -391,15 +464,6 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     return this.exchange.has['setPositionMode'] === true
   }
 
-  /**
-   * The account's ACTUAL position mode, not the venue's capability.
-   *
-   * A Binance account sits in one-way mode by default even though the venue
-   * offers hedge mode, and there positionSide is rejected while an
-   * opposite-side order nets against the existing position instead of opening
-   * beside it. Callers that place directional orders must know which world
-   * they are in; `supportsPositionSide` alone cannot tell them.
-   */
   /** Retune ccxt's throttle on the live instance; 0 switches it off. */
   setRateLimit(ms: number): void {
     if (ms <= 0) {
@@ -431,11 +495,43 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     }
   }
 
+  /**
+   * The account's ACTUAL position mode, not the venue's capability.
+   *
+   * A Binance account sits in one-way mode by default even though the venue
+   * offers hedge mode, and there positionSide is rejected while an
+   * opposite-side order nets against the existing position instead of opening
+   * beside it. Callers that place directional orders must know which world
+   * they are in; `supportsPositionSide` alone cannot tell them.
+   *
+   * Cached, and single-flighted: two legs closing together on one account asked
+   * twice, and on Aster each ask costs the rate limiter ten seconds that the
+   * order behind it then waits out. The value is account-wide (the venue's
+   * endpoint takes no symbol), so one read answers for every symbol.
+   *
+   * The cache is dropped the moment the venue rejects an order's shape, so a
+   * mode changed underneath us costs one rejected order, not a stale belief.
+   */
   async fetchPositionMode(symbol?: string): Promise<{ hedged: boolean }> {
     if (!canFetchPositionMode(this.exchange.id, this.exchange.has['fetchPositionMode'])) return { hedged: false }
+    const cached = this.positionMode
+    if (cached && Date.now() - cached.readAt < POSITION_MODE_TTL_MS) return { hedged: cached.hedged }
+    this.positionModeInFlight ??= this.readPositionMode(symbol)
+      .finally(() => { this.positionModeInFlight = undefined })
+    return this.positionModeInFlight
+  }
+
+  private async readPositionMode(symbol?: string): Promise<{ hedged: boolean }> {
     const mode = await this.guard(() => this.exchange.fetchPositionMode(symbol))
     const raw = mode as { hedged?: boolean; info?: { posMode?: string } }
-    return { hedged: raw.hedged === true || raw.info?.posMode === 'long_short_mode' }
+    const hedged = raw.hedged === true || raw.info?.posMode === 'long_short_mode'
+    this.positionMode = { hedged, readAt: Date.now() }
+    return { hedged }
+  }
+
+  /** Forget the cached mode — after a rejection that says the account has changed it. */
+  protected forgetPositionMode(): void {
+    this.positionMode = undefined
   }
 
   async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
@@ -521,15 +617,23 @@ export class CcxtAdapter implements PerpExchangeAdapter {
       }
     }
 
-    const order = await this.guard(() => this.exchange.createOrder(
-      params.symbol,
-      params.type,
-      params.side,
-      params.amount,
-      params.price,
-      extra,
-    ))
-    return this.mapOrder(order)
+    try {
+      const order = await this.guard(() => this.exchange.createOrder(
+        params.symbol,
+        params.type,
+        params.side,
+        params.amount,
+        params.price,
+        extra,
+      ))
+      return this.mapOrder(order)
+    } catch (err) {
+      // The one answer that proves a cached position mode wrong. Drop it here,
+      // so the caller's retry — every one of them retries the other shape —
+      // asks the venue again instead of repeating the same rejected order.
+      if (isPositionModeMismatch(err)) this.forgetPositionMode()
+      throw err
+    }
   }
 
   async cancelOrder(orderId: string, symbol: string): Promise<void> {

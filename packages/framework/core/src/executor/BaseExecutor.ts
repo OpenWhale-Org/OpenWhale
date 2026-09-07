@@ -36,6 +36,29 @@ import { createLogger } from '../utils/logger.js'
  *    On parse failure, the base class records a 'failed' result and skips execute().
  *    For multiple actions, use z.discriminatedUnion('action', [...]).
  */
+/**
+ * The fields the FRAMEWORK owns on an instruction, as opposed to `action` and
+ * `params`, which belong to the executor's own schema.
+ *
+ * They have to be carried across validation by hand: an `instructionSchema`
+ * describes the payload its executor cares about, and zod strips everything
+ * it does not mention. Spelling the list out at the call site is exactly how
+ * `runId` was lost the day it was added — BaseStrategy stamped it, the schema
+ * dropped it, and every execution from a schema-validated executor read back
+ * as "carries no run id". Naming the envelope in one place means the next
+ * field added to ExecutionInstruction survives without anyone remembering to
+ * come back here.
+ */
+function envelopeOf(raw: ExecutionInstruction): Partial<ExecutionInstruction> {
+  return {
+    executorId: raw.executorId,
+    messageId: raw.messageId,
+    ...(raw.instanceId !== undefined ? { instanceId: raw.instanceId } : {}),
+    ...(raw.runId !== undefined ? { runId: raw.runId } : {}),
+    ...(raw.accountNames !== undefined ? { accountNames: raw.accountNames } : {}),
+  }
+}
+
 export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = ExecutionInstruction> {
   protected readonly dataDir: string
   private readonly timeout: number
@@ -246,7 +269,7 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
           await this.recordSafe(result)
           return result
         }
-        return await this.runWithRetry({ ...parsed.data, executorId: raw.executorId, messageId: raw.messageId, instanceId: raw.instanceId, accountNames: raw.accountNames } as TInstruction)
+        return await this.runWithRetry({ ...parsed.data, ...envelopeOf(raw) } as TInstruction)
       } else {
         return await this.runWithRetry(raw as TInstruction)
       }

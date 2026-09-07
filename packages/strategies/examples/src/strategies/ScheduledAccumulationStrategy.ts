@@ -31,8 +31,8 @@ const decls = {
 } as const satisfies StrategyDeclarations
 
 @OwStrategy({
-  name: 'Scheduled Accumulation (DCA)',
-  description: 'Buys a fixed USD clip on a cron schedule until a target position is reached — bigger clips below the average',
+  name: { en: 'Scheduled Accumulation (DCA)', 'zh-CN': '定投（DCA）' },
+  description: { en: 'Buys a fixed USD clip on a cron schedule until a target position is reached — bigger clips below the average', 'zh-CN': '按 cron 计划固定金额买入，直到达到目标仓位——价格低于均值时加大买入' },
 })
 export class ScheduledAccumulationStrategy extends BaseStrategy<typeof decls> {
   readonly strategyId = 'scheduled-accumulation'
@@ -45,11 +45,11 @@ export class ScheduledAccumulationStrategy extends BaseStrategy<typeof decls> {
     symbol: z.string().meta({ displayName: 'Symbol', placeholder: 'BTC/USDT:USDT' }),
     usdPerBuy: z.number().positive().meta({
       displayName: 'USD per Buy', placeholder: '100',
-      description: 'Base clip size for each scheduled purchase',
+      description: 'Base clip size for each scheduled purchase', i18n: { 'zh-CN': { displayName: '每次买入（USD）', description: '每次定投的基础金额' } }
     }),
     targetUsd: z.number().positive().meta({
       displayName: 'Target Position (USD)', placeholder: '5000',
-      description: 'Accumulate up to this exposure, then idle',
+      description: 'Accumulate up to this exposure, then idle', i18n: { 'zh-CN': { displayName: '目标仓位（USD）', description: '累积到这个敞口后停止' } }
     }),
   })
 
@@ -57,14 +57,14 @@ export class ScheduledAccumulationStrategy extends BaseStrategy<typeof decls> {
     schedule: z.string().min(1).default('0 0 */4 * * *')
       .meta({
         displayName: 'Schedule (cron)',
-        description: '6-field cron (sec min hour day month weekday). Default: every 4 hours on the hour',
+        description: '6-field cron (sec min hour day month weekday). Default: every 4 hours on the hour', i18n: { 'zh-CN': { displayName: '计划（cron）', description: '6 段 cron（秒 分 时 日 月 周）。默认每 4 小时整点' } }
       }),
     dipLookback: z.number().int().min(0).default(24)
-      .meta({ displayName: 'Dip Lookback (samples)', description: 'Ticker samples averaged for the "is it cheap" test. 0 disables dip sizing' }),
+      .meta({ displayName: 'Dip Lookback (samples)', description: 'Ticker samples averaged for the "is it cheap" test. 0 disables dip sizing', i18n: { 'zh-CN': { displayName: '低点回看（样本数）', description: '用于判断“是否便宜”的行情样本均值。0 关闭低点加仓' } } }),
     dipMultiplier: z.number().min(1).default(2)
-      .meta({ displayName: 'Dip Multiplier', description: 'Clip multiplier when the price is below the average', slider: { min: 1, max: 5, step: 0.25 } }),
+      .meta({ displayName: 'Dip Multiplier', description: 'Clip multiplier when the price is below the average', slider: { min: 1, max: 5, step: 0.25 }, i18n: { 'zh-CN': { displayName: '低点倍数', description: '价格低于均值时的买入倍数' } } }),
     slippage: z.number().min(0).max(1).default(0.005)
-      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders' }),
+      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders', i18n: { 'zh-CN': { displayName: '滑点容忍', description: '市价单的最大滑点比例' } } }),
   })
 
   private priceKey(params: StrategyParams): string {

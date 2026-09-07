@@ -98,6 +98,194 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 }
 ```
 
+## Lifecycle hooks
+
+Two optional overrides, both traced like a run (`lifecycle:<reason>` on the instance board):
+
+```ts
+override async onActivate(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {
+  // After every setter, triggers registered, nothing fired yet.
+  if (!(await this.store.has('baseline'))) await this.store.set('baseline', await this.snapshot())
+  this.trace('leverage', { leverage: 3 })
+  return [this.instruction('trade', 'setLeverage', { symbol, leverage: 3 }, ['main'])]   // fired inline, awaited
+}
+
+override async onDeactivate(ctx: LifecycleContext): Promise<ExecutionInstruction[] | void> {
+  // No run in flight, no new one can start, executor slots still materialized.
+  const quote = await this.store.get<RestingQuote>('quote')
+  if (!quote || ctx.reason === 'restart') return          // keep it across a restart if you like
+  return [this.instruction('trade', 'cancelOrder', { orderId: quote.orderId, symbol: quote.symbol }, ['main'])]
+}
+```
+
+| `ctx.reason` | when |
+|---|---|
+| `activate` | operator activates a stopped instance |
+| `boot` | the runtime restores persisted active instances at start |
+| `restart` | `updateInstance(…, { restart: true })` — deactivate, then activate the new object |
+| `rollback` | the restart's activation failed; the previous configuration is reactivated |
+| `stop` / `delete` | operator deactivates / deletes |
+| `shutdown` | `runtime.stop()` — one quiesce budget across every instance |
+
+Rules the runtime enforces: returned instructions pass through label resolution and the dry-run
+gate exactly as a run's do, and are **fired inline and awaited** — leverage is set before the
+first clip, a quote is cancelled by the slots that are about to be removed. `onActivate` throwing
+fails the activation and un-registers what was registered. `onDeactivate` throwing, or running
+past `quiesceTimeoutMs` (runtime option, default 15 s), is logged and teardown continues: an
+instance that cannot be stopped would resume trading on the next boot. Do housekeeping here, not
+on the first evaluation behind a store flag — that spends the first trigger.
+
+## Text in more than one language
+
+Every string a person reads — the strategy's `name` and `description`, a param's `displayName`,
+`description`, `hint`, `placeholder` and `section`, an enum option's `label`, a list column's name,
+an illustration's `title`, a preset's or picker's `title`/`description`, a Script's name and params,
+the plugin's `readme` — is a `Text`: a plain string (English) or a table with `en` required:
+
+```ts
+// In a zod .meta(): English as written, translations under i18n — zod types
+// `description` as a string, so a table cannot sit there directly.
+notionalUsd: z.number().positive().meta({
+  displayName: 'Notional (USD)', description: 'Per leg. Every leg is this size.',
+  i18n: { 'zh-CN': { displayName: '名义仓位（USD）', description: '每条腿的名义金额，四条腿相同。' } },
+}),
+// Everywhere else — decorators, manifests, cards, account panels — a table:
+@OwStrategy({ name: { en: 'Fixed-rate carry', 'zh-CN': '固定利率套利' }, description: { en: '…', 'zh-CN': '…' } })
+```
+
+The gateway resolves every table for the reader's locale before a page sees it; a locale that
+is missing falls back to `en`. **Our own strategies carry `en` and `zh-CN` on every string.**
+Dynamic text — preset and picker cards, illustration figures, a Script's report — is yours to
+write in `ctx.locale` (`PresetContext.locale`, `ScriptContext.locale`; the illustration message
+carries `locale` too); core exports `resolveText(text, locale)` for the tables you keep yourself.
+
+A plugin that keeps its source in one language ships language packs instead, and an operator
+can lay their own over any plugin from `<dataDir>/i18n/<plugin>/<locale>.json`:
+
+```ts
+definePlugin({
+  i18n: { 'zh-CN': { 'strategies.fixed-rate-carry.name': '固定利率套利', 'strategies.fixed-rate-carry.params.legs.displayName': '四条腿', 'readme': '…' } },
+})
+```
+
+Paths: `strategies|monitors|executors|scripts|accounts.<local id>.<field>`, with
+`params.<name>.<field>` and `params.<name>.options.<value>.label` underneath, and `readme`.
+Never translate trace step names, log lines or ids — those are keys people grep for.
+
+## Presets — named configurations, or a live ranking
+
+`paramPresets` is a static list: "conservative", "aggressive", "paper". Each names the fields
+it sets; the Dashboard renders a dropdown and fills those fields, leaving every field editable.
+
+A strategy whose sensible starting points are **opportunities** — which pair, which market,
+right now — computes them instead (core ≥ 0.2.3):
+
+```ts
+override readonly presetSource = { title: 'Fixed-rate opportunities', description: 'Ranked by net APR after fees at $100k per leg; executable pairs first.', ttlMs: 60_000 }
+
+override async presets(ctx: PresetContext): Promise<ParamPreset[]> {
+  const boros = await ctx.adapters.resolve<BorosSession>('pendle/rates', 'boros')     // keyless cells only
+  const markets = await boros.fetchMarkets()
+  return rank(markets).map(o => ({
+    id: `${o.longMarket}|${o.shortMarket}`,
+    label: `${o.asset} ${o.longVenue} ↔ ${o.shortVenue}`,
+    base: { longMarket: o.longMarket, shortMarket: o.shortMarket, perpLongSymbol: o.perpLong, perpShortSymbol: o.perpShort },
+    card: {
+      title: o.asset, subtitle: `${o.longVenue} ↔ ${o.shortVenue}`,
+      headline: { label: 'net APR', value: pct(o.netApr), tone: o.netApr >= 0 ? 'positive' : 'negative' },
+      rows: [{ label: 'matures', value: `${o.days}d` }, { label: 'per leg', value: '$100k' }],
+      badges: o.executable ? [{ text: 'executable', tone: 'positive' }] : [],
+      group: o.executable ? 'Executable' : 'Not on this venue',
+    },
+  }))
+}
+```
+
+Rules:
+- `presets()` runs on a **probe** instance: no store, no accounts, no params of its own. It gets
+  keyless adapters, the slots the operator has bound so far (`ctx.accounts`, label → account
+  name) and the form's current values (`ctx.params`), which a scan may size to.
+- The runtime caches the result for `presetSource.ttlMs` (default 60 s) keyed by those inputs;
+  the dialog's Refresh bypasses it. Throw on a venue you cannot reach — an empty list reads as
+  "no opportunities", which is a different fact.
+- The **order is the ranking**. Cards with the same `group` sit under one heading, groups in
+  first-seen order. Static `paramPresets` are listed first, as a plain list.
+- A preset with a `card` renders as one: `title` / `subtitle` top left, the `headline` figure set
+  large top right, `rows` as label/value pairs, `badges` as pills. Tones are `positive |
+  negative | neutral | muted` — theme colours, so the card is right in both themes. `card.html`
+  replaces all of that with your own drawing in a sandboxed frame, as a `ParamIllustration` is.
+- The moment any preset carries a card, or the strategy has a `presetSource`, the Dashboard
+  offers a dialog instead of the dropdown. Choosing fills the named fields; nothing is locked.
+- The same scan usually wants to exist as a **Script** too (a report an operator runs without
+  opening the form). Put the computation in one module and call it from both.
+
+## Picker fields — a value that is a whole decision
+
+A catalogue answers "which symbol". When the choice is several things at once — the four legs
+of a carry, a market with its size — make the param an **object** and give it a picker (core ≥
+0.2.3):
+
+```ts
+legs: z.object({ longMarket: z.string(), shortMarket: z.string(), perpLongSymbol: z.string(), perpShortSymbol: z.string() }).meta({
+  displayName: 'The four legs',
+  picker: { source: 'strategy', id: 'carry-legs', title: 'Fixed-rate carry opportunities', description: 'Ranked by net APR after fees.', ttlMs: 60_000 },
+})
+
+override async pickerOptions(pickerId: string, ctx: PresetContext): Promise<PickerOption[]> {
+  if (pickerId !== 'carry-legs') return []
+  return (await scan(ctx.adapters)).map(o => ({
+    id: o.id, label: `${o.asset} ${o.longVenue} → ${o.shortVenue}`,
+    value: { longMarket: o.longMarket, shortMarket: o.shortMarket, perpLongSymbol: o.perpLong, perpShortSymbol: o.perpShort },
+    card: { title: o.asset, headline: { label: 'net APR', value: pct(o.netApr), tone: 'positive' }, rows: [...], badges: [...], group: 'Executable' },
+  }))
+}
+```
+
+The Dashboard draws the field as a button naming the current choice and opens the same card
+dialog presets use; choosing sets the field to `option.value`. `pickerOptions()` runs on a probe
+with keyless adapters, the bound slots and the form's current values, cached for `ttlMs`; the
+order is the ranking. Prefer this over a preset when the decision IS the param — a preset fills
+fields the operator may then drift from, a picker keeps the four names together.
+
+## Illustrations with live figures
+
+`paramsIllustrations` are HTML pages drawn in the form — above the fields by default, after a
+named `section`, with `placement: 'after-base'` between the base and tunable params, or `'bottom'` after the last
+field (a preview of what the fields add up to belongs below them). Each receives `{ type: 'ow-params',
+values }` by postMessage on load and on every edit. A page that needs what the form does not
+hold — quotes, an estimate, the venue's limits — gets it from the strategy (core ≥ 0.2.3):
+
+```ts
+readonly paramsIllustrations = [carryIllustration]
+
+override async illustrationData(ctx: PresetContext): Promise<Record<string, unknown>> {
+  const b = ctx.params.base
+  if (!b['longMarket']) return { ok: false, reason: 'Pick a market to see the estimate.' }
+  const boros = await ctx.adapters.resolve<BorosSession>('pendle/rates', 'boros')
+  const q = await boros.marketQuote(await marketId(boros, String(b['longMarket'])))
+  return { ok: true, estimate: carryEstimate({ ...termsOf(q), notionalUsd: Number(b['notionalUsd']) }) }
+}
+```
+
+The Dashboard calls it, debounced, whenever the form changes, and posts the answer to every frame
+as `data` (a throw arrives as `dataError`; `pending: true` while a newer answer is on its way, so
+the page can dim what it shows). A page that posts `{ type: 'ow-size', height }` to its parent
+gets that height — do it after every render, so nothing is clipped at any panel width. The
+message also carries `logos`: credential type → logo URL (`gate`, `hyperliquid`,
+`pendle/boros-agent`, …), the marks the Accounts page draws, for a picture that names venues. Same probe rules as `presets()`: keyless adapters, no
+store; the runtime caches by form state for 15 s. Keep the arithmetic here and let the page only
+format — one estimator, the strategy's own, for the trace, the presets and the picture.
+
+## Dry run is the framework's, not yours
+
+Do not declare a `dryRun` param. Every instance has a **Dry run** option (`options.dryRun`), and
+under it the engine records what a run returns without sending it — the trace and the Executions
+page show the instruction, no result comes back, `onExecutionResult` is not called. Emit the real
+actions (`clip`, `open`, `cancel`); a `simulate*` twin the strategy chooses itself still reaches
+the venue and gives an operator two switches to read where one would do. `ctx.dryRun` is there
+for the rare strategy whose own memory depends on whether an order went out (a maker that
+remembers the quote it would have rested); read it, never branch the action on it.
+
 ## The API you have inside a strategy
 
 | Member | What it gives you |
@@ -115,6 +303,10 @@ export class MyStrategy extends BaseStrategy<typeof decls> {
 | `this.addMonitorSource(label, key, { trigger? })` | Start collecting a monitor key discovered at RUNTIME (e.g. an auto-detected pair's feed); `trigger: true` also wakes `evaluate` on its pushes. Returns false on runtimes without dynamic-source support; idempotence is your job |
 | `this.trace(step, data?)` | Record one decision step of the current run. The Dashboard shows the trace per run and it survives restarts; `GET /api/instances/{id}/runs` returns them. Call it at EVERY gate — `this.trace('rate-below-min', { rate, min })` before `return []` — so a run that emitted nothing still says which condition refused. No-op outside `run()` |
 | `this.rule(cond, instructions)` / `this.parallel(sets)` | `rule` returns the instructions only when `cond` holds (else `[]`); `parallel` flattens several instruction sets. Sugar for readable `evaluate` bodies |
+| `onActivate(ctx)` / `onDeactivate(ctx)` | Lifecycle hooks — see the section above |
+| `presetSource` / `presets(ctx)` | Live presets — see the section above |
+| `illustrationData(ctx)` | Live figures for the illustrations — see the section above |
+| `pickerOptions(id, ctx)` | Options of a picker field — see the section above |
 | `onExecutionResult(result, { instanceId })` | Optional override: called with the executor's recorded `ExecutionResult` for every instruction THIS instance emitted (success, failed or skipped), after the record is written — the place to note fill ids or a failed leg in `this.store`. `this.store` is the same per-instance store; `this.trace` is a no-op here unless a run happens to be active. Runs off the queue path: a throw is logged as a warning and never touches the execution record |
 | `availabilityCheckers` | `Readonly<Record<name, AvailabilityChecker>>` — pure functions over the venue's market list, named from a param's `.meta({ availability: { checker } })`. The built-in `availability: { source: 'market', kind? }` needs no checker: every value must be a listed market |
 

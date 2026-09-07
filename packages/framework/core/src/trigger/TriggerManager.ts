@@ -1,12 +1,12 @@
 import cron from 'node-cron'
 import { MonitorMode, type BaseMonitor } from '../monitor/BaseMonitor.js'
 import type { EmitHandler } from '../types/monitor.js'
-import type { ExecutionInstruction, ExecutionQueue } from '../types/executor.js'
+import type { ExecutionInstruction, ExecutionQueue, ExecutionResult } from '../types/executor.js'
 import type { CronCondition, MonitorCondition, MonitorSource, Trigger, TriggerFilter } from '../types/trigger.js'
 import type { IStrategy, StrategyContext } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
-import type { StrategyParams } from '../types/instance.js'
+import type { InstanceOptions, StrategyParams } from '../types/instance.js'
 import type { MonitorRegistry } from '../registry/Registry.js'
 import { DBStrategyStore } from '../strategy/StrategyStore.js'
 import { PortfolioJournal } from '../strategy/PortfolioJournal.js'
@@ -22,6 +22,8 @@ export interface StrategyRunEvent {
   monitorData: Record<string, Record<string, unknown>>
   instructions: ExecutionInstruction[]
   timestamp: number
+  /** The instance is in dry run: these instructions were recorded, not queued. */
+  dryRun?: boolean
 }
 
 interface InstanceEntry {
@@ -40,6 +42,12 @@ interface InstanceEntry {
    * satisfy nothing and fire nothing.
    */
   subscriptions: MonitorSource[]
+  /** Framework switches. Settable while live, so dry run is a usable kill switch. */
+  options?: InstanceOptions
+  /** Set on the way out: no new run starts, so the deactivate hook never races evaluate(). */
+  suspended?: boolean
+  /** Runs started and not yet finished — what drain() waits for. */
+  inFlight: Set<Promise<void>>
 }
 
 /**
@@ -89,6 +97,30 @@ export class TriggerManager {
     this.database = database
   }
 
+  /**
+   * Where held-back instructions go. The manager decides WHETHER an instruction
+   * is queued; what a record of one looks like on disk belongs to whoever owns
+   * the execution log, so it is handed out rather than written here.
+   */
+  private dryRunSink: ((results: ExecutionResult[]) => void) | null = null
+
+  setDryRunSink(sink: ((results: ExecutionResult[]) => void) | null): void {
+    this.dryRunSink = sink
+  }
+
+  /**
+   * Set (or clear) an instance's framework switches. Separate from
+   * registerInstance so dry run can be flipped on a RUNNING instance: a switch
+   * that stops an instance trading is worth nothing if reaching it costs a
+   * restart of the thing you are trying to stop.
+   */
+  setInstanceOptions(instanceId: string, options: InstanceOptions | undefined): void {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return
+    if (options === undefined) delete entry.options
+    else entry.options = options
+  }
+
   addStrategyRunHandler(handler: (event: StrategyRunEvent) => void): void {
     this.strategyRunHandlers.push(handler)
   }
@@ -132,6 +164,7 @@ export class TriggerManager {
       instanceId, triggers, strategy, monitorLabelToKey, monitorKeyToLabel, executorLabelToKey,
       subscriptions: (strategy.subscriptions?.(params) ?? [])
         .map(source => this.resolveSourceKey(source, monitorLabelToKey)),
+      inFlight: new Set(),
     }
 
     // Re-registration (e.g. re-activate with new params) must first release the
@@ -204,6 +237,63 @@ export class TriggerManager {
 
   getStrategy(instanceId: string): IStrategy | undefined {
     return this.instances.get(instanceId)?.strategy
+  }
+
+  /** No run may start for this instance from now on. Idempotent. */
+  suspend(instanceId: string): void {
+    const entry = this.instances.get(instanceId)
+    if (entry) entry.suspended = true
+  }
+
+  /**
+   * Wait for the instance's runs in flight, up to `timeoutMs`.
+   *
+   * Returns false when a run was still going at the deadline — the caller
+   * proceeds anyway and says so, since a stop that waits forever on a strategy
+   * awaiting a venue is not a stop.
+   */
+  async drain(instanceId: string, timeoutMs: number): Promise<boolean> {
+    const entry = this.instances.get(instanceId)
+    if (!entry || entry.inFlight.size === 0) return true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })
+    const done = Promise.all(Array.from(entry.inFlight)).then(() => true as const)
+    try {
+      return await Promise.race([done, timeout])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Instructions leave a strategy with executor LABELS and no instance id; this
+   * resolves both, exactly as checkAndFire does on the way to the queue, and
+   * says whether the instance is in dry run so the caller records instead of
+   * firing. Used for what lifecycle hooks return.
+   */
+  /** Whether an instance runs under the framework's Dry run option. */
+  isDryRun(instanceId: string): boolean {
+    return this.instances.get(instanceId)?.options?.dryRun === true
+  }
+
+  prepareInstructions(instanceId: string, instructions: ExecutionInstruction[]): { instructions: ExecutionInstruction[]; dryRun: boolean } | undefined {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return undefined
+    return { instructions: this.tag(entry, instructions), dryRun: entry.options?.dryRun === true }
+  }
+
+  /** Record held instructions as dry-run results, the same way a run's are. */
+  recordDryRun(instructions: ExecutionInstruction[]): void {
+    const at = new Date()
+    this.dryRunSink?.(instructions.map(instruction => ({ instruction, status: 'dry-run' as const, executedAt: at })))
+  }
+
+  private tag(entry: InstanceEntry, instructions: ExecutionInstruction[]): ExecutionInstruction[] {
+    return instructions.map(i => ({
+      ...i,
+      instanceId: entry.instanceId,
+      executorId: entry.executorLabelToKey.get(i.executorId) ?? i.executorId,
+    }))
   }
 
   /**
@@ -466,14 +556,37 @@ export class TriggerManager {
       now: number,
   ): Promise<void> {
     const { instanceId, strategy } = entry
+    if (entry.suspended) return
     if (!triggerState.isComplete(trigger.conditions, trigger.window, now)) return
     const monitorData = triggerState.collectMonitorData(trigger.conditions)
     triggerState.reset()
+    // Tracked so a deactivation can wait for this run rather than tear the
+    // instance down underneath it.
+    let release: () => void = () => {}
+    const running = new Promise<void>(resolve => { release = resolve })
+    entry.inFlight.add(running)
+    try {
+      await this.fireRun(entry, trigger, queue, now, monitorData)
+    } finally {
+      entry.inFlight.delete(running)
+      release()
+    }
+  }
+
+  private async fireRun(
+      entry: InstanceEntry,
+      trigger: Trigger,
+      queue: ExecutionQueue,
+      now: number,
+      monitorData: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    const { instanceId, strategy } = entry
     const context: StrategyContext = {
       instanceId,
       triggerId: trigger.id,
       monitorData,
       timestamp: now,
+      ...(entry.options?.dryRun === true ? { dryRun: true } : {}),
       getData(monitorLabel: string, key: string) {
         return monitorData[`${monitorLabel}:${key}`]
       },
@@ -489,13 +602,20 @@ export class TriggerManager {
     }
     // Instructions leave the strategy with executor LABELS; resolve them to
     // registry keys here — the only point where instructions enter the queue.
-    const tagged = instructions.map(i => ({
-      ...i,
-      instanceId,
-      executorId: entry.executorLabelToKey.get(i.executorId) ?? i.executorId,
-    }))
-    await queue.pushBatch(tagged)
-    const event: StrategyRunEvent = { instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now }
+    const tagged = this.tag(entry, instructions)
+    /* Dry run holds the instructions HERE, at the one point they would enter
+       the queue, rather than asking each executor to behave. An executor that
+       forgets to check, or a strategy whose own dryRun param only covers the
+       branch its author remembered, still places the order; nothing gets past
+       a gate that is upstream of every executor. */
+    const dryRun = entry.options?.dryRun === true
+    if (dryRun) {
+      this.recordDryRun(tagged)
+      log.info({ instanceId, triggerId: trigger.id, held: tagged.length }, 'Dry run — instructions recorded, none queued')
+    } else {
+      await queue.pushBatch(tagged)
+    }
+    const event: StrategyRunEvent = { instanceId, triggerId: trigger.id, monitorData, instructions: tagged, timestamp: now, ...(dryRun ? { dryRun: true } : {}) }
     for (const handler of this.strategyRunHandlers) {
       try {
         handler(event)

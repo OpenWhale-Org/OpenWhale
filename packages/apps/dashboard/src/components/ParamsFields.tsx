@@ -2,7 +2,7 @@
 
 import { Select } from './Select'
 
-import type { ParamFieldDef } from '@openwhaleorg/core'
+import type { ParamFieldDef } from '@/lib/core-types'
 
 /** Schema-derived tuning fields (numbers/booleans/strings). Values as strings; empty = use default. */
 export const FIELD_CLASS = 'rounded-md px-2 h-8 text-xs'

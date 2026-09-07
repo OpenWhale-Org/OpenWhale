@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { SeriesChart, type ChartSeries, type ChartRegion, type ChartYRange } from '@/components/SeriesChart'
+import { useT } from '@/i18n'
 
 interface PlotInfo { id: string; title: string; kind: string; columns?: string[]; unit?: string; xKind?: 'time' | 'value'; xUnit?: string; description?: string; multi?: boolean }
 
@@ -18,6 +19,7 @@ function SingleOptionPicker({ options, value, onChange }: {
   value: string
   onChange: (value: string) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
@@ -55,7 +57,7 @@ function SingleOptionPicker({ options, value, onChange }: {
         onClick={() => setOpen(v => !v)}
         className="rounded-md px-2 py-1 text-xs font-mono max-w-64 truncate"
         style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        title="Pick which capture to display"
+        title={t('monitor.pickCapture')}
       >
         {current?.label ?? value} ▾
       </button>
@@ -72,13 +74,13 @@ function SingleOptionPicker({ options, value, onChange }: {
               if (e.key === 'Escape') { setOpen(false); return }
               if (e.key === 'Enter' && matches.length >= 1) pick(matches[0]!.value)
             }}
-            placeholder="search…"
+            placeholder={t('monitor.searchPlaceholder')}
             className="px-3 py-2 text-xs font-mono"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: 'none', borderBottom: '1px solid var(--border)', outline: 'none' }}
           />
           <div className="overflow-y-auto">
             {matches.length === 0 ? (
-              <p className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>no match</p>
+              <p className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>{t('monitor.noMatch')}</p>
             ) : matches.map(o => (
               <button
                 key={o.value}
@@ -113,6 +115,7 @@ function MultiOptionPicker({ options, selected, onChange }: {
   selected: string[]
   onChange: (values: string[]) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
@@ -171,9 +174,9 @@ function MultiOptionPicker({ options, selected, onChange }: {
         onClick={() => setOpen(v => !v)}
         className="rounded-md px-2 py-1 text-xs font-mono"
         style={{ background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        title="Pick which series to draw"
+        title={t('monitor.pickSeries')}
       >
-        {selected.length} of {options.length} ▾
+        {t('monitor.nOfTotal', { n: selected.length, total: options.length })} ▾
       </button>
       {open && (
         <div
@@ -190,22 +193,22 @@ function MultiOptionPicker({ options, selected, onChange }: {
               // typing a few letters of a token name.
               if (e.key === 'Enter' && matches.length === 1) { toggle(matches[0]!.value); setQuery('') }
             }}
-            placeholder="search…"
+            placeholder={t('monitor.searchPlaceholder')}
             className="px-3 py-2 text-xs font-mono"
             style={{ background: 'var(--background)', color: 'var(--foreground)', border: 'none', borderBottom: '1px solid var(--border)', outline: 'none' }}
           />
           <div className="flex gap-2 px-3 py-1.5 text-xs items-center" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
             <button type="button" onClick={selectMatches} className="hover:underline">
-              {q ? `add ${matches.length}` : 'all'}
+              {q ? t('monitor.addN', { n: matches.length }) : t('monitor.all')}
             </button>
             <button type="button" onClick={clearMatches} className="hover:underline">
-              {q ? 'remove these' : 'none'}
+              {q ? t('monitor.removeThese') : t('monitor.none')}
             </button>
-            <span className="ml-auto">{selected.length} selected</span>
+            <span className="ml-auto">{t('monitor.nSelected', { n: selected.length })}</span>
           </div>
           <div className="overflow-y-auto">
             {matches.length === 0 ? (
-              <p className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>no match</p>
+              <p className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>{t('monitor.noMatch')}</p>
             ) : matches.map(o => (
               <button
                 key={o.value}
@@ -238,11 +241,12 @@ function MultiOptionPicker({ options, selected, onChange }: {
  * where a chart obscures exactly the "which token, what number" question.
  */
 function PlotTable({ series, columns, unit }: { series: ChartSeries[]; columns: string[]; unit?: string }) {
+  const t = useT()
   // sort: null = the plot's own order; -1 = the label column; 0.. = data column
   const [sortCol, setSortCol] = useState<number | null>(null)
   const [sortDesc, setSortDesc] = useState(false)
   if (series.length === 0) {
-    return <div className="text-xs py-6 text-center" style={{ color: 'var(--muted)' }}>No data in window.</div>
+    return <div className="text-xs py-6 text-center" style={{ color: 'var(--muted)' }}>{t('monitor.noDataWindow')}</div>
   }
   const fmt = (v: number | undefined) => {
     if (v === undefined || !Number.isFinite(v)) return '—'
@@ -286,7 +290,7 @@ function PlotTable({ series, columns, unit }: { series: ChartSeries[]; columns: 
                 className="text-right px-2 py-1 sticky top-0 cursor-pointer select-none"
                 style={{ background: 'var(--background)' }}
                 onClick={() => clickSort(i)}
-                title="Click to sort; click again to flip the order"
+                title={t('monitor.clickSort')}
               >
                 {c}{arrow(i)}
               </th>
@@ -327,6 +331,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
   /** Drop the frame and the toolbar — the host card already has both. */
   bare?: boolean
 }) {
+  const t = useT()
   const [plots, setPlots] = useState<PlotInfo[] | null>(null)
   const [selectedKey, setSelectedKey] = useState<string>(initialKey ?? keys[0] ?? '')
   const [series, setSeries] = useState<Record<string, ChartSeries[]>>({})
@@ -424,7 +429,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
   return (
     <div className={frame} style={frameStyle}>
       <div className={bare ? 'hidden' : 'flex items-center gap-3'}>
-        <h3 className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>BOARDS</h3>
+        <h3 className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>{t('monitor.boards')}</h3>
         {keys.length > 0 ? (
           <select
             value={selectedKey}
@@ -435,19 +440,19 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
             {keys.map(k => <option key={k} value={k}>{k}</option>)}
           </select>
         ) : (
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>no keys with data yet — add a watch first</span>
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('monitor.noKeysData')}</span>
         )}
         <select
           value={window}
           onChange={(e) => setWindow(Number(e.target.value))}
           className="rounded-md px-2 py-1 text-xs ml-auto"
           style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-          title="How many stored records each panel curates"
+          title={t('monitor.windowTitle')}
         >
-          <option value={0}>all history</option>
-          <option value={500}>last 500</option>
-          <option value={2000}>last 2000</option>
-          <option value={10000}>last 10000</option>
+          <option value={0}>{t('monitor.window.all')}</option>
+          <option value={500}>{t('monitor.window.last', { n: 500 })}</option>
+          <option value={2000}>{t('monitor.window.last', { n: 2000 })}</option>
+          <option value={10000}>{t('monitor.window.last', { n: 10000 })}</option>
         </select>
         <button onClick={() => void load()} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>⟳</button>
       </div>
@@ -501,7 +506,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
                     })}
                     className="text-xs px-2 py-1 rounded-md"
                     style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-                    title={isExpanded ? 'Collapse' : 'Expand to full width'}
+                    title={isExpanded ? t('monitor.collapse') : t('monitor.expandFull')}
                   >
                     {isExpanded ? '⤡' : '⤢'}
                   </button>

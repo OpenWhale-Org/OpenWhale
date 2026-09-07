@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import type { MonitorInstanceView, CredentialInfo, ParamFieldDef } from '@openwhaleorg/core'
+import type { CredentialInfo } from '@openwhaleorg/core'
+import type { MonitorInstanceView, ParamFieldDef } from '@/lib/core-types'
 import { ParamsFields, buildParams, FIELD_CLASS, FIELD_STYLE } from '../../components/ParamsFields'
+import { useT } from '@/i18n'
 
 export interface ImplementationInfo {
   id: string
@@ -45,6 +47,7 @@ interface Props {
  * silently stop collecting for a venue.
  */
 export function MonitorInstancesPanel({ contract, instances, implementations, pendingKeys, credentials, onChanged, embedded = false }: Props & { embedded?: boolean }) {
+  const t = useT()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [implId, setImplId] = useState('')
@@ -70,7 +73,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
     setBusy(false)
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { error?: string }
-      setError(body.error ?? 'request failed')
+      setError(body.error ?? t('monitor.requestFailed'))
       return false
     }
     return true
@@ -136,10 +139,10 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
   return (
     <section className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>INSTANCES ({mine.length})</span>
+        <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>{t('monitor.instances', { n: mine.length })}</span>
         {multiDomain && (
-          <span className="text-xs" style={{ color: 'var(--muted)' }} title="Each implementation is its own dispatch domain — one active instance each">
-            {new Set(mine.map(i => i.implementation)).size} implementations · one active each
+          <span className="text-xs" style={{ color: 'var(--muted)' }} title={t('monitor.domainTitle')}>
+            {t('monitor.implsOneActive', { n: new Set(mine.map(i => i.implementation)).size })}
           </span>
         )}
         {impls.length > 0 && (
@@ -148,7 +151,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
             className="hoverable hoverable-flat ml-auto text-xs px-2.5 h-8 rounded-md"
             style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
           >
-            ＋ New instance
+            {t('monitor.newInstance')}
           </button>
         )}
       </div>
@@ -159,15 +162,15 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
 
       {pending.length > 0 && (
         <p className="text-xs px-3 py-2 rounded-md" style={{ background: 'color-mix(in srgb, var(--warning, #eab308) 12%, transparent)', color: 'var(--warning, #eab308)' }}>
-          Subscribed but unserved — no active instance covers: {pending.join(', ')}
+          {t('monitor.unserved', { keys: pending.join(', ') })}
         </p>
       )}
 
       {mine.length === 0 ? (
         <p className="text-xs" style={{ color: 'var(--muted)' }}>
           {impls.length === 0
-            ? 'No implementation registers for this contract.'
-            : 'No instance yet — create one to start serving this monitor.'}
+            ? t('monitor.noImplementation')
+            : t('monitor.noInstance')}
         </p>
       ) : (
         <div className="flex flex-col">
@@ -188,7 +191,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                     onClick={() => void choose(inst)}
                     disabled={busy || inst.active}
                     className="flex items-center gap-2 text-xs min-w-0"
-                    title={inst.active ? 'Running' : 'Activate — stops the current one first'}
+                    title={inst.active ? t('monitor.running') : t('monitor.activateTitle')}
                     style={{ color: inst.active ? 'var(--foreground)' : 'var(--muted)', cursor: inst.active ? 'default' : 'pointer' }}
                   >
                     <span style={{ color: inst.active ? 'var(--success, #22c55e)' : 'var(--muted)' }}>
@@ -213,7 +216,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                   )}
                   {inst.servingKeys?.length ? (
                     <span className="text-xs font-mono truncate" style={{ color: 'var(--muted)' }} title={inst.servingKeys.join(', ')}>
-                      serving {inst.servingKeys.length}
+                      {t('monitor.serving', { n: inst.servingKeys.length })}
                     </span>
                   ) : null}
                   {inst.problem && (
@@ -226,9 +229,9 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                         disabled={busy}
                         className="text-xs px-2 py-1 rounded-md"
                         style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-                        title="Stop this instance — its keys go unserved until something else covers them"
+                        title={t('monitor.stopTitle')}
                       >
-                        Stop
+                        {t('monitor.stop')}
                       </button>
                     )}
                     <button
@@ -237,7 +240,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                       className="text-xs px-2 py-1 rounded-md"
                       style={{ border: '1px solid var(--border)', color: 'var(--danger, #ef4444)' }}
                     >
-                      Delete
+                      {t('common.delete')}
                     </button>
                   </div>
                 </div>
@@ -268,16 +271,16 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                             disabled={busy}
                             className="text-xs px-3 h-8 rounded-md"
                             style={{ background: 'var(--accent)', color: '#fff' }}
-                            title={inst.active ? 'Saves, then rebuilds the running instance from the new params' : undefined}
+                            title={inst.active ? t('monitor.saveRestartTitle') : undefined}
                           >
-                            {inst.active ? 'Save & restart' : 'Save'}
+                            {inst.active ? t('monitor.saveRestart') : t('common.save')}
                           </button>
                           <button
                             onClick={() => setEditing(null)}
                             className="text-xs px-2.5 h-8 rounded-md"
                             style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
                           >
-                            Revert
+                            {t('monitor.revert')}
                           </button>
                         </div>
                       )}
@@ -307,7 +310,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={impl?.displayName ?? impl?.id ?? 'Name'}
+              placeholder={impl?.displayName ?? impl?.id ?? t('monitor.namePlaceholder')}
               className={`${FIELD_CLASS} min-w-48 flex-1`}
               style={FIELD_STYLE}
               autoFocus
@@ -321,7 +324,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
               >
                 {impls.map(i => (
                   <option key={i.id} value={i.id}>
-                    {i.displayName ?? i.id}{i.credential ? ` — needs ${i.credential.type}` : ''}
+                    {i.credential ? t('monitor.needsCredential', { name: i.displayName ?? i.id, type: i.credential.type }) : (i.displayName ?? i.id)}
                   </option>
                 ))}
               </select>
@@ -334,7 +337,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                 className={FIELD_CLASS}
                 style={FIELD_STYLE}
               >
-                <option value="">{impl.credential.level === 'required' ? `${impl.credential.type} credential…` : 'no credential'}</option>
+                <option value="">{impl.credential.level === 'required' ? t('monitor.credentialPlaceholder', { type: impl.credential.type }) : t('monitor.noCredential')}</option>
                 {eligibleCredentials.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
             )}
@@ -345,17 +348,17 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
                 className="text-xs px-3 h-8 rounded-md"
                 style={{ background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}
                 title={mine.length === 0
-                  ? 'Nothing serves this contract yet, so it starts collecting straight away'
-                  : 'Created stopped — one implementation serves at a time, and something is already running'}
+                  ? t('monitor.createStartTitle')
+                  : t('monitor.createStoppedTitle')}
               >
-                {busy ? 'Creating…' : mine.length === 0 ? 'Create & start' : 'Create'}
+                {busy ? t('monitor.creating') : mine.length === 0 ? t('monitor.createStart') : t('common.create')}
               </button>
               <button
                 onClick={() => { setCreating(false); setName(''); setCredential(''); setParamValues({}) }}
                 className="text-xs px-2.5 h-8 rounded-md"
                 style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </div>
@@ -370,7 +373,7 @@ export function MonitorInstancesPanel({ contract, instances, implementations, pe
 
           {impl?.credential?.level === 'required' && eligibleCredentials.length === 0 && (
             <span className="text-xs" style={{ color: 'var(--warning, #eab308)' }}>
-              No {impl.credential.type} credential stored — add one on the Credentials page first.
+              {t('monitor.noCredentialStored', { type: impl.credential.type })}
             </span>
           )}
         </div>

@@ -1,10 +1,18 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import type { StrategyDefinition, StrategyInstanceView, ParamFieldDef, ParamIllustration, ParamPreset } from '@openwhaleorg/core'
-import { InstanceDetail, IconMenu, ParamFieldsForm, buildParamsFromFields, fieldValuesFromParams, iconFor, patchInstanceMeta } from '../InstancesClient'
+import type { StrategyInstanceView } from '@openwhaleorg/core'
+import type { StrategyDefinition, ParamFieldDef, ParamIllustration, ParamPreset, PresetSource } from '@/lib/core-types'
+import { InstanceDetail, IconMenu, ParamFieldsForm, iconFor, patchInstanceMeta } from '../InstancesClient'
+import { buildParamsFromFields, fieldValuesFromParams, sameValues, type ParamValues } from '@/components/paramsIo'
+import { ParamsToolbar, ParamsJsonView, useParamsJson, type ParamsView } from '@/components/ParamsToolbar'
+import { useHistory, useUndoShortcuts } from '@/components/useHistory'
+import { useDirtyFlag } from '@/components/unsaved'
+import { implVenueMap, pickerVenue } from '@/components/venue'
 import { InstancePnlPanel } from './InstancePnlPanel'
+import { InstanceMiscPanel } from './InstanceMiscPanel'
+import { useT } from '@/i18n'
 
 /**
  * Full-page board for ONE instance — the same tabs as the list-page card, but
@@ -12,11 +20,26 @@ import { InstancePnlPanel } from './InstancePnlPanel'
  * (runs/logs come from the persisted trace store, not just process memory).
  */
 export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
+  const t = useT()
   const [instance, setInstance] = useState<StrategyInstanceView | null>(null)
   const [missing, setMissing] = useState(false)
   const [acting, setActing] = useState(false)
   const [actError, setActError] = useState('')
   const [confirmStop, setConfirmStop] = useState(false)
+  /* The pinned header's height, published to the page so a second sticky bar
+     (the parameter toolbar) pins below it rather than behind it. Measured
+     because the title wraps: a hardcoded offset is wrong on the first long
+     instance name. */
+  const headRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = headRef.current
+    if (!el) return
+    const publish = () => el.parentElement?.style.setProperty('--ow-sticky-top', `${el.offsetHeight}px`)
+    publish()
+    const ro = new ResizeObserver(publish)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [instance?.id, instance?.active])
 
   const pull = async () => {
     const r = await fetch('/api/instances')
@@ -54,17 +77,21 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
   return (
     <div>
       <div className="mb-4">
-        <Link href="/instances" className="text-xs" style={{ color: 'var(--muted)' }}>← Instances</Link>
+        <Link href="/instances" className="text-xs" style={{ color: 'var(--muted)' }}>← {t('nav.instances')}</Link>
       </div>
 
       {missing ? (
         <div className="text-sm" style={{ color: 'var(--muted)' }}>
-          Instance <span className="font-mono">{instanceId}</span> not found.
+          {t('board.notFound', { id: instanceId })}
         </div>
       ) : !instance ? (
-        <div className="text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
+        <div className="text-sm" style={{ color: 'var(--muted)' }}>{t('common.loading')}</div>
       ) : (
         <>
+          {/* Pinned: on a board this long, which instance you are looking at
+              and whether it is running are the two facts you must not lose
+              track of while scrolling. */}
+          <div ref={headRef} className="aurora-page-head mb-4">
           <div className="flex items-start justify-between gap-4 mb-1">
             <h1 className="text-2xl font-semibold flex items-center gap-2">
               <IconMenu
@@ -85,27 +112,34 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
               />
             </h1>
             <div className="flex items-center gap-2 mt-2">
+              {/* Dry run is not a third kind of stopped: it runs, and queues
+                  nothing. Amber, and it says so, because an instance that
+                  looks live while placing nothing is the expensive confusion. */}
               <span
                 className="text-xs px-2 py-0.5 rounded-full"
-                style={{
-                  background: instance.active ? '#14532d' : '#292524',
-                  color: instance.active ? 'var(--success)' : 'var(--muted)',
-                }}
+                style={
+                  !instance.active
+                    ? { background: '#292524', color: 'var(--muted)' }
+                    : instance.options?.dryRun
+                      ? { background: '#3f2d14', color: 'var(--warning)' }
+                      : { background: '#14532d', color: 'var(--success)' }
+                }
+                title={instance.options?.dryRun ? t('board.dryRunTitle') : undefined}
               >
-                {instance.active ? 'active' : 'stopped'}
+                {instance.active ? (instance.options?.dryRun ? 'active · dry run' : 'active') : 'stopped'}
               </span>
               {instance.active ? (
                 confirmStop ? (
                   <>
-                    <span className="text-xs" style={{ color: 'var(--muted)' }}>Deactivate this instance?</span>
+                    <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('board.deactivateConfirm')}</span>
                     <button onClick={() => setConfirmStop(false)} className="px-3 py-1.5 rounded-md text-xs"
-                      style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>Cancel</button>
+                      style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>{t('common.cancel')}</button>
                     <button onClick={() => void act('deactivate')} disabled={acting} className="px-3 py-1.5 rounded-md text-xs"
                       style={{ background: 'var(--danger)', color: '#fff' }}>{acting ? '…' : 'Confirm'}</button>
                   </>
                 ) : (
                   <button onClick={() => setConfirmStop(true)} className="px-3 py-1.5 rounded-md text-xs"
-                    style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}>Deactivate</button>
+                    style={{ background: '#3f1f1f', color: 'var(--danger)', border: '1px solid #7f1d1d' }}>{t('board.deactivate')}</button>
                 )
               ) : (
                 <button onClick={() => void act('activate')} disabled={acting} className="px-3 py-1.5 rounded-md text-xs"
@@ -119,10 +153,11 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
           {instance.description && (
             <div className="text-sm mb-1" style={{ color: 'var(--muted)' }}>{instance.description}</div>
           )}
-          <div className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+          <div className="text-xs" style={{ color: 'var(--muted)' }}>
             strategy: <span style={{ color: 'var(--accent)' }}>{instance.strategyId}</span>
             {' · '}id: {instance.id}
             {bindings.length > 0 && <>{' · '}accounts: {bindings.join(', ')}</>}
+          </div>
           </div>
 
           <InstancePnlPanel instanceId={instance.id} />
@@ -130,6 +165,8 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
           <InstanceAccountsPanel instance={instance} onSaved={pull} />
 
           <InstanceParamsPanel instance={instance} />
+
+          <InstanceMiscPanel instance={instance} onSaved={pull} />
 
           <InstanceStatePanel instance={instance} />
 
@@ -152,6 +189,7 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
  * the instance is stopped; active instances show them read-only.
  */
 function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstanceView; onSaved: () => Promise<void> }) {
+  const t = useT()
   const [open, setOpen] = useState(true)
   const [slots, setSlots] = useState<Array<{ label: string; kind?: string; type?: string; optional?: boolean }> | null>(null)
   const [accounts, setAccounts] = useState<Array<{ name: string; kind?: string; type?: string; status: string }>>([])
@@ -159,6 +197,7 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
   const [credentialTypes, setCredentialTypes] = useState<Array<{ type: string; kinds: string[] }>>([])
   const [bindings, setBindings] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
+  useDirtyFlag(dirty, t('board.accountBindings'))
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
 
@@ -193,8 +232,8 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
       body: JSON.stringify({ credentials: Object.fromEntries(Object.entries(bindings).filter(([, v]) => v)) }),
     })
     setSaving(false)
-    if (res.ok) { setDirty(false); setNotice('Saved ✓'); await onSaved() }
-    else setNotice(`Save failed: ${await res.text()}`)
+    if (res.ok) { setDirty(false); setNotice(t('board.saved')); await onSaved() }
+    else setNotice(t('board.saveFailed', { error: await res.text() }))
   }
 
   return (
@@ -202,13 +241,13 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
       <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
         <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>
-          <span>Accounts</span>
+          <span>{t('instance.accounts')}</span>
           <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
             {instance.active ? '(active: read-only — deactivate to rebind)' : '(stopped: rebind and save)'}
           </span>
-          {dirty && !instance.active && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
+          {dirty && !instance.active && <span className="text-xs" style={{ color: 'var(--warning)' }}>{t('board.unsaved')}</span>}
         </button>
-        {notice && <span className="text-xs" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        {notice && <span className="text-xs" style={{ color: notice.startsWith(t('board.savedPrefix')) ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
         {!instance.active && (
           <button
             onClick={() => void save()}
@@ -216,7 +255,7 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
             className="px-3 py-1.5 rounded-md text-xs shrink-0"
             style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         )}
       </div>
@@ -258,12 +297,12 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
                         : 'choose account…'}
                   </option>
                   {eligible.length > 0 && (
-                    <optgroup label="Accounts">
+                    <optgroup label={t('instance.accountsGroup')}>
                       {eligible.map(a => <option key={a.name} value={a.name}>{a.name} ({a.type ?? a.kind})</option>)}
                     </optgroup>
                   )}
                   {legacyEligible.length > 0 && (
-                    <optgroup label={slot.kind ? 'Credentials (legacy direct binding)' : 'Credentials'}>
+                    <optgroup label={slot.kind ? t('instance.credentialsLegacy') : t('nav.credentials')}>
                       {legacyEligible.map(c => <option key={c.id} value={c.name}>{c.name} ({c.type})</option>)}
                     </optgroup>
                   )}
@@ -282,6 +321,7 @@ function InstanceAccountsPanel({ instance, onSaved }: { instance: StrategyInstan
  * active. Enter/blur commits, Esc cancels.
  */
 function EditableName({ name, onSave }: { name: string; onSave: (name: string) => Promise<void> }) {
+  const t = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
 
@@ -296,7 +336,7 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
     return (
       <button
         className="flex items-center gap-2 text-left group"
-        title="Click to rename"
+        title={t('board.clickRename')}
         onClick={() => { setDraft(name); setEditing(true) }}
       >
         {name}
@@ -339,6 +379,7 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
  * instance is active and this panel says so rather than hiding the button.
  */
 function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [keys, setKeys] = useState<string[] | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -361,7 +402,7 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
       const body = await r.text()
       if (!r.ok) { setNotice(body || `HTTP ${r.status}`); return }
       const { cleared } = JSON.parse(body) as { cleared: number }
-      setNotice(`Cleared ${cleared} ${cleared === 1 ? 'key' : 'keys'}`)
+      setNotice(t('board.cleared', { n: cleared }))
       setConfirming(false)
       await pull()
     } catch (err) {
@@ -377,20 +418,20 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
       <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
         <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>
-          <span>Runtime state</span>
+          <span>{t('board.runtimeState')}</span>
           <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
             {keys === null ? '' : count === 0 ? '(empty)' : `(${count} ${count === 1 ? 'key' : 'keys'} the strategy stored)`}
           </span>
         </button>
         {notice && (
-          <span className="text-xs" style={{ color: notice.startsWith('Cleared') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>
+          <span className="text-xs" style={{ color: notice.startsWith(t('board.clearedPrefix')) ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>
         )}
         {confirming ? (
           <>
-            <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>Clear all stored state?</span>
-            <button onClick={() => setConfirming(false)} className="btn btn-secondary btn-sm shrink-0">Cancel</button>
+            <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>{t('board.clearConfirm')}</span>
+            <button onClick={() => setConfirming(false)} className="btn btn-secondary btn-sm shrink-0">{t('common.cancel')}</button>
             <button onClick={() => void clear()} disabled={busy} className="btn btn-danger-solid btn-sm shrink-0">
-              {busy ? '…' : 'Confirm'}
+              {busy ? '…' : t('common.confirm')}
             </button>
           </>
         ) : (
@@ -398,9 +439,9 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
             onClick={() => setConfirming(true)}
             disabled={instance.active || count === 0}
             className="btn btn-danger btn-sm shrink-0"
-            title={instance.active ? 'Deactivate the instance first — clearing state under a running strategy loses its idempotency marks' : 'Delete everything the strategy wrote to this.store'}
+            title={instance.active ? t('board.clearBlockedTitle') : t('board.clearTitle')}
           >
-            Clear state
+            {t('board.clearState')}
           </button>
         )}
       </div>
@@ -408,8 +449,8 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
         <div className="px-4 pb-4 flex flex-col gap-2">
           <p className="text-xs" style={{ color: 'var(--muted)' }}>
             {instance.active
-              ? 'Active — deactivate before clearing. A strategy reads this store mid-cycle; wiping it underneath one drops the marks that say a leg is already placed, and the next run acts as if nothing had happened.'
-              : 'Everything the strategy wrote to this.store: baselines, idempotency marks, cycle bookkeeping. Clearing makes the next activation start from scratch. Params, accounts, runs and PnL are untouched.'}
+              ? t('board.clearBlockedBody')
+              : t('board.clearBody')}
           </p>
           {count > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -423,6 +464,7 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
 }
 
 function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
+  const t = useT()
   const [open, setOpen] = useState(true)
   const [fields, setFields] = useState<ParamFieldDef[] | null>(null)
   /* The same diagrams the create form shows. They were missing here only
@@ -431,8 +473,18 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
      picture of what a knob does is worth the most. */
   const [illustrations, setIllustrations] = useState<ParamIllustration[] | undefined>(undefined)
   const [presets, setPresets] = useState<ParamPreset[] | undefined>(undefined)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [dirty, setDirty] = useState(false)
+  const [presetSource, setPresetSource] = useState<PresetSource | undefined>(undefined)
+  const [illustrationData, setIllustrationData] = useState<boolean | undefined>(undefined)
+  const history = useHistory<ParamValues>({})
+  const values = history.state
+  const setValues = history.set
+  const [view, setView] = useState<ParamsView>('form')
+  const json = useParamsJson(fields ?? [], values, setValues)
+  /* Dirty is derived, not flagged: undo back to where you started has to stop
+     claiming there is something to save. */
+  const [saved, setSaved] = useState<ParamValues>({})
+  const dirty = !sameValues(values, saved)
+  useDirtyFlag(dirty, t('params.title'))
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   /** Venue per bound slot label; the first entry is the default for fields naming no `accountSlot`. */
@@ -450,24 +502,29 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       setFields(f)
       setIllustrations(def?.paramsIllustrations)
       setPresets(def?.paramPresets)
-      setValues(fieldValuesFromParams(f, instance.params))
-      setDirty(false)
-      // The pickers and availability checks need the bound account's venue —
-      // same derivation as the create form: slot binding → account → venue
-      // pin from the implementation, credential type only as CEX fallback.
+      setPresetSource(def?.presetSource)
+      setIllustrationData(def?.illustrationData)
+      const seed = fieldValuesFromParams(f, instance.params)
+      history.reset(seed)
+      setSaved(seed)
+      json.reset()
+      setView('form')
+      // The pickers and availability checks need the bound account's venue:
+      // slot binding → account → pickerVenue (see components/venue.ts, the one
+      // place that knows how a venue is resolved).
       if (ra.ok) {
         const { accounts, implementations } = (await ra.json()) as {
-          accounts: Array<{ name: string; implementation?: string; credential?: string; type?: string }>
-          implementations?: Array<{ id: string; type?: string }>
+          accounts: Array<{ name: string; implementation?: string; credential?: string; type?: string; venue?: string }>
+          implementations?: Array<{ id: string; venue?: string; type?: string }>
         }
-        const implVenues = Object.fromEntries((implementations ?? []).flatMap(i => i.type ? [[i.id, i.type]] : []))
+        const implVenues = implVenueMap(implementations)
         const venues: Record<string, string> = {}
         for (const slot of def?.accountRequirements ?? []) {
           const bound = instance.credentials?.[slot.label] ?? instance.accounts?.[0]
           if (!bound) continue
           // Instances from before Account entities bind by credential name — match either
           const account = accounts.find(a => a.name === bound || a.credential === bound)
-          const venue = account ? implVenues[account.implementation ?? ''] ?? account.type : undefined
+          const venue = pickerVenue(account, implVenues)
           if (venue) venues[slot.label] = venue
         }
         if (!gone) setSlotVenues(venues)
@@ -478,6 +535,10 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
     // a deactivation just made them editable — either way start clean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instance.strategyId, instance.active])
+
+  // ⌘Z belongs to the panel only while it is open and the form has focus —
+  // the JSON editor keeps Monaco's own undo.
+  useUndoShortcuts(open && view === 'form', history.undo, history.redo)
 
   if (fields === null) return null
   if (fields.length === 0) return null
@@ -493,57 +554,107 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
       body: JSON.stringify({ params: buildParamsFromFields(fields!, values) }),
     })
     setSaving(false)
-    if (res.ok) { setDirty(false); setNotice(instance.active ? 'Saved & restarted ✓' : 'Saved ✓') }
-    else setNotice(`Save failed: ${await res.text()}`)
+    if (res.ok) { setSaved(values); setNotice(instance.active ? t('board.savedRestarted') : t('board.saved')) }
+    else setNotice(t('board.saveFailed', { error: await res.text() }))
   }
 
+  const blocked = view === 'json' && json.error !== ''
+
   return (
-    <div className="rounded-lg mb-4 overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      {/* A div, not a button: the top save button must not nest inside the toggle. */}
-      <div className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium">
-        <button className="flex items-center gap-2 text-left flex-1 py-0.5" onClick={() => setOpen(v => !v)}>
+    // overflow-clip, not hidden: hidden would make this a scroll container and
+    // the sticky toolbar inside it would never stick.
+    <div className="rounded-lg mb-4 overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      {/* Sticky so Save, undo and the view switch stay reachable however far
+          down a long parameter form the user has scrolled. A div, not a button:
+          the actions must not nest inside the collapse toggle. */}
+      <div
+        className="sticky z-20 w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
+        style={{
+          // Below the page's own pinned header, not behind it.
+          top: 'var(--ow-sticky-top, 0px)',
+          background: 'var(--surface)',
+          borderBottom: open ? '1px solid var(--border)' : 'none',
+        }}
+      >
+        <button className="flex items-center gap-2 text-left py-0.5 min-w-0" onClick={() => setOpen(v => !v)}>
           <span>{open ? '▾' : '▸'}</span>
-          <span>Parameters</span>
-          <span className="text-xs font-normal" style={{ color: 'var(--muted)' }}>
+          <span>{t('params.title')}</span>
+          <span className="text-xs font-normal truncate" style={{ color: 'var(--muted)' }}>
             {instance.active ? '(active: saving restarts the instance)' : '(stopped: edit and save directly)'}
           </span>
-          {dirty && <span className="text-xs" style={{ color: 'var(--warning)' }}>Unsaved</span>}
+          {dirty && <span className="text-xs shrink-0" style={{ color: 'var(--warning)' }}>{t('board.unsaved')}</span>}
         </button>
-        {notice && <span className="text-xs" style={{ color: notice.startsWith('Saved') ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        <div className="flex-1" />
+        {notice && <span className="text-xs shrink-0" style={{ color: notice.startsWith(t('board.savedPrefix')) ? 'var(--success)' : 'var(--danger)' }}>{notice}</span>}
+        {open && (
+          <ParamsToolbar
+            fields={fields}
+            values={values}
+            view={view}
+            onView={(v) => {
+              // Leaving JSON drops the draft: what the form shows is what the
+              // last parse produced, and a stale draft would overwrite it later.
+              if (v === 'form') json.reset()
+              setView(v)
+            }}
+            history={history}
+            onImport={(next) => {
+              setValues(next, { coalesce: false })   // one undo step, not one per field
+              json.reset()
+              setNotice('')
+            }}
+            strategyId={instance.strategyId}
+            instanceName={instance.name}
+            disabled={blocked}
+          />
+        )}
         <button
           onClick={() => void save()}
-          disabled={saving || !dirty}
+          disabled={saving || !dirty || blocked}
           className="px-3 py-1.5 rounded-md text-xs shrink-0"
-          style={{ background: dirty ? 'var(--accent)' : 'var(--background)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+          style={{ background: dirty && !blocked ? 'var(--accent)' : 'var(--background)', color: dirty && !blocked ? '#fff' : 'var(--muted)', border: dirty && !blocked ? 'none' : '1px solid var(--border)' }}
         >
-          {saving ? 'Saving…' : instance.active ? 'Save & restart' : 'Save'}
+          {saving ? t('common.saving') : instance.active ? t('board.saveRestart') : t('common.save')}
         </button>
       </div>
       {open && (
         <div className="px-4 pb-4">
-          <ParamFieldsForm
-            fields={fields}
-            values={values}
-            onChange={(v) => { setValues(v); setDirty(true) }}
-            strategyId={instance.strategyId}
-            venueContext={boundVenue}
-            slotVenues={slotVenues}
-            {...(illustrations ? { illustrations } : {})}
-            {...(presets ? { presets } : {})}
-          />
+          {view === 'json' ? (
+            <div className="pt-2">
+              <ParamsJsonView
+                json={json}
+                path={`params/${instance.id}.json`}
+                note={t('params.jsonNoteSave')}
+              />
+            </div>
+          ) : (
+            <ParamFieldsForm
+              fields={fields}
+              values={values}
+              onChange={(v) => setValues(v)}
+              strategyId={instance.strategyId}
+              venueContext={boundVenue}
+              slotVenues={slotVenues}
+              {...(illustrations ? { illustrations } : {})}
+              {...(presets ? { presets } : {})}
+              presetSource={presetSource}
+              slotBindings={instance.credentials ?? {}}
+              illustrationData={illustrationData}
+            />
+          )}
           <div className="flex justify-end items-center gap-3 mt-3">
             {instance.active && dirty && (
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                Saving rebuilds the running instance from these values.
+                {t('board.saveRebuilds')}
               </span>
             )}
             <button
               onClick={() => void save()}
-              disabled={saving || !dirty}
+              disabled={saving || !dirty || blocked}
               className="px-4 py-2 rounded-md text-sm"
-              style={{ background: dirty ? 'var(--accent)' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: dirty ? 'none' : '1px solid var(--border)' }}
+              style={{ background: dirty && !blocked ? 'var(--accent)' : 'var(--surface)', color: dirty && !blocked ? '#fff' : 'var(--muted)', border: dirty && !blocked ? 'none' : '1px solid var(--border)' }}
             >
-              {saving ? 'Saving…' : instance.active ? 'Save & restart' : 'Save parameters'}
+              {saving ? t('common.saving') : instance.active ? t('board.saveRestart') : t('board.saveParams')}
             </button>
           </div>
         </div>

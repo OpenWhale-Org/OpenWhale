@@ -2,9 +2,11 @@
 
 import { useState } from 'react'
 import { JsonTree } from './JsonTree'
+import { useT } from '@/i18n'
 
 /** One-click copy with transient feedback. Copies pretty JSON for objects, raw text otherwise. */
 export function CopyButton({ value, label }: { value: unknown; label?: string }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   return (
     <button
@@ -16,7 +18,7 @@ export function CopyButton({ value, label }: { value: unknown; label?: string })
           setTimeout(() => setCopied(false), 1200)
         })
       }}
-      title="Copy JSON"
+      title={t('ui.copyJson')}
       className="text-xs px-1.5 py-0.5 rounded shrink-0"
       style={{
         color: copied ? '#4ade80' : 'var(--muted)',
@@ -24,13 +26,14 @@ export function CopyButton({ value, label }: { value: unknown; label?: string })
         background: 'transparent',
       }}
     >
-      {copied ? '✓ copied' : label ?? '⧉'}
+      {copied ? t('ui.copied') : label ?? '⧉'}
     </button>
   )
 }
 
 /** Fullscreen-overlay JSON viewer with copy. */
 export function JsonModal({ title, data, onClose }: { title: string; data: unknown; onClose: () => void }) {
+  const t = useT()
   const text = JSON.stringify(data, null, 2)
   return (
     <div
@@ -45,7 +48,7 @@ export function JsonModal({ title, data, onClose }: { title: string; data: unkno
       >
         <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
           <span className="text-sm font-mono font-medium flex-1 truncate">{title}</span>
-          <CopyButton value={text} label="copy JSON" />
+          <CopyButton value={text} label={t('ui.copyJsonLabel')} />
           <button onClick={onClose} className="text-sm px-2" style={{ color: 'var(--muted)' }}>✕</button>
         </div>
         <div className="flex-1 overflow-auto scroll-hidden p-4">

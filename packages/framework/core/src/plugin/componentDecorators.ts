@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from '../types/materialization.js'
 import type { AccountSectionDef } from '../types/account.js'
@@ -34,10 +35,21 @@ export interface OwMonitorMeta {
    * narrow its keySchema (values only, same fields).
    */
   contract?: string
-  name?: string
-  description?: string
+  name?: Text
+  description?: Text
   /** Credential requirement for instances (absent = credential-less). */
   credential?: { type: string; level: 'optional' | 'required' }
+  /**
+   * The venue this monitor's keys live on, when it has exactly one.
+   *
+   * A catalogue picker needs (kind, venue) to list anything. Multi-venue
+   * monitors carry the venue IN the key and let the form read it from that
+   * field; a monitor pinned to one venue has no such field, and without this
+   * the dashboard has nothing to go on — the operator types symbols by hand.
+   * Declare it only when the pin is real: a wrong venue is a 404 at the
+   * catalogue, not a caught mistake.
+   */
+  venue?: string
   /**
    * Top-level tuning params (Zod object, .meta() drives the form). Filled per
    * instance at creation, editable any time (an active one is rebuilt).
@@ -70,7 +82,7 @@ export interface OwAccountMeta {
   venue?: string
   /** @deprecated Legacy name for {@link venue}. */
   type?: string
-  displayName?: string
+  displayName?: Text
   /** Declared configuration schema — see AccountImplementation.paramsSchema. */
   paramsSchema?: ZodObject<ZodRawShape>
   /** Declarative detail panel — see AccountImplementation.sections. */
@@ -108,8 +120,8 @@ export type AccountClass = new (accountName: string, session: never, params?: Re
 export interface OwExecutorMeta {
   /** Registry id. Defaults to the instance's executorName at lowering. */
   id?: string
-  name?: string
-  description?: string
+  name?: Text
+  description?: Text
 }
 
 const executorMeta = new WeakMap<object, OwExecutorMeta>()
@@ -128,8 +140,8 @@ export function owExecutorMeta(ctor: object): OwExecutorMeta | undefined {
 export interface OwStrategyMeta {
   /** Registry id. Defaults to the probe instance's strategyId at lowering. */
   id?: string
-  name?: string
-  description?: string
+  name?: Text
+  description?: Text
 }
 
 const strategyMeta = new WeakMap<object, OwStrategyMeta>()

@@ -43,6 +43,8 @@ export type {
   CustomProviderConfig,
   IStrategy,
   StrategyRunTrace,
+  LifecycleReason,
+  LifecycleContext,
   StrategyPortfolioSnapshot,
   AccountSlotMeta,
   ScriptDefinition,
@@ -50,6 +52,8 @@ export type {
   ScriptResult,
   ScriptInfo,
   StrategyInstance,
+  InstanceOptions,
+  BreakerRule,
   StrategyInstanceView,
   StrategyParams,
   PortfolioMode,
@@ -109,6 +113,13 @@ export type {
   ParamFieldMeta,
   ParamIllustration,
   ParamPreset,
+  PresetCard,
+  PresetFigure,
+  PresetTone,
+  PresetSource,
+  PresetContext,
+  ParamPicker,
+  PickerOption,
   ParamAvailability,
   AvailabilityVerdict,
   AvailabilityChecker,
@@ -134,8 +145,10 @@ export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 // Monitor
 export { BaseMonitor, MonitorMode } from './monitor/BaseMonitor.js'
 export { PnlService } from './pnl/PnlService.js'
-export type { OrderClaim, PnlSummary, PnlSeriesPoint, PnlFillRow, PnlPositionRow, PnlSessionLike } from './pnl/PnlService.js'
+export type { OrderClaim, PnlSummary, PnlSeriesPoint, PnlFillRow, PnlPositionRow, PnlSessionLike, PnlWindow, LedgerHealth } from './pnl/PnlService.js'
 export { MonitorDataReaderImpl } from './monitor/MonitorDataReader.js'
+export { pruneJsonlByTime, matchesKeyPattern } from './monitor/retention.js'
+export type { PruneResult } from './monitor/retention.js'
 export { MonitorInstanceManager, ContractMonitor } from './monitor/MonitorInstanceManager.js'
 export { DBMonitorInstanceStore, MemoryMonitorInstanceStore } from './monitor/MonitorInstanceStore.js'
 export { DBAccountStore, MemoryAccountStore } from './account/AccountStore.js'
@@ -218,3 +231,5 @@ export {
   getInstancePath,
 } from './utils/paths.js'
 export { appendJsonl, readJsonlLines, writeJsonlLines, streamJsonlLines } from './utils/jsonl.js'
+export { DEFAULT_LOCALE, resolveText, pickLocale, normalizeLocale, localize, foldLanguagePacks, isLocalizedText } from './i18n.js'
+export type { Locale, Text, LocalizedText, Localized, LanguagePack } from './i18n.js'

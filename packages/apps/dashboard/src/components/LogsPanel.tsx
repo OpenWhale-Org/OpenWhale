@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { subscribeLiveEvents } from '@/lib/live-events'
+import { useT } from '@/i18n'
 
 interface LogLine {
   ts: number
@@ -20,6 +21,7 @@ const LEVEL_COLORS: Record<string, string> = {
  * pushed over SSE (events of `sseType` whose `monitor` field equals `id`).
  */
 export function LogsPanel({ id, logsUrl, sseType }: { id: string; logsUrl: string; sseType: string }) {
+  const t = useT()
   const [lines, setLines] = useState<LogLine[]>([])
 
   useEffect(() => {
@@ -38,11 +40,11 @@ export function LogsPanel({ id, logsUrl, sseType }: { id: string; logsUrl: strin
   return (
     <div className="rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       <div className="px-3 py-1.5 text-xs" style={{ background: 'var(--background)', color: 'var(--muted)' }}>
-        logs · live <span className="animate-pulse">●</span>
+        {t('ui.logsLive')} <span className="animate-pulse">●</span>
       </div>
       <div className="max-h-72 overflow-y-auto font-mono text-xs">
         {lines.length === 0 ? (
-          <p className="p-3" style={{ color: 'var(--muted)' }}>No log lines yet.</p>
+          <p className="p-3" style={{ color: 'var(--muted)' }}>{t('ui.noLogLines')}</p>
         ) : lines.map((line, i) => (
           <div key={`${line.ts}-${i}`} className="px-3 py-1 flex gap-2 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
             <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(line.ts).toLocaleTimeString()}</span>

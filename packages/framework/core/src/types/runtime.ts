@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 import type { StrategyInstance } from './instance.js'
 import type { ExecutionQueue } from './executor.js'
 import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition } from './definition.js'
@@ -28,6 +29,13 @@ export interface RuntimeOptions {
   database?: DatabaseAdapter
   /** Equity snapshotter tuning (Accounts page curves). Defaults: 5min interval, 30d retention. */
   accountSnapshots?: { intervalMs?: number; retentionMs?: number }
+  /**
+   * How long a deactivation waits for the strategy's own teardown — the run in
+   * flight, then onDeactivate and what it fires. Past it, teardown proceeds:
+   * an instance that cannot be stopped resumes trading on the next boot. On
+   * shutdown one budget covers every instance. Default 15 s.
+   */
+  quiesceTimeoutMs?: number
 }
 
 /** Summary of a loaded plugin: its namespace and the registry ids it contributed. */
@@ -47,7 +55,7 @@ export interface LoadedPluginInfo {
   declaredName?: string
   version: string
   /** Markdown shipped by the plugin (manifest `readme`) — the Plugins page's detail pane. */
-  readme?: string
+  readme?: Text
   /** Brand mark (https URL or data: URI); the dashboard falls back to a credential type's mark, then a letter chip. */
   logo?: string
   icon?: string

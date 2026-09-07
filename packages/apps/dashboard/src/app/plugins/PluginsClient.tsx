@@ -3,10 +3,20 @@
 import { useMemo, useState, useEffect } from 'react'
 import { Rail, RailItem } from '@/components/Rail'
 import { useRouter } from 'next/navigation'
-import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, CredentialTypeInfo, ScriptInfo, AccountImplementationInfo, PluginDependents } from '@openwhaleorg/core'
+import type { PluginDependents } from '@openwhaleorg/core'
+import type { CredentialTypeInfo } from '@/lib/core-types'
+import type { MonitorDefinition, ExecutorDefinition, StrategyDefinition, ScriptInfo, AccountImplementationInfo } from '@/lib/core-types'
 import type { InstalledPluginView, PluginUpdate } from '@/lib/data'
 import { Markdown } from '@/components/Markdown'
 import { TypeMark } from '@/components/TypeMark'
+import { useT, type MessageKey } from '@/i18n'
+
+/** Render a translated sentence whose `backticked` spans are code — a name, an env var — so the wording stays a sentence in every language. */
+function rich(text: string): React.ReactNode {
+  const parts = text.split('`')
+  if (parts.length < 3) return text
+  return parts.map((part, i) => i % 2 === 1 ? <span key={i} className="font-mono">{part}</span> : <span key={i}>{part}</span>)
+}
 
 /**
  * Plugins + Registry, merged: a JetBrains-style manager. Left rail lists
@@ -58,6 +68,7 @@ const CATEGORY_COLORS = {
 } as const
 
 export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes, scripts, accountImpls }: Props) {
+  const t = useT()
   const [plugins, setPlugins] = useState(initialPlugins)
   const [registry, setRegistry] = useState(initialRegistry)
   const [tab, setTab] = useState<'builtin' | 'external'>('builtin')
@@ -106,7 +117,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
         <button onClick={() => setInstalling(v => !v)} className={`btn ${installing ? 'btn-secondary' : 'btn-primary'}`}>
-          {installing ? 'Cancel' : '+ Install Plugin'}
+          {installing ? t('common.cancel') : t('plugins.install')}
         </button>
       </div>
 
@@ -116,7 +127,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
           width="18rem"
           header={
             <div className="flex">
-              {([['builtin', `Built-in (${builtins.length})`], ['external', `External (${externals.length + (compiledCount > 0 ? 1 : 0)})`]] as const).map(([key, label]) => (
+              {([['builtin', t('plugins.tab.builtin', { n: builtins.length })], ['external', t('plugins.tab.external', { n: externals.length + (compiledCount > 0 ? 1 : 0) })]] as const).map(([key, label]) => (
                 <button
                   key={key}
                   onClick={() => pick(key, key === 'builtin' ? builtins[0]?.name ?? null : externals[0]?.name ?? (compiledCount > 0 ? COMPILED_ID : null))}
@@ -143,7 +154,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
                 onClick={() => pick(tab, p.name)}
                 mark={<TypeMark logo={mark.logo} icon={mark.icon} label={p.name} size={26} />}
                 title={<>{p.name}{p.loadError && <span className="ml-1.5 text-xs" style={{ color: 'var(--danger)' }} title={p.loadError}>⚠</span>}</>}
-                subtitle={updates[p.name] ? <>v{p.version} <span style={{ color: 'var(--accent)' }}>→ v{updates[p.name]!.latest} available</span></> : `v${p.version}`}
+                subtitle={updates[p.name] ? <>v{p.version} <span style={{ color: 'var(--accent)' }}>{t('plugins.updateAvailable', { version: updates[p.name]!.latest })}</span></> : `v${p.version}`}
                 right={<span className="font-mono">{count}</span>}
               />
             )
@@ -152,17 +163,17 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
             <RailItem
               active={selected === COMPILED_ID}
               onClick={() => pick('external', COMPILED_ID)}
-              mark={<TypeMark icon="✦" label="AI Compiled" size={26} />}
-              title="AI Compiled"
-              subtitle="compiled components"
+              mark={<TypeMark icon="✦" label={t('plugins.compiled')} size={26} />}
+              title={t('plugins.compiled')}
+              subtitle={t('plugins.compiledComponents')}
               right={<span className="font-mono">{compiledCount}</span>}
             />
           )}
           {tab === 'external' && externalEmpty && (
             <div className="px-4 py-10 text-center flex flex-col items-center gap-3">
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>No external plugins yet.</p>
-              <button onClick={() => setInstalling(true)} className="btn btn-primary btn-sm">+ Install Plugin</button>
-              <p className="text-[11px] opacity-60" style={{ color: 'var(--muted)' }}>Plugin marketplace — coming soon</p>
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('plugins.noExternal')}</p>
+              <button onClick={() => setInstalling(true)} className="btn btn-primary btn-sm">{t('plugins.install')}</button>
+              <p className="text-[11px] opacity-60" style={{ color: 'var(--muted)' }}>{t('plugins.marketplaceSoon')}</p>
             </div>
           )}
         </Rail>
@@ -193,7 +204,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
               onUpdated={() => void refresh()}
             />
           ) : (
-            <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>Pick a plugin.</div>
+            <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>{t('plugins.pickOne')}</div>
           )}
         </div>
       </div>
@@ -214,6 +225,7 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
   onUninstalled: () => void
   onUpdated: () => void
 }) {
+  const t = useT()
   const [confirming, setConfirming] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [updating, setUpdating] = useState(false)
@@ -229,11 +241,11 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
       const res = await fetch(`/api/plugins/${encodeURIComponent(plugin.name)}/update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: update.latest }),
       })
-      if (!res.ok) { setError(await res.text() || `Update failed (HTTP ${res.status})`); return }
+      if (!res.ok) { setError(await res.text() || t('plugins.updateFailed', { status: res.status })); return }
       const out = await res.json() as { reloaded: string[]; reactivated: string[] }
-      const bits = [`updated to v${update.latest}`]
-      if (out.reloaded.length) bits.push(`reloaded ${out.reloaded.join(', ')}`)
-      if (out.reactivated.length) bits.push(`re-activated ${out.reactivated.length} instance${out.reactivated.length === 1 ? '' : 's'}`)
+      const bits = [t('plugins.updatedTo', { version: update.latest })]
+      if (out.reloaded.length) bits.push(t('plugins.reloaded', { names: out.reloaded.join(', ') }))
+      if (out.reactivated.length) bits.push(t('plugins.reactivated', { n: out.reactivated.length }))
       setUpdateNote(bits.join(' · '))
       onUpdated()
     } catch (err) {
@@ -262,7 +274,7 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
   }
 
   const blockers: Array<[string, string[]]> = deps
-    ? ([['strategy instances', deps.instances], ['accounts', deps.accounts], ['credentials', deps.credentials]] as Array<[string, string[]]>)
+    ? ([[t('plugins.dep.instances'), deps.instances], [t('plugins.dep.accounts'), deps.accounts], [t('plugins.dep.credentials'), deps.credentials]] as Array<[string, string[]]>)
         .filter(([, ids]) => ids.length > 0)
     : []
 
@@ -281,10 +293,10 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
     const res = await fetch(`/api/plugins/${encodeURIComponent(plugin.name)}`, { method: 'DELETE' })
     setRemoving(false)
     if (res.ok) { setConfirming(false); setDeps(null); onUninstalled() }
-    else { setConfirming(false); setError(await res.text() || `Uninstall failed (HTTP ${res.status})`) }
+    else { setConfirming(false); setError(await res.text() || t('plugins.uninstallFailed', { status: res.status })) }
   }
 
-  const sourceBadge = !plugin.source ? 'built-in'
+  const sourceBadge = !plugin.source ? t('plugins.source.builtin')
     : plugin.source.kind === 'npm' ? `npm: ${plugin.source.package}`
     : plugin.source.kind === 'github' ? `github: ${plugin.source.repo}${plugin.source.ref ? `#${plugin.source.ref}` : ''}`
     : plugin.source.kind === 'local' ? `local: ${plugin.source.path}`
@@ -304,8 +316,8 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
           {/* Installed under a namespace that is not its own name — say whose
               plugin this actually is, or the rail is a list of aliases. */}
           {plugin.declaredName && (
-            <span className="badge badge-neutral" title={`The package calls itself "${plugin.declaredName}"`}>
-              declared: {plugin.declaredName}
+            <span className="badge badge-neutral" title={t('plugins.declaredTitle', { name: plugin.declaredName })}>
+              {t('plugins.declared', { name: plugin.declaredName })}
             </span>
           )}
           <span className="badge badge-neutral">v{plugin.version}</span>
@@ -314,7 +326,7 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
           ) : (
             <span className="badge badge-neutral truncate max-w-[24rem]" title={sourceBadge}>{sourceBadge}</span>
           )}
-          {plugin.installedAt && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>installed {new Date(plugin.installedAt).toLocaleString()}</span>}
+          {plugin.installedAt && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{t('plugins.installedAt', { when: new Date(plugin.installedAt).toLocaleString() })}</span>}
         </div>
         {plugin.source && (
           <div className="shrink-0 flex gap-2">
@@ -323,24 +335,24 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
                 onClick={() => void runUpdate()}
                 disabled={updating}
                 className="btn btn-sm btn-primary"
-                title={`Installed v${update.installed}; v${update.latest} is on npm. Updates in place, reloads dependent plugins and re-activates running instances.`}
+                title={t('plugins.updateTitle', { installed: update.installed, latest: update.latest })}
               >
-                {updating ? 'Updating…' : `↑ Update to v${update.latest}`}
+                {updating ? t('plugins.updating') : t('plugins.updateTo', { version: update.latest })}
               </button>
             )}
             {confirming ? (
               <>
-                <button onClick={() => setConfirming(false)} className="btn btn-sm btn-secondary">Cancel</button>
+                <button onClick={() => setConfirming(false)} className="btn btn-sm btn-secondary">{t('common.cancel')}</button>
                 <button
                   onClick={() => void uninstall()}
                   disabled={removing || checking || blockers.length > 0}
                   className="btn btn-sm btn-danger-solid"
                 >
-                  {removing ? 'Removing…' : checking ? 'Checking…' : 'Confirm'}
+                  {removing ? t('plugins.removing') : checking ? t('plugins.checking') : t('common.confirm')}
                 </button>
               </>
             ) : (
-              <button onClick={() => void askConfirm()} className="btn btn-sm btn-danger">Uninstall</button>
+              <button onClick={() => void askConfirm()} className="btn btn-sm btn-danger">{t('plugins.uninstall')}</button>
             )}
           </div>
         )}
@@ -354,27 +366,27 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
         {confirming && (
           <div className={`alert text-xs flex flex-col gap-1.5 ${blockers.length > 0 ? 'alert-danger' : 'alert-warning'}`}>
             {checking ? (
-              <span>Checking what depends on {plugin.name}…</span>
+              <span>{t('plugins.checkingDeps', { name: plugin.name })}</span>
             ) : blockers.length > 0 ? (
               <>
-                <span className="font-medium">Cannot uninstall — {plugin.name} is still in use:</span>
+                <span className="font-medium">{t('plugins.cannotUninstall', { name: plugin.name })}</span>
                 {blockers.map(([label, ids]) => (
                   <span key={label}>
-                    <span className="opacity-70">{ids.length} {label}: </span>
-                    <span className="font-mono">{ids.slice(0, 6).join(', ')}{ids.length > 6 ? ` and ${ids.length - 6} more` : ''}</span>
+                    <span className="opacity-70">{t('plugins.depCount', { n: ids.length, what: label })}</span>
+                    <span className="font-mono">{ids.slice(0, 6).join(', ')}{ids.length > 6 ? t('plugins.andMore', { n: ids.length - 6 }) : ''}</span>
                   </span>
                 ))}
                 {/* Each of these holds something the user configured — params,
                     a key, an equity history. Removing them is their call. */}
-                <span className="opacity-70">Delete them first. Uninstalling would leave each one pointing at code that no longer exists.</span>
+                <span className="opacity-70">{t('plugins.deleteFirst')}</span>
               </>
             ) : (
               <>
-                <span className="font-medium">Uninstall {plugin.name}?</span>
+                <span className="font-medium">{t('plugins.uninstallConfirm', { name: plugin.name })}</span>
                 {deps && deps.monitorInstances.length > 0 && (
                   <span>
-                    <span className="opacity-70">{deps.monitorInstances.length} monitor instance(s) will be deleted with it: </span>
-                    <span className="font-mono">{deps.monitorInstances.slice(0, 6).join(', ')}{deps.monitorInstances.length > 6 ? ` and ${deps.monitorInstances.length - 6} more` : ''}</span>
+                    <span className="opacity-70">{t('plugins.monitorInstancesDeleted', { n: deps.monitorInstances.length })}</span>
+                    <span className="font-mono">{deps.monitorInstances.slice(0, 6).join(', ')}{deps.monitorInstances.length > 6 ? t('plugins.andMore', { n: deps.monitorInstances.length - 6 }) : ''}</span>
                   </span>
                 )}
               </>
@@ -387,51 +399,55 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
             <Markdown source={plugin.readme} />
           </div>
         ) : (
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>This plugin ships no README.</p>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('plugins.noReadme')}</p>
         )}
 
         <ElementGrid
-          title="Strategies"
+          title={t('plugins.grid.strategies')}
           color={CATEGORY_COLORS.strategies}
           href={(id) => `/instances?new=${encodeURIComponent(id)}`}
           items={strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))}
         />
         <ElementGrid
-          title="Monitors"
+          title={t('plugins.grid.monitors')}
           color={CATEGORY_COLORS.monitors}
           href={(id) => `/monitor?sel=${encodeURIComponent(id)}`}
           items={monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))}
         />
         <ElementGrid
-          title="Executors"
+          title={t('plugins.grid.executors')}
           color={CATEGORY_COLORS.executors}
           href={() => '/executors'}
           items={executors.map(d => ({ id: d.id, name: d.name, description: d.description ?? d.supportedActions?.join(' · ') }))}
         />
         <ElementGrid
-          title="Accounts"
+          title={t('plugins.grid.accounts')}
           color={CATEGORY_COLORS.accounts}
           href={() => '/accounts'}
           items={myAccounts.map(a => ({
             id: a.id,
             name: a.displayName ?? a.id,
-            description: `${a.kind}${a.type ? ` · venue ${a.type}` : ' · any venue'}${a.credentialTypes ? ` · keys: ${a.credentialTypes.join(', ')}` : ''}`,
+            description: [
+              a.kind,
+              a.type ? t('plugins.account.venue', { venue: a.type }) : t('plugins.account.anyVenue'),
+              ...(a.credentialTypes ? [t('plugins.account.keys', { types: a.credentialTypes.join(', ') })] : []),
+            ].join(' · '),
           }))}
         />
         <ElementGrid
-          title="Credential Types"
+          title={t('plugins.grid.credentialTypes')}
           color={CATEGORY_COLORS.credentials}
           href={() => '/credentials'}
-          items={myCredTypes.map(t => ({ id: t.type, name: t.displayName ?? t.type, description: t.description, logo: t.logo, icon: t.icon }))}
+          items={myCredTypes.map(ct => ({ id: ct.type, name: ct.displayName ?? ct.type, description: ct.description, logo: ct.logo, icon: ct.icon }))}
         />
         <ElementGrid
-          title="Adapter Cells"
+          title={t('plugins.grid.cells')}
           color={CATEGORY_COLORS.cells}
           items={plugin.cells.map(c => ({ id: `${c.kind} × ${c.venue}`, name: `${c.kind} × ${c.venue}` }))}
           compact
         />
         <ElementGrid
-          title="Scripts"
+          title={t('plugins.grid.scripts')}
           color={CATEGORY_COLORS.scripts}
           href={() => '/scripts'}
           items={myScripts.map(s => ({ id: s.id, name: s.name, description: s.description }))}
@@ -451,6 +467,7 @@ function ElementGrid({ title, color, items, href, compact, onDelete }: {
   /** Two-step delete on each card (compiled components only). */
   onDelete?: (id: string) => Promise<void>
 }) {
+  const t = useT()
   const router = useRouter()
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   if (items.length === 0) return null
@@ -482,8 +499,8 @@ function ElementGrid({ title, color, items, href, compact, onDelete }: {
                   void onDelete(item.id)
                 }}
                 onMouseLeave={() => { if (pendingDelete === item.id) setPendingDelete(null) }}
-                title={pendingDelete === item.id ? 'Click again to delete permanently' : 'Delete compiled component'}
-                aria-label={`Delete ${item.name}`}
+                title={pendingDelete === item.id ? t('plugins.deleteAgain') : t('plugins.deleteCompiled')}
+                aria-label={t('plugins.deleteItem', { name: item.name })}
                 className="absolute top-1.5 grid place-items-center w-6 h-6 rounded-md text-[11px]"
                 style={{
                   right: href ? '2rem' : '0.375rem',
@@ -502,8 +519,8 @@ function ElementGrid({ title, color, items, href, compact, onDelete }: {
             {href && (
               <button
                 onClick={() => router.push(href(item.id))}
-                title={`Open in ${title}`}
-                aria-label={`Open ${item.name}`}
+                title={t('plugins.openIn', { title })}
+                aria-label={t('plugins.openItem', { name: item.name })}
                 className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-md"
                 style={{ color: 'var(--muted)', border: '1px solid transparent' }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = color; e.currentTarget.style.borderColor = `color-mix(in srgb, ${color} 45%, transparent)` }}
@@ -543,41 +560,49 @@ function CompiledPane({ compiled, onChanged }: {
   compiled: { strategies: StrategyDefinition[]; monitors: MonitorDefinition[]; executors: ExecutorDefinition[] }
   onChanged: () => void
 }) {
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
 
   const deleteComponent = (type: 'strategies' | 'monitors' | 'executors') => async (id: string) => {
     setError('')
     const res = await fetch(`/api/registry/${type}/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!res.ok) setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Delete failed (HTTP ${res.status})`)
+    if (!res.ok) setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? t('plugins.deleteFailed', { status: res.status }))
     else onChanged()
   }
   return (
     <>
       <div className="px-4 py-3 shrink-0 flex items-center justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
-          <span className="text-base font-medium">AI Compiled</span>
-          <span className="badge badge-neutral">compiled components</span>
+          <span className="text-base font-medium">{t('plugins.compiled')}</span>
+          <span className="badge badge-neutral">{t('plugins.compiledComponents')}</span>
         </div>
         <button onClick={() => setImporting(v => !v)} className={`btn btn-sm ${importing ? 'btn-secondary' : 'btn-primary'}`}>
-          {importing ? 'Cancel' : '+ Import Component'}
+          {importing ? t('common.cancel') : t('plugins.importComponent')}
         </button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden p-4 flex flex-col gap-5">
         <p className="text-xs" style={{ color: 'var(--muted)' }}>
-          Components registered outside any plugin — the AI compiler&apos;s approved output, and manual compiled imports.
+          {t('plugins.compiledHint')}
         </p>
         {error && <p className="alert alert-danger text-xs">{error}</p>}
         {importing && <ImportForm onSuccess={() => { setImporting(false); onChanged() }} />}
-        <ElementGrid title="Strategies" color={CATEGORY_COLORS.strategies} href={(id) => `/instances?new=${encodeURIComponent(id)}`} onDelete={deleteComponent('strategies')} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-        <ElementGrid title="Monitors" color={CATEGORY_COLORS.monitors} href={(id) => `/monitor?sel=${encodeURIComponent(id)}`} onDelete={deleteComponent('monitors')} items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
-        <ElementGrid title="Executors" color={CATEGORY_COLORS.executors} href={() => '/executors'} onDelete={deleteComponent('executors')} items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title={t('plugins.grid.strategies')} color={CATEGORY_COLORS.strategies} href={(id) => `/instances?new=${encodeURIComponent(id)}`} onDelete={deleteComponent('strategies')} items={compiled.strategies.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title={t('plugins.grid.monitors')} color={CATEGORY_COLORS.monitors} href={(id) => `/monitor?sel=${encodeURIComponent(id)}`} onDelete={deleteComponent('monitors')} items={compiled.monitors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
+        <ElementGrid title={t('plugins.grid.executors')} color={CATEGORY_COLORS.executors} href={() => '/executors'} onDelete={deleteComponent('executors')} items={compiled.executors.map(d => ({ id: d.id, name: d.name, description: d.description }))} />
       </div>
     </>
   )
 }
 
+const COMPONENT_TYPE_LABEL: Record<'strategies' | 'monitors' | 'executors', MessageKey> = {
+  strategies: 'plugins.grid.strategies',
+  monitors: 'plugins.grid.monitors',
+  executors: 'plugins.grid.executors',
+}
+
 function ImportForm({ onSuccess }: { onSuccess: () => void }) {
+  const t = useT()
   const [type, setType] = useState<'strategies' | 'monitors' | 'executors'>('strategies')
   const [id, setId] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -595,15 +620,15 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
     fd.append('file', file)
     const res = await fetch('/api/registry', { method: 'POST', body: fd })
     if (res.ok) onSuccess()
-    else setError(((await res.json()) as { error?: string }).error ?? 'Import failed')
+    else setError(((await res.json()) as { error?: string }).error ?? t('plugins.importFailed'))
     setSubmitting(false)
   }
 
   return (
     <form onSubmit={handleSubmit} className="rounded-md p-4 flex flex-col gap-3" style={{ border: '1px solid var(--border)' }}>
       <div className="flex gap-2">
-        {(['strategies', 'monitors', 'executors'] as const).map(t => (
-          <button key={t} type="button" onClick={() => setType(t)} className={`btn btn-sm capitalize ${type === t ? 'btn-primary' : 'btn-secondary'}`}>{t}</button>
+        {(['strategies', 'monitors', 'executors'] as const).map(kind => (
+          <button key={kind} type="button" onClick={() => setType(kind)} className={`btn btn-sm ${type === kind ? 'btn-primary' : 'btn-secondary'}`}>{t(COMPONENT_TYPE_LABEL[kind])}</button>
         ))}
       </div>
       <input
@@ -611,13 +636,13 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
         onChange={(e) => setId(e.target.value)}
         required
         pattern="[A-Za-z0-9-_]+"
-        placeholder="component id, e.g. btc-price-monitor"
+        placeholder={t('plugins.componentIdPlaceholder')}
         className="input font-mono"
       />
       <input type="file" accept=".ts,.js,.mjs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm text-muted" />
       {error && <p className="alert alert-danger text-xs">{error}</p>}
       <button type="submit" disabled={submitting || !file || !id.trim()} className="btn btn-primary btn-sm self-end">
-        {submitting ? 'Importing…' : 'Import'}
+        {submitting ? t('plugins.importing') : t('common.import')}
       </button>
     </form>
   )
@@ -626,15 +651,15 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
 // ── Install form: bundle file, GitHub repo, or npm package ───────────────────
 
 const MODES = [
-  ['npm', 'From npm'],
-  ['github', 'From GitHub'],
-  ['file', 'From file'],
-] as const
+  ['npm', 'plugins.mode.npm'],
+  ['github', 'plugins.mode.github'],
+  ['file', 'plugins.mode.file'],
+] as const satisfies ReadonlyArray<readonly [string, MessageKey]>
 
-const MODE_HINT: Record<(typeof MODES)[number][0], string> = {
-  npm: 'Recommended for the manual routes — published packages install with their dependencies and get the one-click Update button when a newer version appears (e.g. @openwhaleorg/pendle). A local absolute path works too.',
-  github: 'For a repository that is not on npm yet: the gateway clones and builds it, which takes a few minutes and needs the build toolchain on the server.',
-  file: 'A single pre-built bundle you upload by hand — for trying a plugin before it has a package or a repo.',
+const MODE_HINT: Record<(typeof MODES)[number][0], MessageKey> = {
+  npm: 'plugins.modeHint.npm',
+  github: 'plugins.modeHint.github',
+  file: 'plugins.modeHint.file',
 }
 
 type Conflict = {
@@ -657,6 +682,7 @@ type ReplaceOutcome = { plugin: string; resumed: string[]; orphaned: string[] }
  * missing from the list for as long as you read what happened to it.
  */
 function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSuccess: () => void }) {
+  const t = useT()
   const [mode, setMode] = useState<'npm' | 'github' | 'file'>('npm')
   const [pkg, setPkg] = useState('')
   const [repo, setRepo] = useState('')
@@ -702,10 +728,10 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
     try {
       parsedConfig = config.trim() === '' ? {} : JSON.parse(config)
     } catch {
-      setError('Config must be valid JSON')
+      setError(t('plugins.configInvalid'))
       return
     }
-    if (mode === 'file' && !file) { setError('Choose a .js/.mjs bundle file'); return }
+    if (mode === 'file' && !file) { setError(t('plugins.chooseBundle')); return }
     setInstalling(true)
     try {
       const res = await post(overwrite, as, parsedConfig)
@@ -714,11 +740,11 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
         if (body.conflict) {
           setConflict(body.conflict)
           setAlias(body.conflict.suggestedAlias)
-        } else setError(body.error ?? 'Install failed')
+        } else setError(body.error ?? t('plugins.installFailed'))
         return
       }
       if (!res.ok) {
-        setError(await res.text() || `Install failed (HTTP ${res.status})`)
+        setError(await res.text() || t('plugins.installFailedHttp', { status: res.status }))
         return
       }
       const view = await res.json() as InstalledPluginView & { replace?: { replaced: boolean; resumed: string[]; orphaned: string[] } }
@@ -726,7 +752,7 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
       if (view.replace?.replaced) setOutcome({ plugin: view.name, resumed: view.replace.resumed, orphaned: view.replace.orphaned })
       else onSuccess()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Network error')
+      setError(err instanceof Error ? err.message : t('plugins.networkError'))
     } finally {
       setInstalling(false)
     }
@@ -740,33 +766,32 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
   if (outcome) {
     return (
       <div className="flex flex-col gap-4">
-        <h2 className="font-semibold text-base">{outcome.plugin} replaced</h2>
+        <h2 className="font-semibold text-base">{t('plugins.replaced', { name: outcome.plugin })}</h2>
         <p className="alert alert-success text-xs">
           {outcome.resumed.length > 0
-            ? `${outcome.resumed.length} instance(s) were running on the old code and are running again.`
-            : 'Nothing was running on the old code.'}
+            ? t('plugins.resumed', { n: outcome.resumed.length })
+            : t('plugins.nothingRunning')}
         </p>
         {outcome.orphaned.length > 0 && (
           <div className="alert alert-warning text-xs flex flex-col gap-1.5">
-            <span className="font-medium">{outcome.orphaned.length} instance(s) could not restart — the new version does not provide their strategy:</span>
+            <span className="font-medium">{t('plugins.orphaned', { n: outcome.orphaned.length })}</span>
             <span className="font-mono">{outcome.orphaned.join(', ')}</span>
             {/* Nothing was deleted, which is the point: they are on the
                 Instances page marked broken, to remove or to bring back by
                 reinstalling the version that had the strategy. */}
             <span className="opacity-70">
-              Nothing was deleted. They are on the Instances page marked broken — delete them there, or reinstall the
-              version that has the strategy and they come back.
+              {t('plugins.orphanedHint')}
             </span>
           </div>
         )}
-        <button type="button" onClick={onSuccess} className="btn btn-primary self-end">Done</button>
+        <button type="button" onClick={onSuccess} className="btn btn-primary self-end">{t('plugins.done')}</button>
       </div>
     )
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <h2 className="font-semibold text-base">Install Plugin</h2>
+      <h2 className="font-semibold text-base">{t('plugins.installTitle')}</h2>
       {/* The hands-off path first: the Assistant knows the registry, picks the
           package, installs it and walks through credentials and accounts. The
           tabs below are the manual routes. */}
@@ -777,29 +802,29 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
       >
         <span aria-hidden className="text-base leading-none mt-0.5">✨</span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">Recommended: install from AI</span>
+          <span className="block text-sm font-medium">{t('plugins.aiRecommended')}</span>
           <span className="block text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-            Tell the Assistant what you want to trade or which plugin you mean — it finds the package, installs it and sets up the credentials and accounts with you. The tabs below are the manual way.
+            {t('plugins.aiHint')}
           </span>
         </span>
-        <span className="text-xs shrink-0 mt-1" style={{ color: 'var(--accent)' }}>Open Assistant →</span>
+        <span className="text-xs shrink-0 mt-1" style={{ color: 'var(--accent)' }}>{t('plugins.openAssistant')}</span>
       </a>
       <div className="flex gap-2 items-center flex-wrap">
         {MODES.map(([m, label]) => (
           <button key={m} type="button" onClick={() => setMode(m)} className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}>
-            {label}
-            {m === 'npm' && <span className="ml-1.5 text-[10px] px-1 rounded" style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)', color: 'var(--success, #22c55e)' }}>recommended</span>}
+            {t(label)}
+            {m === 'npm' && <span className="ml-1.5 text-[10px] px-1 rounded" style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 18%, transparent)', color: 'var(--success, #22c55e)' }}>{t('plugins.recommended')}</span>}
           </button>
         ))}
       </div>
-      <p className="text-xs -mt-2" style={{ color: 'var(--muted)' }}>{MODE_HINT[mode]}</p>
+      <p className="text-xs -mt-2" style={{ color: 'var(--muted)' }}>{t(MODE_HINT[mode])}</p>
       {mode === 'npm' ? (
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted">
-            Package name or local path <span className="text-danger">*</span>
-            <span className="ml-1 opacity-60">— @scope/pkg, name@1.2.0, or an absolute directory like /Users/me/my-plugin (must be built)</span>
+            {t('plugins.npm.label')} <span className="text-danger">*</span>
+            <span className="ml-1 opacity-60">{t('plugins.npm.hint')}</span>
           </label>
-          <input value={pkg} onChange={(e) => setPkg(e.target.value)} required placeholder="@scope/package-name or /abs/path/to/package" className="input font-mono" />
+          <input value={pkg} onChange={(e) => setPkg(e.target.value)} required placeholder={t('plugins.npm.placeholder')} className="input font-mono" />
         </div>
       ) : mode === 'github' ? (
         /* Two fields, not one: the URL people paste already carries a branch
@@ -808,38 +833,37 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
         <>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted">
-              Repository <span className="text-danger">*</span>
-              <span className="ml-1 opacity-60">— owner/repo, or paste the address bar: https://github.com/owner/repo</span>
+              {t('plugins.github.repo')} <span className="text-danger">*</span>
+              <span className="ml-1 opacity-60">{t('plugins.github.repoHint')}</span>
             </label>
             <input value={repo} onChange={(e) => setRepo(e.target.value)} required placeholder="OpenWhale-Org/OpenWhale" className="input font-mono" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted">
-              Branch, tag or commit
-              <span className="ml-1 opacity-60">— optional; defaults to the repo&apos;s default branch</span>
+              {t('plugins.github.ref')}
+              <span className="ml-1 opacity-60">{t('plugins.github.refHint')}</span>
             </label>
             <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main / v1.2.0 / 4f3a91c" className="input font-mono" />
           </div>
           <p className="text-xs" style={{ color: 'var(--muted)' }}>
-            The repo is cloned and built by npm — a source-only repo needs a <code className="font-mono">prepare</code> script in its
-            package.json. Private repos need <code className="font-mono">OPENWHALE_GITHUB_TOKEN</code> set on the engine.
+            {rich(t('plugins.github.note'))}
           </p>
         </>
       ) : (
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted">
-            Plugin bundle <span className="text-danger">*</span>
-            <span className="ml-1 opacity-60">— built ESM .js/.mjs, default-exporting a plugin factory</span>
+            {t('plugins.file.label')} <span className="text-danger">*</span>
+            <span className="ml-1 opacity-60">{t('plugins.file.hint')}</span>
           </label>
           <input type="file" accept=".js,.mjs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm text-muted" />
         </div>
       )}
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-muted">Config (JSON) — passed to the plugin factory</label>
+        <label className="text-xs text-muted">{t('plugins.config')}</label>
         <textarea value={config} onChange={(e) => setConfig(e.target.value)} rows={3} spellCheck={false} placeholder='{ "testnet": true }' className="input font-mono resize-y" />
       </div>
       <p className="alert alert-warning text-xs">
-        ⚠️ Installing a plugin runs third-party code inside the engine process with full access to credentials and accounts. Only install packages you trust.
+        {t('plugins.trustWarning')}
       </p>
       {error && <p className="alert alert-danger whitespace-pre-wrap">{error}</p>}
       {conflict && (
@@ -853,13 +877,12 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
           {conflict.sameSource ? (
             <>
               <span className="font-medium">
-                <span className="font-mono">{conflict.plugin}</span> is already installed from this same source
+                {rich(t('plugins.conflict.sameSource', { plugin: conflict.plugin }))}
                 {conflict.source && <> (<span className="font-mono">{conflict.source}</span>)</>}
-                {conflict.installedAt && <span className="opacity-70"> — {new Date(conflict.installedAt).toLocaleString()}</span>}.
+                {conflict.installedAt && <span className="opacity-70"> — {new Date(conflict.installedAt).toLocaleString()}</span>}
               </span>
               <span className="opacity-70">
-                Overwriting replaces its code. Instances, accounts and credentials are kept — anything running restarts on
-                the new code, and anything whose strategy the new version dropped is left marked broken rather than deleted.
+                {t('plugins.conflict.overwriteHint')}
               </span>
             </>
           ) : conflict.blockedBy && conflict.blockedBy.length > 0 ? (
@@ -869,37 +892,32 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
                that only one of them can be installed, and the choice is which. */
             <>
               <span className="font-medium">
-                These two cannot both be installed. This package and the one installed as{' '}
-                <span className="font-mono">{conflict.plugin}</span> both provide:
+                {rich(t('plugins.conflict.blocked', { plugin: conflict.plugin }))}
               </span>
               <ul className="flex flex-col gap-0.5 pl-4 list-disc">
                 {conflict.blockedBy.map(c => (
                   <li key={`${c.what}:${c.name}`}>
                     {c.what} <span className="font-mono">{c.name}</span>
-                    <span className="opacity-70"> — held by <span className="font-mono">{c.owner}</span></span>
+                    <span className="opacity-70">{rich(t('plugins.conflict.heldBy', { owner: c.owner }))}</span>
                   </li>
                 ))}
               </ul>
               <span className="opacity-70">
-                Those are addressed without a plugin name — that is how an account finds its venue — so exactly one plugin
-                can provide each, and a separate namespace would not change it. Overwrite the installed one if this is
-                meant to take its place, or uninstall it first.
+                {t('plugins.conflict.blockedHint')}
               </span>
             </>
           ) : (
             <>
               <span className="font-medium">
-                The namespace <span className="font-mono">{conflict.plugin}</span> is taken
-                {conflict.source && <> by an install from <span className="font-mono">{conflict.source}</span></>}.
+                {rich(conflict.source
+                  ? t('plugins.conflict.takenBy', { plugin: conflict.plugin, source: conflict.source })
+                  : t('plugins.conflict.taken', { plugin: conflict.plugin }))}
               </span>
               <span className="opacity-70">
-                This package came from somewhere else, so it is a different plugin that happens to share a name. Give it a
-                namespace of its own — its strategies, monitors and accounts will be named after it
-                (<span className="font-mono">{alias || conflict.suggestedAlias}/…</span>), and it cannot be changed later
-                because instances are saved under those ids.
+                {rich(t('plugins.conflict.aliasHint', { alias: alias || conflict.suggestedAlias }))}
               </span>
               <label className="flex flex-col gap-1 mt-0.5">
-                <span className="opacity-70">Install as</span>
+                <span className="opacity-70">{t('plugins.installAs')}</span>
                 <input
                   value={alias}
                   onChange={(e) => setAlias(e.target.value)}
@@ -920,7 +938,7 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
             disabled={installing}
             className="btn btn-primary"
           >
-            {installing ? 'Installing…' : `Install as ${alias.trim() || conflict.suggestedAlias}`}
+            {installing ? t('plugins.installing') : t('plugins.installAsName', { alias: alias.trim() || conflict.suggestedAlias })}
           </button>
         )}
         {conflict && (
@@ -929,9 +947,9 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
             onClick={() => void run(true)}
             disabled={installing}
             className={`btn ${conflict.sameSource || conflict.blockedBy?.length ? 'btn-danger-solid' : 'btn-danger'}`}
-            title={conflict.sameSource ? undefined : 'Replaces the installed plugin — its strategies stop being available'}
+            title={conflict.sameSource ? undefined : t('plugins.overwriteTitle')}
           >
-            {installing ? 'Overwriting…' : `Overwrite ${conflict.plugin}`}
+            {installing ? t('plugins.overwriting') : t('plugins.overwrite', { plugin: conflict.plugin })}
           </button>
         )}
         <button
@@ -940,8 +958,8 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
           className={`btn ${conflict ? 'btn-secondary' : 'btn-primary'}`}
         >
           {installing && !conflict
-            ? mode === 'github' ? 'Cloning and building… (may take a few minutes)' : 'Installing… (npm may take a minute)'
-            : conflict ? 'Retry' : 'Install'}
+            ? mode === 'github' ? t('plugins.cloning') : t('plugins.installingNpm')
+            : conflict ? t('common.retry') : t('plugins.installBtn')}
         </button>
       </div>
     </form>

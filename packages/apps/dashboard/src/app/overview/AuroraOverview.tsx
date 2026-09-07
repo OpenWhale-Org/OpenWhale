@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { startTour, tourWasSeen } from '@/components/Tour'
 import { useSortable, DragHandle } from '@/components/Sortable'
+import { useT } from '@/i18n'
 import type { AccountSnapshotRecord, AccountView, StrategyInstanceView } from '@openwhaleorg/core'
 import { PortfolioEquityChart, PortfolioEquitySparkline, usePortfolioEquity } from './PortfolioEquityChart'
 import { MonitorBoards } from '../monitor/MonitorBoards'
@@ -58,6 +59,7 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
   snapshots: Record<string, AccountSnapshotRecord>
 }) {
   useFirstRunRedirect(instances.length === 0 && accounts.length === 0)
+  const t = useT()
   const [stats, setStats] = useState<Stats | null>(null)
   const [pointer, setPointer] = useState({ x: 68, y: 28 })
   const portfolioEquity = usePortfolioEquity()
@@ -137,34 +139,34 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
       case 'equity':
         return (
           <article className="aurora-kpi-card">
-            <span>Total Equity</span><strong>{usd(displayedTotalEquity)}</strong>
-            <small className="is-positive">● {displayedAccountCount} connected accounts</small>
+            <span>{t('overview.totalEquity')}</span><strong>{usd(displayedTotalEquity)}</strong>
+            <small className="is-positive">● {t('overview.connectedAccounts', { n: displayedAccountCount })}</small>
             <PortfolioEquitySparkline points={portfolioPoints} />
           </article>
         )
       case 'pnl-today':
         return (
           <article className="aurora-kpi-card">
-            <span>Today PnL</span>
+            <span>{t('overview.todayPnl')}</span>
             <strong className={todayPnl < 0 ? 'is-negative' : ''}>{usd(todayPnl)}</strong>
             <small className={todayPnl < 0 ? 'is-negative' : 'is-positive'}>
-              {todayPnl >= 0 ? '↗' : '↘'} realized {usd(stats?.pnl.realized ?? 0)}
+              {todayPnl >= 0 ? '↗' : '↘'} {t('overview.realized', { v: usd(stats?.pnl.realized ?? 0) })}
             </small>
           </article>
         )
       case 'running':
         return (
           <article className="aurora-kpi-card">
-            <span>Running Strategies</span><strong>{running} <em>/ {instances.length}</em></strong>
-            <small>{instances.length ? Math.round((running / instances.length) * 100) : 0}% of configured strategies</small>
+            <span>{t('overview.runningStrategies')}</span><strong>{running} <em>/ {instances.length}</em></strong>
+            <small>{t('overview.pctConfigured', { pct: instances.length ? Math.round((running / instances.length) * 100) : 0 })}</small>
             <div className="aurora-kpi-ring" style={{ '--ring-value': `${instances.length ? (running / instances.length) * 360 : 0}deg` } as React.CSSProperties} />
           </article>
         )
       case 'runs-24h':
         return (
           <article className="aurora-kpi-card">
-            <span>24h Runs</span><strong>{stats?.runs.runs.toLocaleString() ?? '—'}</strong>
-            <small>{stats?.runs.instructions.toLocaleString() ?? 0} execution instructions</small>
+            <span>{t('overview.runs24h')}</span><strong>{stats?.runs.runs.toLocaleString() ?? '—'}</strong>
+            <small>{t('overview.instructions', { n: stats?.runs.instructions.toLocaleString() ?? 0 })}</small>
           </article>
         )
       case 'portfolio-chart':
@@ -172,33 +174,37 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
       case 'agents':
         return (
           <article className="aurora-dashboard-card aurora-agents-card">
-            <div className="aurora-card-header"><div><h2>Active Agents</h2><p>Currently operating</p></div><Link href="/instances">View all</Link></div>
+            <div className="aurora-card-header"><div><h2>{t('overview.activeAgents')}</h2><p>{t('overview.currentlyOperating')}</p></div><Link href="/instances">{t('overview.viewAll')}</Link></div>
             <div className="aurora-agent-list">
               {instances.slice(0, 5).map((instance, index) => (
                 <Link href={`/instances/${encodeURIComponent(instance.id)}`} key={instance.id} className="aurora-agent-row">
                   <span className={`aurora-agent-mark mark-${index % 4}`}>{instance.name.slice(0, 2).toUpperCase()}</span>
                   <span className="aurora-agent-name"><strong>{instance.name}</strong><small>{instance.strategyId}</small></span>
-                  <span className={instance.active ? 'aurora-status-running' : 'aurora-status-paused'}><i /> {instance.active ? 'Running' : 'Paused'}</span>
+                  <span className={instance.active ? 'aurora-status-running' : 'aurora-status-paused'}><i /> {instance.active ? t('overview.running') : t('overview.paused')}</span>
                 </Link>
               ))}
-              {instances.length === 0 && <div className="aurora-empty-row">No strategy agents configured yet.</div>}
+              {instances.length === 0 && <div className="aurora-empty-row">{t('overview.noAgents')}</div>}
             </div>
           </article>
         )
       case 'activity':
         return (
           <article className="aurora-dashboard-card aurora-decisions-card">
-            <div className="aurora-card-header"><div><h2>Recent Activity</h2><p>Live system flow</p></div><span className="aurora-live-label"><i /> LIVE</span></div>
-            {[['Monitor emit received', `${stats?.events.count ?? 0} events in 24h`, 'now'], ['Strategy evaluation completed', `${stats?.runs.runs ?? 0} runs recorded`, '2m'], ['Portfolio snapshot sampled', `${accounts.length} accounts updated`, '5m']]
+            <div className="aurora-card-header"><div><h2>{t('overview.recentActivity')}</h2><p>{t('overview.liveFlow')}</p></div><span className="aurora-live-label"><i /> {t('overview.live')}</span></div>
+            {[
+              [t('overview.activity.emit'), t('overview.activity.emitSub', { n: stats?.events.count ?? 0 }), t('overview.time.now')],
+              [t('overview.activity.eval'), t('overview.activity.evalSub', { n: stats?.runs.runs ?? 0 }), t('overview.time.minutes', { n: 2 })],
+              [t('overview.activity.snapshot'), t('overview.activity.snapshotSub', { n: accounts.length }), t('overview.time.minutes', { n: 5 })],
+            ]
               .map(([title, sub, time], i) => <div className="aurora-activity-row" key={title}><i className={`activity-${i}`} /><span><strong>{title}</strong><small>{sub}</small></span><time>{time}</time></div>)}
           </article>
         )
       case 'health':
         return (
           <article className="aurora-dashboard-card aurora-health-card">
-            <div className="aurora-card-header"><div><h2>System Health</h2><p>Gateway and runtime</p></div></div>
-            {['Market Data', 'Strategy Engine', 'Executors', 'Database'].map((label, i) => <div className="aurora-health-row" key={label}><span>{label}</span><strong><i /> Healthy</strong><small>{12 + i * 9} ms</small></div>)}
-            <div className="aurora-health-summary">✓ All systems operational</div>
+            <div className="aurora-card-header"><div><h2>{t('overview.systemHealth')}</h2><p>{t('overview.gatewayRuntime')}</p></div></div>
+            {[t('overview.health.marketData'), t('overview.health.engine'), t('overview.health.executors'), t('overview.health.database')].map((label, i) => <div className="aurora-health-row" key={label}><span>{label}</span><strong><i /> {t('overview.healthy')}</strong><small>{12 + i * 9} ms</small></div>)}
+            <div className="aurora-health-summary">{t('overview.allOperational')}</div>
           </article>
         )
       case 'monitor-panel':
@@ -238,11 +244,11 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
       }} style={{ '--hero-x': `${pointer.x}%`, '--hero-y': `${pointer.y}%` } as React.CSSProperties}>
         <div className="aurora-overview-glow" />
         <div>
-          <span className="aurora-page-kicker"><i /> WORKSPACE ONLINE</span>
-          <h1>Good evening</h1>
-          <p>Your agents are monitoring markets and waiting for the next opportunity.</p>
+          <span className="aurora-page-kicker"><i /> {t('overview.kicker')}</span>
+          <h1>{t('overview.greeting')}</h1>
+          <p>{t('overview.tagline')}</p>
         </div>
-        <Link href="/instances" className="aurora-new-strategy">New Strategy <span>＋</span></Link>
+        <Link href="/instances" className="aurora-new-strategy">{t('overview.newStrategy')} <span>＋</span></Link>
       </section>
 
       <div className="flex items-center gap-2 mb-3">
@@ -332,7 +338,7 @@ export function AuroraOverview({ instances, accounts, snapshots }: {
         />
       )}
 
-      <Link href="/assistant" className="aurora-assistant-bar"><span className="aurora-assistant-orb" /><span>Ask OpenWhale about your portfolio…</span><kbd>⌘ K</kbd><b>↑</b></Link>
+      <Link href="/assistant" className="aurora-assistant-bar"><span className="aurora-assistant-orb" /><span>{t('overview.askAssistant')}</span><kbd>⌘ K</kbd><b>↑</b></Link>
     </div>
   )
 }

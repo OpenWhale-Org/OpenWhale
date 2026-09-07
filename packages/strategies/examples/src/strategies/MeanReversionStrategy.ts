@@ -26,8 +26,8 @@ const decls = {
 } as const satisfies StrategyDeclarations
 
 @OwStrategy({
-  name: 'Mean Reversion (z-score)',
-  description: 'Fades statistical extremes on any perp venue — enter beyond ±z, exit as the z-score decays',
+  name: { en: 'Mean Reversion (z-score)', 'zh-CN': '均值回归（z 分数）' },
+  description: { en: 'Fades statistical extremes on any perp venue — enter beyond ±z, exit as the z-score decays', 'zh-CN': '在任意永续交易所逆势做统计极值——超过 ±z 入场，z 分数回落时离场' },
 })
 export class MeanReversionStrategy extends BaseStrategy<typeof decls> {
   readonly strategyId = 'mean-reversion'
@@ -40,24 +40,24 @@ export class MeanReversionStrategy extends BaseStrategy<typeof decls> {
     symbol: z.string().meta({ displayName: 'Symbol', placeholder: 'ETH/USDT:USDT' }),
     timeframe: z.string().default('15m').meta({
       displayName: 'Timeframe', placeholder: '15m',
-      description: 'Candle size; the klines monitor instance must collect this same timeframe',
+      description: 'Candle size; the klines monitor instance must collect this same timeframe', i18n: { 'zh-CN': { description: 'K 线周期；klines 监控实例必须采集同一周期' } }
     }),
-    notionalUsd: z.number().positive().meta({ displayName: 'Order Notional (USD)', placeholder: '300' }),
+    notionalUsd: z.number().positive().meta({ displayName: 'Order Notional (USD)', placeholder: '300', i18n: { 'zh-CN': { displayName: '单笔名义（USD）' } } }),
     maxPositionUsd: z.number().positive().meta({
       displayName: 'Max Position (USD)', placeholder: '1500',
-      description: 'Hard cap on |exposure| — a fade that keeps going is the classic way to die, so the cap is checked against the VENUE every evaluation',
+      description: 'Hard cap on |exposure| — a fade that keeps going is the classic way to die, so the cap is checked against the VENUE every evaluation', i18n: { 'zh-CN': { displayName: '最大仓位（USD）', description: '|敞口| 的硬上限——一路逆势加仓是经典死法，所以每次评估都对照交易所核对上限' } }
     }),
   })
 
   readonly tunableParamsSchema = z.object({
     period: z.number().int().min(5).default(30)
-      .meta({ displayName: 'Lookback (bars)', description: 'Window for the mean and deviation', slider: { min: 10, max: 200, step: 5 } }),
+      .meta({ displayName: 'Lookback (bars)', description: 'Window for the mean and deviation', slider: { min: 10, max: 200, step: 5 }, i18n: { 'zh-CN': { displayName: '回看（根）', description: '计算均值与标准差的窗口' } } }),
     entryZ: z.number().positive().default(2)
-      .meta({ displayName: 'Entry |z|', description: 'Distance from the mean, in standard deviations, that counts as an extreme', slider: { min: 0.5, max: 4, step: 0.1 } }),
+      .meta({ displayName: 'Entry |z|', description: 'Distance from the mean, in standard deviations, that counts as an extreme', slider: { min: 0.5, max: 4, step: 0.1 }, i18n: { 'zh-CN': { displayName: '入场 |z|', description: '距均值多少个标准差算作极值' } } }),
     exitZ: z.number().min(0).default(0.5)
-      .meta({ displayName: 'Exit |z|', description: 'Flatten once the price is back within this many deviations', slider: { min: 0, max: 2, step: 0.1 } }),
+      .meta({ displayName: 'Exit |z|', description: 'Flatten once the price is back within this many deviations', slider: { min: 0, max: 2, step: 0.1 }, i18n: { 'zh-CN': { displayName: '离场 |z|', description: '价格回到这么多个标准差以内就平仓' } } }),
     slippage: z.number().min(0).max(1).default(0.005)
-      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders' }),
+      .meta({ displayName: 'Slippage Tolerance', description: 'Max slippage fraction for market orders', i18n: { 'zh-CN': { displayName: '滑点容忍', description: '市价单的最大滑点比例' } } }),
   })
 
   private candleKey(params: StrategyParams): string {

@@ -13,10 +13,13 @@ import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { z } from 'zod'
 import { loadOverviewLayout, saveOverviewLayout, resetOverviewLayout } from './overviewLayout.js'
-import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs } from '@openwhaleorg/core'
+import { getAlertService, type AlertSettings } from './notify/alerts.js'
+import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime } from './runtime.js'
+import { getRetentionService } from './maintenance/retention.js'
+import { getBreakerService } from './maintenance/breaker.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
 import { installFromNpm, installFromGithub, installFromFile, uninstallPlugin, listInstalledPlugins, PluginConflictError, describeSource, checkPluginUpdates, updatePlugin, reloadUnloaded } from './plugins.js'
 import { watchKey, unwatchKey, listManualWatches } from './monitorWatch.js'
@@ -25,6 +28,7 @@ import { activityMeter } from './activity.js'
 import { getAuth, getScriptShelf } from './authService.js'
 import { SESSION_COOKIE, readCookie, setSessionCookie, clearSessionCookie } from './auth.js'
 import type { AuthedRequest } from './auth.js'
+import { readExecutions } from './executions.js'
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
@@ -61,6 +65,23 @@ function h(fn: (req: Request, res: Response) => Promise<void> | void) {
       if (!res.headersSent) res.status(500).json({ error: errText(err) })
     })
   }
+}
+
+/**
+ * The locale a request reads in: `?locale=`, then the `ow_locale` cookie the
+ * Dashboard sets, then the browser's Accept-Language, then English. Every
+ * definition the gateway serves is resolved for it — a plugin's tables never
+ * reach a page.
+ */
+function localeOf(req: { query: Record<string, unknown>; headers: Record<string, unknown> }): string {
+  const q = req.query['locale']
+  if (typeof q === 'string' && q.trim()) return normalizeLocale(q)
+  const cookie = String(req.headers['cookie'] ?? '')
+  const m = /(?:^|;\s*)ow_locale=([^;]+)/.exec(cookie)
+  if (m?.[1]) return normalizeLocale(decodeURIComponent(m[1]))
+  const accept = String(req.headers['accept-language'] ?? '')
+  const first = accept.split(',')[0]?.trim().split(';')[0]
+  return first ? normalizeLocale(first) : 'en'
 }
 
 export function buildRouter(): Router {
@@ -144,11 +165,11 @@ export function buildRouter(): Router {
 
   // ── accounts ────────────────────────────────────────────────────────────────
 
-  router.get('/api/accounts', h(async (_req, res) => {
+  router.get('/api/accounts', h(async (req, res) => {
     const runtime = await ensureStarted()
     res.json({
       accounts: await runtime.listAccounts(),
-      implementations: runtime.listAccountImplementations(),
+      implementations: localize(runtime.listAccountImplementations(), localeOf(req)),
       snapshots: await runtime.latestAccountSnapshots(),
     })
   }))
@@ -238,9 +259,9 @@ export function buildRouter(): Router {
 
   // ── credentials ─────────────────────────────────────────────────────────────
 
-  router.get('/api/credential-types', h(async (_req, res) => {
+  router.get('/api/credential-types', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(runtime.describeCredentialTypes())
+    res.json(localize(runtime.describeCredentialTypes(), localeOf(req)))
   }))
 
   router.post('/api/credential-types/:type/test', h(async (req, res) => {
@@ -296,9 +317,9 @@ export function buildRouter(): Router {
 
   // ── Scripts — on-demand plugin utilities ─────────────────────────────────────
 
-  router.get('/api/scripts', h(async (_req, res) => {
+  router.get('/api/scripts', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(await runtime.listScripts())
+    res.json(localize(await runtime.listScripts(), localeOf(req)))
   }))
 
   /* Shelf = how the page is arranged (folders + what is taken off it).
@@ -310,6 +331,18 @@ export function buildRouter(): Router {
 
   router.put('/api/scripts/shelf', h(async (req, res) => {
     res.json(await getScriptShelf().put(req.body))
+  }))
+
+  /* Option lists that depend on other fields (a symbol list drawn from the
+     chosen account). The form asks with its current values. */
+  router.post('/api/scripts/:owner/:sid/options', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
+      res.json(await runtime.scriptOptions(`${req.params['owner']}/${req.params['sid']}`, params))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
   }))
 
   router.post('/api/scripts/:owner/:sid/run', h(async (req, res) => {
@@ -426,6 +459,39 @@ export function buildRouter(): Router {
     res.json([...live, ...persisted].sort((a, b) => b.startedAt - a.startedAt).slice(0, 100))
   }))
 
+  router.get('/api/instances/:id/runs/:runId', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const id = req.params['id']!
+    const runId = req.params['runId']!
+    const strategy = runtime.getStrategy?.(id) as { getRecentRuns?: () => Array<{ runId?: string }> } | undefined
+    // The live ring holds runs the sampler never wrote (a no-op run that still
+    // explains why nothing was emitted), so it is asked first.
+    const live = strategy?.getRecentRuns?.()?.find(r => r.runId === runId)
+    const run = live ?? await runtime.readInstanceRun(id, runId)
+    if (!run) { res.status(404).json({ error: `no run "${runId}" for instance ${id}` }); return }
+    res.json(run)
+  }))
+
+  /**
+   * Every instance's runs, newest first — the Runs page.
+   *
+   * The Executions page answers "what was sent"; this one answers "what was
+   * decided", including the runs that decided nothing and the runs that
+   * failed before deciding — an error here is the strategy's own evaluation
+   * throwing (a venue read that came back 429, say), which never reaches an
+   * executor and so never shows up as an execution.
+   */
+  router.get('/api/runs', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const q = req.query
+    const status = q['status']
+    res.json(await runtime.readAllRuns({
+      limit: Math.min(Number(q['limit']) || 200, 1000),
+      ...(typeof q['instanceId'] === 'string' && q['instanceId'] ? { instanceId: q['instanceId'] } : {}),
+      ...(status === 'error' || status === 'instructions' || status === 'noop' ? { status } : {}),
+    }))
+  }))
+
   // ── PnL attribution (order-claim ledger) ─────────────────────────────────
 
   router.get('/api/pnl/summary', h(async (_req, res) => {
@@ -532,9 +598,23 @@ export function buildRouter(): Router {
     res.json(replayed.slice(-n))
   }))
 
+  /**
+   * A name is how an operator tells instances apart in every list, alert
+   * and run trace. The form marks it required, but a browser only enforces
+   * that on submit — the "Save only" button is not a submit — so the row
+   * must refuse a blank one itself.
+   */
+  const blankName = (body: unknown): boolean => {
+    const name = (body as { name?: unknown } | undefined)?.name
+    return typeof name !== 'string' || name.trim() === ''
+  }
+  const namePatched = (body: unknown): boolean =>
+    typeof body === 'object' && body !== null && 'name' in body
+
   router.post('/api/instances', h(async (req, res) => {
     const runtime = await ensureStarted()
     const instance = req.body as StrategyInstance
+    if (blankName(instance)) { res.status(400).send('Name is required'); return }
     try {
       /* `enabled: false` used to be accepted and ignored — every create
          started trading, whatever the form said. Saving stopped is the whole
@@ -572,6 +652,7 @@ export function buildRouter(): Router {
   router.patch('/api/instances/:id', h(async (req, res) => {
     const runtime = await ensureStarted()
     const restart = req.query['restart'] === '1' || req.query['restart'] === 'true'
+    if (namePatched(req.body) && blankName(req.body)) { res.status(400).send('Name is required'); return }
     try {
       res.json(await runtime.updateInstance(
         req.params['id']!, req.body as Parameters<typeof runtime.updateInstance>[1], { restart },
@@ -585,6 +666,7 @@ export function buildRouter(): Router {
   // Cosmetic metadata (icon/folder/order/name/description) — allowed while active
   router.patch('/api/instances/:id/meta', h(async (req, res) => {
     const runtime = await ensureStarted()
+    if (namePatched(req.body) && blankName(req.body)) { res.status(400).send('Name is required'); return }
     try {
       res.json(await runtime.updateInstanceMeta(req.params['id']!, req.body as Parameters<typeof runtime.updateInstanceMeta>[1]))
     } catch (err) {
@@ -627,54 +709,41 @@ export function buildRouter(): Router {
   }))
 
   router.get('/api/instances/:id/executions', h(async (req, res) => {
-    const instanceId = req.params['id']!
-    const executionsDir = path.join(dataDirFromEnv(), 'executions')
-    const results: unknown[] = []
-    try {
-      const executorDirs = await fs.promises.readdir(executionsDir)
-      await Promise.all(executorDirs.map(async (executorName) => {
-        const dir = path.join(executionsDir, executorName)
-        let files: string[]
-        try {
-          files = await fs.promises.readdir(dir)
-        } catch {
-          return
-        }
-        // Two most recent day-files so the list doesn't go empty after UTC midnight
-        const recent = files.filter(f => f.endsWith('.jsonl')).sort().slice(-2)
-        for (const file of recent) {
-          try {
-            const content = await fs.promises.readFile(path.join(dir, file), 'utf8')
-            for (const line of content.split('\n')) {
-              if (!line.trim()) continue
-              try {
-                const record = JSON.parse(line) as { instruction?: { instanceId?: string } }
-                if (record.instruction?.instanceId === instanceId) results.push(record)
-              } catch { /* skip malformed lines */ }
-            }
-          } catch { /* file may have been rotated away */ }
-        }
-      }))
-    } catch { /* executions dir may not exist yet */ }
-    results.sort((a, b) =>
-      new Date((b as { executedAt: string }).executedAt).getTime() - new Date((a as { executedAt: string }).executedAt).getTime())
-    res.json(results.slice(0, 200))
+    res.json(await readExecutions(dataDirFromEnv(), { instanceId: req.params['id']!, limit: 200 }))
+  }))
+
+  /**
+   * Every instance's executions, newest first — the Executions page.
+   *
+   * The same log the per-instance route reads; only the filter differs. What
+   * makes it usable across instances is `instruction.runId`, which points at
+   * the run that decided each one (see /api/instances/:id/runs/:runId).
+   */
+  router.get('/api/executions', h(async (req, res) => {
+    const q = req.query
+    res.json(await readExecutions(dataDirFromEnv(), {
+      limit: Number(q['limit']) || 100,
+      ...(typeof q['instanceId'] === 'string' ? { instanceId: q['instanceId'] } : {}),
+      ...(typeof q['executorId'] === 'string' ? { executorId: q['executorId'] } : {}),
+      ...(typeof q['status'] === 'string' ? { status: q['status'] } : {}),
+      ...(q['since'] !== undefined ? { since: Number(q['since']) } : {}),
+    }))
   }))
 
   // ── strategies / registry ───────────────────────────────────────────────────
 
-  router.get('/api/strategies', h(async (_req, res) => {
+  router.get('/api/strategies', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(runtime.listStrategies())
+    res.json(localize(runtime.listStrategies(), localeOf(req)))
   }))
 
-  router.get('/api/registry', h(async (_req, res) => {
+  router.get('/api/registry', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json({
+    res.json(localize({
       monitors: runtime.listMonitors(),
       executors: runtime.listExecutors(),
       strategies: runtime.listStrategies(),
-    })
+    }, localeOf(req)))
   }))
 
   router.post('/api/registry', upload.single('file'), h(async (req, res) => {
@@ -805,8 +874,6 @@ export function buildRouter(): Router {
     }
   }))
 
-  // ── monitors ────────────────────────────────────────────────────────────────
-
   /* ── Overview layout ─────────────────────────────────────────────────────
      Which widgets the Overview shows, and in what order. One arrangement for
      the engine: a layout is a claim about which of THIS engine's numbers
@@ -830,12 +897,66 @@ export function buildRouter(): Router {
     res.json({ ok: true })
   }))
 
-  router.get('/api/monitor', h(async (_req, res) => {
+  /**
+   * A strategy's presets, live. The body carries what the form knows — the
+   * slots bound so far and the current values — so a scan can size to them;
+   * `refresh` skips the runtime's cache. Errors are the strategy's own words:
+   * a scan that could not reach its venue must not read as "no opportunities".
+   */
+  router.post('/api/strategies/:id/presets', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json({ monitors: runtime.listMonitors(), executors: runtime.listExecutors() })
+    const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean }
+    try {
+      res.json(localize(await runtime.strategyPresets(req.params['id']!, {
+        ...(body.accounts ? { accounts: body.accounts } : {}),
+        ...(body.params ? { params: body.params } : {}),
+        refresh: body.refresh === true,
+        locale: localeOf(req),
+      }), localeOf(req)))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
   }))
 
-  router.get('/api/monitor/status', h(async (_req, res) => {
+  /** Live figures for a strategy's illustrations, for the form's current values. */
+  router.post('/api/strategies/:id/illustration-data', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> } }
+    try {
+      res.json(await runtime.strategyIllustrationData(req.params['id']!, {
+        ...(body.accounts ? { accounts: body.accounts } : {}),
+        ...(body.params ? { params: body.params } : {}),
+        locale: localeOf(req),
+      }))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  /** Options of a strategy's picker field, computed for the form's current state. */
+  router.post('/api/strategies/:id/pickers/:pickerId', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { accounts?: Record<string, string>; params?: { base?: Record<string, unknown>; tunable?: Record<string, unknown> }; refresh?: boolean }
+    try {
+      res.json(localize(await runtime.strategyPickerOptions(req.params['id']!, req.params['pickerId']!, {
+        ...(body.accounts ? { accounts: body.accounts } : {}),
+        ...(body.params ? { params: body.params } : {}),
+        refresh: body.refresh === true,
+        locale: localeOf(req),
+      }), localeOf(req)))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  // ── monitors ────────────────────────────────────────────────────────────────
+
+  router.get('/api/monitor', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    res.json(localize({ monitors: runtime.listMonitors(), executors: runtime.listExecutors() }, localeOf(req)))
+  }))
+
+  router.get('/api/monitor/status', h(async (req, res) => {
     const runtime = await ensureStarted()
     const statuses = await Promise.all(runtime.listMonitors().map(async (def) => {
       const instance = runtime.getMonitorInstance(def.id)
@@ -848,6 +969,7 @@ export function buildRouter(): Router {
         id: def.id,
         name: def.name,
         ...(def.description ? { description: def.description } : {}),
+        ...(def.venue ? { venue: def.venue } : {}),
         mode: status?.mode ?? 'unknown',
         activeKeys: status?.activeKeys ?? [],
         wildcardSubscribers: status?.wildcardSubscribers ?? 0,
@@ -860,7 +982,7 @@ export function buildRouter(): Router {
         dataKeys,
       }
     }))
-    res.json(statuses)
+    res.json(localize(statuses, localeOf(req)))
   }))
 
   router.post('/api/monitor/:name/watch', h(async (req, res) => {
@@ -899,7 +1021,7 @@ export function buildRouter(): Router {
   // Plot routes MUST precede the generic :name/:key record route
   router.get('/api/monitor/:name/plots', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(runtime.monitorPlots(req.params['name']!))
+    res.json(localize(runtime.monitorPlots(req.params['name']!), localeOf(req)))
   }))
 
   router.get('/api/monitor/:name/plots/:plotId', h(async (req, res) => {
@@ -919,7 +1041,7 @@ export function buildRouter(): Router {
       : Array.isArray(raw) ? raw.map(String)
       : String(raw)
     try {
-      res.json(await runtime.monitorPlotSeries(req.params['name']!, req.params['plotId']!, key, n, option))
+      res.json(localize(await runtime.monitorPlotSeries(req.params['name']!, req.params['plotId']!, key, n, option), localeOf(req)))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }
@@ -938,11 +1060,11 @@ export function buildRouter(): Router {
 
   // ── monitor instances ───────────────────────────────────────────────────────
 
-  router.get('/api/monitor-instances', h(async (_req, res) => {
+  router.get('/api/monitor-instances', h(async (req, res) => {
     const runtime = await ensureStarted()
     res.json({
       instances: await runtime.listMonitorInstances(),
-      implementations: runtime.listMonitorImplementations(),
+      implementations: localize(runtime.listMonitorImplementations(), localeOf(req)),
       pendingKeys: runtime.monitorPendingKeys(),
     })
   }))
@@ -1107,6 +1229,115 @@ export function buildRouter(): Router {
     res.json({ records: tailRecords(filePath, limit) })
   }))
 
+  // ── circuit breakers ────────────────────────────────────────────────────────
+
+  /** What the breaker currently sees for one instance — including why it is
+   *  abstaining, so a safety net that has gone blind is never silent. */
+  router.get('/api/instances/:id/breaker', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getBreakerService()
+    if (!svc) { res.status(503).json({ error: 'breaker service not ready' }); return }
+    res.json(await svc.status(req.params['id']!))
+  }))
+
+  /** Evaluate one instance now. Rules that trip WILL fire — this is the real
+   *  pass, not a rehearsal, because a rehearsal that cannot stop an instance
+   *  proves nothing about the one that can. */
+  router.post('/api/instances/:id/breaker/evaluate', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getBreakerService()
+    if (!svc) { res.status(503).json({ error: 'breaker service not ready' }); return }
+    res.json({ trips: await svc.evaluate(req.params['id']!) })
+  }))
+
+  router.get('/api/breaker/trips', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getBreakerService()
+    if (!svc) { res.status(503).json({ error: 'breaker service not ready' }); return }
+    res.json({ trips: await svc.trips(Number(req.query['limit'] ?? 100) || 100) })
+  }))
+
+  // ── monitor retention ───────────────────────────────────────────────────────
+  //
+  // Pruning is opt-in per store: some monitor files ARE the historical record a
+  // strategy fits its baseline against, so nothing is trimmed until an operator
+  // names a target and a horizon. Every mutating call is explicit; the sweep
+  // that runs hourly only touches policies saved through here.
+
+  router.get('/api/monitor-retention', h(async (_req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    res.json({ policies: await svc.list() })
+  }))
+
+  router.post('/api/monitor-retention', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    try {
+      res.json({ policy: await svc.upsert((req.body ?? {}) as Record<string, never>) })
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  router.delete('/api/monitor-retention/:id', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    await svc.remove(String(req.params['id']))
+    res.json({ ok: true })
+  }))
+
+  /**
+   * What a horizon WOULD cost, without touching a byte. The editor calls this
+   * as the operator types, because "keep 7 days" means nothing until you can
+   * see it is about to drop 5.4GB from a store you meant to keep.
+   */
+  router.post('/api/monitor-retention/preview', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    const body = (req.body ?? {}) as { monitor?: string; keyPattern?: string; keepDays?: number }
+    const monitor = (body.monitor ?? '').trim()
+    const keyPattern = (body.keyPattern ?? '*').trim() || '*'
+    const keepDays = Number(body.keepDays)
+    if (!monitor || !Number.isFinite(keepDays) || keepDays <= 0) {
+      res.status(400).json({ error: 'monitor and a positive keepDays are required' })
+      return
+    }
+    const matched = svc.matches(monitor, keyPattern)
+    const summary = await svc.apply({ monitor, keyPattern, keepDays }, true)
+    res.json({
+      // Absolute paths stay server-side; the client identifies a store by
+      // (monitor, key) exactly as the Explorer does.
+      matched: matched.map(({ monitor: m, key, bytes, updatedAt }) => ({ monitor: m, key, bytes, updatedAt })),
+      summary,
+    })
+  }))
+
+  /** What retention actually deleted, newest first. Passes that moved
+   *  nothing are not recorded — `lastRunAt` on the policy answers liveness. */
+  router.get('/api/monitor-retention/runs', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    res.json({ runs: await svc.runs(Number(req.query['limit'] ?? 100) || 100) })
+  }))
+
+  router.post('/api/monitor-retention/run', h(async (req, res) => {
+    await ensureStarted()
+    const svc = getRetentionService()
+    if (!svc) { res.status(503).json({ error: 'retention service not ready' }); return }
+    const id = (req.body as { id?: string } | undefined)?.id
+    try {
+      res.json(id ? { summaries: [await svc.runPolicy(id)] } : { summaries: await svc.sweep() })
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   router.post('/api/monitor-data/open', h(async (req, res) => {
     const runtime = await ensureStarted()
     const body = (req.body ?? {}) as { monitor?: string }
@@ -1123,7 +1354,7 @@ export function buildRouter(): Router {
 
   // ── executors ───────────────────────────────────────────────────────────────
 
-  router.get('/api/executor/status', h(async (_req, res) => {
+  router.get('/api/executor/status', h(async (req, res) => {
     const runtime = await ensureStarted()
     const executors = runtime.listExecutors().map((def) => {
       const instance = runtime.getExecutorInstance(def.id)
@@ -1143,7 +1374,7 @@ export function buildRouter(): Router {
           : {}),
       }
     })
-    res.json(executors)
+    res.json(localize(executors, localeOf(req)))
   }))
 
   router.post('/api/executor/:name/fire', h(async (req, res) => {
@@ -1189,9 +1420,9 @@ export function buildRouter(): Router {
 
   // ── plugins ─────────────────────────────────────────────────────────────────
 
-  router.get('/api/plugins', h(async (_req, res) => {
+  router.get('/api/plugins', h(async (req, res) => {
     const runtime = await ensureStarted()
-    res.json(await listInstalledPlugins(runtime))
+    res.json(localize(await listInstalledPlugins(runtime), localeOf(req)))
   }))
 
   router.post('/api/plugins', upload.single('file'), h(async (req, res) => {
@@ -1251,6 +1482,40 @@ export function buildRouter(): Router {
   }))
 
   /* npm-installed plugins with a newer version on the registry. */
+  /* ── Alerting ────────────────────────────────────────────────────────────
+     One configuration for the engine. The channels are credentials, so the
+     keys are stored encrypted with everything else and nothing here holds a
+     secret — only the NAME of a credential and where to send. */
+  router.get('/api/alerts/settings', h(async (_req, res) => {
+    const alerts = getAlertService()
+    res.json(alerts ? alerts.current() : { enabled: false, emailTo: [] })
+  }))
+
+  router.put('/api/alerts/settings', h(async (req, res) => {
+    const alerts = getAlertService()
+    if (!alerts) { res.status(503).send('Alerting is not started yet'); return }
+    res.json(await alerts.save(req.body as AlertSettings))
+  }))
+
+  /* Send one now, through whatever is configured. The only way to learn that a
+     relay accepts the key but refuses the sender, or that a bot was never
+     added to its group — both of which look like success until an alert
+     matters. Reports per channel rather than one verdict: half-working is the
+     interesting state. */
+  router.post('/api/alerts/test', h(async (_req, res) => {
+    const alerts = getAlertService()
+    if (!alerts) { res.status(503).send('Alerting is not started yet'); return }
+    const result = await alerts.dispatch(
+      'OpenWhale: test alert',
+      'This is a test from the Alerts page. If you are reading it, delivery works.',
+    )
+    if (result.sent.length === 0 && result.failed.length === 0) {
+      res.status(400).json({ error: 'Nothing is configured to send to' })
+      return
+    }
+    res.json(result)
+  }))
+
   router.get('/api/plugins/updates', h(async (_req, res) => {
     res.json(await checkPluginUpdates())
   }))

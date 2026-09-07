@@ -1,3 +1,4 @@
+import type { Text } from '../i18n.js'
 export interface MonitorRecord<TData = Record<string, unknown>> {
   ts: number
   data: TData
@@ -71,7 +72,7 @@ export interface PlotCandle {
 }
 
 export interface PlotSeries {
-  label: string
+  label: Text
   points?: PlotPoint[]
   candles?: PlotCandle[]
 }
@@ -98,7 +99,7 @@ export interface PlotRegion {
   /** x end, exclusive. `from === to` draws a vertical reference LINE at that instant. */
   to: number
   /** Shown on hover / in the legend. */
-  label?: string
+  label?: Text
   /** Optional tone hint; the dashboard picks the actual colour. Default 'neutral'. */
   tone?: 'neutral' | 'warn' | 'good'
 }
@@ -110,7 +111,7 @@ export interface PlotYRange {
   /** y end, exclusive. `from === to` draws a horizontal reference LINE at that level. */
   to: number
   /** Shown on hover / in the legend. */
-  label?: string
+  label?: Text
   /** Optional tone hint; the dashboard picks the actual colour. Default 'neutral'. */
   tone?: 'neutral' | 'warn' | 'good'
 }
@@ -118,7 +119,7 @@ export interface PlotYRange {
 /** A selectable variant of a panel (e.g. one captured session among many). */
 export interface PlotOption {
   value: string
-  label: string
+  label: Text
   /**
    * Pre-selected when the viewer has not chosen anything. Only meaningful on
    * `multi` panels, where "the first option" is a poor default — a panel that
@@ -131,7 +132,7 @@ export interface PlotOption {
 interface PlotDefBase<TData> {
   /** Panel id, unique within the monitor. */
   id: string
-  title: string
+  title: Text
   /**
    * Chart form. 'candles' series carry PlotCandle[] instead of points.
    * 'table' renders each series as a ROW (label = row name, points[i].y =
@@ -141,12 +142,12 @@ interface PlotDefBase<TData> {
   /** Column headers for kind 'table' — cell i of a row is points[i].y. */
   columns?: string[]
   /** y-axis unit hint shown on labels ('$', 'bps', '%', …). */
-  unit?: string
+  unit?: Text
   /** x-axis semantics: 'time' (epoch ms, default) or 'value' (plain number, e.g. bp offsets). */
   xKind?: 'time' | 'value'
   /** x-axis unit hint when xKind is 'value'. */
   xUnit?: string
-  description?: string
+  description?: Text
   /**
    * Selectable variants derived from the same record window (e.g. one entry
    * per captured session, or the tokens present in it). When present the
@@ -210,13 +211,13 @@ export type MonitorPlotDef<TData = Record<string, unknown>> = SinglePlotDef<TDat
 /** Serializable panel metadata (everything except extract). */
 export interface MonitorPlotInfo {
   id: string
-  title: string
+  title: Text
   kind: 'line' | 'bar' | 'candles' | 'table' | 'scatter'
   columns?: string[]
-  unit?: string
+  unit?: Text
   xKind?: 'time' | 'value'
   xUnit?: string
-  description?: string
+  description?: Text
   /** Options are a multi-select filter rather than one-of-many variants. */
   multi?: boolean
 }

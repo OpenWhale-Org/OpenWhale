@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { useAnchoredPlacement } from './popover'
+import { useT } from '@/i18n'
 
 /**
  * A select drawn in the dashboard's own list style rather than the browser's.
@@ -39,6 +40,7 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
   style?: React.CSSProperties
   disabled?: boolean
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(-1)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -113,7 +115,7 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
           }}
         >
           {options.length === 0 && (
-            <div className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>Nothing to choose from.</div>
+            <div className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>{t('ui.nothingToChoose')}</div>
           )}
           {options.map((o, i) => {
             const selected = o.value === value
