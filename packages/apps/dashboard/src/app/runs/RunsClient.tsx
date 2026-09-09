@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import type { StrategyInstanceView } from '@openwhaleorg/core'
 import { Select } from '@/components/Select'
-import { RunSteps, type RunTrace } from '@/components/RunTrace'
+import { RunSteps, runClock, type RunTrace } from '@/components/RunTrace'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { useT } from '@/i18n'
 
@@ -170,7 +170,7 @@ function RunListRow({ run, instanceName, open, onToggle }: {
         onClick={onToggle}
       >
         <span className="mono" style={{ color: 'var(--muted)' }}>
-          {open ? '▾' : '▸'} {new Date(run.startedAt).toLocaleTimeString()}
+          {open ? '▾' : '▸'} {runClock(run.startedAt)}
         </span>
         <span className="px-1.5 py-0.5 rounded text-xs justify-self-start" style={{ background: color + '22', color }}>{outcome}</span>
         <span className="truncate" style={{ color: 'var(--muted)' }}>{instanceName ?? run.instanceId}</span>

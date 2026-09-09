@@ -30,6 +30,20 @@ export interface RunTrace {
   steps: RunStepRecord[]
 }
 
+/**
+ * A run's clock, to the millisecond.
+ *
+ * Runs fire as fast as the monitor emits, and since the venue feeds moved to
+ * quote streams that is several per second — three rows all reading "02:24:36"
+ * cannot be put in order by eye. `toLocaleTimeString` has no millisecond field,
+ * so the parts are assembled by hand and stay in the viewer's local zone.
+ */
+export function runClock(ts: number): string {
+  const d = new Date(ts)
+  const p = (n: number, w = 2) => String(n).padStart(w, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
+}
+
 export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpen?: boolean }) {
   const t = useT()
   const [open, setOpen] = useState(defaultOpen)
@@ -41,7 +55,7 @@ export function RunRow({ run, defaultOpen = false }: { run: RunTrace; defaultOpe
     // same block in a different typeface from the other.
     <div className="font-mono text-xs flex flex-col gap-0.5">
       <div className="flex gap-2 items-start cursor-pointer" onClick={() => setOpen(o => !o)}>
-        <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'} {new Date(run.startedAt).toLocaleTimeString()}</span>
+        <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'} {runClock(run.startedAt)}</span>
         <span className="px-1 rounded text-xs" style={{ background: color + '22', color }}>
           {run.error ? t('ui.error') : run.instructions === 1 ? t('ui.instructionsOne') : t('ui.instructionsN', { n: run.instructions })}
         </span>
