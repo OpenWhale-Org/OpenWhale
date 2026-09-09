@@ -61,6 +61,12 @@ export interface CcxtAdapterOptions {
   /** Additional raw ccxt constructor options. */
   ccxtOptions?: Record<string, unknown>
   /**
+   * Build `watchTicker` from the venue's quote stream instead of its 24h
+   * ticker. Defaults to on wherever the venue offers one — see
+   * `watchTickerViaQuotes`. Set false to take the venue's `@ticker` verbatim.
+   */
+  tickerFromQuotes?: boolean
+  /**
    * Send this venue's traffic through an outbound proxy — REST **and**
    * WebSocket. `http://host:port`, or `socks5://…`.
    *
@@ -205,6 +211,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
   /** Cached position mode, and the in-flight read that concurrent callers share. */
   private positionMode: { hedged: boolean; readAt: number } | undefined
   private positionModeInFlight: Promise<{ hedged: boolean }> | undefined
+  private readonly tickerFromQuotes: boolean
 
   constructor(options: CcxtAdapterOptions) {
     // ccxt.pro holds the WebSocket-capable constructors; typed as the base Exchange
@@ -253,6 +260,7 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     }
 
     this.exchange = new Ctor(opts)
+    this.tickerFromQuotes = options.tickerFromQuotes ?? true
     // Counts what this process asks of the venue, per endpoint, per minute.
     // Measurement only — it paces nothing and delays nothing.
     meterRequests(this.exchange as unknown as Parameters<typeof meterRequests>[0])
@@ -780,7 +788,150 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     })
   }
 
+  /**
+   * A ticker feed built from the streams the venue actually pushes.
+   *
+   * `watchTicker` subscribes to the 24-hour rolling summary, which every
+   * Binance-family venue sends ONLY when a trade prints. On the leveraged-ETF
+   * markets this engine trades that is minutes apart, so the quote goes stale
+   * while the book underneath it moves. Measured 2026-09-09 over 25s on the
+   * same symbol: binance `SNXX/USDT:USDT` gave 5 ticker frames (4351ms apart)
+   * against 340 from `watchBidsAsks` (1ms); aster gave ZERO against 55. A
+   * quote feed that only speaks when someone trades is not a quote feed.
+   *
+   * So: the quote comes from the bid/ask stream, the last traded price from
+   * the trade stream, and the 24-hour figures from one REST snapshot at
+   * subscribe time. Every field still means what it says — `last` is a real
+   * trade, not a mid dressed up as one — and the fields that move
+   * continuously now move continuously.
+   *
+   * Venues without a quote stream (Hyperliquid, whose ccxt build has no
+   * `watchBidsAsks`) fall through to the plain watch unchanged.
+   */
+  protected async watchTickerViaQuotes(
+    symbol: string,
+    callback: (ticker: Ticker) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const ex = this.exchange as unknown as {
+      watchTrades: (symbol: string) => Promise<Array<{ price?: number; timestamp?: number }>>
+    }
+
+    // The 24h frame of reference — fetched ALONGSIDE the streams, never ahead of
+    // them. On Hyperliquid the first fetchTicker pays for loading every HIP-3
+    // dex: measured 22.2s on 2026-09-09. Awaiting it first would hold the quote
+    // feed shut for exactly as long, which is the opposite of the point. Its
+    // absence must not stop the feed either — a strategy reading bid/ask does
+    // not care about yesterday's high.
+    let base: Ticker = { symbol, timestamp: Date.now(), last: 0, bid: 0, ask: 0, high: 0, low: 0, volume: 0, quoteVolume: 0 }
+    let framed = false
+
+    const emit = (over: Partial<Ticker>) => {
+      base = { ...base, ...over }
+      callback(base)
+    }
+
+    void this.fetchTicker(symbol).then(
+      // The stream's own fields outrank the snapshot: by the time it lands the
+      // book has moved, and a stale bid overwriting a live one is a bug.
+      t => {
+        if (framed) base = { ...t, bid: base.bid, ask: base.ask, ...(base.last > 0 ? { last: base.last } : {}) }
+        else base = t
+        framed = true
+      },
+      () => undefined,
+    )
+
+    const quotes = this.quoteStream(symbol, q => {
+      framed = true
+      emit({
+        ...(q.bid !== undefined ? { bid: q.bid } : {}),
+        ...(q.ask !== undefined ? { ask: q.ask } : {}),
+        timestamp: q.timestamp ?? Date.now(),
+      })
+    }, signal)
+
+    const trades = (async () => {
+      while (!signal?.aborted) {
+        const rows = await ex.watchTrades(symbol)
+        const last = rows[rows.length - 1]
+        if (last?.price !== undefined) emit({ last: last.price, timestamp: last.timestamp ?? Date.now() })
+      }
+    })()
+
+    // Either stream ending ends the feed, exactly as a single watch would: the
+    // caller reconnects, and a half-live ticker is worse than a restarted one.
+    try {
+      await Promise.race([quotes, trades, new Promise<void>(resolve => {
+        if (signal) signal.addEventListener('abort', () => resolve(), { once: true })
+      })])
+    } finally {
+      // The loop that did not settle the race is still awaiting a frame. Once
+      // we have returned, its eventual failure has no one to tell — and an
+      // unhandled rejection takes the process down with it.
+      void quotes.catch(() => undefined)
+      void trades.catch(() => undefined)
+    }
+  }
+
+  /**
+   * This venue's live best bid/offer, or undefined when it has none.
+   *
+   * The seam venues override: ccxt's `watchBidsAsks` covers the Binance
+   * family, while Hyperliquid needs its own `bbo` subscription — see the
+   * Hyperliquid adapter. Returning undefined means "no quote stream", and
+   * `watchTicker` then takes the venue's `@ticker` verbatim.
+   */
+  /**
+   * Can this venue do `name` over a websocket?
+   *
+   * `has` is the venue class's own declaration, and subclasses forget to make
+   * it: ccxt's `binance` declares `watchBidsAsks` and `watchTrades`, while
+   * `binanceusdm` inherits both working methods and declares NEITHER (verified
+   * 2026-09-09 — `has` undefined, `typeof === 'function'`). Gating on the flag
+   * alone silently excluded every Binance perp, which is most of what this
+   * engine trades. So: the method decides, and `has` only gets to veto.
+   */
+  protected venueCanWatch(name: string): boolean {
+    const ex = this.exchange as unknown as Record<string, unknown>
+    return typeof ex[name] === 'function' && this.exchange.has[name] !== false
+  }
+
+  protected get hasQuoteStream(): boolean { return this.venueCanWatch('watchBidsAsks') }
+
+  protected quoteStream(
+    symbol: string,
+    onQuote: (q: { bid?: number; ask?: number; timestamp?: number }) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const ex = this.exchange as unknown as {
+      watchBidsAsks: (symbols: string[]) => Promise<Record<string, { bid?: number; ask?: number; timestamp?: number }>>
+    }
+    return (async () => {
+      while (!signal?.aborted) {
+        const t = (await ex.watchBidsAsks([symbol]))[symbol]
+        if (t) onQuote(t)
+      }
+    })()
+  }
+
+  /** Does this venue offer a real quote stream, and are we allowed to use it? */
+  private get quotesBackTicker(): boolean {
+    return this.tickerFromQuotes && this.hasQuoteStream && this.venueCanWatch('watchTrades')
+  }
+
   async watchTicker(symbol: string, callback: (ticker: Ticker) => void, signal?: AbortSignal): Promise<void> {
+    if (this.quotesBackTicker) {
+      // `has` can only veto, so a venue that answers NotSupported reaches here
+      // instead of being excluded up front. Falling back beats failing: the
+      // 24h ticker is worse, not useless.
+      try {
+        return await this.watchTickerViaQuotes(symbol, callback, signal)
+      } catch (err) {
+        if (signal?.aborted) return
+        createLogger('CcxtAdapter').warn({ symbol, err }, 'Quote stream unavailable — falling back to the venue 24h ticker')
+      }
+    }
     while (!signal?.aborted) {
       const t = await this.raceAbort(this.exchange.watchTicker(symbol), signal)
       if (t === null) return

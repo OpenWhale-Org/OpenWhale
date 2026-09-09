@@ -2,6 +2,7 @@ import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
 import { createLogger, TerminalAdapterError } from '@openwhaleorg/core'
 import type { ExchangeFill, ExchangeOrder, ExchangePosition, FundingRateData, PerpOrderParams, Ticker } from '@openwhaleorg/exchange'
 import { decidePriority, isPriorityBalanceRejection, priorityP } from './priority.js'
+import { HyperliquidBboFeed } from './bboFeed.js'
 
 /**
  * ccxt internals the priority path borrows. None of these are ccxt's public
@@ -169,6 +170,50 @@ export interface HyperliquidCredentials {
  * is inherited.
  */
 export class HyperliquidAdapter extends CcxtAdapter {
+  /** Opened on the first watched symbol, shared by all of them. See bboFeed.ts. */
+  private bbo: HyperliquidBboFeed | undefined
+
+  /**
+   * ccxt has no `watchBidsAsks` here, but the venue does have a quote stream —
+   * it is just not one ccxt speaks. Claiming it turns on the quote-built
+   * ticker in the base adapter; `quoteStream` below supplies the frames.
+   */
+  protected override get hasQuoteStream(): boolean { return true }
+
+  /**
+   * Best bid/offer from Hyperliquid's `bbo` channel.
+   *
+   * The coin string the channel wants is `market.info.name` — `xyz:KORU` for a
+   * HIP-3 market, plain `BTC` for the main universe. Without a market we have
+   * no coin to ask for, and a stream that silently watches the wrong thing is
+   * worse than none: the promise rejects and `watchTicker` falls back.
+   */
+  protected override async quoteStream(
+    symbol: string,
+    onQuote: (q: { bid?: number; ask?: number; timestamp?: number }) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.exchange.loadMarkets()
+    const coin = (this.exchange.market(symbol).info as { name?: string } | undefined)?.name
+    if (!coin) throw new Error(`Hyperliquid: no coin id for ${symbol} — cannot subscribe to bbo`)
+    this.bbo ??= new HyperliquidBboFeed()
+    const off = this.bbo.subscribe(coin, onQuote)
+    try {
+      await new Promise<void>(resolve => {
+        if (signal?.aborted) { resolve(); return }
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+    } finally {
+      off()
+    }
+  }
+
+  override async close(): Promise<void> {
+    this.bbo?.close()
+    this.bbo = undefined
+    await super.close()
+  }
+
   /**
    * Quirk: ccxt double-counts the builder fee.
    *
