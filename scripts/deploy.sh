@@ -157,6 +157,49 @@ if [ "$FORCE_WINDOW" = 0 ] && in_blackout; then
   echo "▶️  UTC $(date -u +%H:%M) — window clear, restarting."
 fi
 
+# ── 2b. Refresh the staged copies ─────────────────────────────────────────────
+#
+# The engine does NOT load a plugin from where it was installed. Node's ESM
+# registry is keyed by resolved URL and can never be evicted, so a reinstall at
+# the same path would change the bytes on disk and change nothing about what
+# runs; the installer therefore copies each package to a fresh directory under
+# ~/.openwhale/plugins/staged/ and records THAT as the entry point.
+#
+# Which means rsync + restart is not a deploy. It puts the new code on the
+# server, next to the old code that keeps running — silently, which is the
+# worst way for a trading engine to be wrong about what it is executing.
+# Measured 2026-09-10: pair-arb had been frozen at a copy from 09-09 while
+# three deploys reported success.
+#
+# So: refresh each staged copy in place from what we just synced. The recorded
+# entryPath stays valid, and the restart below picks the new bytes up.
+# `node_modules` is excluded — the copy holds a symlink back to the install's
+# own tree, and overwriting it would break resolution.
+step "Refresh staged plugin copies"
+# Quoted heredoc: the remote script is sent verbatim, so nothing here needs a
+# second layer of escaping.
+"${SSH[@]}" "$DEPLOY_HOST" bash -s <<'REMOTE_RESTAGE'
+set -e
+node -e '
+  const fs = require("fs"), path = require("path");
+  const file = path.join(process.env.HOME, ".openwhale/plugins/plugins.json");
+  let list = []; try { list = JSON.parse(fs.readFileSync(file, "utf8")) } catch { process.exit(0) }
+  for (const p of list) {
+    const entry = p.entryPath || "";
+    if (!entry.includes("/staged/")) continue;            // loaded live — nothing to refresh
+    if (!p.source || p.source.kind !== "local" || !p.source.path) continue;
+    const cut = entry.indexOf("/dist/");
+    if (cut < 0) continue;
+    const root = entry.slice(0, cut);
+    if (fs.existsSync(root) && fs.existsSync(p.source.path)) console.log(p.source.path + "\t" + root);
+  }
+' | while IFS=$'\t' read -r src dst; do
+  [ -n "$src" ] || continue
+  rsync -a --delete --exclude node_modules --exclude .git "$src/" "$dst/"
+  echo "  restaged ${dst##*/}"
+done
+REMOTE_RESTAGE
+
 step "Install dependencies and restart"
 "${SSH[@]}" "$DEPLOY_HOST" "
 set -e
