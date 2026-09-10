@@ -548,6 +548,61 @@ export class TriggerManager {
     this.cronTasks.get(entry.instanceId)!.push(task)
   }
 
+  /**
+   * Run an instance's trigger NOW, as if its schedule had just fired.
+   *
+   * The operator is the condition: the trigger's own conditions are not
+   * consulted (a cron that has not come round is exactly why someone reaches
+   * for this), but everything downstream is the ordinary path — the same run,
+   * the same trace, the same dispatch to the same executor slots. A run that
+   * fires here is indistinguishable from a scheduled one in the record, which
+   * is the point: it must not be a second, subtly different way to trade.
+   *
+   * Reports rather than throws when there is nothing to run, and says WHY —
+   * "suspended" is the answer to the question that usually brings someone
+   * here, namely why the schedule went quiet.
+   */
+  async fireNow(instanceId: string, triggerId?: string):
+  Promise<{ fired: boolean; reason?: string; triggerId?: string }> {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return { fired: false, reason: 'instance is not active in this runtime' }
+    if (!this.running || !this.queue) return { fired: false, reason: 'the trigger manager is not started' }
+    if (entry.suspended) return { fired: false, reason: 'instance is suspended (mid-teardown or a failed re-activation)' }
+    const trigger = triggerId !== undefined
+      ? entry.triggers.find(t => t.id === triggerId)
+      : entry.triggers.find(t => t.enabled)
+    if (!trigger) return { fired: false, reason: triggerId !== undefined ? `no trigger "${triggerId}"` : 'the instance has no enabled trigger' }
+
+    const now = Date.now()
+    const triggerState = this.triggerStates.get(trigger.id)
+    const monitorData = triggerState?.collectMonitorData(trigger.conditions) ?? {}
+    let release: () => void = () => {}
+    const running = new Promise<void>(resolve => { release = resolve })
+    entry.inFlight.add(running)
+    try {
+      await this.fireRun(entry, trigger, this.queue, now, monitorData)
+      return { fired: true, triggerId: trigger.id }
+    } finally {
+      entry.inFlight.delete(running)
+      release()
+    }
+  }
+
+  /** What the schedule looks like from outside — for "why did it not fire". */
+  scheduleOf(instanceId: string): { active: boolean; suspended: boolean; cronTasks: number; triggers: Array<{ id: string; enabled: boolean; conditions: string[] }> } {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return { active: false, suspended: false, cronTasks: 0, triggers: [] }
+    return {
+      active: true,
+      suspended: entry.suspended === true,
+      cronTasks: this.cronTasks.get(instanceId)?.length ?? 0,
+      triggers: entry.triggers.map(t => ({
+        id: t.id, enabled: t.enabled,
+        conditions: t.conditions.map(c => c.type === 'cron' ? `cron ${c.expression}` : c.type),
+      })),
+    }
+  }
+
   private async checkAndFire(
       entry: InstanceEntry,
       trigger: Trigger,

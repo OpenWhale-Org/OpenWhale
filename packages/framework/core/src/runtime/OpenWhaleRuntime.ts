@@ -1130,6 +1130,23 @@ export class OpenWhaleRuntime implements IRuntime {
    *
    * ⚠️ This performs the executor's REAL side effects (orders, messages…).
    */
+  /**
+   * Run an active instance's trigger now, the same way its schedule would.
+   *
+   * For the operator who can see that a scheduled decision did not happen and
+   * needs it to happen — not a second trading path: the run, its trace and its
+   * dispatch are the ordinary ones. `scheduleState` answers the question that
+   * usually comes first (is it even scheduled, is it suspended).
+   */
+  async fireInstanceNow(instanceId: string, triggerId?: string): Promise<{ fired: boolean; reason?: string; triggerId?: string }> {
+    return this.triggerManager.fireNow(instanceId, triggerId)
+  }
+
+  /** What the trigger manager currently holds for an instance — for diagnosis. */
+  scheduleState(instanceId: string): ReturnType<TriggerManager['scheduleOf']> {
+    return this.triggerManager.scheduleOf(instanceId)
+  }
+
   async fireInstruction(
     executorId: string,
     action: string,
