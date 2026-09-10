@@ -59,21 +59,33 @@ step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 #
 # Restarting the gateway interrupts whatever is mid-execution. If your
 # strategies work in cycles around a fixed instant, set DEPLOY_BLACKOUT to the
-# minutes-past-the-hour they occupy, UTC, as FROM-TO — it may wrap, so 54-01
-# means :54 through :01. Empty (the default) disables the check.
-if [ -n "$DEPLOY_BLACKOUT" ]; then
-  FROM="${DEPLOY_BLACKOUT%%-*}"
-  TO="${DEPLOY_BLACKOUT##*-}"
-  MIN=$(date -u +%-M)
-  if { [ "$FROM" -le "$TO" ] && [ "$MIN" -ge "$FROM" ] && [ "$MIN" -le "$TO" ]; } \
-  || { [ "$FROM" -gt "$TO" ] && { [ "$MIN" -ge "$FROM" ] || [ "$MIN" -le "$TO" ]; }; }; then
-    if [ "$FORCE_WINDOW" = 0 ]; then
-      echo "⛔ It is UTC $(date -u +%H:%M), inside the blackout window XX:${FROM}–XX:${TO}."
-      echo "   Wait, or pass --force-window when you know nothing is mid-cycle."
-      exit 1
-    fi
-    echo "⚠️  UTC $(date -u +%H:%M) is inside the blackout window; --force-window given."
+# minutes-past-the-hour they occupy, UTC, as FROM-TO — it may wrap, so 50-03
+# means :50 through :03. Empty (the default) disables the check.
+#
+# The window guards the RESTART, not the moment you typed the command, and a
+# full deploy takes minutes: build, sync, install, then restart. Checking only
+# at the start let a deploy started at :51 restart the gateway at :54 — inside
+# the very window meant to prevent it (measured 2026-09-10, nine minutes before
+# a funding settlement). So the check runs twice: here to fail fast before
+# paying for a build, and again immediately before the restart, where it WAITS
+# the window out rather than abandoning a finished build.
+FROM="${DEPLOY_BLACKOUT%%-*}"
+TO="${DEPLOY_BLACKOUT##*-}"
+
+in_blackout() {
+  [ -n "$DEPLOY_BLACKOUT" ] || return 1
+  local min; min=$(date -u +%-M)
+  { [ "$FROM" -le "$TO" ] && [ "$min" -ge "$FROM" ] && [ "$min" -le "$TO" ]; } \
+  || { [ "$FROM" -gt "$TO" ] && { [ "$min" -ge "$FROM" ] || [ "$min" -le "$TO" ]; }; }
+}
+
+if in_blackout; then
+  if [ "$FORCE_WINDOW" = 0 ]; then
+    echo "⛔ It is UTC $(date -u +%H:%M), inside the blackout window XX:${FROM}–XX:${TO}."
+    echo "   Wait, or pass --force-window when you know nothing is mid-cycle."
+    exit 1
   fi
+  echo "⚠️  UTC $(date -u +%H:%M) is inside the blackout window; --force-window given."
 fi
 
 # ── 1. Build locally ──────────────────────────────────────────────────────────
@@ -134,6 +146,16 @@ for entry in $DEPLOY_PLUGINS; do
   [ "$entry" != "$dir" ] && remote="${entry#*:}"
   REMOTE_PLUGIN_DIRS="$REMOTE_PLUGIN_DIRS $remote/$(basename "$dir")"
 done
+
+# The build and the sync are done; only the restart is dangerous. If the clock
+# has walked into the window while they ran, hold here — the artefacts are
+# already on the server, so waiting costs nothing and restarting mid-cycle
+# costs an execution.
+if [ "$FORCE_WINDOW" = 0 ] && in_blackout; then
+  echo "⏸  UTC $(date -u +%H:%M) is inside the blackout window XX:${FROM}–XX:${TO} — holding the restart."
+  while in_blackout; do sleep 20; done
+  echo "▶️  UTC $(date -u +%H:%M) — window clear, restarting."
+fi
 
 step "Install dependencies and restart"
 "${SSH[@]}" "$DEPLOY_HOST" "
