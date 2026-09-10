@@ -41,8 +41,77 @@ const TAIL_CHUNK = 1 << 20
  * hold data sets. */
 let tailCache: { file: string; stamp: string; n: number; records: unknown[] } | null = null
 const tailInFlight = new Map<string, Promise<unknown[]>>()
-/** Line count of an oversized file is a full scan — remember it per stamp. */
-let countCache: { file: string; stamp: string; n: number } | null = null
+/**
+ * Line counts, remembered per file and advanced incrementally.
+ *
+ * Counting used to stream the whole file THROUGH THE JSON PARSER and throw
+ * every record away — 431,020 records off a 178MB store measured at 2.51s of
+ * CPU on 2026-09-10, and `funding-rates/binance.jsonl` had reached 7.5GB, so
+ * one count of it is ~105s and ~18M objects of garbage. That garbage is what
+ * the multi-second parallel GC pauses were: the gateway showed 100-171% CPU
+ * for fourteen seconds at a stretch while every API call queued behind it.
+ *
+ * Worse, the old cache key was `mtimeMs:size` — both of which change on every
+ * append, and these stores are appended ~20x a second. The cache could never
+ * hit, so EVERY request full-scanned. `/api/monitor/:name/:key` calls this to
+ * put a row count in the UI.
+ *
+ * Two changes. Counting reads bytes and counts 0x0a, never parsing — a count
+ * does not need the records. And the entry remembers where it stopped, so an
+ * append-only store is advanced by counting the newlines in the bytes ADDED
+ * since last time, which is a few KB rather than gigabytes.
+ *
+ * `head` guards the one case that is not append-only: retention prunes by
+ * rewriting the file from the front, so a changed head means our offset is
+ * meaningless and the count starts over.
+ */
+const HEAD_PROBE = 256
+const COUNT_CACHE_MAX = 64
+/** `nl` is the RAW newline count over [0, size) — see `count` for why. */
+const countCache = new Map<string, { size: number; head: string; nl: number }>()
+
+/** Newlines in [from, to) — bytes only, no parse, no per-record allocation. */
+async function countNewlines(file: string, from: number, to: number): Promise<number> {
+  if (to <= from) return 0
+  const fh = await fs.promises.open(file, 'r')
+  try {
+    const buf = Buffer.alloc(Math.min(1 << 20, to - from))
+    let pos = from, n = 0
+    while (pos < to) {
+      const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, to - pos), pos)
+      if (bytesRead <= 0) break
+      for (let i = 0; i < bytesRead; i++) if (buf[i] === 0x0a) n++
+      pos += bytesRead
+    }
+    return n
+  } finally {
+    await fh.close()
+  }
+}
+
+async function readHead(file: string, bytes: number): Promise<string> {
+  const fh = await fs.promises.open(file, 'r')
+  try {
+    const buf = Buffer.alloc(bytes)
+    const { bytesRead } = await fh.read(buf, 0, bytes, 0)
+    return buf.subarray(0, bytesRead).toString('latin1')
+  } finally {
+    await fh.close()
+  }
+}
+
+/** Is the file's last byte a newline? Decides whether a final record is unterminated. */
+async function endsWithNewline(file: string, size: number): Promise<boolean> {
+  if (size <= 0) return true
+  const fh = await fs.promises.open(file, 'r')
+  try {
+    const buf = Buffer.alloc(1)
+    await fh.read(buf, 0, 1, size - 1)
+    return buf[0] === 0x0a
+  } finally {
+    await fh.close()
+  }
+}
 
 export class MonitorDataReaderImpl<TData = Record<string, unknown>>
   implements MonitorDataReader<TData>
@@ -175,12 +244,22 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
     if (await this.oversized(key)) {
       const file = this.filePath(key)
       const stat = await fs.promises.stat(file)
-      const stamp = `${stat.mtimeMs}:${stat.size}`
-      if (countCache && countCache.file === file && countCache.stamp === stamp) return countCache.n
-      let n = 0
-      for await (const _ of this.stream(key)) n++
-      countCache = { file, stamp, n }
-      return n
+      const head = await readHead(file, HEAD_PROBE)
+      const hit = countCache.get(file)
+      // Append-only since we last looked: count the tail we have not seen.
+      // A shrunken file or a rewritten head means retention has been through
+      // it and the offset no longer means anything.
+      const from = hit && hit.head === head && stat.size >= hit.size ? hit.size : 0
+      const base = from > 0 ? hit!.nl : 0
+      // Cache the RAW newline count, never the answer. A final record with no
+      // terminator gets a +1 at return time; folding it into the cache would
+      // double-count it the moment an append supplies the missing newline.
+      const nl = base + await countNewlines(file, from, stat.size)
+      if (countCache.size >= COUNT_CACHE_MAX && !countCache.has(file)) {
+        countCache.delete(countCache.keys().next().value!)
+      }
+      countCache.set(file, { size: stat.size, head, nl })
+      return nl + (await endsWithNewline(file, stat.size) ? 0 : 1)
     }
     // Small files ride the parse cache instead of a second full read.
     return (await this.load(key)).length
