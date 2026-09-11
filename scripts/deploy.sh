@@ -37,11 +37,16 @@ DEPLOY_REMOTE_PLUGINS="${DEPLOY_REMOTE_PLUGINS:-plugins}"
 DEPLOY_SERVICES="${DEPLOY_SERVICES:-openwhale-gateway openwhale-dashboard}"
 DEPLOY_BLACKOUT="${DEPLOY_BLACKOUT:-}"
 
-SSH=(ssh)
-RSYNC=(rsync -az)
+# Keepalives: the restart step is silent for as long as the slowest service
+# takes to stop, and a NAT or proxy on the way cuts a silent connection at
+# about a minute — "closed by remote host", with the job still running on the
+# server and no health check. Measured 2026-09-11, twice.
+SSH_OPTS=(-o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+SSH=(ssh "${SSH_OPTS[@]}")
+RSYNC=(rsync -az -e "ssh ${SSH_OPTS[*]}")
 if [ -n "$DEPLOY_SSH_KEY" ]; then
-  SSH=(ssh -i "$DEPLOY_SSH_KEY")
-  RSYNC=(rsync -az -e "ssh -i $DEPLOY_SSH_KEY")
+  SSH=(ssh "${SSH_OPTS[@]}" -i "$DEPLOY_SSH_KEY")
+  RSYNC=(rsync -az -e "ssh ${SSH_OPTS[*]} -i $DEPLOY_SSH_KEY")
 fi
 
 SKIP_BUILD=0; WITH_ENV=0; FORCE_WINDOW=0
