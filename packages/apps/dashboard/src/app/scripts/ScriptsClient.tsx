@@ -203,6 +203,15 @@ function downloadFile(file: ScriptFile): void {
  * the same for text fields: a script author who set `.default()` expects that
  * value to be sent without the user retyping it.
  */
+/** A field's `displayOptions` against the current values — the same rule the strategy form applies. */
+function fieldVisible(f: ParamFieldDef, values: Record<string, string>): boolean {
+  const d = f.displayOptions
+  if (!d) return true
+  for (const [key, allowed] of Object.entries(d.show ?? {})) if (!allowed.map(String).includes(values[key] ?? '')) return false
+  for (const [key, blocked] of Object.entries(d.hide ?? {})) if (blocked.map(String).includes(values[key] ?? '')) return false
+  return true
+}
+
 function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> {
   const out: Record<string, string> = {}
   for (const f of fields ?? []) {
@@ -425,7 +434,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
 
       {fields.length > 0 && (
         <div className="flex flex-wrap gap-3 mt-3">
-          {fields.map(f => <FieldInput key={f.name} field={f} value={values[f.name] ?? ''} onChange={v => setValues(prev => ({ ...prev, [f.name]: v }))} />)}
+          {fields.filter(f => fieldVisible(f, values)).map(f => <FieldInput key={f.name} field={f} value={values[f.name] ?? ''} onChange={v => setValues(prev => ({ ...prev, [f.name]: v }))} />)}
         </div>
       )}
 
