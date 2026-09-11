@@ -186,7 +186,7 @@ fi
 # Which means rsync + restart is not a deploy. It puts the new code on the
 # server, next to the old code that keeps running — silently, which is the
 # worst way for a trading engine to be wrong about what it is executing.
-# Measured 2026-09-10: pair-arb had been frozen at a copy from 09-09 while
+# Measured 2026-09-10: one plugin had been frozen at a day-old staged copy while
 # three deploys reported success.
 #
 # So: refresh each staged copy in place from what we just synced. The recorded
