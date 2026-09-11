@@ -541,10 +541,11 @@ body {
   margin-top: .5rem; font-family: var(--font-mono, ui-monospace, Menlo, monospace);
   font-size: .66rem !important; color: var(--accent) !important;
 }
-.ow-tour-actions { display: flex; align-items: center; gap: .4rem; margin-top: .8rem; }
+.ow-tour-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
 .ow-tour-spacer { flex: 1 }
 .ow-tour-card button {
-  height: 28px; padding: 0 .7rem; border-radius: 7px; font-size: .72rem;
+  min-height: 28px; max-width: 100%; padding: .3rem .7rem; border-radius: 7px; font-size: .72rem;
+  white-space: normal;
   border: 1px solid var(--border); color: rgba(226,220,250,.72); background: rgba(255,255,255,.04);
 }
 .ow-tour-card button:hover { color: #fff; border-color: color-mix(in srgb, var(--accent) 60%, transparent) }

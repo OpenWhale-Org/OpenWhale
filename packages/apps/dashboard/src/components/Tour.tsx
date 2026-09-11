@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { usePathname, useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
+import { placeCard } from './tourPlacement'
 import { useT, type MessageKey } from '@/i18n'
 
 type T = ReturnType<typeof useT>
@@ -448,34 +449,4 @@ function blockers(rect: DOMRect | null): React.CSSProperties[] {
     { left: 0, top: t, width: l, height: Math.max(0, b - t) },
     { left: r, top: t, width: Math.max(0, W - r), height: Math.max(0, b - t) },
   ]
-}
-
-/**
- * Put the card beside the spotlight, on whichever side has room.
- *
- * "Beside" and not "over": when the target is a dialog the card would land on
- * top of the very form it is describing, which is how the first version had
- * you reading instructions through a panel covering the inputs. If neither
- * side fits — a wide target, i.e. a dialog — it goes under or above instead.
- */
-function placeCard(rect: DOMRect | null): React.CSSProperties {
-  if (typeof window === 'undefined') return {}
-  const W = 340
-  const GAP = 20
-  if (!rect) return { left: '50%', bottom: 40, transform: 'translateX(-50%)', width: W }
-
-  const right = window.innerWidth - rect.right
-  if (right > W + GAP) return { left: rect.right + GAP, top: clampTop(rect.top - 8), width: W }
-  if (rect.left > W + GAP) return { left: rect.left - W - GAP, top: clampTop(rect.top - 8), width: W }
-
-  // Nothing either side — sit in the taller of the bands above and below.
-  const below = window.innerHeight - rect.bottom
-  const left = Math.min(Math.max(16, rect.left), window.innerWidth - W - 16)
-  return below > rect.top
-    ? { left, top: rect.bottom + GAP, width: W }
-    : { left, top: Math.max(16, rect.top - GAP - 240), width: W }
-}
-
-function clampTop(v: number): number {
-  return Math.min(Math.max(16, v), window.innerHeight - 260)
 }
