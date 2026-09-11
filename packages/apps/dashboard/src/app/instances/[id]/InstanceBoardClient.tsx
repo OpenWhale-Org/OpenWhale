@@ -743,31 +743,30 @@ function InstanceParamsPanel({ instance, onSaved }: { instance: StrategyInstance
               {/* Quick parameters: the strategy's pick, or the operator's. The
                   same values and history as the full form below — an edit here
                   is an edit there, and one Save applies both. */}
-              <div className="rounded-md mt-3 px-3 py-2" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium">{t('board.quick.title')}</span>
-                  <span className="text-[10px]" style={{ color: 'var(--muted)' }}>· {sets.overridden ? t('board.quick.overridden') : t('board.quick.defaults')}</span>
-                  {sets.pinned.length > 0 && (
-                    <span className="text-[10px]" style={{ color: 'var(--muted)' }} title={sets.pinned.join(', ')}>· ★ {sets.pinned.length}</span>
-                  )}
-                  <div className="flex-1" />
-                  <button type="button" className="text-xs" style={{ color: 'var(--accent)' }} onClick={() => setConfiguring(true)}>{t('board.quick.configure')}</button>
-                </div>
-                {quickFields.length === 0 ? (
-                  <p className="text-xs py-1" style={{ color: 'var(--muted)' }}>{t('board.quick.none')}</p>
-                ) : (
-                  <ParamFieldsForm
-                    fields={quickFields}
-                    values={values}
-                    onChange={(v) => setValues(v)}
-                    strategyId={instance.strategyId}
-                    venueContext={boundVenue}
-                    slotVenues={slotVenues}
-                    slotBindings={instance.credentials ?? {}}
-                  />
+              <div className="flex items-center gap-2 text-xs mt-3 mb-1" style={{ color: 'var(--muted)' }}>
+                <span>▾</span>
+                <span>{t('board.quick.title')} ({quickFields.length})</span>
+                <span className="text-[10px]">· {sets.overridden ? t('board.quick.overridden') : t('board.quick.defaults')}</span>
+                {sets.pinned.length > 0 && (
+                  <span className="text-[10px]" title={sets.pinned.join(', ')}>· ★ {sets.pinned.length}</span>
                 )}
+                <div className="flex-1" />
+                <button type="button" className="text-xs" style={{ color: 'var(--accent)' }} onClick={() => setConfiguring(true)}>{t('board.quick.configure')}</button>
               </div>
-              <button type="button" className="flex items-center gap-2 text-xs mt-3 mb-1" style={{ color: 'var(--muted)' }} onClick={() => setAllOpen(v => !v)}>
+              {quickFields.length === 0 ? (
+                <p className="text-xs py-1" style={{ color: 'var(--muted)' }}>{t('board.quick.none')}</p>
+              ) : (
+                <ParamFieldsForm
+                  fields={quickFields}
+                  values={values}
+                  onChange={(v) => setValues(v)}
+                  strategyId={instance.strategyId}
+                  venueContext={boundVenue}
+                  slotVenues={slotVenues}
+                  slotBindings={instance.credentials ?? {}}
+                />
+              )}
+              <button type="button" className="flex items-center gap-2 text-xs mt-4 mb-1" style={{ color: 'var(--muted)' }} onClick={() => setAllOpen(v => !v)}>
                 <span>{allOpen ? '▾' : '▸'}</span>
                 <span>{t('board.quick.all')} ({fields.length})</span>
               </button>
