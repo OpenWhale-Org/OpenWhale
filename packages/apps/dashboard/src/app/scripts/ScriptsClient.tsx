@@ -309,6 +309,25 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
     if (view === 'json' && result?.json === undefined) setView('report')
   }, [view, htmlFile, result])
 
+  // What a select shows is what runs. A remembered value that is no longer in
+  // the list (a pair whose strategy was stopped since) left the select
+  // rendering its first option while the state kept the old value, and the run
+  // sent the old one — 2026-09-12 the slippage probe displayed SNXX/SNDK and
+  // placed real orders on SOXS/SOXL. Snap every such value to the option the
+  // select actually renders, so the screen and the request cannot disagree.
+  useEffect(() => {
+    setValues(prev => {
+      const next = { ...prev }
+      let changed = false
+      for (const f of fields) {
+        if (f.multiple || f.type !== 'options' || !f.options?.length) continue
+        const v = next[f.name]
+        if (v === undefined || !f.options.some(o => String(o.value) === v)) { next[f.name] = String(f.options[0]!.value); changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [fields])
+
   // paramOptions resolves server-side on every listing, so the option list can
   // arrive after the first render. Re-seed the fields that are still empty —
   // never overwrite something the user has already touched.

@@ -141,16 +141,29 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
     return this.load(key)
   }
 
+  /**
+   * Every key with a data file. Walks subdirectories: where the platform does
+   * not encode `/`, a key like `binance:binance:SNXX/USDT:USDT:…` is stored as
+   * nested directories, and a top-level-only listing never saw a single
+   * contract-named key (the gateway's walkJsonl already walked them).
+   */
   async keys(): Promise<string[]> {
-    try {
-      const entries = await fs.promises.readdir(this.monitorDir)
-      return entries
-        .filter(f => f.endsWith('.jsonl'))
-        .map(f => decodeMonitorKey(f.slice(0, -6)))  // strip '.jsonl', undo the path-safe encoding
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
-      throw err
+    const out: string[] = []
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      let entries: fs.Dirent[]
+      try {
+        entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+        throw err
+      }
+      for (const e of entries) {
+        if (e.isDirectory()) await walk(path.join(dir, e.name), `${prefix}${e.name}/`)
+        else if (e.name.endsWith('.jsonl')) out.push(decodeMonitorKey(`${prefix}${e.name.slice(0, -6)}`))  // strip '.jsonl', undo the path-safe encoding
+      }
     }
+    await walk(this.monitorDir, '')
+    return out
   }
 
   async readLast(key: string, n: number): Promise<MonitorRecord<TData>[]> {
