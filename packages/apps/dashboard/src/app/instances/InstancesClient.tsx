@@ -2931,12 +2931,12 @@ function RunControl({ instance, onActivate, onDeactivate }: {
           real target instead of a glyph in a 28px box. */}
       <Link
         href={`/instances/${instance.id}`}
-        className={`${CTRL} px-3 gap-1.5`}
+        className={`${CTRL} w-8`}
         style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
         title={t('inst.openBoard')}
+        aria-label={t('inst.open')}
       >
         <span className="text-sm leading-none">↗</span>
-        {t('inst.open')}
       </Link>
       {instance.active ? (
         confirmStop ? (
@@ -2953,17 +2953,17 @@ function RunControl({ instance, onActivate, onDeactivate }: {
         ) : (
           <button
             onClick={() => setConfirmStop(true)}
-            className={`${CTRL} px-3 gap-1.5`}
+            className={`${CTRL} w-8`}
             style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
             title={t('inst.runningStop')}
+            aria-label={t('inst.running')}
           >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
-            {t('inst.running')}
+            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
           </button>
         )
       ) : (
-        <button onClick={onActivate} className={`${CTRL} px-3`} style={{ background: 'var(--accent)', color: '#fff' }}>
-          ▶ Activate
+        <button onClick={onActivate} className={`${CTRL} w-8`} style={{ background: 'var(--accent)', color: '#fff' }} title="Activate" aria-label="Activate">
+          ▶
         </button>
       )}
     </div>
