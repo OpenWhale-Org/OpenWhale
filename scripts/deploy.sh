@@ -42,11 +42,24 @@ DEPLOY_BLACKOUT="${DEPLOY_BLACKOUT:-}"
 # about a minute — "closed by remote host", with the job still running on the
 # server and no health check. Measured 2026-09-11, twice.
 SSH_OPTS=(-o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+# A connection reset mid-transfer is the network's failure, not the deploy's:
+# rsync is idempotent, so each sync is tried up to three times before the run
+# gives up. Measured 2026-09-11: three runs lost to a reset in a different
+# sync step each time, with the server's sshd logging nothing.
+retry() {
+  local n=0
+  until "$@"; do
+    n=$((n + 1))
+    [ "$n" -ge 3 ] && return 1
+    echo "  ↻ attempt $((n + 1)) after a failed $1" >&2
+    sleep 4
+  done
+}
 SSH=(ssh "${SSH_OPTS[@]}")
-RSYNC=(rsync -az -e "ssh ${SSH_OPTS[*]}")
+RSYNC=(retry rsync -az -e "ssh ${SSH_OPTS[*]}")
 if [ -n "$DEPLOY_SSH_KEY" ]; then
   SSH=(ssh "${SSH_OPTS[@]}" -i "$DEPLOY_SSH_KEY")
-  RSYNC=(rsync -az -e "ssh ${SSH_OPTS[*]} -i $DEPLOY_SSH_KEY")
+  RSYNC=(retry rsync -az -e "ssh ${SSH_OPTS[*]} -i $DEPLOY_SSH_KEY")
 fi
 
 SKIP_BUILD=0; WITH_ENV=0; FORCE_WINDOW=0
