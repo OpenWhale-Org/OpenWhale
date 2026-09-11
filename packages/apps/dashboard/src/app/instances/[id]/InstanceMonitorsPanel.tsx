@@ -93,16 +93,19 @@ export function InstanceMonitorsPanel({ instanceId, active }: { instanceId: stri
           </span>
         </button>
         {open && sources && sources.length > 1 && (
-          <div className="flex items-center gap-1 ml-auto overflow-x-auto">
+          /* A segmented pager, as the Executors page switches its views: one
+             segment per source, wrapping onto a second row when they do not
+             fit rather than scrolling behind a bar. */
+          <div className="flex flex-wrap ml-auto rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
             {sources.map((s, i) => (
               <button
                 key={`${s.monitorName}:${s.key}`}
+                type="button"
                 onClick={() => setTab(i)}
-                className="text-xs px-2 py-1 rounded-md font-mono whitespace-nowrap"
+                aria-pressed={i === tab}
+                className="text-xs px-2.5 h-7 font-mono whitespace-nowrap"
                 title={`${s.monitorName} · ${s.key}`}
-                style={i === tab
-                  ? { background: 'var(--accent)', color: '#fff' }
-                  : { background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+                style={{ background: i === tab ? 'var(--accent)' : 'transparent', color: i === tab ? '#fff' : 'var(--muted)' }}
               >
                 {s.monitorName.split('/').pop()}{s.key && s.key !== '*' ? ` · ${shortKey(s.key)}` : ''}
               </button>
@@ -133,5 +136,5 @@ export function InstanceMonitorsPanel({ instanceId, active }: { instanceId: stri
 
 /** The tail of a long key: the symbols, not the venues that prefix them. */
 function shortKey(key: string): string {
-  return key.length <= 28 ? key : `…${key.slice(-26)}`
+  return key.length <= 22 ? key : `…${key.slice(-20)}`
 }

@@ -1272,6 +1272,14 @@ export function InstancesClient({ initialInstances }: Props) {
           onSelect={setWhaleSelected}
           onActivate={(id) => act(id, 'activate')}
           onDeactivate={(id) => act(id, 'deactivate')}
+          defs={defs}
+          onSaveParams={async (id, params) => {
+            const res = await fetch(`/api/instances/${id}?restart=1`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),
+            })
+            if (!res.ok) throw new Error(await res.text())
+            await refresh()
+          }}
         />
       ) : (
         <div className="flex flex-col gap-3 mt-4">
@@ -1469,9 +1477,11 @@ export function InstancesClient({ initialInstances }: Props) {
  * The hover card is DOM, not a sprite in the scene — it has to look like every
  * other card on this page, and text drawn into a texture never quite does.
  */
-function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onActivate, onDeactivate }: {
+function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onActivate, onDeactivate, defs, onSaveParams }: {
   instances: StrategyInstanceView[]
   pnl: Record<string, PnlTotals>
+  defs: StrategyDefinition[]
+  onSaveParams: (id: string, params: { base: Record<string, unknown>; tunable: Record<string, unknown> }) => Promise<void>
   hover: { id: string; x: number; y: number; w: number; h: number } | null
   selected: string | null
   onHover: (id: string | null, at: { x: number; y: number; w: number; h: number } | null) => void
@@ -1659,6 +1669,14 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
 
             <section className="flex flex-col gap-1.5">
               <h3 className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.heading.parameters')}</h3>
+              {(() => {
+                const pf = pinnedFieldsOf(defs.find(d => d.id === chosen.strategyId)?.paramsFields ?? [], chosen)
+                return pf.length > 0 ? (
+                  <div className="rounded-md px-2 py-1.5 mb-1" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                    <PinnedParams instance={chosen} fields={pf} onSave={(params) => onSaveParams(chosen.id, params)} />
+                  </div>
+                ) : null
+              })()}
               <div className="flex flex-col gap-0.5">
                 {paramRows(chosen).map(([k, v]) => (
                   <div key={k} className="flex gap-3 text-xs py-1" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
@@ -2763,7 +2781,7 @@ function CardMenu({ instance, folders, onEdit, onDuplicate, onDelete, onSetFolde
  * ↗ and Edit both already open, and a full detail panel unfolding inside one
  * cell of a three-column grid reflows every card beside it.
  */
-function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon, onRename }: {
+function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon, onRename, def, onSaveParams }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
   folders: string[]
@@ -2789,6 +2807,7 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
   const paramValues = Object.values(base).map(v => String(v)).filter(v => v !== '' && v !== 'false')
   const paramChip = paramValues.slice(0, 2).join(' · ')
   const strategyShort = instance.strategyId.split('/').pop() ?? instance.strategyId
+  const pinnedFields = pinnedFieldsOf(def?.paramsFields ?? [], instance)
 
   return (
     <div
@@ -2871,7 +2890,9 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
 
       {/* Footer: what it trades, then the one action */}
       <div className="flex items-center gap-2 mt-auto pt-1">
-        {paramChip && (
+        {pinnedFields.length > 0 && onSaveParams ? (
+          <PinnedParams instance={instance} fields={pinnedFields} onSave={onSaveParams} />
+        ) : paramChip && (
           <span className="text-xs font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
             title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
             {paramChip}
@@ -3127,10 +3148,25 @@ function PinnedParams({ instance, fields, onSave }: {
   const label = (f: ParamFieldDef) => typeof f.displayName === 'string' ? f.displayName : f.name
   const inputStyle = { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }
   return (
-    <div className="flex items-center gap-2 min-w-0 overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="flex items-center gap-2 min-w-0" onClick={e => e.stopPropagation()}>
       {fields.map(f => (
-        <label key={f.name} className="flex items-center gap-1 min-w-0" title={`${label(f)}${f.description ? ` — ${typeof f.description === 'string' ? f.description : ''}` : ''}`}>
-          <span className="text-[10px] truncate" style={{ color: 'var(--muted)', maxWidth: '5.5rem' }}>{label(f)}</span>
+        <label key={f.name} className="flex items-center gap-1 min-w-0">
+          {/* The name never fits a row: a two-glyph badge, and the full name
+              with its description as a hover tip. */}
+          <span className="relative group shrink-0">
+            <span className="inline-flex items-center justify-center rounded text-[10px] font-medium px-1 h-4 cursor-help select-none"
+              style={{ background: 'var(--accent-soft)', color: 'var(--accent)', minWidth: '1.4rem' }}>
+              {abbrev(label(f))}
+            </span>
+            <span className="hidden group-hover:block absolute z-50 left-0 bottom-full mb-1 rounded-md px-2.5 py-1.5 text-xs whitespace-normal shadow-lg"
+              style={{ background: 'var(--surface-raised)', color: 'var(--foreground)', border: '1px solid var(--border)', width: 'max-content', maxWidth: '20rem' }}>
+              <span className="font-medium">{label(f)}</span>
+              <span className="font-mono ml-1.5" style={{ color: 'var(--muted)' }}>{f.name}</span>
+              {f.description && typeof f.description === 'string' && (
+                <span className="block mt-0.5" style={{ color: 'var(--muted)' }}>{f.description}</span>
+              )}
+            </span>
+          </span>
           {f.type === 'boolean' ? (
             <input type="checkbox" disabled={busy === f.name} checked={current(f) === true} onChange={e => void commit(f, e.target.checked)} />
           ) : f.options && f.options.length > 0 ? (
@@ -3148,6 +3184,15 @@ function PinnedParams({ instance, fields, onSave }: {
       {note && <span className="text-[10px] truncate" style={{ color: note.ok ? 'var(--success)' : 'var(--danger)' }} title={note.text}>{note.text}</span>}
     </div>
   )
+}
+
+/** Two glyphs that stand for a label: the first two of a CJK name, the initials of a Latin one. */
+function abbrev(label: string): string {
+  const cjk = label.match(/[\u3400-\u9fff]/g)
+  if (cjk && cjk.length >= 2) return cjk.slice(0, 2).join('')
+  const words = label.replace(/[()（）\[\]]/g, ' ').split(/[\s/·—-]+/).filter(Boolean)
+  if (words.length >= 2) return words.slice(0, 3).map(w => w[0]!).join('').toUpperCase()
+  return label.slice(0, 3)
 }
 
 function PinnedInput({ type, initial, busy, onCommit, style }: { type: 'number' | 'text'; initial: string; busy: boolean; onCommit: (v: string) => void; style: React.CSSProperties }) {
