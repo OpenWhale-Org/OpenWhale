@@ -299,4 +299,7 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'board.quick.defaults': '策略默认',
   'inst.pinned.saved': '已保存',
   'inst.pinned.restart': '已保存 · 已重启',
+  'board.view.params': '参数',
+  'board.view.split': '分栏',
+  'board.view.observe': '看板与记录',
 }

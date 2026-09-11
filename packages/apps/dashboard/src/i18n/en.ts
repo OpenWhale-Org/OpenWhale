@@ -305,4 +305,7 @@ export const en = {
   'board.quick.defaults': 'strategy defaults',
   'inst.pinned.saved': 'saved',
   'inst.pinned.restart': 'saved · restarted',
+  'board.view.params': 'Parameters',
+  'board.view.split': 'Split',
+  'board.view.observe': 'Monitors & records',
 } as const

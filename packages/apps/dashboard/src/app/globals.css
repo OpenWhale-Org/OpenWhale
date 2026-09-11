@@ -677,4 +677,5 @@ body {
 
 /* Instance board: parameters on the left, what the instance sees and did on the right. */
 .board-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }
+.board-columns-single { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1180px) { .board-columns { grid-template-columns: minmax(0, 1fr); } }

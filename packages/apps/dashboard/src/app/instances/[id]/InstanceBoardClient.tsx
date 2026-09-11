@@ -21,6 +21,9 @@ import { useT } from '@/i18n'
  * with room to breathe, a permalink, and it works for stopped instances too
  * (runs/logs come from the persisted trace store, not just process memory).
  */
+type BoardView = 'left' | 'split' | 'right'
+const VIEW_KEY = 'ow:board:view'
+
 export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
   const t = useT()
   const [instance, setInstance] = useState<StrategyInstanceView | null>(null)
@@ -28,6 +31,14 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
   const [acting, setActing] = useState(false)
   const [actError, setActError] = useState('')
   const [confirmStop, setConfirmStop] = useState(false)
+  /* Which columns the board shows under the PnL — parameters, both, or what
+     the instance sees and did — remembered across boards like the Executors
+     page remembers its split. */
+  const [view, setView] = useState<BoardView>('split')
+  useEffect(() => {
+    try { const v = localStorage.getItem(VIEW_KEY); if (v === 'left' || v === 'split' || v === 'right') setView(v) } catch { /* no storage */ }
+  }, [])
+  const pickView = (v: BoardView) => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch { /* no storage */ } }
   /* The pinned header's height, published to the page so a second sticky bar
      (the parameter toolbar) pins below it rather than behind it. Measured
      because the title wraps: a hardcoded offset is wrong on the first long
@@ -165,15 +176,32 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
           <InstancePnlPanel instanceId={instance.id} />
 
           {/* Two columns under the PnL: what you set on the left, what the
-              instance sees and did on the right — the Executors page's split. */}
-          <div className="board-columns">
-            <div className="min-w-0">
+              instance sees and did on the right — the Executors page's split,
+              with the same switch. */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="flex rounded-md overflow-hidden h-8" style={{ border: '1px solid var(--border)' }}>
+              {([['left', t('board.view.params')], ['split', t('board.view.split')], ['right', t('board.view.observe')]] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => pickView(id)}
+                  aria-pressed={view === id}
+                  className="px-3 text-xs"
+                  style={{ background: view === id ? 'var(--accent)' : 'transparent', color: view === id ? '#fff' : 'var(--muted)' }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={view === 'split' ? 'board-columns' : 'board-columns board-columns-single'}>
+            <div className="min-w-0" hidden={view === 'right'}>
               <InstanceAccountsPanel instance={instance} onSaved={pull} />
               <InstanceParamsPanel instance={instance} onSaved={pull} />
               <InstanceMiscPanel instance={instance} onSaved={pull} />
               <InstanceStatePanel instance={instance} />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0" hidden={view === 'left'}>
               <InstanceMonitorsPanel instanceId={instance.id} active={instance.active} />
               <div
                 className="rounded-lg overflow-hidden"
