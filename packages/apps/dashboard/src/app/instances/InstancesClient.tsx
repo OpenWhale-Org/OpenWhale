@@ -2799,11 +2799,6 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
 }) {
   const t = useT()
   const base = instance.params?.base ?? {}
-  const bindings = instance.credentials
-    ? Object.entries(instance.credentials).map(([slot, target]) => `${slot} → ${target}`)
-    : instance.accounts ?? []
-  // The venue/account chip: the first binding's TARGET is the recognisable half
-  const account = bindings[0]?.split('→').pop()?.trim()
   const paramValues = Object.values(base).map(v => String(v)).filter(v => v !== '' && v !== 'false')
   const paramChip = paramValues.slice(0, 2).join(' · ')
   const strategyShort = instance.strategyId.split('/').pop() ?? instance.strategyId
@@ -2836,13 +2831,6 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
               title={instance.problem ?? `${instance.strategyId} · ${instance.id}`}>
               {instance.problem ? `⚠ ${strategyShort}` : strategyShort}
             </span>
-            {account && (
-              <span className="text-xs px-1.5 py-0.5 rounded truncate"
-                style={{ background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-                title={bindings.join(', ')}>
-                {account}
-              </span>
-            )}
           </div>
         </div>
         <div className="shrink-0 flex items-center gap-1">
@@ -2888,11 +2876,17 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
         />
       </div>
 
-      {/* Footer: what it trades, then the one action */}
-      <div className="flex items-center gap-2 mt-auto pt-1">
-        {pinnedFields.length > 0 && onSaveParams ? (
+      {/* The pinned parameters on a row of their own, above the footer — the
+          action buttons keep their words when nothing competes for the row. */}
+      {pinnedFields.length > 0 && onSaveParams && (
+        <div className="mt-auto pt-1">
           <PinnedParams instance={instance} fields={pinnedFields} onSave={onSaveParams} />
-        ) : paramChip && (
+        </div>
+      )}
+
+      {/* Footer: what it trades, then the one action */}
+      <div className={`flex items-center gap-2 pt-1 ${pinnedFields.length > 0 && onSaveParams ? '' : 'mt-auto'}`}>
+        {!(pinnedFields.length > 0 && onSaveParams) && paramChip && (
           <span className="text-xs font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
             title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
             {paramChip}
@@ -2953,17 +2947,17 @@ function RunControl({ instance, onActivate, onDeactivate }: {
         ) : (
           <button
             onClick={() => setConfirmStop(true)}
-            className={`${CTRL} w-8`}
+            className={`${CTRL} px-3 gap-1.5`}
             style={{ background: 'color-mix(in srgb, var(--success, #22c55e) 16%, transparent)', color: 'var(--success, #22c55e)', border: '1px solid color-mix(in srgb, var(--success, #22c55e) 40%, transparent)' }}
             title={t('inst.runningStop')}
-            aria-label={t('inst.running')}
           >
-            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success, #22c55e)' }} />
+            {t('inst.running')}
           </button>
         )
       ) : (
-        <button onClick={onActivate} className={`${CTRL} w-8`} style={{ background: 'var(--accent)', color: '#fff' }} title="Activate" aria-label="Activate">
-          ▶
+        <button onClick={onActivate} className={`${CTRL} px-3`} style={{ background: 'var(--accent)', color: '#fff' }}>
+          ▶ Activate
         </button>
       )}
     </div>
