@@ -265,6 +265,14 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
   const columns = field.list?.columns ?? []
   const rows = parseListRows(value)
   const commit = (next: ListRow[]) => onChange(JSON.stringify(next))
+  /* Rows reorder by their grip, through the shared sortable (frozen geometry,
+     transforms — see components/Sortable.tsx). Rows have no identity of their
+     own, so the index is the id for the duration of one drag. */
+  const { beginDrag, cardStyle } = useSortable({
+    onReorder: (order) => commit(order.map(id => rows[Number(id)]!).filter(Boolean)),
+    onRefile: () => {},
+    onFolderMove: () => {},
+  })
 
   const setCell = (i: number, name: string, v: unknown) =>
     commit(rows.map((r, j) => j === i ? { ...r, [name]: v } : r))
@@ -291,13 +299,15 @@ function ListParamEditor({ field, value, onChange, venueFor }: {
   }
 
   return (
-    <div className="flex flex-col gap-1 rounded-md p-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <div className="grid gap-2 items-center text-xs font-medium" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0,1fr)) 1.5rem`, color: 'var(--muted)' }}>
+    <div className="flex flex-col gap-1 rounded-md p-2" data-cards={`list:${field.name}`} style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="grid gap-2 items-center text-xs font-medium" style={{ gridTemplateColumns: `1.25rem repeat(${columns.length}, minmax(0,1fr)) 1.5rem`, color: 'var(--muted)' }}>
+        <span />
         {columns.map(c => <span key={c.name} title={c.description}>{c.displayName}</span>)}
         <span />
       </div>
       {rows.map((row, i) => (
-        <div key={i} className="grid gap-2 items-center" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0,1fr)) 1.5rem` }}>
+        <div key={i} data-card-id={String(i)} className="grid gap-2 items-center" style={{ gridTemplateColumns: `1.25rem repeat(${columns.length}, minmax(0,1fr)) 1.5rem`, ...cardStyle(String(i)) }}>
+          <DragHandle title={t('params.reorderRow')} onPointerDown={(e) => beginDrag('card', String(i), e)} />
           {columns.map((c) => {
             const v = row[c.name]
             if (c.type === 'number') {

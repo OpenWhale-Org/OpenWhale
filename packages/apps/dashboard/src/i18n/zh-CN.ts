@@ -302,4 +302,5 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'board.view.params': '参数',
   'board.view.split': '分栏',
   'board.view.observe': '看板与记录',
+  'params.reorderRow': '拖动调整顺序',
 }

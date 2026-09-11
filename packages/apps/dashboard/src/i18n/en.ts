@@ -308,4 +308,5 @@ export const en = {
   'board.view.params': 'Parameters',
   'board.view.split': 'Split',
   'board.view.observe': 'Monitors & records',
+  'params.reorderRow': 'Drag to reorder',
 } as const
