@@ -329,6 +329,8 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
           ...(meta.unit ? { unit: meta.unit } : {}),
           ...(meta.optionsDependOn ? { optionsDependOn: meta.optionsDependOn } : {}),
           ...(list ? { list } : {}),
+          ...(meta.quick || meta.pinned ? { quick: true } : {}),
+          ...(meta.pinned ? { pinned: true } : {}),
         })
       }
     }

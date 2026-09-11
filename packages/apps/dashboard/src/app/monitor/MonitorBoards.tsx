@@ -314,7 +314,7 @@ function PlotTable({ series, columns, unit }: { series: ChartSeries[]; columns: 
   )
 }
 
-export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, bare, height }: {
+export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, bare, height, extraRegions }: {
   monitorId: string
   /** Keys with data or live subscriptions — the board's key picker. */
   keys: string[]
@@ -332,6 +332,11 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
   bare?: boolean
   /** Chart height in px. Widgets pass what their cell allows; the page keeps its own two sizes. */
   height?: number
+  /**
+   * Reference lines the host lays over every panel — an instance's runs and
+   * executions on its monitors' boards. Drawn like the monitor's own regions.
+   */
+  extraRegions?: ChartRegion[]
 }) {
   const t = useT()
   const [plots, setPlots] = useState<PlotInfo[] | null>(null)
@@ -523,7 +528,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
                   /* Monitor and panel together: the same panel of two monitors
                      is two charts, and each keeps its own marks. */
                   storageKey={`${monitorId}:${p.id}`}
-                  {...(regions[p.id]?.length ? { regions: regions[p.id]! } : {})}
+                  {...((regions[p.id]?.length || extraRegions?.length) ? { regions: [...(regions[p.id] ?? []), ...(extraRegions ?? [])] } : {})}
                   {...(yRanges[p.id]?.length ? { yRanges: yRanges[p.id]! } : {})}
                   {...(p.kind === 'scatter' ? { mode: 'scatter' as const } : {})}
                   {...(p.unit !== undefined ? { unit: p.unit } : {})}

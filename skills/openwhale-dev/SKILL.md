@@ -69,6 +69,10 @@ the discipline that risk limits live in code even when a model produces the sign
   renders as a button and a card dialog whose options `pickerOptions(id, ctx)` computes — for a
   value that is a whole decision (the four legs of a carry), where a preset would scatter it over
   fields. (`references/strategy.md` §Picker fields)
+- **Quick and pinned parameters** (core ≥ 0.2.3). `.meta({ quick: true })` lists a field on the quick
+  panel at the top of the instance board; `.meta({ pinned: true })` (three at most) makes it editable
+  from the instance list. Strategy defaults; the operator may override per instance.
+  (`references/strategy.md` §Quick and pinned parameters)
 - **Illustrations get live figures** (core ≥ 0.2.3). `illustrationData(ctx)` on a strategy is called,
   debounced, for the form's current values, and its answer reaches every `paramsIllustrations`
   frame as `data` in the `ow-params` message — quotes, an estimate, a venue limit, drawn live as

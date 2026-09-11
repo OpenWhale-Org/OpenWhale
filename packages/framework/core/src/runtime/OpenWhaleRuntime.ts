@@ -1876,11 +1876,19 @@ export class OpenWhaleRuntime implements IRuntime {
    */
   async updateInstanceMeta(
     instanceId: string,
-    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder' | 'options'>>,
+    patch: Partial<Pick<StrategyInstance, 'name' | 'description' | 'icon' | 'folder' | 'sortOrder' | 'options'>>
+      & { quickParams?: string[] | null; pinnedParams?: string[] | null },
   ): Promise<StrategyInstance> {
     const persisted = await this.instanceStore.load(instanceId)
     if (!persisted) throw new Error(`Unknown instance "${instanceId}"`)
+    if (Array.isArray(patch.pinnedParams) && patch.pinnedParams.length > 3) throw new Error('At most three parameters can be pinned')
+    const names = (v: string[] | null | undefined) => v === null || v === undefined ? v : [...new Set(v.map(String).filter(Boolean))]
+    const quick = names(patch.quickParams)
+    const pinned = names(patch.pinnedParams)
     const apply = (target: StrategyInstance) => {
+      // null = back to the strategy's defaults; an empty array = explicitly none.
+      if (quick !== undefined) { if (quick === null) delete target.quickParams; else target.quickParams = quick }
+      if (pinned !== undefined) { if (pinned === null) delete target.pinnedParams; else target.pinnedParams = pinned }
       if (patch.name !== undefined) target.name = patch.name
       if (patch.description !== undefined) {
         if (patch.description) target.description = patch.description
@@ -1904,6 +1912,15 @@ export class OpenWhaleRuntime implements IRuntime {
     if (live) apply(live)
     if (patch.options !== undefined) this.triggerManager.setInstanceOptions(instanceId, patch.options)
     return persisted
+  }
+
+  /**
+   * The monitor sources a running instance is wired to — registry key and
+   * resolved key — for the board that draws its monitors. Empty for a stopped
+   * instance: keys are resolved at activation, against the bound accounts.
+   */
+  instanceSources(instanceId: string): Array<{ monitorName: string; key: string }> {
+    return this.triggerManager.sourcesOf(instanceId)
   }
 
   /** Copy an instance's full configuration into a new STOPPED instance. */

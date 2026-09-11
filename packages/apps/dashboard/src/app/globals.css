@@ -674,3 +674,7 @@ body {
 .aurora-lang-btn { font-size: 11px; padding: 4px 9px; background: transparent; color: var(--muted); border: 0; cursor: pointer; }
 .aurora-lang-btn + .aurora-lang-btn { border-left: 1px solid var(--border); }
 .aurora-lang-btn.is-active { color: var(--foreground); background: var(--accent-soft); }
+
+/* Instance board: parameters on the left, what the instance sees and did on the right. */
+.board-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }
+@media (max-width: 1180px) { .board-columns { grid-template-columns: minmax(0, 1fr); } }

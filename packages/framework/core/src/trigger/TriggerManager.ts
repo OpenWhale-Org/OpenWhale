@@ -483,6 +483,30 @@ export class TriggerManager {
     }
   }
 
+  /**
+   * Every monitor source of a registered instance, by registry key and
+   * resolved key, deduplicated — trigger conditions and data-only
+   * subscriptions alike. What a board of the instance's monitors draws.
+   */
+  sourcesOf(instanceId: string): Array<{ monitorName: string; key: string }> {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return []
+    const seen = new Map<string, { monitorName: string; key: string }>()
+    const add = (source: MonitorSource) => {
+      const monitorName = entry.monitorLabelToKey.get(source.monitorName) ?? source.monitorName
+      const key = source.key ?? ''
+      seen.set(`${monitorName}\u0000${key}`, { monitorName, key })
+    }
+    for (const trigger of entry.triggers) {
+      for (const condition of trigger.conditions) {
+        if (condition.type !== 'monitor') continue
+        for (const source of condition.sources) add(source)
+      }
+    }
+    for (const source of entry.subscriptions) add(source)
+    return [...seen.values()]
+  }
+
   private resolveSourceKey(source: MonitorSource, labelToKey: Map<string, string>): MonitorSource {
     if (!source.keyParams || (source.key && source.key !== '')) return source
     const registryKey = labelToKey.get(source.monitorName) ?? source.monitorName

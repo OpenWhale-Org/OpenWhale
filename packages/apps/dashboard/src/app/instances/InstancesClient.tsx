@@ -967,6 +967,13 @@ export { buildParamsFromFields, fieldValuesFromParams }
 export interface PnlTotals { realized: number; fees: number; funding: number; net: number; unrealized: number | null }
 
 export function InstancesClient({ initialInstances }: Props) {
+  /* Strategy definitions, for the pinned parameters a row edits in place. */
+  const [defs, setDefs] = useState<StrategyDefinition[]>([])
+  useEffect(() => {
+    let gone = false
+    void fetch('/api/strategies').then(r => r.json() as Promise<StrategyDefinition[]>).then(d => { if (!gone) setDefs(d) }).catch(() => {})
+    return () => { gone = true }
+  }, [])
   const t = useT()
   const router = useRouter()
   // ?new=<strategyId> (the Plugins page's jump link) opens the form on that
@@ -1415,6 +1422,14 @@ export function InstancesClient({ initialInstances }: Props) {
                         : {})}
                       pnl={pnl[inst.id]}
                       folders={folderNames}
+                      def={defs.find(d => d.id === inst.strategyId)}
+                      onSaveParams={async (params) => {
+                        const res = await fetch(`/api/instances/${inst.id}?restart=1`, {
+                          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),
+                        })
+                        if (!res.ok) throw new Error(await res.text())
+                        await refresh()
+                      }}
                       onActivate={() => act(inst.id, 'activate')}
                       onDeactivate={() => act(inst.id, 'deactivate')}
                       onDuplicate={() => act(inst.id, 'duplicate')}
@@ -2752,6 +2767,8 @@ function InstanceCard({ instance, pnl, folders, dragHandle, onActivate, onDeacti
   instance: StrategyInstanceView
   pnl?: PnlTotals
   folders: string[]
+  def?: StrategyDefinition | undefined
+  onSaveParams?: (params: { base: Record<string, unknown>; tunable: Record<string, unknown> }) => Promise<void>
   /** Rendered in the header. Supplied by the list, which owns the drag state. */
   dragHandle?: React.ReactNode
   onActivate: () => void
@@ -2956,10 +2973,12 @@ function RunControl({ instance, onActivate, onDeactivate }: {
  */
 const ROW_COLUMNS = '1.75rem minmax(0,1.5fr) minmax(0,1.3fr) 5.5rem 5.5rem 5.5rem minmax(0,1.4fr) 15.5rem'
 
-function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon, onRename }: {
+function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactivate, onDuplicate, onDelete, onSetFolder, onSetIcon, onRename, def, onSaveParams }: {
   instance: StrategyInstanceView
   pnl?: PnlTotals
   folders: string[]
+  def?: StrategyDefinition | undefined
+  onSaveParams?: (params: { base: Record<string, unknown>; tunable: Record<string, unknown> }) => Promise<void>
   dragHandle?: React.ReactNode
   onActivate: () => void
   onDeactivate: () => void
@@ -2977,6 +2996,7 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
   const account = bindings[0]?.split('→').pop()?.trim()
   const paramValues = Object.values(base).map(v => String(v)).filter(v => v !== '' && v !== 'false')
   const strategyShort = instance.strategyId.split('/').pop() ?? instance.strategyId
+  const pinnedFields = pinnedFieldsOf(def?.paramsFields ?? [], instance)
 
   return (
     <div
@@ -3038,10 +3058,14 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
         {pnl ? statMoney(pnl.funding) : '—'}
       </div>
 
-      <div className="text-xs font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
-        title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
-        {paramValues.slice(0, 3).join(' · ')}
-      </div>
+      {pinnedFields.length > 0 && onSaveParams ? (
+        <PinnedParams instance={instance} fields={pinnedFields} onSave={onSaveParams} />
+      ) : (
+        <div className="text-xs font-mono truncate min-w-0" style={{ color: 'var(--muted)' }}
+          title={Object.entries(base).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}>
+          {paramValues.slice(0, 3).join(' · ')}
+        </div>
+      )}
 
       <div className="flex items-center justify-end gap-1">
         <RunControl instance={instance} onActivate={onActivate} onDeactivate={onDeactivate} />
@@ -3056,6 +3080,92 @@ function InstanceRow({ instance, pnl, folders, dragHandle, onActivate, onDeactiv
         {dragHandle}
       </div>
     </div>
+  )
+}
+
+/** The instance's pinned fields (its own set, else the strategy's), three at most, scalar only. */
+function pinnedFieldsOf(fields: ParamFieldDef[], instance: StrategyInstanceView): ParamFieldDef[] {
+  const names = instance.pinnedParams ?? fields.filter(f => f.pinned).map(f => f.name)
+  return names.map(n => fields.find(f => f.name === n)).filter((f): f is ParamFieldDef => !!f && f.type !== 'object' && !f.list).slice(0, 3)
+}
+
+/**
+ * The pinned parameters, edited in the row. Enter or blur commits, Esc
+ * reverts; a commit saves the whole params document with this one value
+ * changed and restarts a running instance — the same thing the board's Save
+ * does, without the trip to the board.
+ */
+function PinnedParams({ instance, fields, onSave }: {
+  instance: StrategyInstanceView
+  fields: ParamFieldDef[]
+  onSave: (params: { base: Record<string, unknown>; tunable: Record<string, unknown> }) => Promise<void>
+}) {
+  const t = useT()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [note, setNote] = useState<{ name: string; text: string; ok: boolean } | null>(null)
+  const current = (f: ParamFieldDef): unknown => (instance.params?.[f.group] as Record<string, unknown> | undefined)?.[f.name] ?? f.default
+  const commit = async (f: ParamFieldDef, raw: string | boolean) => {
+    let value: unknown = raw
+    if (f.type === 'number') { value = Number(raw); if (!Number.isFinite(value as number)) return }
+    if (String(value) === String(current(f))) return
+    setBusy(f.name)
+    setNote(null)
+    try {
+      const params = {
+        base: { ...((instance.params?.base as Record<string, unknown>) ?? {}) },
+        tunable: { ...((instance.params?.tunable as Record<string, unknown>) ?? {}) },
+      }
+      params[f.group][f.name] = value
+      await onSave(params)
+      setNote({ name: f.name, text: instance.active ? t('inst.pinned.restart') : t('inst.pinned.saved'), ok: true })
+    } catch (err) {
+      setNote({ name: f.name, text: err instanceof Error ? err.message : String(err), ok: false })
+    } finally {
+      setBusy(null)
+    }
+  }
+  const label = (f: ParamFieldDef) => typeof f.displayName === 'string' ? f.displayName : f.name
+  const inputStyle = { background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }
+  return (
+    <div className="flex items-center gap-2 min-w-0 overflow-hidden" onClick={e => e.stopPropagation()}>
+      {fields.map(f => (
+        <label key={f.name} className="flex items-center gap-1 min-w-0" title={`${label(f)}${f.description ? ` — ${typeof f.description === 'string' ? f.description : ''}` : ''}`}>
+          <span className="text-[10px] truncate" style={{ color: 'var(--muted)', maxWidth: '5.5rem' }}>{label(f)}</span>
+          {f.type === 'boolean' ? (
+            <input type="checkbox" disabled={busy === f.name} checked={current(f) === true} onChange={e => void commit(f, e.target.checked)} />
+          ) : f.options && f.options.length > 0 ? (
+            <select disabled={busy === f.name} value={String(current(f) ?? '')} onChange={e => void commit(f, e.target.value)}
+              className="text-xs rounded px-1 py-0.5 font-mono" style={{ ...inputStyle, maxWidth: '7rem' }}>
+              {f.options.map(o => <option key={String(o.value)} value={String(o.value)}>{typeof o.label === 'string' ? o.label : String(o.value)}</option>)}
+            </select>
+          ) : (
+            <PinnedInput key={`${f.name}:${String(current(f))}`} type={f.type === 'number' ? 'number' : 'text'} initial={String(current(f) ?? '')} busy={busy === f.name}
+              onCommit={v => void commit(f, v)} style={inputStyle} />
+          )}
+          {f.unit && <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{f.unit}</span>}
+        </label>
+      ))}
+      {note && <span className="text-[10px] truncate" style={{ color: note.ok ? 'var(--success)' : 'var(--danger)' }} title={note.text}>{note.text}</span>}
+    </div>
+  )
+}
+
+function PinnedInput({ type, initial, busy, onCommit, style }: { type: 'number' | 'text'; initial: string; busy: boolean; onCommit: (v: string) => void; style: React.CSSProperties }) {
+  const [draft, setDraft] = useState(initial)
+  return (
+    <input
+      type={type}
+      value={draft}
+      disabled={busy}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== initial) onCommit(draft) }}
+      onKeyDown={e => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') { setDraft(initial); (e.target as HTMLInputElement).blur() }
+      }}
+      className="text-xs rounded px-1 py-0.5 font-mono"
+      style={{ ...style, width: '4.5rem', opacity: busy ? 0.6 : 1 }}
+    />
   )
 }
 

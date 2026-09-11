@@ -172,6 +172,23 @@ Paths: `strategies|monitors|executors|scripts|accounts.<local id>.<field>`, with
 `params.<name>.<field>` and `params.<name>.options.<value>.label` underneath, and `readme`.
 Never translate trace step names, log lines or ids — those are keys people grep for.
 
+## Quick and pinned parameters
+
+A strategy with forty knobs has five an operator touches every day. Name them on the field meta:
+
+```ts
+maxLegUsd: z.number().positive().meta({ displayName: 'Notional (USD)', pinned: true }),   // pinned ⇒ quick
+entryPct:  z.number().default(1).meta({ displayName: 'Entry %', quick: true }),
+```
+
+- `quick` puts the field on the **quick parameters** panel at the top of the instance board; the full
+  form folds beneath it. Pick what is tuned most — position size, the entry ladder, a stop.
+- `pinned` (three at most per strategy) makes the field editable **straight from the instance
+  list**, no board needed. The most important sizing knobs, not the most numerous.
+- These are the strategy's defaults. An operator may keep their own sets per instance
+  (`quickParams` / `pinnedParams` on the instance); the board's "Configure…" dialog writes them.
+- A list-typed field can be quick, not pinned — a row has no room for a ladder.
+
 ## Presets — named configurations, or a live ranking
 
 `paramPresets` is a static list: "conservative", "aggressive", "paper". Each names the fields

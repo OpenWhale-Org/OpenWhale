@@ -117,6 +117,18 @@ export interface ParamFieldMeta {
    * one of them changes — a symbol list drawn from the chosen account, say.
    */
   optionsDependOn?: string[]
+  /**
+   * A quick parameter: the strategy's own pick of what an operator tunes
+   * most — position size, entry ladder, a stop. The Dashboard lists these
+   * first, on their own panel above the full form; the operator may override
+   * the set per instance.
+   */
+  quick?: boolean
+  /**
+   * A pinned parameter (at most three per strategy): editable straight from
+   * the instance list, without opening the board. Implies quick.
+   */
+  pinned?: boolean
 }
 
 /**
@@ -243,6 +255,10 @@ export interface ParamFieldDef {
   unit?: string
   /** Row structure for type='list' — columns derived from the array's element schema. */
   list?: ListParamDef
+  /** The strategy's default quick parameter — see ParamFieldMeta.quick. */
+  quick?: boolean
+  /** The strategy's default pinned parameter — see ParamFieldMeta.pinned. */
+  pinned?: boolean
 }
 
 // ── Component definitions ─────────────────────────────────────────────────────

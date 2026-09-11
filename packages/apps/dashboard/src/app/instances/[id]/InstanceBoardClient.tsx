@@ -12,6 +12,8 @@ import { useDirtyFlag } from '@/components/unsaved'
 import { implVenueMap, pickerVenue } from '@/components/venue'
 import { InstancePnlPanel } from './InstancePnlPanel'
 import { InstanceMiscPanel } from './InstanceMiscPanel'
+import { InstanceMonitorsPanel } from './InstanceMonitorsPanel'
+import { Modal } from '@/components/Modal'
 import { useT } from '@/i18n'
 
 /**
@@ -162,19 +164,24 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
 
           <InstancePnlPanel instanceId={instance.id} />
 
-          <InstanceAccountsPanel instance={instance} onSaved={pull} />
-
-          <InstanceParamsPanel instance={instance} />
-
-          <InstanceMiscPanel instance={instance} onSaved={pull} />
-
-          <InstanceStatePanel instance={instance} />
-
-          <div
-            className="rounded-lg overflow-hidden"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-          >
-            <InstanceDetail instanceId={instance.id} tall />
+          {/* Two columns under the PnL: what you set on the left, what the
+              instance sees and did on the right — the Executors page's split. */}
+          <div className="board-columns">
+            <div className="min-w-0">
+              <InstanceAccountsPanel instance={instance} onSaved={pull} />
+              <InstanceParamsPanel instance={instance} onSaved={pull} />
+              <InstanceMiscPanel instance={instance} onSaved={pull} />
+              <InstanceStatePanel instance={instance} />
+            </div>
+            <div className="min-w-0">
+              <InstanceMonitorsPanel instanceId={instance.id} active={instance.active} />
+              <div
+                className="rounded-lg overflow-hidden"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+              >
+                <InstanceDetail instanceId={instance.id} tall />
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -463,10 +470,107 @@ function InstanceStatePanel({ instance }: { instance: StrategyInstanceView }) {
   )
 }
 
-function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
+/** The strategy's default quick / pinned sets, or the operator's own when set on the instance. */
+export function effectiveQuick(fields: ParamFieldDef[], instance: { quickParams?: string[] | undefined; pinnedParams?: string[] | undefined }): { quick: string[]; pinned: string[]; overridden: boolean } {
+  const names = new Set(fields.map(f => f.name))
+  const pinned = (instance.pinnedParams ?? fields.filter(f => f.pinned).map(f => f.name)).filter(n => names.has(n)).slice(0, 3)
+  const quickOwn = (instance.quickParams ?? fields.filter(f => f.quick).map(f => f.name)).filter(n => names.has(n))
+  // Pinned implies quick, whichever set named it.
+  const quick = [...new Set([...pinned, ...quickOwn])]
+  return { quick, pinned, overridden: instance.quickParams !== undefined || instance.pinnedParams !== undefined }
+}
+
+/**
+ * The picker for both sets: every field with a quick checkbox and a pin
+ * toggle (three at most). Saved as the instance's own sets; "strategy
+ * defaults" clears them.
+ */
+function QuickParamsDialog({ fields, quick, pinned, onSave, onClose }: {
+  fields: ParamFieldDef[]
+  quick: string[]
+  pinned: string[]
+  onSave: (next: { quickParams: string[] | null; pinnedParams: string[] | null }) => Promise<void>
+  onClose: () => void
+}) {
+  const t = useT()
+  const [q, setQ] = useState<Set<string>>(new Set(quick))
+  const [p, setP] = useState<string[]>(pinned)
+  const [busy, setBusy] = useState(false)
+  const toggleQuick = (name: string) => setQ(prev => {
+    const next = new Set(prev)
+    if (next.has(name)) { next.delete(name); setP(cur => cur.filter(n => n !== name)) } else next.add(name)
+    return next
+  })
+  const togglePin = (name: string) => {
+    if (p.includes(name)) { setP(p.filter(n => n !== name)); return }
+    if (p.length >= 3) return
+    setP([...p, name])
+    setQ(prev => new Set([...prev, name]))
+  }
+  const label = (f: ParamFieldDef) => typeof f.displayName === 'string' ? f.displayName : f.name
+  const groups: Array<['base' | 'tunable', ParamFieldDef[]]> = [['base', fields.filter(f => f.group === 'base')], ['tunable', fields.filter(f => f.group === 'tunable')]]
+  return (
+    <Modal onClose={onClose} maxWidth="44rem" height="80vh">
+      <div className="flex flex-col h-full min-h-0">
+        <div className="px-5 pt-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <h2 className="text-base font-semibold">{t('board.quick.dialogTitle')}</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{t('board.quick.dialogHint')}</p>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto px-5 py-3 flex flex-col gap-4">
+          {groups.map(([group, list]) => list.length > 0 && (
+            <div key={group} className="flex flex-col gap-1">
+              <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>{group}</div>
+              {list.map(f => {
+                const isQuick = q.has(f.name)
+                const isPinned = p.includes(f.name)
+                return (
+                  <div key={f.name} className="flex items-center gap-3 px-2 py-1.5 rounded-md" style={{ background: isQuick ? 'var(--accent-soft)' : 'transparent' }}>
+                    <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                      <input type="checkbox" checked={isQuick} onChange={() => toggleQuick(f.name)} />
+                      <span className="text-sm truncate">{label(f)}</span>
+                      <span className="text-[10px] font-mono truncate" style={{ color: 'var(--muted)' }}>{f.name}</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => togglePin(f.name)}
+                      disabled={!isPinned && p.length >= 3}
+                      className="text-xs px-2 py-0.5 rounded"
+                      title={!isPinned && p.length >= 3 ? t('board.quick.pinLimit') : t('board.quick.pin')}
+                      style={isPinned
+                        ? { background: 'var(--accent)', color: '#fff' }
+                        : { background: 'var(--background)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: p.length >= 3 ? 0.5 : 1 }}
+                    >
+                      {isPinned ? '★' : '☆'} {t('board.quick.pin')}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => { setBusy(true); void onSave({ quickParams: null, pinnedParams: null }).finally(() => setBusy(false)) }}>
+            {t('board.quick.reset')}
+          </button>
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>{p.length}/3 {t('board.quick.pin')}</span>
+          <div className="flex-1" />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => { setBusy(true); void onSave({ quickParams: [...q], pinnedParams: p }).finally(() => setBusy(false)) }}>
+            {busy ? t('common.saving') : t('common.save')}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function InstanceParamsPanel({ instance, onSaved }: { instance: StrategyInstanceView; onSaved: () => Promise<void> }) {
   const t = useT()
   const [open, setOpen] = useState(true)
   const [fields, setFields] = useState<ParamFieldDef[] | null>(null)
+  /* Quick parameters on top, the whole form folded beneath. */
+  const [allOpen, setAllOpen] = useState(false)
+  const [configuring, setConfiguring] = useState(false)
   /* The same diagrams the create form shows. They were missing here only
      because this panel read paramsFields off the definition and stopped —
      and this is where params are actually TUNED, so it is the place the
@@ -559,6 +663,13 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
   }
 
   const blocked = view === 'json' && json.error !== ''
+  const sets = effectiveQuick(fields, instance)
+  const quickFields = sets.quick.map(n => fields!.find(f => f.name === n)!).filter(Boolean)
+  const saveSets = async (next: { quickParams: string[] | null; pinnedParams: string[] | null }) => {
+    await patchInstanceMeta(instance.id, next)
+    setConfiguring(false)
+    await onSaved()
+  }
 
   return (
     // overflow-clip, not hidden: hidden would make this a scroll container and
@@ -628,19 +739,57 @@ function InstanceParamsPanel({ instance }: { instance: StrategyInstanceView }) {
               />
             </div>
           ) : (
-            <ParamFieldsForm
-              fields={fields}
-              values={values}
-              onChange={(v) => setValues(v)}
-              strategyId={instance.strategyId}
-              venueContext={boundVenue}
-              slotVenues={slotVenues}
-              {...(illustrations ? { illustrations } : {})}
-              {...(presets ? { presets } : {})}
-              presetSource={presetSource}
-              slotBindings={instance.credentials ?? {}}
-              illustrationData={illustrationData}
-            />
+            <>
+              {/* Quick parameters: the strategy's pick, or the operator's. The
+                  same values and history as the full form below — an edit here
+                  is an edit there, and one Save applies both. */}
+              <div className="rounded-md mt-3 px-3 py-2" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium">{t('board.quick.title')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--muted)' }}>· {sets.overridden ? t('board.quick.overridden') : t('board.quick.defaults')}</span>
+                  {sets.pinned.length > 0 && (
+                    <span className="text-[10px]" style={{ color: 'var(--muted)' }} title={sets.pinned.join(', ')}>· ★ {sets.pinned.length}</span>
+                  )}
+                  <div className="flex-1" />
+                  <button type="button" className="text-xs" style={{ color: 'var(--accent)' }} onClick={() => setConfiguring(true)}>{t('board.quick.configure')}</button>
+                </div>
+                {quickFields.length === 0 ? (
+                  <p className="text-xs py-1" style={{ color: 'var(--muted)' }}>{t('board.quick.none')}</p>
+                ) : (
+                  <ParamFieldsForm
+                    fields={quickFields}
+                    values={values}
+                    onChange={(v) => setValues(v)}
+                    strategyId={instance.strategyId}
+                    venueContext={boundVenue}
+                    slotVenues={slotVenues}
+                    slotBindings={instance.credentials ?? {}}
+                  />
+                )}
+              </div>
+              <button type="button" className="flex items-center gap-2 text-xs mt-3 mb-1" style={{ color: 'var(--muted)' }} onClick={() => setAllOpen(v => !v)}>
+                <span>{allOpen ? '▾' : '▸'}</span>
+                <span>{t('board.quick.all')} ({fields.length})</span>
+              </button>
+              {allOpen && (
+                <ParamFieldsForm
+                  fields={fields}
+                  values={values}
+                  onChange={(v) => setValues(v)}
+                  strategyId={instance.strategyId}
+                  venueContext={boundVenue}
+                  slotVenues={slotVenues}
+                  {...(illustrations ? { illustrations } : {})}
+                  {...(presets ? { presets } : {})}
+                  presetSource={presetSource}
+                  slotBindings={instance.credentials ?? {}}
+                  illustrationData={illustrationData}
+                />
+              )}
+              {configuring && (
+                <QuickParamsDialog fields={fields} quick={sets.quick} pinned={sets.pinned} onSave={saveSets} onClose={() => setConfiguring(false)} />
+              )}
+            </>
           )}
           <div className="flex justify-end items-center gap-3 mt-3">
             {instance.active && dirty && (

@@ -108,6 +108,14 @@ export interface StrategyInstance {
   folder?: string
   /** Manual ordering inside a folder (ascending). */
   sortOrder?: number
+  /**
+   * The operator's own quick parameters for this instance — field names,
+   * replacing the strategy's default set (ParamFieldDef.quick). Absent =
+   * the strategy's defaults.
+   */
+  quickParams?: string[]
+  /** The operator's pinned parameters (≤ 3), replacing the strategy's defaults. Absent = defaults. */
+  pinnedParams?: string[]
   createdAt: string
   updatedAt: string
 }

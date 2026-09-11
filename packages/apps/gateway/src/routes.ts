@@ -474,6 +474,12 @@ export function buildRouter(): Router {
     })
   }))
 
+  /** The monitor sources a running instance is wired to (registry key + resolved key). */
+  router.get('/api/instances/:id/sources', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    res.json(runtime.instanceSources(req.params['id']!))
+  }))
+
   router.get('/api/instances/:id/runs', h(async (req, res) => {
     const runtime = await ensureStarted()
     const id = req.params['id']!
