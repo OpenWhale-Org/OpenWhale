@@ -5,7 +5,7 @@ import { useI18n, type MessageKey } from '@/i18n'
 import { usePathname } from 'next/navigation'
 import { AuroraLogo } from './AuroraLogo'
 
-type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts' | 'executions' | 'runs' | 'retention'
+type IconName = 'start' | 'overview' | 'strategies' | 'accounts' | 'credentials' | 'registry' | 'monitor' | 'explorer' | 'executors' | 'plugins' | 'compiler' | 'scripts' | 'assistant' | 'users' | 'alerts' | 'executions' | 'runs' | 'retention' | 'system'
 
 const links: Array<{ href: string; label: MessageKey; auroraLabel?: MessageKey; group?: MessageKey; icon: IconName }> = [
   { href: '/instances', label: 'nav.instances', auroraLabel: 'nav.instances.aurora', group: 'nav.group.trade', icon: 'strategies' },
@@ -23,6 +23,7 @@ const links: Array<{ href: string; label: MessageKey; auroraLabel?: MessageKey; 
   { href: '/assistant', label: 'nav.assistant', icon: 'assistant' },
   { href: '/alerts', label: 'nav.alerts', group: 'nav.group.settings', icon: 'alerts' },
   { href: '/users', label: 'nav.users', group: 'nav.group.settings', icon: 'users' },
+  { href: '/system', label: 'nav.system', group: 'nav.group.settings', icon: 'system' },
 ]
 
 const auroraGroups: MessageKey[] = ['nav.group.trade', 'nav.group.observe', 'nav.group.automate', 'nav.group.develop', 'nav.group.settings']
@@ -49,6 +50,7 @@ function Icon({ name }: { name: IconName }) {
     case 'assistant': return <svg {...common}><path d="M12 3 13.5 8.5 19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5Z" /><path d="M19 17l.7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7Z" /></svg>
     case 'alerts': return <svg {...common}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
     case 'retention': return <svg {...common}><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" /><path d="M12 11v3l2 1" /></svg>
+    case 'system': return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></svg>
     case 'users': return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.2a4 4 0 0 1 0 7.6" /></svg>
   }
 }

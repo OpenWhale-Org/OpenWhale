@@ -18,6 +18,7 @@ import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, rec
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime, getDatabase } from './runtime.js'
+import { PnlCollectorPref } from './pnlCollectorPref.js'
 import { getRetentionService } from './maintenance/retention.js'
 import { getBreakerService } from './maintenance/breaker.js'
 import { ensureCompiler, getCompilerService } from './compiler.js'
@@ -565,6 +566,26 @@ export function buildRouter(): Router {
     const runtime = await ensureStarted()
     try {
       res.json(await runtime.instancePositions(req.params['id']!))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  /** The PnL collector's switch and its last sweep. */
+  router.get('/api/pnl/collector', h(async (_req, res) => {
+    const runtime = await ensureStarted()
+    res.json(runtime.pnlCollectorStatus() ?? { paused: false, collecting: false, intervalMs: 0, unavailable: true })
+  }))
+
+  /** Pause or resume the collector; persisted, so a restart keeps it. */
+  router.put('/api/pnl/collector', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const paused = (req.body as { paused?: unknown } | undefined)?.paused
+    if (typeof paused !== 'boolean') { res.status(400).json({ error: 'paused must be a boolean' }); return }
+    try {
+      runtime.setPnlCollectorPaused(paused)
+      await new PnlCollectorPref(getDatabase()).setPaused(paused)
+      res.json(runtime.pnlCollectorStatus())
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }

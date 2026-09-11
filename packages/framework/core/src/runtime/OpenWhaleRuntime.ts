@@ -986,6 +986,17 @@ export class OpenWhaleRuntime implements IRuntime {
     await this.pnlService?.collect()
   }
 
+  /** The PnL collector's switch and last sweep; undefined on a runtime without a database. */
+  pnlCollectorStatus(): ReturnType<PnlService['status']> | undefined {
+    return this.pnlService?.status()
+  }
+
+  /** Pause or resume the PnL collector's venue queries — see PnlService.setPaused. */
+  setPnlCollectorPaused(paused: boolean): void {
+    if (!this.pnlService) throw new Error('PnL collection requires a database-backed runtime')
+    this.pnlService.setPaused(paused)
+  }
+
   // ── Scripts — on-demand plugin utilities ─────────────────────────────────────
 
   private readonly scriptRegistry = new Map<string, { def: ScriptDefinition; owner: string }>()

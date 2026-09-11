@@ -189,6 +189,14 @@ export class PnlService {
   private collecting = false
   private pending = new Map<string, Set<string>>()
   private pendingSweep = false
+  /**
+   * Paused by the operator: no periodic sweep and no claim-triggered pass.
+   * Claims are still recorded — they are one cheap row each and they are
+   * what attribution is built from — so resuming catches up with one sweep
+   * and nothing is lost. An explicit collect() still runs while paused.
+   */
+  private paused = false
+  private lastCollect: { at: number; ms: number } | undefined
 
   constructor(options: PnlServiceOptions) {
     this.db = options.db
@@ -209,10 +217,40 @@ export class PnlService {
   }
 
   start(): void {
-    if (this.timer) return
+    if (this.timer || this.paused) return
     this.timer = setInterval(() => { void this.collect() }, this.intervalMs)
     this.timer.unref?.()
     log.info({ intervalMs: this.intervalMs }, 'PnL collector armed')
+  }
+
+  /**
+   * Stop or resume the collector's own traffic. Pausing drops the pending
+   * claim-triggered pass along with the timer; resuming re-arms the timer and
+   * sweeps once, so fills that landed while paused reach the ledger now
+   * rather than at the next interval.
+   */
+  setPaused(paused: boolean): void {
+    if (paused === this.paused) return
+    this.paused = paused
+    if (paused) {
+      this.stop()
+      this.pending = new Map()
+      this.pendingSweep = false
+      log.warn('PnL collector paused — no venue fill or funding queries until resumed')
+      return
+    }
+    this.start()
+    log.info('PnL collector resumed — sweeping once to catch up')
+    void this.collect()
+  }
+
+  status(): { paused: boolean; collecting: boolean; intervalMs: number; lastCollectAt?: number; lastCollectMs?: number } {
+    return {
+      paused: this.paused,
+      collecting: this.collecting,
+      intervalMs: this.intervalMs,
+      ...(this.lastCollect ? { lastCollectAt: this.lastCollect.at, lastCollectMs: this.lastCollect.ms } : {}),
+    }
   }
 
   stop(): void {
@@ -245,6 +283,7 @@ export class PnlService {
    * fill. The debounce still coalesces a burst of orders into one pass.
    */
   kick(account?: string, symbol?: string): void {
+    if (this.paused) return
     if (account !== undefined && symbol !== undefined) {
       const symbols = this.pending.get(account) ?? new Set<string>()
       symbols.add(symbol)
@@ -294,6 +333,7 @@ export class PnlService {
   async collect(): Promise<void> {
     if (this.collecting) return
     this.collecting = true
+    const started = Date.now()
     try {
       const accounts = await this.db.all<{ account: string }>(
         `SELECT DISTINCT account FROM pnl_order_claims`)
@@ -306,6 +346,7 @@ export class PnlService {
       }
     } finally {
       this.collecting = false
+      this.lastCollect = { at: started, ms: Date.now() - started }
     }
   }
 

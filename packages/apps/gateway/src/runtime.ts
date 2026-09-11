@@ -14,6 +14,7 @@ import os from 'os'
 import { restorePlugins } from './plugins.js'
 import { notifyCredentialTypes } from './notify/credentialTypes.js'
 import { AlertService, setAlertService } from './notify/alerts.js'
+import { PnlCollectorPref } from './pnlCollectorPref.js'
 import { BudgetWatch } from './notify/budgetWatch.js'
 import { RetentionService, setRetentionService } from './maintenance/retention.js'
 import { BreakerService, setBreakerService } from './maintenance/breaker.js'
@@ -112,6 +113,11 @@ export async function ensureStarted(): Promise<OpenWhaleRuntime> {
       .then(() => importLlmKeysFromEnv(credentialStore).then(() => undefined))
       // After start(), so the subscription attaches to a runtime whose
       // executors are already registered and whose database exists.
+      // Before anything else runs on the ledger: a collector the operator
+      // paused stays paused across restarts (its first timer fires 10 min in).
+      .then(async () => {
+        if (await new PnlCollectorPref(getDatabase()).paused()) runtime.setPnlCollectorPaused(true)
+      })
       .then(async () => {
         const alerts = new AlertService(getDatabase(), runtime, credentialStore)
         await alerts.initialize()
