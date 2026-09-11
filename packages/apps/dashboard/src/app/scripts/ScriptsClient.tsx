@@ -217,9 +217,30 @@ function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> 
   return out
 }
 
+/**
+ * A script's last-typed parameters, per browser. Leaving the page and coming
+ * back — or the card remounting behind a filter — used to reset every field
+ * to its default; an operator who runs the same scan daily retyped it daily.
+ * Keyed by script id; a field the script no longer declares is dropped on
+ * the next save.
+ */
+const PARAMS_KEY = (id: string) => `ow:script:params:${id}`
+function rememberedValues(id: string): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(PARAMS_KEY(id))
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object') return {}
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>
+  } catch { return {} }
+}
+
 function ScriptCard({ script }: { script: ScriptInfo }) {
   const t = useT()
-  const [values, setValues] = useState<Record<string, string>>(() => seedValues(script.paramsFields))
+  const [values, setValues] = useState<Record<string, string>>(() => ({ ...seedValues(script.paramsFields), ...rememberedValues(script.id) }))
+  useEffect(() => {
+    try { localStorage.setItem(PARAMS_KEY(script.id), JSON.stringify(values)) } catch { /* no storage: the form still works */ }
+  }, [script.id, values])
   const [running, setRunning] = useState(false)
   /** The in-flight stream; Stop aborts it, which the gateway relays to the script. */
   const abortRef = useRef<AbortController | null>(null)
