@@ -23,6 +23,7 @@ import { useT } from '@/i18n'
  */
 type BoardView = 'left' | 'split' | 'right'
 const VIEW_KEY = 'ow:board:view'
+const SPLIT_KEY = 'ow:board:split'
 
 export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
   const t = useT()
@@ -39,6 +40,26 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
     try { const v = localStorage.getItem(VIEW_KEY); if (v === 'left' || v === 'split' || v === 'right') setView(v) } catch { /* no storage */ }
   }, [])
   const pickView = (v: BoardView) => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch { /* no storage */ } }
+  /* The divider between the columns, dragged like the Executors page's:
+     the left column's share in percent, kept per browser. */
+  const [splitPct, setSplitPct] = useState(42)
+  useEffect(() => {
+    try { const v = Number(localStorage.getItem(SPLIT_KEY)); if (v >= 25 && v <= 75) setSplitPct(v) } catch { /* no storage */ }
+  }, [])
+  const areaRef = useRef<HTMLDivElement>(null)
+  function startDrag(e: React.MouseEvent) {
+    e.preventDefault()
+    const rect = areaRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const move = (ev: MouseEvent) => setSplitPct(Math.min(75, Math.max(25, ((ev.clientX - rect.left) / rect.width) * 100)))
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setSplitPct(p => { try { localStorage.setItem(SPLIT_KEY, String(Math.round(p))) } catch { /* no storage */ } return p })
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
   /* The pinned header's height, published to the page so a second sticky bar
      (the parameter toolbar) pins below it rather than behind it. Measured
      because the title wraps: a hardcoded offset is wrong on the first long
@@ -194,14 +215,20 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
               ))}
             </div>
           </div>
-          <div className={view === 'split' ? 'board-columns' : 'board-columns board-columns-single'}>
-            <div className="min-w-0" hidden={view === 'right'}>
+          {/* left | divider | right — the divider drags, as on the Executors page. */}
+          <div ref={areaRef} className="flex items-start">
+            <div className="min-w-0" hidden={view === 'right'} style={{ flexBasis: view === 'split' ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
               <InstanceAccountsPanel instance={instance} onSaved={pull} />
               <InstanceParamsPanel instance={instance} onSaved={pull} />
               <InstanceMiscPanel instance={instance} onSaved={pull} />
               <InstanceStatePanel instance={instance} />
             </div>
-            <div className="min-w-0" hidden={view === 'left'}>
+            {view === 'split' && (
+              <div onMouseDown={startDrag} className="shrink-0 cursor-col-resize grid place-items-center mx-1 self-stretch" style={{ width: 8 }} title={t('executors.dragResize')}>
+                <div className="w-0.5 h-8 rounded-full" style={{ background: 'var(--muted)', opacity: 0.6 }} />
+              </div>
+            )}
+            <div className="flex-1 min-w-0" hidden={view === 'left'}>
               <InstanceMonitorsPanel instanceId={instance.id} active={instance.active} />
               <div
                 className="rounded-lg overflow-hidden"
