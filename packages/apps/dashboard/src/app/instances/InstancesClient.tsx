@@ -3150,23 +3150,9 @@ function PinnedParams({ instance, fields, onSave }: {
   return (
     <div className="flex items-center gap-2 min-w-0" onClick={e => e.stopPropagation()}>
       {fields.map(f => (
-        <label key={f.name} className="flex items-center gap-1 min-w-0">
-          {/* The name never fits a row: a two-glyph badge, and the full name
-              with its description as a hover tip. */}
-          <span className="relative group shrink-0">
-            <span className="inline-flex items-center justify-center rounded text-[10px] font-medium px-1 h-4 cursor-help select-none"
-              style={{ background: 'var(--accent-soft)', color: 'var(--accent)', minWidth: '1.4rem' }}>
-              {abbrev(label(f))}
-            </span>
-            <span className="hidden group-hover:block absolute z-50 left-0 bottom-full mb-1 rounded-md px-2.5 py-1.5 text-xs whitespace-normal shadow-lg"
-              style={{ background: 'var(--surface-raised)', color: 'var(--foreground)', border: '1px solid var(--border)', width: 'max-content', maxWidth: '20rem' }}>
-              <span className="font-medium">{label(f)}</span>
-              <span className="font-mono ml-1.5" style={{ color: 'var(--muted)' }}>{f.name}</span>
-              {f.description && typeof f.description === 'string' && (
-                <span className="block mt-0.5" style={{ color: 'var(--muted)' }}>{f.description}</span>
-              )}
-            </span>
-          </span>
+        /* Only the box: the name, key, unit and description are a hover tip
+           on the box itself — a row has no room for a label. */
+        <span key={f.name} className="relative group shrink-0">
           {f.type === 'boolean' ? (
             <input type="checkbox" disabled={busy === f.name} checked={current(f) === true} onChange={e => void commit(f, e.target.checked)} />
           ) : f.options && f.options.length > 0 ? (
@@ -3178,21 +3164,20 @@ function PinnedParams({ instance, fields, onSave }: {
             <PinnedInput key={`${f.name}:${String(current(f))}`} type={f.type === 'number' ? 'number' : 'text'} initial={String(current(f) ?? '')} busy={busy === f.name}
               onCommit={v => void commit(f, v)} style={inputStyle} />
           )}
-          {f.unit && <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{f.unit}</span>}
-        </label>
+          <span className="hidden group-hover:block absolute z-50 left-0 bottom-full mb-1 rounded-md px-2.5 py-1.5 text-xs whitespace-normal shadow-lg pointer-events-none"
+            style={{ background: 'var(--surface-raised)', color: 'var(--foreground)', border: '1px solid var(--border)', width: 'max-content', maxWidth: '20rem' }}>
+            <span className="font-medium">{label(f)}</span>
+            {f.unit && <span className="ml-1" style={{ color: 'var(--muted)' }}>({f.unit})</span>}
+            <span className="font-mono ml-1.5" style={{ color: 'var(--muted)' }}>{f.name}</span>
+            {f.description && typeof f.description === 'string' && (
+              <span className="block mt-0.5" style={{ color: 'var(--muted)' }}>{f.description}</span>
+            )}
+          </span>
+        </span>
       ))}
       {note && <span className="text-[10px] truncate" style={{ color: note.ok ? 'var(--success)' : 'var(--danger)' }} title={note.text}>{note.text}</span>}
     </div>
   )
-}
-
-/** Two glyphs that stand for a label: the first two of a CJK name, the initials of a Latin one. */
-function abbrev(label: string): string {
-  const cjk = label.match(/[\u3400-\u9fff]/g)
-  if (cjk && cjk.length >= 2) return cjk.slice(0, 2).join('')
-  const words = label.replace(/[()（）\[\]]/g, ' ').split(/[\s/·—-]+/).filter(Boolean)
-  if (words.length >= 2) return words.slice(0, 3).map(w => w[0]!).join('').toUpperCase()
-  return label.slice(0, 3)
 }
 
 function PinnedInput({ type, initial, busy, onCommit, style }: { type: 'number' | 'text'; initial: string; busy: boolean; onCommit: (v: string) => void; style: React.CSSProperties }) {
