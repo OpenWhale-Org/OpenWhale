@@ -473,6 +473,15 @@ export interface StrategyDefinition {
   /** Registry keys of the executors this strategy depends on. Derived like monitorIds. */
   executorIds?: string[]
   /**
+   * The labels those executors were declared under, in the same order — the
+   * half of the declaration `executorIds` drops.
+   *
+   * An executor's credential slots are addressed `<executorLabel>:<slotLabel>`,
+   * so a UI cannot offer to bind one without knowing the label. Derived at
+   * registration like the rest.
+   */
+  executorLabels?: string[]
+  /**
    * Account slots this strategy needs — derived from the class's accountTypes
    * at registration. UIs use this to filter the credential picker: `kind`
    * accepts any credential whose type has a factory for it; `type` pins an

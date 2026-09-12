@@ -431,6 +431,7 @@ export class OpenWhaleRuntime implements IRuntime {
         ?? probe.monitors.map(d => resolveComponentName(declarationName(d), definition.pluginName)),
       executorIds: definition.executorIds
         ?? probe.executors.map(d => resolveComponentName(declarationName(d), definition.pluginName)),
+      executorLabels: definition.executorLabels ?? probe.executors.map(d => declarationLabel(d)),
       accountRequirements: definition.accountRequirements
         ?? probe.accounts.map(slot => ({
           label: slot.label,
@@ -2231,7 +2232,33 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   listStrategies(): StrategyDefinition[] {
-    return this.strategyRegistry.list()
+    /* Executor credential slots join the account slots at READ time, not at
+       registration: an executor may register after the strategy that names it,
+       and a snapshot taken then would be missing its slots forever (the same
+       reason listMonitors re-derives keyFields).
+
+       They belong in the same list because they are the same question to an
+       operator — "which credential does this instance use for X" — and the
+       instance form already knows how to render a type-pinned raw slot. What
+       it cannot do is guess the address: a slot is bound as
+       `<executorLabel>:<slotLabel>`, which is what these rows are labelled. */
+    return this.strategyRegistry.list().map((def) => {
+      const ids = def.executorIds ?? []
+      const labels = def.executorLabels ?? []
+      const slots = ids.flatMap((id, i) => {
+        const label = labels[i]
+        const executor = this.executorRegistry.get(id)
+        if (label === undefined || !executor) return []
+        return executor.credentials.map(slot => ({
+          label: `${label}:${slot.label}`,
+          ...('raw' in slot ? {} : { kind: slot.kind }),
+          ...(slot.type !== undefined ? { type: slot.type } : {}),
+          ...(slot.optional ? { optional: true } : {}),
+        }))
+      })
+      if (slots.length === 0) return def
+      return { ...def, accountRequirements: [...(def.accountRequirements ?? []), ...slots] }
+    })
   }
 
   listMonitors(): MonitorDefinition[] {

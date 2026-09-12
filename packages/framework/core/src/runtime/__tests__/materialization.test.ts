@@ -149,9 +149,16 @@ describe('credential materialization: one strategy, two venues', () => {
       () => new AnyVenueStrategy(),
     )
 
-    // accountRequirements derived from the class-reference declarations
+    // accountRequirements derived from the class-reference declarations, plus
+    // the declared executor's own slots — a UI has to offer both, and an
+    // executor slot is addressed '<executorLabel>:<slotLabel>'.
     const def = runtime.listStrategies().find(s => s.id === 'any-venue')!
-    expect(def.accountRequirements).toEqual([{ label: 'main', kind: 'test/fake' }])
+    expect(def.accountRequirements).toEqual([
+      { label: 'main', kind: 'test/fake' },
+      { label: 'exec:trading', kind: 'test/fake' },
+      { label: 'exec:bot', type: 'token-service' },
+    ])
+    expect(def.executorLabels).toEqual(['exec'])
 
     await runtime.start()
 
