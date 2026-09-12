@@ -146,6 +146,20 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
     return ctx.slots.get(label)?.raw
   }
 
+  /**
+   * The NAME of the credential bound to a slot, for the current instruction.
+   *
+   * This is the name PnL claims are filed under: the collector resolves an
+   * account by reading the credential of that name, so an order claimed under
+   * anything else — an account entity's own name, say — resolves to nothing
+   * and its fills stay unattributed. An executor that records which account a
+   * fill happened on should take the name from here rather than from whatever
+   * the instruction happened to carry.
+   */
+  protected credentialNameOf(label: string): string | undefined {
+    return this.executionContext.getStore()?.slots.get(label)?.credentialName
+  }
+
   /** Decrypted credential data of a raw slot, for the current instruction. */
   protected raw(label: string): RawCredentialData {
     const ctx = this.executionContext.getStore()
