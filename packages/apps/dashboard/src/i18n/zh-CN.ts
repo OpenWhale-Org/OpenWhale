@@ -320,4 +320,6 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'system.pnl.never': '本次启动以来尚未采集',
   'system.pnl.pausedNote': '已暂停：实例的 PnL、手续费和资金费不再更新；按亏损触发的熔断器会基于旧数据判断，直到恢复。',
   'system.pnl.unavailable': '当前运行时没有数据库，没有可写入的 PnL 账本。',
+  'ui.filterOptions': '输入以筛选…',
+  'ui.noMatch': '没有匹配项',
 }

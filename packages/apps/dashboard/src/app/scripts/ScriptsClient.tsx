@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useRef } from 'react'
+import { Select } from '@/components/Select'
 import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { ScriptInfo, ParamFieldDef } from '@/lib/core-types'
 import { TypeMark } from '../../components/TypeMark'
@@ -650,26 +651,22 @@ function FieldInput({ field, value, onChange }: { field: ParamFieldDef; value: s
       {field.multiple && field.options ? (
         <MultiSelect options={field.options} value={value} onChange={onChange} />
       ) : field.type === 'options' && field.options ? (
-        <select
+        /* The strategy form's picker: the dashboard's own list, and a search
+           box once the list is long — an account's fifty symbols is not a
+           list anyone scrolls. */
+        <Select
           value={value}
-          onChange={e => onChange(e.target.value)}
-          className="rounded-md px-2 py-1.5 text-sm font-mono"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', minWidth: '16rem' }}
-        >
-          {field.options.map(o => (
-            <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
-          ))}
-        </select>
+          onChange={onChange}
+          options={field.options.map(o => ({ value: String(o.value), label: String(o.label ?? o.value) }))}
+          style={{ minWidth: '16rem' }}
+        />
       ) : field.type === 'boolean' ? (
-        <select
+        <Select
           value={value || 'false'}
-          onChange={e => onChange(e.target.value)}
-          className="rounded-md px-2 py-1.5 text-sm"
-          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-        >
-          <option value="false">false</option>
-          <option value="true">true</option>
-        </select>
+          onChange={onChange}
+          options={[{ value: 'false', label: 'false' }, { value: 'true', label: 'true' }]}
+          style={{ minWidth: '8rem' }}
+        />
       ) : (
         <input
           type={field.type === 'number' ? 'number' : 'text'}

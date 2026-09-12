@@ -6,6 +6,9 @@ import type { ReactNode } from 'react'
 import { useAnchoredPlacement } from './popover'
 import { useT } from '@/i18n'
 
+/** Options from here up get a search box; below it, the list is short enough to read. */
+const SEARCH_FROM = 8
+
 /**
  * A select drawn in the dashboard's own list style rather than the browser's.
  *
@@ -23,6 +26,8 @@ import { useT } from '@/i18n'
 export interface SelectOption {
   value: string
   label: ReactNode
+  /** What typing matches against, when the label is not plain text. Defaults to the label (if a string) and the value. */
+  search?: string
   /** Second line, muted. */
   hint?: ReactNode
   /** Left mark: a TypeMark, a dot. */
@@ -30,7 +35,7 @@ export interface SelectOption {
   disabled?: boolean
 }
 
-export function Select({ value, options, onChange, placeholder = '—', size = 'md', className = '', style, disabled }: {
+export function Select({ value, options, onChange, placeholder = '—', size = 'md', className = '', style, disabled, searchable }: {
   value: string
   options: SelectOption[]
   onChange: (value: string) => void
@@ -39,13 +44,29 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
   className?: string
   style?: React.CSSProperties
   disabled?: boolean
+  /**
+   * Force the search box on or off. Left out, it appears once the list is
+   * long enough to scroll — a picker of four venues does not need a box to
+   * type in, and a picker of ninety symbols is unusable without one.
+   */
+  searchable?: boolean
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(-1)
+  const [query, setQuery] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const current = options.find(o => o.value === value)
+  const withSearch = searchable ?? options.length >= SEARCH_FROM
+  /* Matching is on the words, in any order: "bz usdt" finds
+     "BZ/USDT:USDT · short $91,395", and so does "usdt bz". */
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const shown = terms.length === 0 ? options : options.filter((o) => {
+    const text = `${o.search ?? (typeof o.label === 'string' ? o.label : '')} ${o.value}`.toLowerCase()
+    return terms.every(term => text.includes(term))
+  })
 
   useEffect(() => {
     if (!open) return
@@ -60,9 +81,14 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
   const place = useAnchoredPlacement(open, boxRef, { maxHeight: 288 })
 
   useEffect(() => {
-    if (!open) return
+    if (!open) { setQuery(''); return }
     setCursor(Math.max(0, options.findIndex(o => o.value === value)))
-  }, [open, options, value])
+    // Open with the caret in the box: the point of it is to type straight away.
+    if (withSearch) requestAnimationFrame(() => searchRef.current?.focus())
+  }, [open, options, value, withSearch])
+
+  // A new query re-aims the cursor at the first match, so Enter takes it.
+  useEffect(() => { if (open && query) setCursor(0) }, [open, query])
 
   useEffect(() => {
     if (!open || cursor < 0) return
@@ -77,9 +103,9 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
       return
     }
     if (e.key === 'Escape') { e.preventDefault(); setOpen(false) }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(options.length - 1, c + 1)) }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(shown.length - 1, c + 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(0, c - 1)) }
-    else if (e.key === 'Enter') { e.preventDefault(); const o = options[cursor]; if (o) pick(o) }
+    else if (e.key === 'Enter') { e.preventDefault(); const o = shown[cursor]; if (o) pick(o) }
   }
 
   const h = size === 'sm' ? 'h-8 text-xs px-2' : 'h-9 text-sm px-3'
@@ -114,10 +140,25 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
             ...(place.top !== undefined ? { top: place.top } : { bottom: place.bottom }),
           }}
         >
-          {options.length === 0 && (
-            <div className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>{t('ui.nothingToChoose')}</div>
+          {withSearch && (
+            /* Sticky, so it stays reachable while the list scrolls under it. */
+            <div className="sticky top-0 px-1.5 pb-1 pt-0.5" style={{ background: 'var(--surface)' }}>
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('ui.filterOptions')}
+                className="w-full rounded px-2 py-1 text-xs"
+                style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+              />
+            </div>
           )}
-          {options.map((o, i) => {
+          {shown.length === 0 && (
+            <div className="px-3 py-2 text-xs" style={{ color: 'var(--muted)' }}>
+              {options.length === 0 ? t('ui.nothingToChoose') : t('ui.noMatch')}
+            </div>
+          )}
+          {shown.map((o, i) => {
             const selected = o.value === value
             return (
               <button
