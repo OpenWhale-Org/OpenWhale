@@ -191,6 +191,23 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
    */
   protected onError(_instruction: TInstruction, _error: unknown, _attempt: number): void {}
 
+  /**
+   * The exclusive resources an instruction touches — an account, a symbol on
+   * an account, whatever this executor must not have two of in flight at once.
+   * Instructions sharing any lane run in arrival order; instructions sharing
+   * none overlap, up to `maxConcurrent`.
+   *
+   * Default: none. An executor that opted into concurrency did so expecting
+   * everything to overlap (funding-arb's settlement cycles must), and only the
+   * executor knows what really collides. pair-trade-dual, whose closePair
+   * sizes itself from the venue's position, keys on account + symbol: two
+   * instances holding the same symbol on the same account would otherwise each
+   * close what the other just opened.
+   */
+  protected lanesOf(_instruction: TInstruction | ExecutionInstruction): string[] {
+    return []
+  }
+
   async run(queue: ExecutionQueue, consumeId?: string): Promise<void> {
     const id = consumeId ?? this.executorName
     if (this.maxConcurrent === 1) {
@@ -199,13 +216,33 @@ export abstract class BaseExecutor<TInstruction extends ExecutionInstruction = E
       return
     }
 
-    // Opt-in concurrency: the consume loop returns as soon as a slot is free,
-    // so up to maxConcurrent instructions overlap. handleRaw never throws.
+    /* Opt-in concurrency, in lanes.
+     *
+     * Instructions from DIFFERENT strategy instances have nothing to do with
+     * each other, but one queue served them one at a time: on 2026-09-11 at
+     * 20:30 twelve pair-trade-dual opens fired within a second and the last
+     * one reached the exchange 9.7s later, priced on a quote that old. Within
+     * ONE instance the order still matters (an open must not overtake the
+     * close before it), so each lane stays serial and only lanes overlap.
+     * Placing an order is I/O — the lanes wait on the venue, not on a core. */
     const inFlight = new Set<Promise<void>>()
+    const lanes = new Map<string, Promise<void>>()
     await queue.consume(id, async (raw) => {
       while (inFlight.size >= this.maxConcurrent) await Promise.race(inFlight)
-      const task = this.handleRaw(raw).then(() => undefined).finally(() => inFlight.delete(task))
+      const keys = this.lanesOf(raw)
+      // Wait for every lane this instruction needs, then hold them all for its
+      // duration. allSettled: a lane whose predecessor rejected is still free
+      // (handleRaw does not throw, but a future caller's might).
+      const held = keys.map(k => lanes.get(k)).filter((x): x is Promise<void> => x !== undefined)
+      const task = (held.length > 0 ? Promise.allSettled(held).then(() => undefined) : Promise.resolve())
+        .then(() => this.handleRaw(raw)).then(() => undefined)
+      for (const k of keys) lanes.set(k, task)
       inFlight.add(task)
+      void task.finally(() => {
+        inFlight.delete(task)
+        // Last one out clears the lane, so the map holds only live lanes.
+        for (const k of keys) if (lanes.get(k) === task) lanes.delete(k)
+      })
     })
     // Queue stopped — drain what is still running before returning.
     await Promise.all(inFlight)
