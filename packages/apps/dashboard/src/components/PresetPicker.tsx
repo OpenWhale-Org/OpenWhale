@@ -5,6 +5,7 @@ import type { PresetTone } from '@openwhaleorg/core'
 import type { ParamPreset, PickerOption, PresetSource, PresetCard } from '@/lib/core-types'
 import { Modal } from '@/components/Modal'
 import { useT } from '@/i18n'
+import { fmtTime } from '@/lib/time'
 
 /**
  * The preset picker, for presets that are more than a name.
@@ -99,7 +100,7 @@ export function CardPickerModal<T extends CardChoice>({ heading, load, current, 
           <div className="flex items-center gap-2 shrink-0">
             {computedAt !== null && !loading && (
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                {cardCount} · {new Date(computedAt).toLocaleTimeString()}
+                {cardCount} · {fmtTime(computedAt)}
               </span>
             )}
             {load && (

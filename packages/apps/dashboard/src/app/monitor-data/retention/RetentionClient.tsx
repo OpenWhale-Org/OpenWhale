@@ -5,6 +5,7 @@ import { Select } from '@/components/Select'
 import { Switch } from '@/components/Switch'
 import { KebabMenu, MENU_ITEM } from '@/components/CardMenu'
 import { useT } from '@/i18n'
+import { fmtDateTime } from '@/lib/time'
 
 interface ContractEntry { monitor: string; keys: number; bytes: number }
 interface MatchedFile { monitor: string; key: string; bytes: number; updatedAt: number }
@@ -40,7 +41,7 @@ function formatBytes(n: number): string {
 }
 
 function formatWhen(iso: string | undefined, never: string): string {
-  return iso ? new Date(iso).toLocaleString() : never
+  return iso ? fmtDateTime(iso) : never
 }
 
 export function RetentionClient() {
@@ -356,7 +357,7 @@ export function RetentionClient() {
               <tbody>
                 {runs.map(r => (
                   <tr key={r.id} className="hoverable" style={{ borderTop: '1px solid color-mix(in srgb, var(--border) 55%, transparent)' }}>
-                    <td className="px-3 py-1.5 whitespace-nowrap">{new Date(r.at).toLocaleString()}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{fmtDateTime(r.at)}</td>
                     <td className="py-1.5 font-mono truncate" style={{ maxWidth: 260 }} title={`${r.monitor} / ${r.keyPattern}`}>
                       {r.monitor} <span style={{ color: 'var(--muted)' }}>/</span> {r.keyPattern}
                     </td>

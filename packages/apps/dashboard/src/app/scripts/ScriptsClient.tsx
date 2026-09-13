@@ -6,6 +6,7 @@ import { Rail, RailGroup, RailItem } from '../../components/Rail'
 import type { ScriptInfo, ParamFieldDef } from '@/lib/core-types'
 import { TypeMark } from '../../components/TypeMark'
 import { useT } from '@/i18n'
+import { fmtTime } from '@/lib/time'
 
 /**
  * Scripts — plugin-shipped operator utilities, run on click. A rail on the
@@ -464,7 +465,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         <div className="mt-3">
           <div className="flex items-center gap-3 mb-1">
             <span className="text-xs" style={{ color: 'var(--muted)' }}>
-              {t('scripts.output')}{ranAt ? ` · ${ranAt.toLocaleTimeString()}` : ''}
+              {t('scripts.output')}{ranAt ? ` · ${fmtTime(ranAt)}` : ''}
             </span>
             <div className="flex rounded overflow-hidden" style={{ border: '1px solid var(--border)' }}>
               {(['report', ...(htmlFile ? ['html'] as const : []), ...(result.json !== undefined ? ['json'] as const : [])] as const).map(v => (

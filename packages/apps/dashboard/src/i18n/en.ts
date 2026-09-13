@@ -328,4 +328,6 @@ export const en = {
   'system.pnl.unavailable': 'This runtime has no database, so there is no PnL ledger to collect into.',
   'ui.filterOptions': 'Type to filter…',
   'ui.noMatch': 'No match',
+  'system.tz.title': 'Time zone',
+  'system.tz.desc': 'The clock every timestamp in the dashboard is drawn in — logs, charts, tables. System follows the browser. Changing it reloads the page.',
 } as const

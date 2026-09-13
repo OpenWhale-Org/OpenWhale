@@ -7,6 +7,7 @@ import type { CredentialTypeInfo } from '@/lib/core-types'
 import { LogsPanel } from '@/components/LogsPanel'
 import { JsonModal, CopyButton } from '@/components/JsonModal'
 import { useT } from '@/i18n'
+import { fmtDateTime } from '@/lib/time'
 
 interface ExecutorStatus {
   id: string
@@ -218,7 +219,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
 
       {recordModal && (
         <JsonModal
-          title={`${recordModal.instruction?.action} · ${new Date(recordModal.executedAt).toLocaleString()}`}
+          title={`${recordModal.instruction?.action} · ${fmtDateTime(recordModal.executedAt)}`}
           data={recordModal}
           onClose={() => setRecordModal(null)}
         />
@@ -362,7 +363,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
                   <p className="p-3" style={{ color: 'var(--muted)' }}>{t('executors.noRecords')}</p>
                 ) : records.map((r, i) => (
                   <div key={`${r.executedAt}-${i}`} className="px-3 py-1.5 flex gap-2 items-center" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-                    <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.executedAt).toLocaleString()}</span>
+                    <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{fmtDateTime(r.executedAt)}</span>
                     <span className="shrink-0" style={{ color: r.status === 'success' ? 'var(--success)' : r.status === 'failed' ? 'var(--danger)' : 'var(--warning)' }}>{r.status}</span>
                     <span className="shrink-0" style={{ color: 'var(--accent)' }}>{r.instruction?.action}</span>
                     <button onClick={() => setRecordModal(r)} className="flex-1 min-w-0 text-left truncate" title={t('executors.openRecord')} style={{ color: 'var(--muted)', background: 'transparent' }}>

@@ -49,6 +49,7 @@ import { useHistory, useUndoShortcuts } from '@/components/useHistory'
 import { useDirtyFlag } from '@/components/unsaved'
 import { implVenueMap, pickerVenue } from '@/components/venue'
 import { RunRow, type RunTrace } from '@/components/RunTrace'
+import { fmtDate, fmtDateTime, fmtTime } from '@/lib/time'
 
 // ── SSE event types ───────────────────────────────────────────────────────────
 
@@ -1704,7 +1705,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
               <h3 className="text-xs" style={{ color: 'var(--muted)' }}>{t('inst.heading.identity')}</h3>
               <div className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{chosen.id}</div>
               <div className="text-xs" style={{ color: 'var(--muted)' }}>
-                created {new Date(chosen.createdAt).toLocaleString()}
+                created {fmtDateTime(chosen.createdAt)}
               </div>
             </section>
           </div>
@@ -1793,7 +1794,7 @@ export function PnlSpark({ points, up, height = 64 }: {
       </svg>
       <div className="text-xs mt-1 flex justify-between" style={{ color: 'var(--muted)' }}>
         <span>{t('inst.realizedEvents', { n: points.length })}</span>
-        <span>{new Date(points[points.length - 1]!.ts).toLocaleDateString()}</span>
+        <span>{fmtDate(points[points.length - 1]!.ts)}</span>
       </div>
     </>,
   )
@@ -3475,7 +3476,7 @@ export function InstanceDetail({ instanceId, tall }: { instanceId: string; tall?
 function EventRow({ event }: { event: LiveEvent }) {
   const t = useT()
   const [open, setOpen] = useState(false)
-  const time = new Date(event.type === 'monitor_emit' ? event.ts : event.timestamp).toLocaleTimeString()
+  const time = fmtTime(event.type === 'monitor_emit' ? event.ts : event.timestamp)
 
   if (event.type === 'monitor_emit') {
     return (
@@ -3530,7 +3531,7 @@ function EventRow({ event }: { event: LiveEvent }) {
 
 function ExecutionRow({ result }: { result: ExecutionResult }) {
   const [open, setOpen] = useState(false)
-  const time = new Date(result.executedAt).toLocaleTimeString()
+  const time = fmtTime(result.executedAt)
   const statusColor = result.status === 'success' ? 'var(--success)' : result.status === 'failed' ? 'var(--danger)' : 'var(--muted)'
 
   return (
@@ -3562,7 +3563,7 @@ function LogRow({ row }: { row: { ts: number; level: string; module?: string; ms
     <div className="flex flex-col gap-0.5">
       <div className={hasExtra ? 'flex gap-2 items-start cursor-pointer' : 'flex gap-2 items-start'}
            onClick={() => hasExtra && setOpen(o => !o)}>
-        <span style={{ color: 'var(--muted)' }}>{hasExtra ? (open ? '▾' : '▸') : ' '} {new Date(row.ts).toLocaleTimeString()}</span>
+        <span style={{ color: 'var(--muted)' }}>{hasExtra ? (open ? '▾' : '▸') : ' '} {fmtTime(row.ts)}</span>
         <span className="px-1 rounded text-xs uppercase" style={{ background: color + '22', color }}>{row.level}</span>
         {row.module && <span style={{ color: 'var(--muted)' }}>{row.module}</span>}
         <span style={{ color: 'var(--foreground)' }}>{row.msg}</span>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountSnapshotRecord } from '@openwhaleorg/core'
 import { useT } from '@/i18n'
+import { fmtDate, fmtDateTime, fmtTime } from '@/lib/time'
 
 const RANGES = [
   { label: '24h', hours: 24 },
@@ -22,8 +23,8 @@ function formatUsd(v: number): string {
 
 function formatTime(ts: number, rangeHours: number): string {
   const d = new Date(ts)
-  if (rangeHours <= 48) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  if (rangeHours <= 48) return fmtTime(d, { hour: '2-digit', minute: '2-digit' })
+  return fmtDate(d, { month: 'short', day: 'numeric' })
 }
 
 /**
@@ -236,7 +237,7 @@ export function EquityChart({ account }: { account: string }) {
             >
               <div>{formatUsd(hovered.equity)}</div>
               {hovered.unrealizedPnl !== undefined && <div style={{ color: 'var(--muted)' }}>{t('accounts.chart.upnl', { value: formatUsd(hovered.unrealizedPnl) })}</div>}
-              <div style={{ color: 'var(--muted)' }}>{new Date(hovered.ts).toLocaleString()}</div>
+              <div style={{ color: 'var(--muted)' }}>{fmtDateTime(hovered.ts)}</div>
             </div>
           )}
         </div>

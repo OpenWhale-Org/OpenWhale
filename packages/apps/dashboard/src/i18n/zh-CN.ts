@@ -322,4 +322,6 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'system.pnl.unavailable': '当前运行时没有数据库，没有可写入的 PnL 账本。',
   'ui.filterOptions': '输入以筛选…',
   'ui.noMatch': '没有匹配项',
+  'system.tz.title': '时区',
+  'system.tz.desc': '面板上所有时间（日志、图表、表格）显示所用的时区。「System」跟随浏览器。切换后页面会重新加载。',
 }

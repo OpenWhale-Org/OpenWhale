@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useT } from '@/i18n'
+import { Select } from '@/components/Select'
+import { TIME_ZONES, activeTimeZone, resolvedTimeZone, writeTimeZoneCookie, fmtDateTime } from '@/lib/time'
 
 /**
  * Engine-wide switches — the things that belong to no one instance.
@@ -116,7 +118,7 @@ export function SystemClient() {
             <span style={{ color: 'var(--muted)' }}>{t('system.pnl.last')}</span>
             <span className="font-mono">
               {status.lastCollectAt
-                ? `${new Date(status.lastCollectAt).toLocaleString()} · ${((status.lastCollectMs ?? 0) / 1000).toFixed(1)} s`
+                ? `${fmtDateTime(status.lastCollectAt)} · ${((status.lastCollectMs ?? 0) / 1000).toFixed(1)} s`
                 : t('system.pnl.never')}
             </span>
           </div>
@@ -127,6 +129,44 @@ export function SystemClient() {
         {status?.unavailable && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('system.pnl.unavailable')}</p>}
         {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
       </section>
+
+      <TimeZoneCard />
     </div>
+  )
+}
+
+/**
+ * Which clock the dashboard reads in. Saved in a cookie and applied by a
+ * reload — every rendered time changes at once, and the server renders the
+ * next page in the same zone instead of in its own UTC.
+ */
+function TimeZoneCard() {
+  const t = useT()
+  const [zone, setZone] = useState('')
+  const [now, setNow] = useState('')
+  useEffect(() => {
+    setZone(activeTimeZone())
+    const tick = () => setNow(fmtDateTime(Date.now()))
+    tick()
+    const timer = setInterval(tick, 1_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <section className="rounded-lg p-4 flex flex-col gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-medium">{t('system.tz.title')}</h2>
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('system.tz.desc')}</p>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <Select
+          value={zone}
+          onChange={(z) => { writeTimeZoneCookie(z); window.location.reload() }}
+          options={TIME_ZONES.map(z => ({ value: z.id, label: z.label }))}
+          style={{ minWidth: '18rem' }}
+        />
+        <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{resolvedTimeZone()} · {now}</span>
+      </div>
+    </section>
   )
 }

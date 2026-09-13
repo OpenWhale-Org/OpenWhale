@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CombinedAccountEquityPoint, CombinedAccountEquitySeries } from '@openwhaleorg/core'
 import { useT } from '@/i18n'
+import { fmtDate, fmtDateTime, fmtTime } from '@/lib/time'
 
 type T = ReturnType<typeof useT>
 
@@ -41,8 +42,8 @@ function formatUsd(value: number): string {
 
 function formatAxisTime(ts: number, range: PortfolioRange): string {
   const date = new Date(ts)
-  if (range === '24h') return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  if (range === '24h') return fmtTime(date, { hour: '2-digit', minute: '2-digit' })
+  return fmtDate(date, { month: 'short', day: 'numeric' })
 }
 
 function relativeTime(t: T, ts: number): string {
@@ -363,7 +364,7 @@ export function PortfolioEquityChart({ state }: { state: PortfolioEquityState })
                 {hovered.point.available !== undefined && <span>{t('overview.chart.available', { v: formatUsd(hovered.point.available) })}</span>}
                 <span>{t('overview.chart.accounts', { n: hovered.point.accountCount, total: hovered.point.expectedAccountCount })}</span>
                 {hovered.point.missingAccounts.length > 0 && <span className="is-warning">{t('overview.chart.missing', { list: hovered.point.missingAccounts.join(', ') })}</span>}
-                <time>{new Date(hovered.point.ts).toLocaleString()}</time>
+                <time>{fmtDateTime(hovered.point.ts)}</time>
               </div>
             )}
           </>

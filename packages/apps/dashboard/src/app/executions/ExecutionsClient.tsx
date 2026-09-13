@@ -9,6 +9,7 @@ import { Select } from '@/components/Select'
 import { RunSteps, type RunTrace } from '@/components/RunTrace'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { useT } from '@/i18n'
+import { fmtTime } from '@/lib/time'
 
 /**
  * Every instance's executions, newest first, with the run behind each one.
@@ -191,7 +192,7 @@ function ExecutionRow({ row, instanceName, open, onToggle }: {
         onClick={onToggle}
       >
         <span className="mono" style={{ color: 'var(--muted)' }}>
-          {open ? '▾' : '▸'} {new Date(row.executedAt).toLocaleTimeString()}
+          {open ? '▾' : '▸'} {fmtTime(row.executedAt)}
         </span>
         <span className="truncate">
           <span className="mono">{row.instruction?.action ?? '—'}</span>

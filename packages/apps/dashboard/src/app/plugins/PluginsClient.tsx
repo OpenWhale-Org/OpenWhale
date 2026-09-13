@@ -10,6 +10,7 @@ import type { InstalledPluginView, PluginUpdate } from '@/lib/data'
 import { Markdown } from '@/components/Markdown'
 import { TypeMark } from '@/components/TypeMark'
 import { useT, type MessageKey } from '@/i18n'
+import { fmtDateTime } from '@/lib/time'
 
 /** Render a translated sentence whose `backticked` spans are code — a name, an env var — so the wording stays a sentence in every language. */
 function rich(text: string): React.ReactNode {
@@ -326,7 +327,7 @@ function PluginDetail({ plugin, update, registry, credentialTypes, scripts, acco
           ) : (
             <span className="badge badge-neutral truncate max-w-[24rem]" title={sourceBadge}>{sourceBadge}</span>
           )}
-          {plugin.installedAt && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{t('plugins.installedAt', { when: new Date(plugin.installedAt).toLocaleString() })}</span>}
+          {plugin.installedAt && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{t('plugins.installedAt', { when: fmtDateTime(plugin.installedAt) })}</span>}
         </div>
         {plugin.source && (
           <div className="shrink-0 flex gap-2">
@@ -879,7 +880,7 @@ function InstallForm({ onInstalled, onSuccess }: { onInstalled: () => void; onSu
               <span className="font-medium">
                 {rich(t('plugins.conflict.sameSource', { plugin: conflict.plugin }))}
                 {conflict.source && <> (<span className="font-mono">{conflict.source}</span>)</>}
-                {conflict.installedAt && <span className="opacity-70"> — {new Date(conflict.installedAt).toLocaleString()}</span>}
+                {conflict.installedAt && <span className="opacity-70"> — {fmtDateTime(conflict.installedAt)}</span>}
               </span>
               <span className="opacity-70">
                 {t('plugins.conflict.overwriteHint')}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useT } from '@/i18n'
+import { fmtDate, fmtDateTime } from '@/lib/time'
 
 /**
  * Per-instance PnL — realized / fees / funding from the order-claim
@@ -241,7 +242,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                   <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('pnl.curveTitle')}</span>
                   {series && series.length > 0 && (
                     <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
-                      {new Date(series[0]!.ts).toLocaleDateString()} → {new Date(series[series.length - 1]!.ts).toLocaleDateString()}
+                      {fmtDate(series[0]!.ts)} → {fmtDate(series[series.length - 1]!.ts)}
                       {' · '}{series.length === 1 ? t('pnl.eventsOne') : t('pnl.eventsN', { n: series.length })}
                     </span>
                   )}
@@ -315,7 +316,7 @@ export function InstancePnlPanel({ instanceId }: { instanceId: string }) {
                     <tbody>
                       {sortRows(fills, fillSort).map((f, i) => (
                         <tr key={`${f.orderId}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td className="px-2 py-1" style={{ color: 'var(--muted)' }}>{new Date(f.ts).toLocaleString()}</td>
+                          <td className="px-2 py-1" style={{ color: 'var(--muted)' }}>{fmtDateTime(f.ts)}</td>
                           <td className="px-2 py-1">{f.symbol}</td>
                           <td className="px-2 py-1" style={{ color: f.side === 'buy' ? 'var(--success)' : 'var(--danger)' }}>{f.side}</td>
                           <td className="text-right px-2 py-1">{f.qty}</td>

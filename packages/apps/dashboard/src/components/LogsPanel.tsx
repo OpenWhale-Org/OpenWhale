@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { subscribeLiveEvents } from '@/lib/live-events'
 import { useT } from '@/i18n'
+import { fmtTime } from '@/lib/time'
 
 interface LogLine {
   ts: number
@@ -47,7 +48,7 @@ export function LogsPanel({ id, logsUrl, sseType }: { id: string; logsUrl: strin
           <p className="p-3" style={{ color: 'var(--muted)' }}>{t('ui.noLogLines')}</p>
         ) : lines.map((line, i) => (
           <div key={`${line.ts}-${i}`} className="px-3 py-1 flex gap-2 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-            <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(line.ts).toLocaleTimeString()}</span>
+            <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{fmtTime(line.ts)}</span>
             <span className="shrink-0 uppercase" style={{ color: LEVEL_COLORS[line.level] ?? 'var(--muted)' }}>{line.level}</span>
             <span className="break-all" style={{ color: 'var(--foreground)' }}>
               {line.msg}

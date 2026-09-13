@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { AuthUser } from '@/lib/auth'
 import { useT } from '@/i18n'
+import { fmtDate } from '@/lib/time'
 
 /**
  * Account management. Every user here can do everything — there are no roles,
@@ -94,7 +95,7 @@ export function UsersClient({ initialUsers, currentUserId }: { initialUsers: Aut
                 {u.id === currentUserId && <span className="text-xs ml-2" style={{ color: 'var(--accent)' }}>{t('users.you')}</span>}
               </span>
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                {t('users.since', { date: new Date(u.createdAt).toLocaleDateString() })}
+                {t('users.since', { date: fmtDate(u.createdAt) })}
               </span>
             </div>
             {resetFor === u.id ? (

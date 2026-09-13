@@ -14,6 +14,7 @@ import { JsonModal, CopyButton } from '@/components/JsonModal'
 import { SymbolPicker } from '@/components/SymbolPicker'
 import { effectiveValue } from '@/components/venue'
 import { useT } from '@/i18n'
+import { fmtTime } from '@/lib/time'
 
 interface SseEvent {
   type: string
@@ -429,7 +430,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
                 <p className="p-4" style={{ color: 'var(--muted)' }}>{t('monitor.waitingEmits')}</p>
               ) : events.map((event, i) => (
                 <div key={`${event.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-                  <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(event.ts).toLocaleTimeString()}</span>
+                  <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{fmtTime(event.ts)}</span>
                   <span className="shrink-0" style={{ color: 'var(--warning)' }}>{event.key}</span>
                   <DataView data={event.data} />
                 </div>
@@ -533,7 +534,7 @@ function KeyStrip({ status, events, connected, subscribers }: {
               <span className="font-mono">{k}</span>
               {by.length > 0 && <span style={{ color: 'var(--muted)' }}>{by.length === 1 ? by[0] : t('monitor.nStrategies', { n: by.length })}</span>}
               <span style={{ color: 'var(--muted)' }}>
-                {seen ? new Date(seen).toLocaleTimeString() : running ? t('monitor.waiting') : t('monitor.stored')}
+                {seen ? fmtTime(seen) : running ? t('monitor.waiting') : t('monitor.stored')}
               </span>
             </button>
           )
@@ -558,7 +559,7 @@ function KeyStrip({ status, events, connected, subscribers }: {
             )}
             {records?.key === openKey && records.rows.map((r, i) => (
               <div key={`${r.ts}-${i}`} className="px-3 py-2 flex gap-3 items-start" style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-                <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{new Date(r.ts).toLocaleTimeString()}</span>
+                <span className="shrink-0 opacity-60" style={{ color: 'var(--muted)' }}>{fmtTime(r.ts)}</span>
                 <DataView data={r.data} />
               </div>
             ))}

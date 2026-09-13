@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '@/i18n'
 import { type Drawing, type Tool, type ChartRegion, type ChartYRange, newId, tryCompile, measure, formatSpan, loadDrawings, saveDrawings, rangeMarks } from './chartTools'
+import { fmtDate, fmtTime } from '@/lib/time'
 
 export interface ChartCandle { x: number; o: number; h: number; l: number; c: number }
 export interface ChartSeries { label: string; points?: Array<{ x: number; y: number }>; candles?: ChartCandle[] }
@@ -78,7 +79,7 @@ function decimalsFromValues(values: number[], fallback: number): number {
  */
 export function formatInstant(ts: number): string {
   const d = new Date(ts)
-  const hms = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const hms = fmtTime(d, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   const ms = ts % 1000
   return ms === 0 ? hms : `${hms}.${String(Math.abs(ms)).padStart(3, '0')}`
 }
@@ -87,12 +88,12 @@ function formatTime(ts: number, spanMs: number): string {
   const d = new Date(ts)
   // Millisecond-candle territory: show HH:MM:SS.mmm once the window is tight
   if (spanMs <= 2 * 60_000) {
-    const hms = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const hms = fmtTime(d, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     return `${hms}.${String(d.getMilliseconds()).padStart(3, '0')}`
   }
-  if (spanMs <= 5 * 60_000) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  if (spanMs <= 48 * 3_600_000) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  if (spanMs <= 5 * 60_000) return fmtTime(d, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  if (spanMs <= 48 * 3_600_000) return fmtTime(d, { hour: '2-digit', minute: '2-digit' })
+  return fmtDate(d, { month: 'short', day: 'numeric' })
 }
 
 /** Two-sided 95% t critical values by degrees of freedom; ≥30 df → the normal 1.96. */

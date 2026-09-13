@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useT } from '@/i18n'
+import { fmtDateTime } from '@/lib/time'
 
 interface ContractEntry { monitor: string; keys: number; bytes: number }
 interface KeyEntry { key: string; bytes: number; updatedAt: number }
@@ -17,7 +18,7 @@ function formatBytes(n: number): string {
 }
 
 function formatTime(ts?: number): string {
-  return ts ? new Date(ts).toLocaleString() : '—'
+  return ts ? fmtDateTime(ts) : '—'
 }
 
 export function ExplorerClient() {

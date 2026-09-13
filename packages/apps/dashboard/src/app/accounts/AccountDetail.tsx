@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useColumnWidths, ResizeHandle } from '@/components/ResizableColumns'
 import { useT } from '@/i18n'
+import { fmtDateTime } from '@/lib/time'
 
 /** Shapes follow the exchange read-view interfaces (IAccountBalance/IPosition/IOrder). */
 interface TokenBalance { token: string; free: number; locked: number; total: number; usdValue?: number }
@@ -46,7 +47,7 @@ function fmtCell(value: unknown, col: ColumnDef): { text: string; color?: string
       const bullish = v === 'long' || v === 'buy'
       return { text: v, color: bullish ? 'var(--success)' : 'var(--danger)' }
     }
-    case 'time': return { text: typeof value === 'number' ? new Date(value).toLocaleString() : String(value) }
+    case 'time': return { text: typeof value === 'number' ? fmtDateTime(value) : String(value) }
     default: return { text: String(value) }
   }
 }

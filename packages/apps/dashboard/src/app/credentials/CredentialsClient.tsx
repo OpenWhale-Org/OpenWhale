@@ -9,6 +9,7 @@ import type { CredentialInfo } from '@openwhaleorg/core'
 import type { CredentialTypeInfo } from '@/lib/core-types'
 import { Switch } from '@/components/Switch'
 import { useT } from '@/i18n'
+import { fmtDateTime } from '@/lib/time'
 
 type T = ReturnType<typeof useT>
 
@@ -906,7 +907,7 @@ function CredentialCard({ credential, credentialTypes, onDuplicate, onDelete, on
         {identity}
         {publicFields ?? <span />}
         <span className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-          {new Date(credential.createdAt).toLocaleString()}
+          {fmtDateTime(credential.createdAt)}
         </span>
         <div className="flex justify-end">{menu}</div>
       </div>
