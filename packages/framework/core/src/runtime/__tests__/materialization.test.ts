@@ -159,6 +159,26 @@ describe('credential materialization: one strategy, two venues', () => {
       { label: 'main', kind: 'test/fake' },
       { label: 'exec:bot', type: 'token-service' },
     ])
+
+    /* A plugin that wrote the row out by hand — the only way to get an
+       executor's raw slot onto the binding form before the runtime derived
+       them — must not end up with it twice. */
+    runtime.registerStrategy(
+      {
+        id: 'hand-written', name: 'Hand written', source: 'builtin', createdAt: now, updatedAt: now,
+        accountRequirements: [
+          { label: 'main', kind: 'test/fake' },
+          { label: 'exec:bot', type: 'token-service', optional: true },
+        ],
+      },
+      () => new AnyVenueStrategy(),
+    )
+    const hand = runtime.listStrategies().find(s => s.id === 'hand-written')!
+    expect(hand.accountRequirements).toEqual([
+      { label: 'main', kind: 'test/fake' },
+      // The declaration wins: it says optional, and the derived row does not.
+      { label: 'exec:bot', type: 'token-service', optional: true },
+    ])
     expect(def.executorLabels).toEqual(['exec'])
 
     await runtime.start()

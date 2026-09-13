@@ -2264,7 +2264,15 @@ export class OpenWhaleRuntime implements IRuntime {
         }))
       })
       if (slots.length === 0) return def
-      return { ...def, accountRequirements: [...(def.accountRequirements ?? []), ...slots] }
+      /* Deduplicate by label, keeping what the definition declared. Before the
+         runtime derived these, a plugin that wanted an executor's raw slot on
+         the binding form had to write the row out by hand — funding-arb still
+         does — and appending the derived one produced the slot twice. The
+         hand-written entry wins because it may carry more than we can derive. */
+      const declared = new Set((def.accountRequirements ?? []).map(a => a.label))
+      const fresh = slots.filter(s => !declared.has(s.label))
+      if (fresh.length === 0) return def
+      return { ...def, accountRequirements: [...(def.accountRequirements ?? []), ...fresh] }
     })
   }
 
