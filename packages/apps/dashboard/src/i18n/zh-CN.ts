@@ -326,5 +326,5 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'system.tz.desc': '面板上所有时间（日志、图表、表格）显示所用的时区。「System」跟随浏览器。切换后页面会重新加载。',
   'toast.more': '另有 {n} 条执行',
   'system.toasts.title': '执行通知',
-  'system.toasts.desc': '每产生一条执行就在左下角提示：做了什么、成功与否，点击可跳到对应实例。短时间内大量执行会折叠成一条计数。按浏览器保存。',
+  'system.toasts.desc': '每产生一条执行就在右下角提示：做了什么、成功与否，点击可跳到对应实例。短时间内大量执行会折叠成一条计数。按浏览器保存。',
 }

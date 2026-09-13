@@ -7,7 +7,7 @@ import { fmtTime } from '@/lib/time'
 import { useT } from '@/i18n'
 
 /**
- * Every execution, announced in the corner.
+ * Every execution, announced in the bottom-right corner.
  *
  * An execution is the moment the engine actually did something at a venue, and
  * until now you only saw it by sitting on the Executions page. These are for
@@ -108,7 +108,7 @@ export function ExecutionToasts() {
   if (!on || (toasts.length === 0 && hidden === 0)) return null
 
   return (
-    <div className="fixed left-4 bottom-4 z-[300] flex flex-col-reverse gap-2 pointer-events-none" style={{ maxWidth: 'min(26rem, 90vw)' }}>
+    <div className="fixed right-4 bottom-4 z-[300] flex flex-col-reverse gap-2 items-end pointer-events-none" style={{ maxWidth: 'min(26rem, 90vw)' }}>
       {hidden > 0 && (
         <div className="rounded-md px-3 py-1.5 text-xs pointer-events-auto"
           style={{ background: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
