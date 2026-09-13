@@ -5,6 +5,7 @@ import { Nav } from './Nav'
 import { UserMenu } from './UserMenu'
 import { Tour } from './Tour'
 import { UnsavedGuard } from './unsaved'
+import { ExecutionToasts } from './ExecutionToasts'
 import { useI18n, LOCALES, type MessageKey } from '@/i18n'
 
 /**
@@ -72,6 +73,7 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
         </main>
         <Tour />
         <UnsavedGuard />
+        <ExecutionToasts />
       </div>
     </div>
   )

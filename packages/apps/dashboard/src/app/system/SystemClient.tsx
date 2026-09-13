@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useT } from '@/i18n'
 import { Select } from '@/components/Select'
 import { TIME_ZONES, activeTimeZone, resolvedTimeZone, writeTimeZoneCookie, fmtDateTime } from '@/lib/time'
+import { executionToastsEnabled, setExecutionToastsEnabled } from '@/components/ExecutionToasts'
+import { Switch } from '@/components/Switch'
 
 /**
  * Engine-wide switches — the things that belong to no one instance.
@@ -131,7 +133,25 @@ export function SystemClient() {
       </section>
 
       <TimeZoneCard />
+
+      <NotificationsCard />
     </div>
+  )
+}
+
+/** Whether an execution announces itself in the corner. Per browser. */
+function NotificationsCard() {
+  const t = useT()
+  const [on, setOn] = useState(true)
+  useEffect(() => { setOn(executionToastsEnabled()) }, [])
+  return (
+    <section className="rounded-lg p-4 flex items-start justify-between gap-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="flex flex-col gap-1 min-w-0">
+        <h2 className="text-sm font-medium">{t('system.toasts.title')}</h2>
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('system.toasts.desc')}</p>
+      </div>
+      <Switch checked={on} onChange={(next) => { setOn(next); setExecutionToastsEnabled(next) }} />
+    </section>
   )
 }
 
