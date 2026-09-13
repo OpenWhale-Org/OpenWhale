@@ -9,6 +9,14 @@
  * Give the stream a warmup to prove itself. If it has not delivered by then,
  * abort it — through a child controller, so the subscription itself survives —
  * and tell the caller to fall back to REST polling for the life of this feed.
+ *
+ * Proving itself once is not enough. A stream can speak for hours and then
+ * stop, with the same signature: no error, no close, an await that never
+ * settles. Measured 2026-09-13 on the live board — binance SNXX/SNDK went
+ * quiet at 14:14 and SOXS/SOXL at 14:47 while twelve other keys on the same
+ * process kept writing; the charts stayed up showing the last thing each had
+ * seen, which is the worst way for a feed to fail. So there is a second
+ * watchdog for the rest of the stream's life: see `idleMs`.
  */
 export interface StreamWarmupOptions {
   /** Runs the stream; must honour the signal it is handed. */
@@ -17,8 +25,19 @@ export interface StreamWarmupOptions {
   hasEmitted: () => boolean
   /** The subscription's signal; aborting it aborts the stream too. */
   signal: AbortSignal
-  /** How long the stream may stay silent. Default 15s. */
+  /** How long the stream may stay silent before its FIRST frame. Default 15s. */
   warmupMs?: number
+  /**
+   * How long the stream may stay silent AFTER it has been speaking, before it
+   * is treated as hung and aborted so the caller can reconnect. Off when
+   * absent — but a caller that can tolerate a reconnect should set it, because
+   * the failure it catches is invisible by construction.
+   *
+   * Needs `lastFrameAt`; without it there is nothing to measure.
+   */
+  idleMs?: number
+  /** When the last frame arrived, in ms. Only read when `idleMs` is set. */
+  lastFrameAt?: () => number
 }
 
 export const DEFAULT_WATCH_WARMUP_MS = 15_000
@@ -33,10 +52,20 @@ export async function streamWithWarmup(options: StreamWarmupOptions): Promise<bo
   const onOuterAbort = () => watch.abort()
   signal.addEventListener('abort', onOuterAbort, { once: true })
   const timer = setTimeout(() => { if (!hasEmitted()) watch.abort() }, warmupMs)
+  /* The idle check samples rather than arming a timer per frame: a busy book
+     is thousands of frames a minute, and re-arming a timer on each one is
+     work the hot path should not do to catch a fault measured in minutes. */
+  const { idleMs, lastFrameAt } = options
+  const idle = idleMs !== undefined && idleMs > 0 && lastFrameAt !== undefined
+    ? setInterval(() => {
+      if (hasEmitted() && Date.now() - lastFrameAt() > idleMs) watch.abort()
+    }, Math.max(1_000, Math.floor(idleMs / 4)))
+    : undefined
   try {
     await stream(watch.signal)
   } finally {
     clearTimeout(timer)
+    if (idle !== undefined) clearInterval(idle)
     signal.removeEventListener('abort', onOuterAbort)
     /*
      * Whatever the stream started dies with the call. A two-leg stream is a
