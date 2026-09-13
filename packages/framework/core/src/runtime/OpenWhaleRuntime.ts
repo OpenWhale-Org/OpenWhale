@@ -2249,9 +2249,16 @@ export class OpenWhaleRuntime implements IRuntime {
         const label = labels[i]
         const executor = this.executorRegistry.get(id)
         if (label === undefined || !executor) return []
-        return executor.credentials.map(slot => ({
+        /* RAW slots only. A slot that wants a session names a kind, and a kind
+           is satisfied by the strategy's own account bindings — that is what
+           defaultExecutorBinding is for, and it has always worked without
+           anyone filling anything in. Offering those a row of their own put an
+           empty, mandatory-looking select on every instance form in the
+           system for a binding the runtime already makes. A raw slot has no
+           such fallback when nothing bound to the strategy is of its type,
+           which is the case this list exists to serve. */
+        return executor.credentials.filter(slot => 'raw' in slot).map(slot => ({
           label: `${label}:${slot.label}`,
-          ...('raw' in slot ? {} : { kind: slot.kind }),
           ...(slot.type !== undefined ? { type: slot.type } : {}),
           ...(slot.optional ? { optional: true } : {}),
         }))

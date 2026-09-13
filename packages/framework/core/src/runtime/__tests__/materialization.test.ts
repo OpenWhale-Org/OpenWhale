@@ -153,9 +153,10 @@ describe('credential materialization: one strategy, two venues', () => {
     // the declared executor's own slots — a UI has to offer both, and an
     // executor slot is addressed '<executorLabel>:<slotLabel>'.
     const def = runtime.listStrategies().find(s => s.id === 'any-venue')!
+    // Only the RAW slot: 'exec:trading' names a kind, and a kind is satisfied
+    // by the strategy's own account binding without anyone choosing anything.
     expect(def.accountRequirements).toEqual([
       { label: 'main', kind: 'test/fake' },
-      { label: 'exec:trading', kind: 'test/fake' },
       { label: 'exec:bot', type: 'token-service' },
     ])
     expect(def.executorLabels).toEqual(['exec'])
