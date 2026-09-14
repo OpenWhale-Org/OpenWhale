@@ -641,6 +641,54 @@ function MultiSelect({ options, value, onChange }: {
   )
 }
 
+/** ISO-8601 UTC → the `datetime-local` value for the same instant, in local time, to the millisecond. */
+function isoToLocalInput(iso: string): string {
+  const d = new Date(iso)
+  if (!iso || Number.isNaN(d.getTime())) return ''
+  const p = (n: number, w = 2) => String(n).padStart(w, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
+}
+
+/**
+ * A date and time to the millisecond. The picker speaks local time — the
+ * operator's clock — and the value is stored as ISO UTC, which is what the
+ * scripts and the engine's timestamps are in; the UTC reading is shown under
+ * the input so the two never get confused. An ISO string can also be pasted.
+ */
+function DateTimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const d = value ? new Date(value) : undefined
+  const valid = d !== undefined && !Number.isNaN(d.getTime())
+  return (
+    <span className="flex flex-col gap-1">
+      <span className="flex items-center gap-2">
+        <input
+          type="datetime-local"
+          step="0.001"
+          value={isoToLocalInput(value)}
+          onChange={(e) => {
+            const v = e.target.value
+            if (!v) { onChange(''); return }
+            const t = new Date(v)
+            if (!Number.isNaN(t.getTime())) onChange(t.toISOString())
+          }}
+          className="rounded-md px-2 py-1.5 text-sm font-mono"
+          style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', minWidth: '16rem', colorScheme: 'dark light' }}
+        />
+        <button type="button" onClick={() => onChange(new Date().toISOString())} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>现在</button>
+        {value && <button type="button" onClick={() => onChange('')} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>清空</button>}
+      </span>
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value.trim())}
+        placeholder="或粘贴 ISO 时间，如 2026-09-14T18:45:49.677Z"
+        className="rounded-md px-2 py-1 text-xs font-mono"
+        style={{ background: 'var(--background)', color: valid || !value ? 'var(--muted)' : 'var(--danger, #e5484d)', border: '1px solid var(--border)', minWidth: '16rem' }}
+      />
+    </span>
+  )
+}
+
 function FieldInput({ field, value, onChange }: { field: ParamFieldDef; value: string; onChange: (v: string) => void }) {
   return (
     <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }}>
@@ -661,6 +709,8 @@ function FieldInput({ field, value, onChange }: { field: ParamFieldDef; value: s
           options={field.options.map(o => ({ value: String(o.value), label: String(o.label ?? o.value) }))}
           style={{ minWidth: '16rem' }}
         />
+      ) : field.widget === 'datetime' ? (
+        <DateTimeInput value={value} onChange={onChange} />
       ) : field.type === 'boolean' ? (
         <Select
           value={value || 'false'}

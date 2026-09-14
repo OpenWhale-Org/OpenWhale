@@ -106,6 +106,14 @@ export interface ParamFieldMeta {
   /** Short unit suffix rendered after the input ('σ', '%', '$'). */
   unit?: string
   /**
+   * Render a string field with a dedicated input. `datetime` is a date and a
+   * time to the millisecond, shown in the viewer's local time and stored as
+   * an ISO-8601 UTC string (`2026-09-14T18:45:49.677Z`); empty stays empty.
+   * A client that does not know the widget renders a text box, and the ISO
+   * string still works there.
+   */
+  widget?: 'datetime'
+  /**
    * Extra list-level settings for an array-of-objects param. The columns
    * themselves derive from the element schema — only presentation extras
    * (add-button label) live here.
@@ -253,6 +261,8 @@ export interface ParamFieldDef {
   slider?: ParamFieldSlider
   /** Short unit suffix rendered after the input. */
   unit?: string
+  /** A dedicated input for a string field — see ParamFieldMeta.widget. */
+  widget?: 'datetime'
   /** Row structure for type='list' — columns derived from the array's element schema. */
   list?: ListParamDef
   /** The strategy's default quick parameter — see ParamFieldMeta.quick. */
