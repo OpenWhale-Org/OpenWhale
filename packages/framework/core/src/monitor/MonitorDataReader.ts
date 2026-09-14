@@ -113,6 +113,32 @@ async function endsWithNewline(file: string, size: number): Promise<boolean> {
   }
 }
 
+/** `ts` off a stored line: the prefix when it is BaseMonitor's shape, a parse otherwise. */
+function readTs(text: string): number | undefined {
+  const m = /^\{"ts":(\d+)/.exec(text)
+  if (m) return Number(m[1])
+  try {
+    const ts = (JSON.parse(text) as { ts?: unknown }).ts
+    return typeof ts === 'number' ? ts : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The in-memory version: the record nearest each of `points` evenly spaced instants. */
+export function sampleByTime<T extends { ts: number }>(records: T[], points: number): T[] {
+  if (records.length <= points || records.length === 0) return records
+  const t0 = records[0]!.ts, t1 = records[records.length - 1]!.ts
+  const out: T[] = []
+  let i = 0
+  for (let p = 0; p < points; p++) {
+    const target = t0 + ((t1 - t0) * p) / Math.max(1, points - 1)
+    while (i < records.length - 1 && Math.abs(records[i + 1]!.ts - target) <= Math.abs(records[i]!.ts - target)) i++
+    if (out[out.length - 1] !== records[i]) out.push(records[i]!)
+  }
+  return out
+}
+
 export class MonitorDataReaderImpl<TData = Record<string, unknown>>
   implements MonitorDataReader<TData>
 {
@@ -228,6 +254,97 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
       return (await read) as MonitorRecord<TData>[]
     } finally {
       tailInFlight.delete(flightKey)
+    }
+  }
+
+  /**
+   * About `points` records spread evenly over the store's TIME span, read
+   * without scanning it — for "the whole history" of a store too large to
+   * load.
+   *
+   * Asking an oversized store for everything used to return its newest 1000
+   * records: on a store written once a second that is the last 17 minutes
+   * labelled "all history" (etf-engine-quotes, 2026-09-14). Byte offsets are
+   * probed evenly to learn where time is in the file, then each time target
+   * takes the probed record nearest it. Where probes land far apart in TIME
+   * but close in bytes — a sparse stretch, like hourly backfill before a
+   * dense live one — that byte range is read whole, so the sparse stretch is
+   * represented by its own records rather than skipped.
+   *
+   * Each record returned is a real record, not an average.
+   */
+  async readSampled(key: string, points: number): Promise<MonitorRecord<TData>[]> {
+    if (!(await this.oversized(key))) return sampleByTime(await this.load(key), points)
+    const file = this.filePath(key)
+    const size = (await fs.promises.stat(file)).size
+    const fh = await fs.promises.open(file, 'r')
+    try {
+      type Line = { start: number; ts: number; text: string }
+      const lineAt = async (offset: number): Promise<Line | undefined> => {
+        let chunk = 8192
+        for (;;) {
+          const buf = Buffer.alloc(Math.min(chunk, Math.max(0, size - offset)))
+          if (buf.length === 0) return undefined
+          const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
+          let from = 0
+          if (offset > 0) {
+            const nl = buf.indexOf(0x0a)
+            if (nl < 0 || nl >= bytesRead - 1) { if (offset + bytesRead >= size || chunk >= 4 << 20) return undefined; chunk *= 4; continue }
+            from = nl + 1
+          }
+          const end = buf.indexOf(0x0a, from)
+          if (end < 0 || end >= bytesRead) { if (offset + bytesRead >= size || chunk >= 4 << 20) return undefined; chunk *= 4; continue }
+          const text = buf.toString('utf8', from, end)
+          const ts = readTs(text)
+          if (ts === undefined) return lineAt(offset + end + 1)
+          return { start: offset + from, ts, text }
+        }
+      }
+      const probes = Math.min(4096, Math.max(64, points * 2))
+      const samples: Line[] = []
+      for (let i = 0; i <= probes; i++) {
+        const line = await lineAt(Math.floor((size * i) / probes))
+        if (line && (samples.length === 0 || line.start > samples[samples.length - 1]!.start)) samples.push(line)
+      }
+      if (samples.length === 0) return []
+      const t0 = samples[0]!.ts, t1 = samples[samples.length - 1]!.ts
+      const step = points > 1 ? (t1 - t0) / (points - 1) : 0
+      const rangeCache = new Map<number, Line[]>()
+      const readRange = async (j: number): Promise<Line[]> => {
+        const hit = rangeCache.get(j)
+        if (hit) return hit
+        const a = samples[j]!, b = samples[j + 1]!
+        const buf = Buffer.alloc(b.start - a.start)
+        await fh.read(buf, 0, buf.length, a.start)
+        const out: Line[] = []
+        let from = 0
+        for (let nl = buf.indexOf(0x0a); nl >= 0; nl = buf.indexOf(0x0a, from)) {
+          const text = buf.toString('utf8', from, nl)
+          const ts = readTs(text)
+          if (ts !== undefined) out.push({ start: a.start + from, ts, text })
+          from = nl + 1
+        }
+        rangeCache.set(j, out)
+        return out
+      }
+      const chosen = new Map<number, Line>()
+      let j = 0
+      for (let p = 0; p < Math.max(1, points); p++) {
+        const target = t0 + step * p
+        while (j < samples.length - 2 && samples[j + 1]!.ts <= target) j++
+        const a = samples[j]!, b = samples[Math.min(j + 1, samples.length - 1)]!
+        let pick = Math.abs(a.ts - target) <= Math.abs(b.ts - target) ? a : b
+        // Probes far apart in time but near in bytes: read what is between them.
+        if (b !== a && b.ts - a.ts > 2 * step && b.start - a.start <= 256 * 1024) {
+          for (const line of await readRange(j)) if (Math.abs(line.ts - target) < Math.abs(pick.ts - target)) pick = line
+        }
+        chosen.set(pick.start, pick)
+      }
+      return [...chosen.values()]
+        .sort((x, y) => x.start - y.start)
+        .flatMap((line) => { try { return [JSON.parse(line.text) as MonitorRecord<TData>] } catch { return [] } })
+    } finally {
+      await fh.close()
     }
   }
 

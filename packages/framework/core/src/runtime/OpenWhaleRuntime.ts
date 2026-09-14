@@ -592,10 +592,16 @@ export class OpenWhaleRuntime implements IRuntime {
     // per filter click (the 2026-07-31 settlement-board freeze), so "all"
     // degrades to the newest PLOT_CAP records there — served from the tail
     // cache, so filter clicks are instant.
+    // "All" on such a store is a TIME-even sample across the whole span when
+    // the reader can take one cheaply; the newest PLOT_CAP records was the
+    // old answer, and on a store written every second it showed 17 minutes.
     const reader = monitor.getReader()
     const PLOT_CAP = 1_000
-    const effectiveN = n > 0 ? n : (await reader.isOversized?.(key)) ? PLOT_CAP : 0
-    const records = effectiveN > 0 ? await reader.readLast(key, effectiveN) : await reader.readAll(key)
+    const PLOT_SAMPLE = 2_000
+    const oversized = n <= 0 && (await reader.isOversized?.(key)) === true
+    const records = n > 0 ? await reader.readLast(key, n)
+      : oversized ? (reader.readSampled ? await reader.readSampled(key, PLOT_SAMPLE) : await reader.readLast(key, PLOT_CAP))
+      : await reader.readAll(key)
     const options = def.options?.(records)
     // The option list is derived from the CURRENT window, so a stale pick
     // (a session that scrolled out, a token no longer sampled) must not reach

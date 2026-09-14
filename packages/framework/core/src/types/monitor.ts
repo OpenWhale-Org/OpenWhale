@@ -29,6 +29,13 @@ export interface MonitorDataReader<TData = Record<string, unknown>> {
    */
   isOversized?(key: string): Promise<boolean>
 
+  /**
+   * About `points` records spread evenly over the store's time span — how a
+   * display asks an oversized store for "all history" without reading it.
+   * Optional: absent on readers that never face large files.
+   */
+  readSampled?(key: string, points: number): Promise<MonitorRecord<TData>[]>
+
   /** Read the latest record for every available key. */
   readAllLatest(): Promise<Map<string, MonitorRecord<TData> | null>>
   /** Read the last n records for every available key. */
