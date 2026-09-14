@@ -574,7 +574,7 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   /** Run one panel's server-side curation over the key's record tail. */
-  async monitorPlotSeries(monitorId: string, plotId: string, key: string, n = 500, option?: string | string[]): Promise<{
+  async monitorPlotSeries(monitorId: string, plotId: string, key: string, n = 500, option?: string | string[], focus?: { from: number; to: number }): Promise<{
     plot: import('../types/monitor.js').MonitorPlotInfo
     series: import('../types/monitor.js').PlotSeries[]
     options?: import('../types/monitor.js').PlotOption[]
@@ -599,9 +599,21 @@ export class OpenWhaleRuntime implements IRuntime {
     const PLOT_CAP = 1_000
     const PLOT_SAMPLE = 2_000
     const oversized = n <= 0 && (await reader.isOversized?.(key)) === true
-    const records = n > 0 ? await reader.readLast(key, n)
+    // A chart zoomed into part of that history also gets the records INSIDE
+    // its view at full resolution (thinned only past PLOT_FOCUS), merged into
+    // the overview — so the zoom shows every second while panning out still
+    // has the whole span to go to.
+    const PLOT_FOCUS = 5_000
+    let records = n > 0 ? await reader.readLast(key, n)
       : oversized ? (reader.readSampled ? await reader.readSampled(key, PLOT_SAMPLE) : await reader.readLast(key, PLOT_CAP))
       : await reader.readAll(key)
+    if (n <= 0 && oversized && focus && reader.readSampled && focus.to > focus.from) {
+      const detail = await reader.readSampled(key, PLOT_FOCUS, focus.from, focus.to)
+      const merged = new Map<number, (typeof records)[number]>()
+      for (const r of records) if (r.ts < focus.from || r.ts > focus.to) merged.set(r.ts, r)
+      for (const r of detail) merged.set(r.ts, r)
+      records = [...merged.values()].sort((a, b) => a.ts - b.ts)
+    }
     const options = def.options?.(records)
     // The option list is derived from the CURRENT window, so a stale pick
     // (a session that scrolled out, a token no longer sampled) must not reach

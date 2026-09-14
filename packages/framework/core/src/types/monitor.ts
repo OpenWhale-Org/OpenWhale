@@ -34,7 +34,7 @@ export interface MonitorDataReader<TData = Record<string, unknown>> {
    * display asks an oversized store for "all history" without reading it.
    * Optional: absent on readers that never face large files.
    */
-  readSampled?(key: string, points: number): Promise<MonitorRecord<TData>[]>
+  readSampled?(key: string, points: number, from?: number, to?: number): Promise<MonitorRecord<TData>[]>
 
   /** Read the latest record for every available key. */
   readAllLatest(): Promise<Map<string, MonitorRecord<TData> | null>>

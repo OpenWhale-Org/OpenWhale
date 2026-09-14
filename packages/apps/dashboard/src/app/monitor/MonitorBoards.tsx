@@ -342,6 +342,10 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
   const [plots, setPlots] = useState<PlotInfo[] | null>(null)
   const [selectedKey, setSelectedKey] = useState<string>(initialKey ?? keys[0] ?? '')
   const [series, setSeries] = useState<Record<string, ChartSeries[]>>({})
+  /* The time range a chart is zoomed to. Panels share the time axis, so one
+     zoom refetches all of them with that stretch at full resolution; the
+     store's whole history stays in the answer, sampled, for panning out. */
+  const [focus, setFocus] = useState<[number, number] | null>(null)
   /** Per-panel shaded x-ranges, resolved server-side over the same window as the series. */
   const [regions, setRegions] = useState<Record<string, ChartRegion[]>>({})
   /** The y mirror — cost bands, threshold zones, stop levels. */
@@ -356,6 +360,8 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   /** Record window per fetch. 0 = the whole stored history (the default). */
   const [window, setWindow] = useState(0)
+  // A zoom belongs to the key and window it was made on.
+  useEffect(() => { setFocus(null) }, [selectedKey, window])
   /** Per-panel option pickers (which capture to view / which series to draw), as returned by the gateway. */
   const [panelOptions, setPanelOptions] = useState<Record<string, { options: PlotOption[]; selected: string[] }>>({})
   /** The user's explicit picks — survive auto-refresh. Always an array; single-select panels hold one. */
@@ -382,7 +388,8 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
       // Multi-select panels repeat the param; the server resolves whatever
       // survives against the current option list.
       const optionQs = (chosen[p.id] ?? []).map(v => `&option=${encodeURIComponent(v)}`).join('')
-      const res = await fetch(`/api/monitor/${encodeURIComponent(monitorId)}/plots/${encodeURIComponent(p.id)}?key=${encodeURIComponent(selectedKey)}&n=${window}${optionQs}`)
+      const focusQs = window === 0 && focus ? `&from=${Math.floor(focus[0])}&to=${Math.ceil(focus[1])}` : ''
+      const res = await fetch(`/api/monitor/${encodeURIComponent(monitorId)}/plots/${encodeURIComponent(p.id)}?key=${encodeURIComponent(selectedKey)}&n=${window}${optionQs}${focusQs}`)
       if (!res.ok) return [p.id, { series: [] }]
       return [p.id, await res.json() as PanelData]
     }))
@@ -402,7 +409,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
         const selected = d.option === undefined ? [] : Array.isArray(d.option) ? d.option : [d.option]
         return [id, { options: d.options!, selected }]
       })))
-  }, [plots, selectedKey, monitorId, chosen, window])
+  }, [plots, selectedKey, monitorId, chosen, window, focus])
 
   useEffect(() => { void load() }, [load])
 
@@ -528,6 +535,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
                   /* Monitor and panel together: the same panel of two monitors
                      is two charts, and each keeps its own marks. */
                   storageKey={`${monitorId}:${p.id}`}
+                  {...(p.xKind !== 'value' ? { onViewChange: (v: [number, number] | null) => setFocus(prev => (prev?.[0] === v?.[0] && prev?.[1] === v?.[1] ? prev : v)) } : {})}
                   {...((regions[p.id]?.length || extraRegions?.length) ? { regions: [...(regions[p.id] ?? []), ...(extraRegions ?? [])] } : {})}
                   {...(yRanges[p.id]?.length ? { yRanges: yRanges[p.id]! } : {})}
                   {...(p.kind === 'scatter' ? { mode: 'scatter' as const } : {})}

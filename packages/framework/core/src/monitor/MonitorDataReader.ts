@@ -139,6 +139,9 @@ export function sampleByTime<T extends { ts: number }>(records: T[], points: num
   return out
 }
 
+const sampledCache = new Map<string, { at: number; records: unknown[] }>()
+const SAMPLED_TTL_MS = 30_000
+
 export class MonitorDataReaderImpl<TData = Record<string, unknown>>
   implements MonitorDataReader<TData>
 {
@@ -273,60 +276,101 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
    *
    * Each record returned is a real record, not an average.
    */
-  async readSampled(key: string, points: number): Promise<MonitorRecord<TData>[]> {
-    if (!(await this.oversized(key))) return sampleByTime(await this.load(key), points)
+  async readSampled(key: string, points: number, from?: number, to?: number): Promise<MonitorRecord<TData>[]> {
+    const inWindow = (r: { ts: number }) => (from === undefined || r.ts >= from) && (to === undefined || r.ts <= to)
+    if (!(await this.oversized(key))) return sampleByTime((await this.load(key)).filter(inWindow), points)
     const file = this.filePath(key)
+    // The whole-history overview barely changes second to second, and a board
+    // refreshes every few seconds per panel: reuse it for a little while.
+    const cacheKey = from === undefined && to === undefined ? `${file}|${points}` : undefined
+    const cached = cacheKey ? sampledCache.get(cacheKey) : undefined
+    if (cached && Date.now() - cached.at < SAMPLED_TTL_MS) return cached.records as MonitorRecord<TData>[]
+    const records = await this.sampleFile(file, points, from, to, inWindow)
+    if (cacheKey) {
+      if (sampledCache.size >= 32) sampledCache.delete(sampledCache.keys().next().value!)
+      sampledCache.set(cacheKey, { at: Date.now(), records })
+    }
+    return records
+  }
+
+  private async sampleFile(
+    file: string, points: number, from: number | undefined, to: number | undefined, inWindow: (r: { ts: number }) => boolean,
+  ): Promise<MonitorRecord<TData>[]> {
     const size = (await fs.promises.stat(file)).size
     const fh = await fs.promises.open(file, 'r')
     try {
       type Line = { start: number; ts: number; text: string }
+      /** The first whole line starting at or after `offset`, skipping lines with no ts. */
       const lineAt = async (offset: number): Promise<Line | undefined> => {
         let chunk = 8192
         for (;;) {
           const buf = Buffer.alloc(Math.min(chunk, Math.max(0, size - offset)))
           if (buf.length === 0) return undefined
           const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
-          let from = 0
+          let from0 = 0
           if (offset > 0) {
             const nl = buf.indexOf(0x0a)
             if (nl < 0 || nl >= bytesRead - 1) { if (offset + bytesRead >= size || chunk >= 4 << 20) return undefined; chunk *= 4; continue }
-            from = nl + 1
+            from0 = nl + 1
           }
-          const end = buf.indexOf(0x0a, from)
+          const end = buf.indexOf(0x0a, from0)
           if (end < 0 || end >= bytesRead) { if (offset + bytesRead >= size || chunk >= 4 << 20) return undefined; chunk *= 4; continue }
-          const text = buf.toString('utf8', from, end)
+          const text = buf.toString('utf8', from0, end)
           const ts = readTs(text)
           if (ts === undefined) return lineAt(offset + end + 1)
-          return { start: offset + from, ts, text }
+          return { start: offset + from0, ts, text }
         }
       }
+      /** Every line in [a, b), parsed for ts. */
+      const linesIn = async (a: number, b: number): Promise<Line[]> => {
+        const buf = Buffer.alloc(Math.max(0, b - a))
+        await fh.read(buf, 0, buf.length, a)
+        const out: Line[] = []
+        let from0 = 0
+        for (let nl = buf.indexOf(0x0a); nl >= 0; nl = buf.indexOf(0x0a, from0)) {
+          const text = buf.toString('utf8', from0, nl)
+          const ts = readTs(text)
+          if (ts !== undefined) out.push({ start: a + from0, ts, text })
+          from0 = nl + 1
+        }
+        return out
+      }
+      /** A byte offset at or before the first line with ts >= target (time order assumed). */
+      const offsetBefore = async (target: number): Promise<number> => {
+        let lo = 0, hi = size
+        while (hi - lo > 64 * 1024) {
+          const mid = Math.floor((lo + hi) / 2)
+          const line = await lineAt(mid)
+          if (!line || line.ts >= target) hi = mid
+          else lo = mid
+        }
+        return lo
+      }
+      const parse = (lines: Line[]) => lines
+        .flatMap((line) => { try { return [JSON.parse(line.text) as MonitorRecord<TData>] } catch { return [] } })
+
+      // A window narrow enough in bytes is read whole: every record, thinned only if too many.
+      let lo = 0, hi = size
+      if (from !== undefined) lo = await offsetBefore(from)
+      if (to !== undefined) hi = Math.min(size, (await offsetBefore(to + 1)) + 64 * 1024 + 8192)
+      if (hi - lo <= 16 << 20) {
+        // Start at a line boundary: lo can land mid-line.
+        const first = lo === 0 ? { start: 0 } : await lineAt(lo)
+        if (!first) return []
+        const lines = (await linesIn(first.start, hi)).filter(inWindow)
+        return sampleByTime(parse(lines), points)
+      }
+
       const probes = Math.min(4096, Math.max(64, points * 2))
       const samples: Line[] = []
       for (let i = 0; i <= probes; i++) {
-        const line = await lineAt(Math.floor((size * i) / probes))
-        if (line && (samples.length === 0 || line.start > samples[samples.length - 1]!.start)) samples.push(line)
+        const line = await lineAt(Math.floor(lo + ((hi - lo) * i) / probes))
+        if (line && inWindow(line) && (samples.length === 0 || line.start > samples[samples.length - 1]!.start)) samples.push(line)
       }
       if (samples.length === 0) return []
       const t0 = samples[0]!.ts, t1 = samples[samples.length - 1]!.ts
       const step = points > 1 ? (t1 - t0) / (points - 1) : 0
       const rangeCache = new Map<number, Line[]>()
-      const readRange = async (j: number): Promise<Line[]> => {
-        const hit = rangeCache.get(j)
-        if (hit) return hit
-        const a = samples[j]!, b = samples[j + 1]!
-        const buf = Buffer.alloc(b.start - a.start)
-        await fh.read(buf, 0, buf.length, a.start)
-        const out: Line[] = []
-        let from = 0
-        for (let nl = buf.indexOf(0x0a); nl >= 0; nl = buf.indexOf(0x0a, from)) {
-          const text = buf.toString('utf8', from, nl)
-          const ts = readTs(text)
-          if (ts !== undefined) out.push({ start: a.start + from, ts, text })
-          from = nl + 1
-        }
-        rangeCache.set(j, out)
-        return out
-      }
       const chosen = new Map<number, Line>()
       let j = 0
       for (let p = 0; p < Math.max(1, points); p++) {
@@ -336,13 +380,13 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
         let pick = Math.abs(a.ts - target) <= Math.abs(b.ts - target) ? a : b
         // Probes far apart in time but near in bytes: read what is between them.
         if (b !== a && b.ts - a.ts > 2 * step && b.start - a.start <= 256 * 1024) {
-          for (const line of await readRange(j)) if (Math.abs(line.ts - target) < Math.abs(pick.ts - target)) pick = line
+          let range = rangeCache.get(j)
+          if (!range) { range = await linesIn(a.start, b.start); rangeCache.set(j, range) }
+          for (const line of range) if (Math.abs(line.ts - target) < Math.abs(pick.ts - target)) pick = line
         }
         chosen.set(pick.start, pick)
       }
-      return [...chosen.values()]
-        .sort((x, y) => x.start - y.start)
-        .flatMap((line) => { try { return [JSON.parse(line.text) as MonitorRecord<TData>] } catch { return [] } })
+      return parse([...chosen.values()].sort((x, y) => x.start - y.start))
     } finally {
       await fh.close()
     }

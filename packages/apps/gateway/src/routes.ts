@@ -1095,7 +1095,10 @@ export function buildRouter(): Router {
       : Array.isArray(raw) ? raw.map(String)
       : String(raw)
     try {
-      res.json(localize(await runtime.monitorPlotSeries(req.params['name']!, req.params['plotId']!, key, n, option), localeOf(req)))
+      // A zoomed chart names its view; the reader fills that stretch in at full resolution.
+      const from = Number(req.query['from']), to = Number(req.query['to'])
+      const focus = Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : undefined
+      res.json(localize(await runtime.monitorPlotSeries(req.params['name']!, req.params['plotId']!, key, n, option, focus), localeOf(req)))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }

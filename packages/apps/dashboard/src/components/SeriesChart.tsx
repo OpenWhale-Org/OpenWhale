@@ -113,7 +113,7 @@ let clipCounter = 0
  * rescales to what the zoomed window shows. Renders at the container's
  * native pixel width so SVG text keeps its true point size.
  */
-export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey }: {
+export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xUnit, height = 220, mode = 'line', storageKey, onViewChange }: {
   series: ChartSeries[]
   /**
    * Shaded x-ranges the monitor declared for this window — sessions, halts,
@@ -134,6 +134,12 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
   mode?: 'line' | 'scatter'
   /** Identity for the reader's own drawings, which persist per chart. Absent = nothing is remembered. */
   storageKey?: string
+  /**
+   * Told the visible x-range (null = fully zoomed out) once the reader stops
+   * zooming or panning — so the owner can fetch that stretch at full
+   * resolution. Debounced; not called while a drag is still moving.
+   */
+  onViewChange?: (view: [number, number] | null) => void
 }) {
   const t = useT()
   const [hoverX, setHoverX] = useState<number | null>(null)
@@ -144,6 +150,13 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)  // px coords
   /** Grab-and-drag pan: the x-domain at mousedown plus where the grab started. */
   const [pan, setPan] = useState<{ x0: number; x1: number; startPx: number } | null>(null)
+  const onViewChangeRef = useRef(onViewChange)
+  onViewChangeRef.current = onViewChange
+  useEffect(() => {
+    if (!onViewChangeRef.current) return
+    const id = setTimeout(() => onViewChangeRef.current?.(view), 300)
+    return () => clearTimeout(id)
+  }, [view])
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const clipId = useMemo(() => `chart-clip-${++clipCounter}`, [])
@@ -293,7 +306,10 @@ export function SeriesChart({ series, regions, yRanges, unit, xKind = 'time', xU
       const span = geom.x1 - geom.x0
       const factor = e.deltaY > 0 ? 1.25 : 0.8
       const fullSpan = dataDomain[1] - dataDomain[0]
-      const newSpan = Math.min(fullSpan, Math.max(fullSpan / 500, span * factor))
+      // An owner that refetches the view can be zoomed down to milliseconds;
+      // one that cannot stops where its points would be too few to read.
+      const minSpan = onViewChangeRef.current ? Math.max(fullSpan / 1e7, 5) : fullSpan / 500
+      const newSpan = Math.min(fullSpan, Math.max(minSpan, span * factor))
       if (newSpan >= fullSpan) { setView(null); return }
       const ratio = span === 0 ? 0.5 : (anchor - geom.x0) / span
       let n0 = anchor - newSpan * ratio

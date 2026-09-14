@@ -37,6 +37,22 @@ describe('readSampled', () => {
     expect(got.every((r, i) => i === 0 || r.ts > got[i - 1]!.ts)).toBe(true)
   })
 
+  it('a window inside an oversized store comes back at full resolution', async () => {
+    const { dir, live0 } = store()
+    const reader = new MonitorDataReaderImpl<{ kind: string }>(dir, { slurpLimit: 1 })
+    const from = live0 + 3_600_000, to = from + 600_000
+    const got = await reader.readSampled('k', 5000, from, to)
+    // Ten minutes at one record a second, every one of them, nothing outside.
+    expect(got).toHaveLength(601)
+    expect(got[0]!.ts).toBe(from)
+    expect(got[got.length - 1]!.ts).toBe(to)
+    // A window too long to return whole is thinned, and still spans it.
+    const wide = await reader.readSampled('k', 300, live0, live0 + 20 * 3_600_000)
+    expect(wide.length).toBeLessThanOrEqual(300)
+    expect(wide[0]!.ts).toBeLessThan(live0 + 10 * 60_000)
+    expect(wide[wide.length - 1]!.ts).toBeGreaterThan(live0 + 19.5 * 3_600_000)
+  })
+
   it('a small store samples in memory the same way', async () => {
     const recs = Array.from({ length: 1000 }, (_, i) => ({ ts: i * 10 }))
     const got = sampleByTime(recs, 11)
