@@ -68,6 +68,14 @@ interface Row {
 }
 
 const HOUR_MS = 3_600_000
+/** The scheduled sweep runs at this offset into each UTC hour — see `initialize`. */
+const SWEEP_MINUTE_MS = 30 * 60_000
+/**
+ * A scheduled pass leaves a file alone until at least this share of it can be
+ * freed. Seven days of retention swept hourly ages out 0.6% an hour, so this
+ * turns 24 rewrites a day per file into about three.
+ */
+const SWEEP_MIN_DROP_FRACTION = 0.05
 /** Rows kept in the run history — see `record`. */
 const HISTORY_CAP = 500
 
@@ -89,6 +97,7 @@ function toPolicy(row: Row): RetentionPolicy {
 
 export class RetentionService {
   private timer: ReturnType<typeof setInterval> | undefined
+  private first: ReturnType<typeof setTimeout> | undefined
   private running = false
 
   constructor(
@@ -126,15 +135,27 @@ export class RetentionService {
       )
     `)
     await this.db.run('CREATE INDEX IF NOT EXISTS idx_retention_runs_at ON monitor_retention_runs (at DESC)')
-    // Hourly is fine for a housekeeping job whose horizons are measured in
-    // days — and it means a policy saved now takes effect within the hour
-    // without a restart. unref'd so it never holds the process open.
-    this.timer = setInterval(() => { void this.sweep() }, HOUR_MS)
-    this.timer.unref?.()
+    /* Hourly, at a FIXED minute of the hour — not an hour after whenever the
+       process happened to start. A sweep is heavy I/O on a 2-core box, and
+       funding settles on the hour: on 2026-09-14 a deploy at 02:59 moved the
+       sweep onto :59, it pinned the CPU through the 04:00 settlement, and the
+       funding-arb decision ran after its own open window had closed. Half
+       past is as far from any settlement as the hour allows. unref'd so it
+       never holds the process open. */
+    const now = Date.now()
+    const next = Math.floor((now - SWEEP_MINUTE_MS) / HOUR_MS) * HOUR_MS + HOUR_MS + SWEEP_MINUTE_MS
+    this.first = setTimeout(() => {
+      void this.sweep()
+      this.timer = setInterval(() => { void this.sweep() }, HOUR_MS)
+      this.timer.unref?.()
+    }, next - now)
+    this.first.unref?.()
   }
 
   stop(): void {
+    if (this.first) clearTimeout(this.first)
     if (this.timer) clearInterval(this.timer)
+    this.first = undefined
     this.timer = undefined
   }
 
@@ -228,12 +249,19 @@ export class RetentionService {
    * the page calls it on every keystroke so an operator sees the cost of a
    * horizon before committing to it.
    */
-  async apply(policy: Pick<RetentionPolicy, 'monitor' | 'keyPattern' | 'keepDays'>, dryRun: boolean): Promise<RunSummary> {
+  async apply(
+    policy: Pick<RetentionPolicy, 'monitor' | 'keyPattern' | 'keepDays'>,
+    dryRun: boolean,
+    trigger: 'scheduled' | 'manual' = 'manual',
+  ): Promise<RunSummary> {
     const cutoff = Date.now() - policy.keepDays * 86_400_000
     const summary: RunSummary = { at: new Date().toISOString(), files: 0, droppedRecords: 0, bytesFreed: 0, errors: [] }
+    // A scheduled pass only rewrites a file once enough has aged out to be
+    // worth it. Pressing the button means "now", so it prunes whatever is due.
+    const minDropFraction = trigger === 'scheduled' && !dryRun ? SWEEP_MIN_DROP_FRACTION : 0
     for (const match of this.matches(policy.monitor, policy.keyPattern)) {
       try {
-        const r = await pruneJsonlByTime(match.file, cutoff, { dryRun })
+        const r = await pruneJsonlByTime(match.file, cutoff, { dryRun, minDropFraction })
         if (r.dropped === 0) continue
         summary.files++
         summary.droppedRecords += r.dropped
@@ -252,7 +280,7 @@ export class RetentionService {
     const row = await this.db.get<Row>('SELECT * FROM monitor_retention_policies WHERE id = ?', [id])
     if (!row) throw new Error('no such policy')
     const policy = toPolicy(row)
-    const summary = await this.apply(policy, false)
+    const summary = await this.apply(policy, false, trigger)
     // last_run_at moves on EVERY pass — that is what answers "is this policy
     // still alive". The history below is the opposite question, so it only
     // takes passes that did something.

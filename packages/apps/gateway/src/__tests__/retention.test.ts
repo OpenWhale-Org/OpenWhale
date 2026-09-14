@@ -139,3 +139,35 @@ describe('RetentionService run history', () => {
     expect(sql.some(e => e.q.includes('DELETE FROM monitor_retention_runs'))).toBe(true)
   })
 })
+
+describe('RetentionService schedule', () => {
+  it('sweeps at half past the hour, however late the process started', async () => {
+    const { vi } = await import('vitest')
+    vi.useFakeTimers()
+    try {
+      // Started at 02:59:10 — the deploy that put the old sweep on :59.
+      vi.setSystemTime(new Date('2026-09-14T02:59:10Z'))
+      const runtime = { dataDirPath: dataDir } as unknown as OpenWhaleRuntime
+      const s = new RetentionService(noDb, runtime)
+      const fired: string[] = []
+      ;(s as unknown as { sweep: () => Promise<unknown[]> }).sweep = async () => { fired.push(new Date().toISOString().slice(11, 16)); return [] }
+      await s.initialize()
+      await vi.advanceTimersByTimeAsync(3 * 3_600_000)
+      s.stop()
+      expect(fired).toEqual(['03:30', '04:30', '05:30'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a scheduled pass waits for enough to age out; the button prunes now', async () => {
+    // One old record in a file of fresh ones: far under the 5% threshold.
+    const fresh = Array.from({ length: 200 }, (_, i) => ({ ts: now - 1 * DAY + i }))
+    store('orderbook', 'binance:SNDK/USDT:USDT', [{ ts: now - 30 * DAY }, ...fresh])
+    const policy = { monitor: 'orderbook', keyPattern: '*', keepDays: 7 }
+    const scheduled = await svc.apply(policy, false, 'scheduled')
+    expect(scheduled.droppedRecords).toBe(0)
+    const manual = await svc.apply(policy, false, 'manual')
+    expect(manual.droppedRecords).toBe(1)
+  })
+})
