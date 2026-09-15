@@ -10,6 +10,7 @@ import type { CredentialTypeInfo } from '@/lib/core-types'
 import type { AccountImplementationInfo } from '@/lib/core-types'
 import { EquityChart } from './EquityChart'
 import { AccountDetail } from './AccountDetail'
+import { PositionGroupsPanel, useGroups } from './PositionGroups'
 import { AccountPicker, eligibleCredentialsFor } from './AccountPicker'
 import { CredentialMark } from '@/components/TypeMark'
 import { useT, type MessageKey } from '@/i18n'
@@ -197,7 +198,10 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
     }
   }
 
-  const selected = accounts.find(a => a.name === (expanded ?? ordered[0]?.name))
+  const GROUPS = '__groups__'
+  const showingGroups = expanded === GROUPS
+  const groupCount = useGroups().filter(g => !g.hidden).length
+  const selected = showingGroups ? undefined : accounts.find(a => a.name === (expanded ?? ordered[0]?.name))
   /* Holds the NAME being confirmed, not a boolean: an account carries its
      equity history and its bindings, so arming Delete on one and then
      switching to another must not leave the next account one click from
@@ -296,6 +300,13 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
             </div>
           }
         >
+          <RailItem
+            active={showingGroups}
+            onClick={() => setExpanded(GROUPS)}
+            mark={<span className="w-[26px] h-[26px] grid place-items-center text-base">🧩</span>}
+            title={t('groups.title')}
+            subtitle={t('groups.railSubtitle', { n: groupCount })}
+          />
           {accounts.length === 0 && (
             <p className="text-xs px-3 py-6 text-center" style={{ color: 'var(--muted)' }}>
               {t('accounts.empty')}
@@ -340,7 +351,11 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
           className="flex-1 min-w-0 rounded-lg overflow-hidden flex flex-col"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
-          {!selected ? (
+          {showingGroups ? (
+            <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3">
+              <PositionGroupsPanel accounts={accounts.filter(a => a.status === 'ready').map(a => a.name)} />
+            </div>
+          ) : !selected ? (
             <div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--muted)' }}>
               {t('accounts.pickOne')}
             </div>

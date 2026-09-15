@@ -18,6 +18,16 @@ import type { PortfolioUpdate } from './portfolio.js'
  * - object form: `{ name: 'user-trades', label: 'trades' }` → custom label for in-strategy access
  * - cross-plugin: `{ name: 'chainlink/price', label: 'price' }` → name contains '/', used as-is
  */
+/** One leg of an instance's position — see IStrategy.positionLegs(). */
+export interface PositionLeg {
+  /** The credential the leg trades on: a value of the instance's bindings. */
+  credential: string
+  /** The contract, as the venue names it ('CL/USDT:USDT'). */
+  symbol: string
+  /** Omitted = whichever side is held. */
+  side?: 'long' | 'short'
+}
+
 export type MonitorDeclaration = string | { name: string; label: string }
 
 /**
@@ -230,6 +240,16 @@ export interface IStrategy {
    * the runtime for the picker's ttl.
    */
   pickerOptions?(pickerId: string, ctx: PresetContext): Promise<PickerOption[]>
+  /**
+   * The positions an instance of this strategy holds, as legs: which bound
+   * credential, which contract, and optionally which side (omitted = either
+   * side, for strategies that trade both directions). The dashboard groups
+   * them into one combination per instance so a multi-leg trade reads as one
+   * line with one PnL. Called on a probe with the instance's bindings and
+   * params; synchronous and cheap — no venue calls. Absent = no automatic
+   * combination.
+   */
+  positionLegs?(ctx: { accounts: Record<string, string>; params: StrategyParams }): PositionLeg[]
   /**
    * Availability checkers this strategy provides, keyed by the name a field's
    * `meta({ availability: { checker } })` refers to. Pure functions over the

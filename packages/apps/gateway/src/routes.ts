@@ -13,6 +13,7 @@ import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { z } from 'zod'
 import { loadOverviewLayout, saveOverviewLayout, resetOverviewLayout } from './overviewLayout.js'
+import { PositionGroups, type Member } from './positionGroups.js'
 import { getAlertService, type AlertSettings } from './notify/alerts.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
@@ -926,6 +927,42 @@ export function buildRouter(): Router {
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }
+  }))
+
+  /* ── Position combinations ───────────────────────────────────────────────
+     Positions across accounts read as one trade — see positionGroups.ts. */
+  let positionGroups: PositionGroups | undefined
+  const groups = async (): Promise<PositionGroups> => {
+    positionGroups ??= new PositionGroups(getDatabase(), await ensureStarted())
+    return positionGroups
+  }
+  const groupError = (res: { status(n: number): { json(b: unknown): void } }, err: unknown) =>
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) })
+
+  router.get('/api/position-groups', h(async (_req, res) => {
+    res.json({ groups: await (await groups()).list() })
+  }))
+  router.get('/api/position-groups/live', h(async (req, res) => {
+    res.json(await (await groups()).live({ includeHidden: req.query['hidden'] === '1' }))
+  }))
+  router.post('/api/position-groups', h(async (req, res) => {
+    const body = (req.body ?? {}) as { name?: string; members?: Member[] }
+    try { res.json({ group: await (await groups()).create(String(body.name ?? ''), Array.isArray(body.members) ? body.members : []) }) } catch (err) { groupError(res, err) }
+  }))
+  router.patch('/api/position-groups/:id', h(async (req, res) => {
+    const body = (req.body ?? {}) as { name?: string; hidden?: boolean; sortOrder?: number }
+    try { await (await groups()).update(req.params['id']!, body); res.json({ ok: true }) } catch (err) { groupError(res, err) }
+  }))
+  router.delete('/api/position-groups/:id', h(async (req, res) => {
+    try { await (await groups()).remove(req.params['id']!); res.json({ ok: true }) } catch (err) { groupError(res, err) }
+  }))
+  router.post('/api/position-groups/:id/members', h(async (req, res) => {
+    const body = (req.body ?? {}) as { members?: Member[] }
+    try { await (await groups()).addMembers(req.params['id']!, Array.isArray(body.members) ? body.members : []); res.json({ ok: true }) } catch (err) { groupError(res, err) }
+  }))
+  router.delete('/api/position-groups/:id/members', h(async (req, res) => {
+    const body = (req.body ?? {}) as Partial<Member>
+    try { await (await groups()).removeMember(req.params['id']!, body as Member); res.json({ ok: true }) } catch (err) { groupError(res, err) }
   }))
 
   /* ── Overview layout ─────────────────────────────────────────────────────

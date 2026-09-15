@@ -2182,6 +2182,23 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   /**
+   * The legs an instance holds, per its strategy's positionLegs() on a probe.
+   * Empty when the strategy declares none or the hook throws — a combination
+   * that cannot be derived is simply not offered.
+   */
+  instancePositionLegs(instance: { strategyId: string; credentials?: Record<string, string>; params?: import('../types/instance.js').StrategyParams }): import('../types/strategy.js').PositionLeg[] {
+    const probe = this.strategyRegistry.get(instance.strategyId)?.()
+    if (!probe || typeof probe.positionLegs !== 'function') return []
+    try {
+      return probe.positionLegs({ accounts: instance.credentials ?? {}, params: instance.params ?? { base: {}, tunable: {} } })
+        .filter(l => typeof l.credential === 'string' && l.credential !== '' && typeof l.symbol === 'string' && l.symbol !== '')
+    } catch (err) {
+      log.warn({ strategyId: instance.strategyId, err }, 'positionLegs() threw — no combination for this instance')
+      return []
+    }
+  }
+
+  /**
    * The options of a strategy's picker field — pickerOptions(id) on a probe,
    * cached by bindings and form state for the picker's ttl, like presets.
    */

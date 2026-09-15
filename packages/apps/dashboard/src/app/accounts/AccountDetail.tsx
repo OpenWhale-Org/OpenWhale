@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useColumnWidths, ResizeHandle } from '@/components/ResizableColumns'
 import { useT } from '@/i18n'
 import { fmtDateTime } from '@/lib/time'
+import { RowGroups, useGroups } from './PositionGroups'
 
 /** Shapes follow the exchange read-view interfaces (IAccountBalance/IPosition/IOrder). */
 interface TokenBalance { token: string; free: number; locked: number; total: number; usdValue?: number }
@@ -138,6 +139,7 @@ export function AccountDetail({ account }: { account: string }) {
   const [detail, setDetail] = useState<DetailPayload | null>(null)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<Tab>('positions')
+  const groups = useGroups()
 
   const load = useCallback(async () => {
     setDetail(null)
@@ -218,6 +220,7 @@ export function AccountDetail({ account }: { account: string }) {
                       <th className="text-left py-1 font-medium">{t('accounts.col.side')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.value')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.upnl')}</th>
+                      <th className="text-right py-1 font-medium pl-3">{t('groups.col.groups')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -231,6 +234,7 @@ export function AccountDetail({ account }: { account: string }) {
                         <td className="py-1 text-right font-mono" style={{ color: p.pnl >= 0 ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>
                           {p.pnl >= 0 ? '+' : ''}{usd(p.pnl)}
                         </td>
+                        <td className="py-1 pl-3 text-right"><RowGroups account={account} symbol={p.id} side={p.side} groups={groups} /></td>
                       </tr>
                     ))}
                   </tbody>

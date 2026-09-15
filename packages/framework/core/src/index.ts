@@ -42,6 +42,7 @@ export type {
   BuiltinProviderConfig,
   CustomProviderConfig,
   IStrategy,
+  PositionLeg,
   StrategyRunTrace,
   LifecycleReason,
   LifecycleContext,
