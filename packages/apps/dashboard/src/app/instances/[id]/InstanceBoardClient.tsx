@@ -13,6 +13,7 @@ import { implVenueMap, pickerVenue } from '@/components/venue'
 import { InstancePnlPanel } from './InstancePnlPanel'
 import { InstanceMiscPanel } from './InstanceMiscPanel'
 import { InstanceMonitorsPanel } from './InstanceMonitorsPanel'
+import { InstanceSwitcher } from './InstanceSwitcher'
 import { Modal } from '@/components/Modal'
 import { useT } from '@/i18n'
 
@@ -110,8 +111,9 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
 
   return (
     <div>
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Link href="/instances" className="text-xs" style={{ color: 'var(--muted)' }}>← {t('nav.instances')}</Link>
+        <InstanceSwitcher currentId={instanceId} />
       </div>
 
       {missing ? (

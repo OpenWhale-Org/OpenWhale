@@ -269,6 +269,7 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'inst.running': '运行中',
   'inst.folder.remove': '移出分组',
   'board.notFound': '找不到实例 {id}。',
+  'board.switchUnsaved': '{what} 有未保存的修改，切换后会丢失。仍要切换吗？',
   'board.deactivate': '停用',
   'board.clearState': '清除状态',
   'board.saveRebuilds': '保存会用这些值重建运行中的实例。',

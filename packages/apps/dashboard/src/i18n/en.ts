@@ -275,6 +275,7 @@ export const en = {
   'inst.running': 'Running',
   'inst.folder.remove': 'Remove from folder',
   'board.notFound': 'Instance {id} not found.',
+  'board.switchUnsaved': 'Unsaved changes in {what} will be lost. Switch anyway?',
   'board.deactivate': 'Deactivate',
   'board.clearState': 'Clear state',
   'board.saveRebuilds': 'Saving rebuilds the running instance from these values.',
