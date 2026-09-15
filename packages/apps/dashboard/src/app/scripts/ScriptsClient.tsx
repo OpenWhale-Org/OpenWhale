@@ -463,11 +463,12 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           {fields.some(f => f.type === 'options') && (
             <button
               onClick={() => setOptionsNonce(n => n + 1)}
-              className="px-3 py-1.5 rounded-md text-sm"
+              className="w-8 h-8 inline-flex items-center justify-center rounded-md text-base leading-none"
               style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
               title={t('scripts.refreshOptionsTitle')}
+              aria-label={t('scripts.refreshOptions')}
             >
-              {t('scripts.refreshOptions')}
+              ↻
             </button>
           )}
           <button
