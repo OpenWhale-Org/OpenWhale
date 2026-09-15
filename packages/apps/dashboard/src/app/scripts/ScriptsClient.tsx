@@ -270,12 +270,27 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
   const valuesRef = useRef(values)
   valuesRef.current = values
   const dependent = useMemo(() => fields.filter(f => (f.optionsDependOn?.length ?? 0) > 0), [fields])
+  const dependentRef = useRef(dependent)
+  dependentRef.current = dependent
+  /* WHICH fields depend on WHAT, as a string. The field objects themselves are
+     replaced every time a list comes back, so depending on them re-fetched the
+     lists after every fetch — a loop that redrew position labels several times
+     a second. Only a change in a dependency's VALUE, or the refresh button,
+     asks again. */
+  const dependentShape = dependent.map(f => `${f.name}<${f.optionsDependOn!.join(',')}`).join('|')
   const depKey = dependent.map(f => f.optionsDependOn!.map(d => values[d] ?? '').join('\u0000')).join('\u0001')
+  const [optionsNonce, setOptionsNonce] = useState(0)
   useEffect(() => {
-    if (dependent.length === 0) return
+    const dependent = dependentRef.current
+    const manual = optionsNonce > 0
+    if (dependent.length === 0 && !manual) return
     const current = valuesRef.current
     const params: Record<string, unknown> = {}
-    for (const f of dependent) for (const d of f.optionsDependOn ?? []) if (current[d] !== undefined && current[d] !== '') params[d] = current[d]
+    if (manual) {
+      for (const [k, v] of Object.entries(current)) if (v !== undefined && v !== '') params[k] = v
+    } else {
+      for (const f of dependent) for (const d of f.optionsDependOn ?? []) if (current[d] !== undefined && current[d] !== '') params[d] = current[d]
+    }
     let gone = false
     const timer = setTimeout(async () => {
       const [owner, ...rest] = script.id.split('/')
@@ -284,8 +299,11 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),
         })
         if (!res.ok || gone) return
-        const resolved = await res.json() as Record<string, Array<{ value: string; label: string }>>
+        const raw = await res.json() as Record<string, Array<{ value: string; label: string }>>
         if (gone) return
+        // One entry per value: a list with a value twice renders ghost rows (the select keys by value).
+        const resolved = Object.fromEntries(Object.entries(raw).map(([k, opts]) => [k,
+          Array.isArray(opts) ? opts.filter((o, i, a) => a.findIndex(x => String(x.value) === String(o.value)) === i) : opts]))
         setFields(prev => prev.map(f => resolved[f.name] !== undefined ? { ...f, type: 'options' as const, options: resolved[f.name]! } : f))
         setValues(prev => {
           const next = { ...prev }
@@ -301,7 +319,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
     }, 300)
     return () => { gone = true; clearTimeout(timer) }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- depKey stands in for the dependency values
-  }, [depKey, dependent, script.id])
+  }, [depKey, dependentShape, script.id, optionsNonce])
   const htmlFile = result?.files?.find(f => (f.mime ?? '').includes('html') || f.name.endsWith('.html'))
 
   // A rerun can take away the view you were on (HTML off, or a script that
@@ -440,6 +458,16 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
               title={t('scripts.stopTitle')}
             >
               {t('scripts.stop')}
+            </button>
+          )}
+          {fields.some(f => f.type === 'options') && (
+            <button
+              onClick={() => setOptionsNonce(n => n + 1)}
+              className="px-3 py-1.5 rounded-md text-sm"
+              style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+              title={t('scripts.refreshOptionsTitle')}
+            >
+              {t('scripts.refreshOptions')}
             </button>
           )}
           <button
