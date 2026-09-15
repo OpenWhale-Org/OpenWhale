@@ -12,6 +12,28 @@ export const FIELD_STYLE = {
   border: '1px solid color-mix(in srgb, var(--border) 70%, transparent)',
 } as const
 
+/** `displayOptions` against the values — an empty field counts as its default, since that is what it sends. */
+function visible(f: ParamFieldDef, fields: ParamFieldDef[], values: Record<string, string>): boolean {
+  const d = f.displayOptions
+  if (!d) return true
+  const current = (key: string) => {
+    const v = values[key] ?? ''
+    if (v !== '') return v
+    const dflt = fields.find(x => x.name === key)?.default
+    return dflt === undefined ? '' : String(dflt)
+  }
+  for (const [key, allowed] of Object.entries(d.show ?? {})) if (!allowed.map(String).includes(current(key))) return false
+  for (const [key, blocked] of Object.entries(d.hide ?? {})) if (blocked.map(String).includes(current(key))) return false
+  return true
+}
+
+/** ISO UTC ↔ the local wall-clock string a datetime-local input speaks. */
+function isoToLocal(iso: string): string {
+  const d = iso ? new Date(iso) : undefined
+  if (!d || Number.isNaN(d.getTime())) return ''
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 23)
+}
+
 export function ParamsFields({ fields, values, onChange }: {
   fields: ParamFieldDef[]
   values: Record<string, string>
@@ -23,7 +45,7 @@ export function ParamsFields({ fields, values, onChange }: {
      and the surface underneath shows through. */
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-2">
-      {fields.map((f) => (
+      {fields.filter(f => visible(f, fields, values)).map((f) => (
         <label key={f.name} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }} title={f.description}>
           <span className="opacity-80">{f.displayName}</span>
           {f.type === 'boolean' ? (
@@ -48,6 +70,18 @@ export function ParamsFields({ fields, values, onChange }: {
                 { value: '', label: `default${f.default !== undefined ? ` (${String(f.default)})` : ''}` },
                 ...f.options.map(o => ({ value: String(o.value), label: o.label })),
               ]}
+            />
+          ) : f.widget === 'datetime' ? (
+            <input
+              type="datetime-local"
+              step="0.001"
+              value={isoToLocal(values[f.name] ?? '')}
+              onChange={(e) => {
+                const t = e.target.value ? new Date(e.target.value) : undefined
+                onChange(f.name, t && !Number.isNaN(t.getTime()) ? t.toISOString() : '')
+              }}
+              className={`${FIELD_CLASS} w-56`}
+              style={{ ...FIELD_STYLE, colorScheme: 'dark light' }}
             />
           ) : (
             <input
