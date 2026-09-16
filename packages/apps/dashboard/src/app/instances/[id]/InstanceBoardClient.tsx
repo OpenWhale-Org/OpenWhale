@@ -14,6 +14,7 @@ import { InstancePnlPanel } from './InstancePnlPanel'
 import { InstanceMiscPanel } from './InstanceMiscPanel'
 import { InstanceMonitorsPanel } from './InstanceMonitorsPanel'
 import { InstanceSwitcher } from './InstanceSwitcher'
+import { TopbarSlot } from '@/components/TopbarSlot'
 import { Modal } from '@/components/Modal'
 import { useT } from '@/i18n'
 
@@ -111,9 +112,13 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
 
   return (
     <div>
+      {/* The switcher lives in the shell's breadcrumb: it names the instance
+          you are on, which is what that line is for, and it stays reachable
+          while the board scrolls. */}
+      <TopbarSlot><InstanceSwitcher currentId={instanceId} /></TopbarSlot>
+
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Link href="/instances" className="text-xs" style={{ color: 'var(--muted)' }}>← {t('nav.instances')}</Link>
-        <InstanceSwitcher currentId={instanceId} />
       </div>
 
       {missing ? (

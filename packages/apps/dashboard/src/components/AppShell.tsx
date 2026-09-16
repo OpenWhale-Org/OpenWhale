@@ -6,6 +6,7 @@ import { UserMenu } from './UserMenu'
 import { Tour } from './Tour'
 import { UnsavedGuard } from './unsaved'
 import { ExecutionToasts } from './ExecutionToasts'
+import { TOPBAR_SLOT_ID } from './TopbarSlot'
 import { useI18n, LOCALES, type MessageKey } from '@/i18n'
 
 /**
@@ -56,6 +57,8 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
             <span>OpenWhale</span>
             <span className="aurora-topbar-separator">/</span>
             <strong>{currentLabel(pathname, t)}</strong>
+            {/* Pages push their own crumb here — see TopbarSlot. */}
+            <span id={TOPBAR_SLOT_ID} className="aurora-topbar-slot" />
           </div>
           <div className="aurora-topbar-right">
             <div className="aurora-lang" role="group" aria-label={t('nav.language')}>

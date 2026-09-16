@@ -252,6 +252,8 @@ body {
 .aurora-topbar-context { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .aurora-topbar-context strong { color: #dcd8e8; font-weight: 550; }
 .aurora-topbar-separator { opacity: .4; }
+.aurora-topbar-slot { display: flex; align-items: center; gap: 8px; }
+.aurora-topbar-slot:not(:empty)::before { content: '/'; opacity: .4; }
 .aurora-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px rgba(50, 214, 160, .8); }
 /* Breathing room under the topbar. The overview hero is the one thing that
    should still sit flush against it, so it pulls this back off. */
