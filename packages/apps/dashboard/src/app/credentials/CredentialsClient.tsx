@@ -208,7 +208,9 @@ function SchemaCredentialForm({
             label={field.displayName}
             value={values[field.name] ?? ''}
             onChange={(v) => set(field.name, v)}
-            placeholder={field.placeholder ?? (field.required ? undefined : field.description)}
+            // The description already sits beside the label; repeating it as a
+            // placeholder made an empty optional field look filled in.
+            placeholder={field.placeholder}
             required={field.required}
             type={field.password ? 'password' : field.type === 'number' ? 'number' : 'text'}
             hint={field.description}
