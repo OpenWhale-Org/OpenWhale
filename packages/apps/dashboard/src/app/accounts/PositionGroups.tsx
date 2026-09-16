@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { Modal } from '@/components/Modal'
 import { Select } from '@/components/Select'
 import { useT } from '@/i18n'
 
@@ -28,6 +29,25 @@ async function api(path: string, method: string, body?: unknown): Promise<string
 }
 export const createGroup = (name: string, members: Member[] = []) => api('/api/position-groups', 'POST', { name, members })
 export const addToGroup = (id: string, members: Member[]) => api(`/api/position-groups/${encodeURIComponent(id)}/members`, 'POST', { members })
+const key = (m: Member) => `${m.account}|${m.symbol}|${m.side}`
+
+/**
+ * Save a dialog's whole form. A new combination is one POST; an existing one
+ * is a rename plus the member difference, because the API adds and removes
+ * members rather than replacing the set.
+ */
+async function saveGroup(group: GroupInfo | undefined, name: string, members: Member[]): Promise<string | undefined> {
+  if (!group) return createGroup(name, members)
+  const base = `/api/position-groups/${encodeURIComponent(group.id)}`
+  if (name !== group.name) { const e = await api(base, 'PATCH', { name }); if (e) return e }
+  const before = new Set(group.members.map(key)), after = new Set(members.map(key))
+  const added = members.filter(m => !before.has(key(m)))
+  if (added.length > 0) { const e = await api(`${base}/members`, 'POST', { members: added }); if (e) return e }
+  for (const m of group.members.filter(m => !after.has(key(m)))) {
+    const e = await api(`${base}/members`, 'DELETE', m); if (e) return e
+  }
+  return undefined
+}
 
 const usd = (v: number) => `$${Math.round(v).toLocaleString()}`
 const signedUsd = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
@@ -50,7 +70,9 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
   const [data, setData] = useState<LiveGroup[] | null>(null)
   const [showHidden, setShowHidden] = useState(false)
   const [error, setError] = useState('')
-  const [newName, setNewName] = useState('')
+  /* `{}` opens the dialog for a new combination, `{group}` for an existing
+     one — one piece of state, so only ever one dialog is up. */
+  const [editing, setEditing] = useState<{ group?: LiveGroup } | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [showFlat, setShowFlat] = useState(false)
 
@@ -80,7 +102,7 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
   const card = (g: LiveGroup) => (
     <GroupCard key={g.id} g={g} accounts={accounts} collapsed={collapsed.has(g.id) !== (g.totals.open > 0)}
       onToggle={() => setCollapsed(prev => { const n = new Set(prev); if (!n.delete(g.id)) n.add(g.id); return n })}
-      onAct={act} />
+      onEdit={() => setEditing({ group: g })} onAct={act} />
   )
 
   return (
@@ -89,11 +111,7 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
         <span className="text-sm font-medium">{t('groups.title')}</span>
         {data && <span className="text-xs font-mono" style={{ color: tone(total) }}>{t('groups.totalPnl')} {signedUsd(total)}</span>}
         <span className="flex-1" />
-        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); if (!newName.trim()) return; void act(createGroup(newName.trim())); setNewName('') }}>
-          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder={t('groups.newPlaceholder')}
-            className="h-8 px-2 rounded-md text-xs" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', width: '11rem' }} />
-          <button type="submit" className="h-8 px-3 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>{t('groups.create')}</button>
-        </form>
+        <button onClick={() => setEditing({})} className="h-8 px-3 rounded-md text-xs" style={{ background: 'var(--accent)', color: '#fff' }}>{t('groups.create')}</button>
         <label className="text-xs flex items-center gap-1" style={{ color: 'var(--muted)' }}>
           <input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} />{t('groups.showHidden')}
         </label>
@@ -111,16 +129,107 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
           {showFlat && flat.map(card)}
         </>
       )}
+      {editing && (
+        <GroupDialog group={editing.group} accounts={accounts} onClose={() => setEditing(null)}
+          onSave={async (name, members) => { const e = await saveGroup(editing.group, name, members); if (e) { setError(e); return false } setEditing(null); return true }} />
+      )}
     </div>
   )
 }
 
-function GroupCard({ g, accounts, collapsed, onToggle, onAct }: {
-  g: LiveGroup; accounts: string[]; collapsed: boolean; onToggle: () => void; onAct: (p: Promise<string | undefined>) => Promise<void>
+/** Name and members of one combination, filled in before anything is saved. */
+function GroupDialog({ group, accounts, onClose, onSave }: {
+  group?: GroupInfo
+  accounts: string[]
+  onClose: () => void
+  onSave: (name: string, members: Member[]) => Promise<boolean>
 }) {
   const t = useT()
-  const [renaming, setRenaming] = useState(false)
-  const [name, setName] = useState(g.name)
+  const [name, setName] = useState(group?.name ?? '')
+  const [members, setMembers] = useState<Member[]>(group?.members ?? [])
+  const [saving, setSaving] = useState(false)
+  const [draft, setDraft] = useState<{ account: string; symbol: string; side: Side }>({ account: accounts[0] ?? '', symbol: '', side: '*' })
+  const positions = useAccountPositions(draft.account)
+
+  const addDraft = () => {
+    if (!draft.account || !draft.symbol) return
+    const m: Member = { account: draft.account, symbol: draft.symbol, side: draft.side }
+    setMembers(prev => (prev.some(x => key(x) === key(m)) ? prev : [...prev, m]))
+    setDraft(d => ({ ...d, symbol: '' }))
+  }
+  const symbols = [...new Set(positions.map(p => p.id))]
+
+  return (
+    <Modal onClose={onClose} maxWidth="42rem">
+      <form className="flex flex-col gap-4 p-5" onSubmit={async (e) => {
+        e.preventDefault()
+        if (!name.trim() || saving) return
+        setSaving(true)
+        if (!await onSave(name.trim(), members)) setSaving(false)
+      }}>
+        <h2 className="text-base font-semibold">{group ? t('groups.editTitle') : t('groups.createTitle')}</h2>
+        <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }}>
+          {t('groups.nameLabel')}
+          <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={t('groups.newPlaceholder')}
+            className="h-9 px-2 rounded-md text-sm" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+        </label>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('groups.membersLabel')}</span>
+          {members.length === 0 && <p className="text-xs py-2" style={{ color: 'var(--muted)' }}>{t('groups.noMembers')}</p>}
+          {members.map(m => (
+            <div key={key(m)} className="flex items-center gap-2 text-xs py-1" style={{ borderTop: '1px solid var(--border)' }}>
+              <span className="truncate" style={{ width: '11rem' }} title={m.account}>{m.account}</span>
+              <span className="font-mono flex-1 truncate" title={m.symbol}>{m.symbol}</span>
+              <span style={{ width: '5rem', color: m.side === '*' ? 'var(--muted)' : m.side === 'long' ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>
+                {m.side === '*' ? t('groups.anySide') : m.side}
+              </span>
+              <button type="button" className="px-1" style={{ color: 'var(--muted)' }} title={t('groups.removeMember')}
+                onClick={() => setMembers(prev => prev.filter(x => key(x) !== key(m)))}>×</button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-2 flex-wrap" style={{ borderTop: '1px solid var(--border)' }}>
+            <Select size="sm" value={draft.account} onChange={(v) => setDraft(d => ({ ...d, account: v, symbol: '' }))} placeholder={t('groups.pickAccount')}
+              style={{ width: '11rem' }} options={accounts.map(a => ({ value: a, label: a }))} />
+            <Select size="sm" value={draft.symbol} onChange={(v) => setDraft(d => ({ ...d, symbol: v }))} placeholder={t('groups.pickPosition')}
+              style={{ flex: 1, minWidth: '12rem' }} disabled={!draft.account} searchable
+              options={symbols.map(sym => ({ value: sym, label: sym, hint: positions.filter(p => p.id === sym).map(p => `${p.side} ${usd(Math.abs(p.value))}`).join(' / ') }))} />
+            <Select size="sm" value={draft.side} onChange={(v) => setDraft(d => ({ ...d, side: v as Side }))} style={{ width: '7rem' }}
+              options={[{ value: '*', label: t('groups.anySide') }, { value: 'long', label: 'long' }, { value: 'short', label: 'short' }]} />
+            <button type="button" onClick={addDraft} disabled={!draft.account || !draft.symbol} className="h-8 px-3 rounded-md text-xs"
+              style={{ border: '1px solid var(--border)', color: 'var(--foreground)', opacity: !draft.account || !draft.symbol ? 0.5 : 1 }}>{t('groups.addMember')}</button>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-9 px-4 rounded-md text-xs" style={{ border: '1px solid var(--border)', color: 'var(--foreground)' }}>{t('common.cancel')}</button>
+          <button type="submit" disabled={!name.trim() || saving} className="h-9 px-4 rounded-md text-xs"
+            style={{ background: 'var(--accent)', color: '#fff', opacity: !name.trim() || saving ? 0.6 : 1 }}>{t('common.save')}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** What an account holds right now, for picking a member out of it. */
+function useAccountPositions(account: string): Array<{ id: string; side: string; value: number }> {
+  const [positions, setPositions] = useState<Array<{ id: string; side: string; value: number }>>([])
+  useEffect(() => {
+    setPositions([])
+    if (!account) return
+    let gone = false
+    void fetch(`/api/accounts/${encodeURIComponent(account)}/detail`).then(r => (r.ok ? r.json() : null))
+      .then((d: { sections?: { positions?: Array<{ id: string; side: string; value: number }> } } | null) => { if (!gone) setPositions(d?.sections?.positions ?? []) })
+      .catch(() => {})
+    return () => { gone = true }
+  }, [account])
+  return positions
+}
+
+function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
+  g: LiveGroup; accounts: string[]; collapsed: boolean; onToggle: () => void; onEdit: () => void; onAct: (p: Promise<string | undefined>) => Promise<void>
+}) {
+  const t = useT()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const manual = g.source === 'manual'
   const base = `/api/position-groups/${encodeURIComponent(g.id)}`
@@ -129,12 +238,7 @@ function GroupCard({ g, accounts, collapsed, onToggle, onAct }: {
     <div className="rounded-lg" style={{ border: '1px solid var(--border)', opacity: g.hidden ? 0.6 : 1 }}>
       <div className="flex items-center gap-2 px-3 py-2 cursor-pointer" onClick={onToggle}>
         <span className="text-xs" style={{ color: 'var(--muted)' }}>{collapsed ? '▸' : '▾'}</span>
-        {renaming ? (
-          <form onClick={e => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); setRenaming(false); void onAct(api(base, 'PATCH', { name })) }}>
-            <input autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={() => setRenaming(false)}
-              className="h-7 px-2 rounded text-sm" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-          </form>
-        ) : <span className="text-sm font-medium truncate" style={{ maxWidth: '16rem' }} title={g.name}>{g.name}</span>}
+        <span className="text-sm font-medium truncate" style={{ maxWidth: '16rem' }} title={g.name}>{g.name}</span>
         <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--border) 60%, transparent)', color: 'var(--muted)' }}>
           {manual ? t('groups.manual') : t('groups.strategy')}
         </span>
@@ -147,7 +251,7 @@ function GroupCard({ g, accounts, collapsed, onToggle, onAct }: {
         {/* One fixed-width tray: Rename and Delete exist only on manual cards,
             and without it Hide would sit at a different x on every card. */}
         <span className="flex items-center justify-end gap-1 shrink-0" style={{ width: '10rem' }} onClick={e => e.stopPropagation()}>
-          {manual && <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={() => { setName(g.name); setRenaming(true) }}>{t('groups.rename')}</button>}
+          {manual && <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={onEdit}>{t('groups.edit')}</button>}
           <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={() => void onAct(api(base, 'PATCH', { hidden: !g.hidden }))}>{g.hidden ? t('groups.unhide') : t('groups.hide')}</button>
           {manual && (
             <button className="text-xs px-1.5" style={{ color: 'var(--danger, #ef4444)' }} onMouseLeave={() => setConfirmDelete(false)}
@@ -209,40 +313,8 @@ function GroupCard({ g, accounts, collapsed, onToggle, onAct }: {
               })}
             </tbody>
           </table>
-          {manual && <AddMember accounts={accounts} onAdd={(m) => onAct(addToGroup(g.id, [m]))} />}
         </div>
       )}
-    </div>
-  )
-}
-
-/** Pick an account, then one of its positions (or type a contract), then a side. */
-function AddMember({ accounts, onAdd }: { accounts: string[]; onAdd: (m: Member) => Promise<void> }) {
-  const t = useT()
-  const [account, setAccount] = useState('')
-  const [positions, setPositions] = useState<Array<{ id: string; side: string; value: number }>>([])
-  const [symbol, setSymbol] = useState('')
-  const [side, setSide] = useState<Side>('*')
-  useEffect(() => {
-    setPositions([]); setSymbol('')
-    if (!account) return
-    let gone = false
-    void fetch(`/api/accounts/${encodeURIComponent(account)}/detail`).then(r => (r.ok ? r.json() : null))
-      .then((d: { sections?: { positions?: Array<{ id: string; side: string; value: number }> } } | null) => { if (!gone) setPositions(d?.sections?.positions ?? []) })
-      .catch(() => {})
-    return () => { gone = true }
-  }, [account])
-  const symbols = [...new Set(positions.map(p => p.id))]
-  return (
-    <div className="flex items-center gap-2 mt-2 flex-wrap">
-      <Select size="sm" value={account} onChange={setAccount} placeholder={t('groups.pickAccount')} style={{ minWidth: '10rem' }}
-        options={accounts.map(a => ({ value: a, label: a }))} />
-      <Select size="sm" value={symbol} onChange={setSymbol} placeholder={t('groups.pickPosition')} style={{ minWidth: '14rem' }} disabled={!account}
-        options={symbols.map(s => ({ value: s, label: s, hint: positions.filter(p => p.id === s).map(p => `${p.side} ${usd(Math.abs(p.value))}`).join(' / ') }))} />
-      <Select size="sm" value={side} onChange={(v) => setSide(v as Side)} style={{ minWidth: '7rem' }}
-        options={[{ value: '*', label: t('groups.anySide') }, { value: 'long', label: 'long' }, { value: 'short', label: 'short' }]} />
-      <button disabled={!account || !symbol} className="h-8 px-3 rounded-md text-xs" style={{ border: '1px solid var(--border)', color: 'var(--foreground)', opacity: !account || !symbol ? 0.5 : 1 }}
-        onClick={() => { void onAdd({ account, symbol, side }); setSymbol('') }}>{t('groups.addMember')}</button>
     </div>
   )
 }
