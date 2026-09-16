@@ -33,6 +33,8 @@ interface FieldSpec {
   description?: string
   placeholder?: string
   password?: boolean
+  /** A value with line breaks (a PEM key): a textarea, not an input. */
+  multiline?: boolean
   pattern?: string
   defaultValue?: unknown
 }
@@ -53,6 +55,7 @@ function fieldsFromJsonSchema(jsonSchema: Record<string, unknown>): FieldSpec[] 
       description: prop['description'] as string | undefined,
       placeholder: prop['placeholder'] as string | undefined,
       password: prop['password'] as boolean | undefined,
+      multiline: prop['multiline'] as boolean | undefined,
       pattern: prop['pattern'] as string | undefined,
       defaultValue: prop['default'],
     }
@@ -209,6 +212,7 @@ function SchemaCredentialForm({
             required={field.required}
             type={field.password ? 'password' : field.type === 'number' ? 'number' : 'text'}
             hint={field.description}
+            multiline={field.multiline}
             mono
           />
         ),
@@ -1021,9 +1025,10 @@ function EditCredentialForm({ credential, typeInfo, onDone, onCancel }: {
             value={values[field.name] ?? ''}
             onChange={(v) => setValues(prev => ({ ...prev, [field.name]: v }))}
             placeholder={field.password ? t('credentials.edit.secretPlaceholder') : field.placeholder}
-            required={field.required || field.password === true}
+            required={field.required}
             type={field.password ? 'password' : field.type === 'number' ? 'number' : 'text'}
             hint={field.description}
+            multiline={field.multiline}
             mono
           />
         ),
@@ -1052,6 +1057,7 @@ function InputField({
   type = 'text',
   mono,
   hint,
+  multiline,
 }: {
   label: string
   value: string
@@ -1061,6 +1067,7 @@ function InputField({
   type?: string
   mono?: boolean
   hint?: string
+  multiline?: boolean | undefined
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -1068,6 +1075,25 @@ function InputField({
         {label}{required && <span style={{ color: 'var(--danger)' }}> *</span>}
         {hint && <span className="ml-1" style={{ opacity: 0.6 }}>— {hint}</span>}
       </label>
+      {multiline ? (
+        /* An <input> flattens a pasted PEM onto one line. A secret textarea is
+           masked with text-security rather than type=password, which a
+           textarea does not have. */
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          required={required}
+          rows={4}
+          spellCheck={false}
+          autoComplete="off"
+          className={`rounded-md px-3 py-2 text-sm resize-y ${mono ? 'font-mono' : ''}`}
+          style={{
+            background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)',
+            ...(type === 'password' && value ? { WebkitTextSecurity: 'disc' } as React.CSSProperties : {}),
+          }}
+        />
+      ) : (
       <input
         type={type}
         value={value}
@@ -1077,6 +1103,7 @@ function InputField({
         className={`rounded-md px-3 py-2 text-sm ${mono ? 'font-mono' : ''}`}
         style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
       />
+      )}
     </div>
   )
 }

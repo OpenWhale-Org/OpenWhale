@@ -4,16 +4,19 @@ import type { RawCredentialData } from '@openwhaleorg/core'
 import { CcxtAdapter } from '@openwhaleorg/ccxt-adapter'
 import { BinanceAdapter } from './adapter.js'
 import { BinancePerpAccount } from './account.js'
+import { binanceSigningSecret } from './keys.js'
 
+// Both builders hand ccxt the signing string: the HMAC secret, or the Ed25519
+// PEM — ccxt switches to Ed25519 signatures on its own when it sees a PEM.
 const buildSpot = (data: RawCredentialData) => new CcxtAdapter({
   exchangeId: 'binance',
   apiKey: data['apiKey'] as string,
-  secret: data['secret'] as string,
+  secret: binanceSigningSecret(data),
   ...((data['testnet'] as boolean | undefined) ? { testnet: true } : {}),
 })
 const buildPerp = (data: RawCredentialData) => new BinanceAdapter({
   apiKey: data['apiKey'] as string,
-  secret: data['secret'] as string,
+  secret: binanceSigningSecret(data),
   testnet: (data['testnet'] as boolean | undefined) ?? false,
   unifiedAccount: (data['unifiedAccount'] as boolean | undefined) ?? false,
 })
@@ -55,14 +58,25 @@ export const binancePlugin = definePlugin({
       displayName: 'Binance',
       logo: '/brands/binance.png',
       icon: '🟡',
-      description: 'Perps and spot on one key. Supports Portfolio Margin and a testnet.',
+      description: 'Perps and spot on one key — HMAC or Ed25519. Supports Portfolio Margin and a testnet.',
       documentationUrl: 'https://www.binance.com/en/support/faq/how-to-create-api-keys-on-binance-360002502072',
       // Raw opt-in: the funding-charge monitor needs the key itself (user-data
       // stream listenKey + signed income reads have no session equivalent).
       raw: true,
       schema: z.object({
         apiKey: z.string().meta({ displayName: 'API Key' }),
-        secret: z.string().meta({ displayName: 'API Secret', password: true }),
+        secret: z.string().optional().meta({
+          displayName: 'API Secret',
+          password: true,
+          description: 'For an HMAC (system-generated) key. Leave empty when using an Ed25519 key.',
+        }),
+        privateKey: z.string().optional().meta({
+          displayName: 'Ed25519 Private Key (PEM)',
+          password: true,
+          multiline: true,
+          placeholder: '-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----',
+          description: 'For a self-generated Ed25519 key: paste the PRIVATE key here, upload the public key to Binance. Leave empty when using an HMAC key.',
+        }),
         testnet: z.boolean().default(false).meta({ displayName: 'Testnet', description: 'Trade on testnet.binancefuture.com instead of mainnet' }),
         unifiedAccount: z.boolean().default(false).meta({
           displayName: 'Unified Account (Portfolio Margin)',
