@@ -52,6 +52,7 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
   const [error, setError] = useState('')
   const [newName, setNewName] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [showFlat, setShowFlat] = useState(false)
 
   const load = useCallback(async () => {
     setError('')
@@ -68,6 +69,19 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
 
   const act = async (p: Promise<string | undefined>) => { const e = await p; if (e) setError(e) }
   const total = (data ?? []).filter(g => !g.hidden).reduce((n, g) => n + g.totals.pnl, 0)
+  /* What is open is what the operator is watching: those sort by PnL, biggest
+     winner first. An instance that holds nothing says nothing every second of
+     the day, so the flat ones fold into one line at the bottom. */
+  const open = (data ?? []).filter(g => g.totals.open > 0).sort((a, b) => b.totals.pnl - a.totals.pnl)
+  const flat = (data ?? []).filter(g => g.totals.open === 0).sort((a, b) => a.name.localeCompare(b.name))
+
+  /* A flat combination opens only on demand: collapsed unless toggled, while
+     one holding positions is open unless toggled. */
+  const card = (g: LiveGroup) => (
+    <GroupCard key={g.id} g={g} accounts={accounts} collapsed={collapsed.has(g.id) !== (g.totals.open > 0)}
+      onToggle={() => setCollapsed(prev => { const n = new Set(prev); if (!n.delete(g.id)) n.add(g.id); return n })}
+      onAct={act} />
+  )
 
   return (
     <div className="flex flex-col gap-3">
@@ -88,11 +102,15 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
       {error && <p className="text-xs" style={{ color: 'var(--danger, #ef4444)' }}>{error}</p>}
       {!data && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>}
       {data?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('groups.empty')}</p>}
-      {data?.map(g => (
-        <GroupCard key={g.id} g={g} accounts={accounts} collapsed={collapsed.has(g.id)}
-          onToggle={() => setCollapsed(prev => { const n = new Set(prev); if (!n.delete(g.id)) n.add(g.id); return n })}
-          onAct={act} />
-      ))}
+      {open.map(card)}
+      {flat.length > 0 && (
+        <>
+          <button onClick={() => setShowFlat(v => !v)} className="flex items-center gap-2 text-xs px-1 py-1" style={{ color: 'var(--muted)' }}>
+            <span>{showFlat ? '▾' : '▸'}</span>{t('groups.flatSection', { n: flat.length })}
+          </button>
+          {showFlat && flat.map(card)}
+        </>
+      )}
     </div>
   )
 }
