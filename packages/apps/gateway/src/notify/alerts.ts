@@ -117,7 +117,9 @@ export class AlertService {
       const options = instance.options ?? {}
       const action = result.instruction.action
 
-      const failed = result.status === 'failed'
+      // An unknown remote outcome is at least as urgent as a confirmed
+      // failure: it may have taken effect and must not be submitted again.
+      const failed = result.status === 'failed' || result.status === 'unknown'
       // Absent means on: an operator who has never opened the panel still wants
       // to hear that their strategy is failing.
       const wantsFailure = failed && options.alertOnFailure !== false
@@ -143,7 +145,7 @@ export class AlertService {
       this.suppressed.delete(instanceId)
 
       const subject = failed
-        ? `OpenWhale: ${instance.name} — ${action} failed`
+        ? `OpenWhale: ${instance.name} — ${action} ${result.status}`
         : `OpenWhale: ${instance.name} — ${action}`
       await this.dispatch(subject, this.body(result, instance.name, held))
     } catch (err) {

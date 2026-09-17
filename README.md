@@ -286,7 +286,7 @@ Copy `skills/openwhale-dev/` into your plugin project's `.claude/skills/` (or re
 | [`@openwhaleorg/exchange`](./packages/framework/exchange) | Kinds `exchange/perp` and `exchange/spot`: account views, trading executors, market monitors |
 | [`@openwhaleorg/web3`](./packages/framework/web3) | Kind `web3/chain`: EVM session, wallet account, `web3/evm` and `web3/rpc` credential types |
 | [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | ccxt implementation of the exchange adapters and the data-driven venue roster |
-| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | Venue plugins: credential types, adapter cells, venue-specialized accounts |
+| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`whaledance`](./packages/venues/whaledance) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | Venue plugins: credential types, adapter cells, venue-specialized accounts and delegated wallets |
 | [`@openwhaleorg/gateway`](./packages/apps/gateway) | Backend: runtime, auth, REST + SSE API, compiler service, plugin install |
 | [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js frontend |
 | [`@openwhaleorg/examples`](./packages/strategies/examples) | Reference strategies: momentum, mean reversion, DCA, LLM analyst, copy trading |

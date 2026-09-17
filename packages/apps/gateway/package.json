@@ -21,6 +21,7 @@
     "@openwhaleorg/examples": "workspace:*",
     "@openwhaleorg/exchange": "workspace:*",
     "@openwhaleorg/hyperliquid": "workspace:*",
+    "@openwhaleorg/whaledance": "workspace:*",
     "@openwhaleorg/venues": "workspace:*",
     "@openwhaleorg/web3": "workspace:*",
     "express": "^4.21.0",

@@ -40,7 +40,13 @@ export interface ExecutionResult<TInstruction extends ExecutionInstruction = Exe
    * held back before the queue and never reached one. It is a record of what
    * the strategy decided, and is excluded from PnL attribution.
    */
-  status: 'success' | 'failed' | 'skipped' | 'dry-run'
+  /**
+   * `pending` and `unknown` are durable remote-execution states, not failures:
+   * pending means the provider accepted the command but has not settled it;
+   * unknown means the provider cannot prove whether it took effect. Callers
+   * must reconcile either state instead of blindly issuing a new command.
+   */
+  status: 'success' | 'failed' | 'pending' | 'unknown' | 'skipped' | 'dry-run'
   data?: Record<string, unknown>
   error?: string
   executedAt: Date

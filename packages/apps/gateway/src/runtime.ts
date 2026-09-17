@@ -5,6 +5,7 @@ import { OpenWhaleRuntime, SQLiteAdapter, DBCredentialStore, getLogger, importLl
 import { exchangePlugin } from '@openwhaleorg/exchange'
 import { web3Plugin } from '@openwhaleorg/web3'
 import { hyperliquidPlugin } from '@openwhaleorg/hyperliquid'
+import { whaledancePlugin } from '@openwhaleorg/whaledance'
 import { examplesPlugin } from '@openwhaleorg/examples'
 import { binancePlugin } from '@openwhaleorg/binance'
 import { asterPlugin } from '@openwhaleorg/aster'
@@ -64,6 +65,7 @@ function createRuntime(): OpenWhaleRuntime {
   // testnet is a per-credential field, not a deployment flag — see the venue
   // plugins' (deliberately empty) config interfaces.
   runtime.loadPlugin(hyperliquidPlugin, {})
+  runtime.loadPlugin(whaledancePlugin, {})
   runtime.loadPlugin(binancePlugin, {})
   runtime.loadPlugin(asterPlugin, {})
   // Plain ccxt venues (Bybit, OKX, Bitget, Gate, Kraken, Upbit, Lighter, …):
