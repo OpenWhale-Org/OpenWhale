@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@openwhaleorg/aster": "workspace:*",
+    "@openwhaleorg/variational": "workspace:*",
     "@openwhaleorg/binance": "workspace:*",
     "@openwhaleorg/ccxt-adapter": "workspace:*",
     "@openwhaleorg/compiler": "workspace:*",
