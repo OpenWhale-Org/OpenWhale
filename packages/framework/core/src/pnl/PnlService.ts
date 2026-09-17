@@ -213,9 +213,21 @@ type FillDbRow = {
 }
 const FILL_COLS = 'fill_id, order_id, instance_id, symbol, position_side, side, qty, price, realized_pnl, fee, fee_asset, ts'
 
-function toLedgerFill(r: FillDbRow): LedgerFill {
+/**
+ * The side a hedge-mode fill belongs to when the ledger row predates the
+ * column. Binance realizes PnL only on the closing leg, so a buy that
+ * realized nothing opened a LONG and one that did closed a SHORT (and the
+ * mirror for sells). Checked against every labelled fill on this install
+ * (2026-09-17): 95 of 95. A close at exactly break-even is the one miss.
+ */
+export function inferHedgeSide(side: string, realizedPnl: number | null): 'LONG' | 'SHORT' {
+  return (side === 'buy') === ((realizedPnl ?? 0) === 0) ? 'LONG' : 'SHORT'
+}
+
+function toLedgerFill(r: FillDbRow, hedge = false): LedgerFill {
+  const positionSide = r.position_side ?? (hedge ? inferHedgeSide(r.side, r.realized_pnl) : null)
   return {
-    fillId: r.fill_id, orderId: r.order_id, instanceId: r.instance_id, symbol: r.symbol, positionSide: r.position_side,
+    fillId: r.fill_id, orderId: r.order_id, instanceId: r.instance_id, symbol: r.symbol, positionSide,
     side: r.side === 'sell' ? 'sell' : 'buy', qty: r.qty, price: r.price,
     realizedPnl: r.realized_pnl, fee: r.fee, feeAsset: r.fee_asset, ts: r.ts,
   }
@@ -224,6 +236,7 @@ function toLedgerFill(r: FillDbRow): LedgerFill {
 /** Replayed positions of one account, kept until the ledger grows. */
 interface PositionCache {
   maxRowid: number
+  hedge: boolean
   /** `${symbol}\u0000${positionSide}` → that book's positions, funding not yet attached. */
   books: Map<string, PositionHistoryRow[]>
 }
@@ -911,6 +924,16 @@ export class PnlService {
 
   private readonly positionCache = new Map<string, PositionCache>()
   private readonly positionBuilds = new Map<string, Promise<PositionCache>>()
+  private readonly hedgeAccounts = new Set<string>()
+
+  /** An account is hedge-mode once any of its fills carries a side; sticky, since that never goes back. */
+  private async isHedge(account: string): Promise<boolean> {
+    if (this.hedgeAccounts.has(account)) return true
+    const row = await this.db.get<{ ps: string }>(
+      `SELECT position_side AS ps FROM pnl_fills WHERE account = ? AND position_side IS NOT NULL ORDER BY ts DESC LIMIT 1`, [account])
+    if (row) this.hedgeAccounts.add(account)
+    return row !== undefined
+  }
 
   /** Symbols this account has traded, for a filter. */
   async accountSymbols(account: string): Promise<string[]> {
@@ -946,8 +969,9 @@ export class PnlService {
               SUM(COALESCE(fee, 0)) AS fee, SUM(COALESCE(realized_pnl, 0)) AS realized,
               SUM(CASE WHEN COALESCE(fee, 0) = 0 THEN qty * price ELSE 0 END) AS zero_volume
          FROM pnl_fills WHERE ${w.sql} GROUP BY 1`, w.args)
+    const hedge = await this.isHedge(account)
     return {
-      rows: page.map(r => toFillRow(toLedgerFill(r))),
+      rows: page.map(r => toFillRow(toLedgerFill(r, hedge))),
       total: agg.reduce((s, a) => s + a.n, 0),
       summary: await this.summaryFromAgg(account, q, agg),
     }
@@ -979,12 +1003,15 @@ export class PnlService {
       `SELECT order_id, MAX(ts) AS last_ts FROM pnl_fills WHERE ${w.sql}
         GROUP BY order_id ORDER BY last_ts DESC, order_id LIMIT ? OFFSET ?`,
       [...w.args, q.limit ?? 50, q.offset ?? 0])
-    const rows: OrderHistoryRow[] = []
-    for (const { order_id } of ids) {
+    const hedge = await this.isHedge(account)
+    const byOrder = new Map<string, LedgerFill[]>(ids.map(i => [i.order_id, []]))
+    if (ids.length > 0) {
       const fills = await this.db.all<FillDbRow>(
-        `SELECT ${FILL_COLS} FROM pnl_fills WHERE account = ? AND order_id = ? ORDER BY ts`, [account, order_id])
-      if (fills.length > 0) rows.push(toOrderRow(fills.map(toLedgerFill)))
+        `SELECT ${FILL_COLS} FROM pnl_fills WHERE account = ? AND order_id IN (${ids.map(() => '?').join(',')}) ORDER BY ts`,
+        [account, ...ids.map(i => i.order_id)])
+      for (const f of fills) byOrder.get(f.order_id)?.push(toLedgerFill(f, hedge))
     }
+    const rows = [...byOrder.values()].filter(f => f.length > 0).map(toOrderRow)
     const count = await this.db.get<{ n: number }>(
       `SELECT COUNT(DISTINCT order_id) AS n FROM pnl_fills WHERE ${w.sql}`, w.args)
     const agg = await this.db.all<{ asset: string | null; n: number; volume: number; fee: number; realized: number; zero_volume: number }>(
@@ -1027,11 +1054,13 @@ export class PnlService {
   private async positionsFor(account: string): Promise<PositionCache> {
     const head = await this.db.get<{ r: number | null }>(`SELECT MAX(rowid) AS r FROM pnl_fills WHERE account = ?`, [account])
     const maxRowid = head?.r ?? 0
-    const cached = this.positionCache.get(account)
+    const hedge = await this.isHedge(account)
+    let cached = this.positionCache.get(account)
+    if (cached && cached.hedge !== hedge) cached = undefined
     if (cached && cached.maxRowid === maxRowid) return cached
     const running = this.positionBuilds.get(account)
     if (running) return running
-    const build = this.buildPositions(account, cached, maxRowid)
+    const build = this.buildPositions(account, cached, maxRowid, hedge)
       .then(c => { this.positionCache.set(account, c); return c })
       .finally(() => this.positionBuilds.delete(account))
     this.positionBuilds.set(account, build)
@@ -1044,18 +1073,24 @@ export class PnlService {
    * first build reads the ledger in rowid pages and yields between them, so
    * a large account does not hold the event loop the strategies run on.
    */
-  private async buildPositions(account: string, prev: PositionCache | undefined, maxRowid: number): Promise<PositionCache> {
+  private async buildPositions(account: string, prev: PositionCache | undefined, maxRowid: number, hedge: boolean): Promise<PositionCache> {
     const keyOf = (symbol: string, side: string | null) => `${symbol}\u0000${side ?? ''}`
     const books = new Map(prev?.books ?? [])
     const groups = new Map<string, LedgerFill[]>()
+    const add = (f: LedgerFill) => {
+      const k = keyOf(f.symbol, f.positionSide)
+      const list = groups.get(k) ?? groups.set(k, []).get(k)!
+      list.push(f)
+    }
     if (prev) {
-      const touched = await this.db.all<{ symbol: string; position_side: string | null }>(
-        `SELECT DISTINCT symbol, position_side FROM pnl_fills WHERE account = ? AND rowid > ?`, [account, prev.maxRowid])
-      for (const t of touched) {
+      // A symbol that gained fills is replayed whole, every side of it.
+      const touched = await this.db.all<{ symbol: string }>(
+        `SELECT DISTINCT symbol FROM pnl_fills WHERE account = ? AND rowid > ?`, [account, prev.maxRowid])
+      for (const { symbol } of touched) {
+        for (const k of [...books.keys()]) if (k.startsWith(`${symbol}\u0000`)) books.delete(k)
         const rows = await this.db.all<FillDbRow>(
-          `SELECT ${FILL_COLS} FROM pnl_fills WHERE account = ? AND symbol = ? AND position_side IS ? ORDER BY ts, rowid`,
-          [account, t.symbol, t.position_side])
-        groups.set(keyOf(t.symbol, t.position_side), rows.map(toLedgerFill))
+          `SELECT ${FILL_COLS} FROM pnl_fills WHERE account = ? AND symbol = ? ORDER BY ts, rowid`, [account, symbol])
+        for (const r of rows) add(toLedgerFill(r, hedge))
         await new Promise(r => setImmediate(r))
       }
     } else {
@@ -1064,22 +1099,21 @@ export class PnlService {
         const rows = await this.db.all<FillDbRow & { rid: number }>(
           `SELECT rowid AS rid, ${FILL_COLS} FROM pnl_fills WHERE account = ? AND rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?`,
           [account, after, maxRowid, HISTORY_PAGE])
-        for (const r of rows) {
-          const k = keyOf(r.symbol, r.position_side)
-          const list = groups.get(k) ?? groups.set(k, []).get(k)!
-          list.push(toLedgerFill(r))
-        }
+        for (const r of rows) add(toLedgerFill(r, hedge))
         if (rows.length < HISTORY_PAGE) break
         after = rows[rows.length - 1]!.rid
         await new Promise(r => setImmediate(r))
       }
       for (const list of groups.values()) list.sort((a, b) => a.ts - b.ts)
     }
+    let replayed = 0
     for (const [k, fills] of groups) {
       const [symbol, side] = k.split('\u0000') as [string, string]
       books.set(k, replayPositions(symbol, side || null, fills))
+      replayed += fills.length
+      if (replayed >= HISTORY_PAGE) { replayed = 0; await new Promise(r => setImmediate(r)) }
     }
-    return { maxRowid, books }
+    return { maxRowid, hedge, books }
   }
 
   // ── Watermarks ────────────────────────────────────────────────────────────

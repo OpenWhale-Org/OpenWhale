@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { SQLiteAdapter } from '../../database/SQLiteAdapter.js'
-import { PnlService } from '../PnlService.js'
+import { PnlService, inferHedgeSide } from '../PnlService.js'
 import { attachFunding, replayPositions, toOrderRow, type LedgerFill } from '../accountHistory.js'
 
 let n = 0
@@ -157,6 +157,14 @@ describe('PnlService account history', () => {
     await put('s1', 's1', 'sell', 5, 100, 1_200, 0, 0, 'SHORT')
     const page = await svc.accountPositions('acct', { symbol: 'X' })
     expect(page.rows.find(r => r.positionSide === 'SHORT')).toMatchObject({ side: 'short', maxQty: 5, closeTs: null })
-    expect(page.rows.filter(r => r.positionSide === null)).toHaveLength(2)
+    // Once the account is known to be hedge-mode, unlabelled older fills are sided by inference.
+    expect(page.rows.filter(r => r.positionSide === null)).toHaveLength(0)
+    expect(page.rows.filter(r => r.positionSide === 'LONG').map(r => r.closeTs)).toEqual([null, 3_700_000])
+  })
+
+  it('infers the hedge side from side and realized PnL', () => {
+    expect([
+      inferHedgeSide('buy', 0), inferHedgeSide('buy', 3), inferHedgeSide('sell', 0), inferHedgeSide('sell', -2), inferHedgeSide('buy', null),
+    ]).toEqual(['LONG', 'SHORT', 'SHORT', 'LONG', 'LONG'])
   })
 })
