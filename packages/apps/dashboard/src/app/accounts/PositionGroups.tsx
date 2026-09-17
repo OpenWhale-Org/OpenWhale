@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Modal } from '@/components/Modal'
 import { Select } from '@/components/Select'
 import { useT } from '@/i18n'
+import { HistoryPanel } from './AccountHistory'
 
 /**
  * Position combinations: positions across accounts read as one trade with one
@@ -231,6 +232,7 @@ function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
 }) {
   const t = useT()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const manual = g.source === 'manual'
   const base = `/api/position-groups/${encodeURIComponent(g.id)}`
 
@@ -250,7 +252,14 @@ function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
         <span className="text-sm font-mono text-right shrink-0" style={{ color: tone(g.totals.pnl), width: '6.5rem' }}>{signedUsd(g.totals.pnl)}</span>
         {/* One fixed-width tray: Rename and Delete exist only on manual cards,
             and without it Hide would sit at a different x on every card. */}
-        <span className="flex items-center justify-end gap-1 shrink-0" style={{ width: '10rem' }} onClick={e => e.stopPropagation()}>
+        <span className="flex items-center justify-end gap-1 shrink-0" style={{ width: '13rem' }} onClick={e => e.stopPropagation()}>
+          <button
+            className="text-xs px-1.5"
+            style={{ color: showHistory ? 'var(--accent)' : 'var(--muted)' }}
+            onClick={() => { setShowHistory(v => !v); if (collapsed && !showHistory) onToggle() }}
+          >
+            {showHistory ? t('groups.hideHistory') : t('groups.history')}
+          </button>
           {manual && <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={onEdit}>{t('groups.edit')}</button>}
           <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={() => void onAct(api(base, 'PATCH', { hidden: !g.hidden }))}>{g.hidden ? t('groups.unhide') : t('groups.hide')}</button>
           {manual && (
@@ -313,6 +322,12 @@ function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {/* Outside the scrolling table box: its overflow would clip the symbol picker's dropdown. */}
+      {!collapsed && showHistory && (
+        <div className="px-3 pb-3 pt-1">
+          <HistoryPanel base={`${base}/history`} showAccount />
         </div>
       )}
     </div>

@@ -57,6 +57,8 @@ export interface HistorySummary extends FeeTotals {
 }
 
 export interface FillHistoryRow extends FeeTotals {
+  /** Which account the row came from, on a view spanning several. */
+  account?: string
   fillId: string
   orderId: string
   instanceId: string | null
@@ -75,6 +77,8 @@ export interface FillHistoryRow extends FeeTotals {
 }
 
 export interface OrderHistoryRow extends FeeTotals {
+  /** Which account the row came from, on a view spanning several. */
+  account?: string
   orderId: string
   instanceId: string | null
   symbol: string
@@ -91,6 +95,8 @@ export interface OrderHistoryRow extends FeeTotals {
 }
 
 export interface PositionHistoryRow extends FeeTotals {
+  /** Which account the row came from, on a view spanning several. */
+  account?: string
   id: string
   symbol: string
   positionSide: string | null

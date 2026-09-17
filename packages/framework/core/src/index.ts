@@ -146,7 +146,7 @@ export { DBCredentialStore } from './credentials/DBCredentialStore.js'
 // Monitor
 export { BaseMonitor, MonitorMode } from './monitor/BaseMonitor.js'
 export { PnlService } from './pnl/PnlService.js'
-export type { OrderClaim, PnlSummary, PnlSeriesPoint, PnlFillRow, PnlPositionRow, PnlSessionLike, PnlWindow, LedgerHealth, HistoryQuery, HistoryPage } from './pnl/PnlService.js'
+export type { OrderClaim, PnlSummary, PnlSeriesPoint, PnlFillRow, PnlPositionRow, PnlSessionLike, PnlWindow, LedgerHealth, HistoryQuery, HistoryPage, HistoryMember, HistoryScope } from './pnl/PnlService.js'
 export type { FillHistoryRow, OrderHistoryRow, PositionHistoryRow, HistorySummary } from './pnl/accountHistory.js'
 export { MonitorDataReaderImpl } from './monitor/MonitorDataReader.js'
 export { pruneJsonlByTime, matchesKeyPattern } from './monitor/retention.js'
@@ -215,6 +215,7 @@ export type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from './regi
 
 // Runtime
 export { OpenWhaleRuntime } from './runtime/OpenWhaleRuntime.js'
+export type { HistoryKind } from './runtime/OpenWhaleRuntime.js'
 
 // Utils
 export { generateId } from './utils/id.js'

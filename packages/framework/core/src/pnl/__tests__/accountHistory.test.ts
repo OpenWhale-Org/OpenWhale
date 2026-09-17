@@ -102,6 +102,8 @@ describe('toOrderRow', () => {
   })
 })
 
+const ACCT = [{ ledger: 'acct', label: 'Acct' }]
+
 describe('PnlService account history', () => {
   async function service() {
     const db = new SQLiteAdapter({ filePath: ':memory:' })
@@ -121,7 +123,7 @@ describe('PnlService account history', () => {
 
   it('pages fills newest first with a summary over the whole window', async () => {
     const { svc } = await service()
-    const page = await svc.accountFills('acct', { limit: 2 })
+    const page = await svc.historyFills(ACCT, { limit: 2 })
     expect(page.rows.map(r => r.fillId)).toEqual(['d', 'c'])
     expect(page.total).toBe(4)
     expect(page.summary.fees).toBeCloseTo(0.2, 10)
@@ -133,7 +135,7 @@ describe('PnlService account history', () => {
 
   it('groups orders and counts their fills', async () => {
     const { svc } = await service()
-    const page = await svc.accountOrders('acct', { since: 0, until: 3_750_000 })
+    const page = await svc.historyOrders(ACCT, { since: 0, until: 3_750_000 })
     expect(page.total).toBe(2)
     expect(page.rows.map(r => [r.orderId, r.fills])).toEqual([['o2', 1], ['o1', 2]])
     expect(page.summary.count).toBe(2)
@@ -141,13 +143,13 @@ describe('PnlService account history', () => {
 
   it('replays positions with funding, and picks up fills added later', async () => {
     const { svc, put } = await service()
-    let page = await svc.accountPositions('acct')
+    let page = await svc.historyPositions(ACCT)
     expect(page.rows.map(r => [r.side, r.closeTs])).toEqual([['long', null], ['long', 3_700_000]])
     expect(page.rows[1]!.funding).toBe(1.5)
     expect(page.rows[1]!.net).toBeCloseTo(20 - 0.2 + 1.5, 10)
 
     await put('e', 'o4', 'sell', 1, 105, 4_000_000, 0.05, 5)
-    page = await svc.accountPositions('acct')
+    page = await svc.historyPositions(ACCT)
     expect(page.rows.map(r => r.closeTs)).toEqual([4_000_000, 3_700_000])
     expect(page.summary.count).toBe(2)
   })
@@ -155,11 +157,47 @@ describe('PnlService account history', () => {
   it('keeps hedge-mode LONG and SHORT books apart', async () => {
     const { svc, put } = await service()
     await put('s1', 's1', 'sell', 5, 100, 1_200, 0, 0, 'SHORT')
-    const page = await svc.accountPositions('acct', { symbol: 'X' })
+    const page = await svc.historyPositions(ACCT, { symbol: 'X' })
     expect(page.rows.find(r => r.positionSide === 'SHORT')).toMatchObject({ side: 'short', maxQty: 5, closeTs: null })
     // Once the account is known to be hedge-mode, unlabelled older fills are sided by inference.
     expect(page.rows.filter(r => r.positionSide === null)).toHaveLength(0)
     expect(page.rows.filter(r => r.positionSide === 'LONG').map(r => r.closeTs)).toEqual([null, 3_700_000])
+  })
+
+  it('a combination scope takes one side of one symbol, across accounts, labelled', async () => {
+    const { svc, put } = await service()
+    await put('s1', 's1', 'sell', 5, 100, 1_200, 0.5, 0, 'SHORT')
+    const scope = [
+      { ledger: 'acct', label: 'Acct', symbol: 'X', side: 'short' as const },
+      { ledger: 'other', label: 'Other', symbol: 'X', side: '*' as const },
+    ]
+    const positions = await svc.historyPositions(scope)
+    expect(positions.rows.map(r => [r.account, r.side, r.maxQty])).toEqual([['Acct', 'short', 5]])
+    const fills = await svc.historyFills(scope)
+    expect(fills.rows.map(r => [r.account, r.fillId])).toEqual([['Acct', 's1']])
+    expect(fills.summary.fees).toBeCloseTo(0.5, 10)
+    const orders = await svc.historyOrders(scope)
+    expect(orders.total).toBe(1)
+    expect(await svc.historySymbols(scope)).toEqual(['X'])
+  })
+
+  it('an instance scope keeps another strategy on the same symbol out', async () => {
+    const db = new SQLiteAdapter({ filePath: ':memory:' })
+    await db.initialize()
+    const put = (id: string, inst: string, side: string, ts: number, realized = 0) => db.run(
+      `INSERT INTO pnl_fills (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts)
+       VALUES ('acct', ?, ?, ?, 'X', ?, 1, 100, ?, 0.1, 'USDT', ?)`, [id, id, inst, side, realized, ts])
+    await put('a1', 'A', 'buy', 1_000)
+    await put('b1', 'B', 'sell', 1_100)
+    await put('a2', 'A', 'sell', 1_200, 3)
+    await db.run(`INSERT INTO pnl_funding (account, event_key, instance_id, symbol, amount, asset, ts) VALUES ('acct', 'e1', 'B', 'X', 9, 'USDT', 1_150)`)
+    const svc = new PnlService({ db, resolveSession: async () => null })
+    const scope = [{ ledger: 'acct', label: 'Acct', symbol: 'X', side: '*' as const, instanceId: 'A' }]
+    const positions = await svc.historyPositions(scope)
+    expect(positions.rows.map(r => [r.side, r.openTs, r.closeTs])).toEqual([['long', 1_000, 1_200]])
+    const fills = await svc.historyFills(scope)
+    expect(fills.rows.map(r => r.fillId)).toEqual(['a2', 'a1'])
+    expect(fills.summary.funding).toBe(0)
   })
 
   it('infers the hedge side from side and realized PnL', () => {

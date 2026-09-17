@@ -19,17 +19,20 @@ interface FeeTotals { fees: number; feesOther: Record<string, number>; feeVolume
 interface Summary extends FeeTotals { count: number; volume: number; realized: number; funding: number; net: number }
 
 interface FillRow extends FeeTotals {
+  account?: string
   fillId: string; orderId: string; instanceId: string | null; symbol: string; positionSide: string | null
   side: 'buy' | 'sell'; qty: number; price: number; notional: number
   realizedPnl: number | null; fee: number | null; feeAsset: string | null; ts: number
 }
 
 interface OrderRow extends FeeTotals {
+  account?: string
   orderId: string; instanceId: string | null; symbol: string; positionSide: string | null; side: 'buy' | 'sell'
   fills: number; qty: number; avgPrice: number; notional: number; realized: number; firstTs: number; lastTs: number
 }
 
 interface PositionRow extends FeeTotals {
+  account?: string
   id: string; symbol: string; positionSide: string | null; side: 'long' | 'short'
   openTs: number; closeTs: number | null; maxQty: number; maxNotional: number; avgEntry: number; avgExit: number | null
   openQty: number; fills: number; orders: number; volume: number; realized: number; funding: number; net: number
@@ -40,7 +43,8 @@ interface Page<T> { rows: T[]; total: number; summary: Summary; unmatchedFunding
 /** A page remembers which view asked for it, so a tab switch never renders rows of the wrong shape. */
 type Loaded = Page<unknown> & { kind: Kind }
 
-const PAGE_SIZE = 50
+const PAGE_SIZES = [20, 50, 100, 200] as const
+const PAGE_SIZE_KEY = 'ow:history:pageSize'
 const RANGES = [
   { key: '1d', ms: 24 * 3600_000 },
   { key: '7d', ms: 7 * 24 * 3600_000 },
@@ -81,8 +85,28 @@ function duration(ms: number): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`
 }
 
+/** One account's history. */
 export function AccountHistory({ account }: { account: string }) {
+  return <HistoryPanel base={`/api/accounts/${encodeURIComponent(account)}/history`} />
+}
+
+/**
+ * History for any ledger scope the gateway serves under `base` — an account,
+ * or a combination (`showAccount` adds the column, since its rows come from
+ * several accounts).
+ */
+export function HistoryPanel({ base, showAccount = false }: { base: string; showAccount?: boolean }) {
   const t = useT()
+  const [pageSize, setPageSizeState] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem(PAGE_SIZE_KEY))
+      return (PAGE_SIZES as readonly number[]).includes(v) ? v : 50
+    } catch { return 50 }
+  })
+  const setPageSize = (v: number) => {
+    setPageSizeState(v)
+    try { localStorage.setItem(PAGE_SIZE_KEY, String(v)) } catch { /* private mode */ }
+  }
   const [kind, setKind] = useState<Kind>('positions')
   const [range, setRange] = useState<RangeKey>('7d')
   const [symbol, setSymbol] = useState('')
@@ -97,24 +121,24 @@ export function AccountHistory({ account }: { account: string }) {
   useEffect(() => {
     setSymbol('')
     setOffset(0)
-    fetch(`/api/accounts/${encodeURIComponent(account)}/history/symbols`)
+    fetch(`${base}/symbols`)
       .then(r => (r.ok ? r.json() : []))
       .then((list: string[]) => setSymbols(Array.isArray(list) ? list : []))
       .catch(() => setSymbols([]))
-  }, [account])
+  }, [base])
 
-  useEffect(() => { setOffset(0) }, [kind, range, symbol])
+  useEffect(() => { setOffset(0) }, [kind, range, symbol, pageSize])
 
   const load = useCallback(async () => {
     const id = ++request.current
     setLoading(true)
     setError('')
-    const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
+    const params = new URLSearchParams({ offset: String(offset), limit: String(pageSize) })
     const ms = RANGES.find(r => r.key === range)!.ms
     if (ms > 0) params.set('since', String(Date.now() - ms))
     if (symbol) params.set('symbol', symbol)
     try {
-      const res = await fetch(`/api/accounts/${encodeURIComponent(account)}/history/${kind}?${params}`)
+      const res = await fetch(`${base}/${kind}?${params}`)
       const body = await res.json() as Page<unknown> & { error?: string }
       if (id !== request.current) return
       if (!res.ok) { setError(body.error ?? t('history.loadFailed')); setLoaded(null); return }
@@ -126,7 +150,7 @@ export function AccountHistory({ account }: { account: string }) {
     } finally {
       if (id === request.current) setLoading(false)
     }
-  }, [account, kind, range, symbol, offset, t])
+  }, [base, kind, range, symbol, offset, pageSize, t])
 
   useEffect(() => { void load() }, [load, nonce])
 
@@ -136,8 +160,8 @@ export function AccountHistory({ account }: { account: string }) {
   ], [symbols, t])
 
   const page = loaded?.kind === kind ? loaded : null
-  const pages = page ? Math.max(1, Math.ceil(page.total / PAGE_SIZE)) : 1
-  const current = Math.floor(offset / PAGE_SIZE) + 1
+  const pages = page ? Math.max(1, Math.ceil(page.total / pageSize)) : 1
+  const current = Math.floor(offset / pageSize) + 1
 
   return (
     <section className="flex flex-col">
@@ -191,22 +215,51 @@ export function AccountHistory({ account }: { account: string }) {
 
       {page && page.rows.length > 0 && (
         <div className="overflow-x-auto scroll-hidden" style={{ opacity: loading ? 0.6 : 1 }}>
-          {kind === 'positions' && <PositionsTable rows={page.rows as PositionRow[]} />}
-          {kind === 'fills' && <FillsTable rows={page.rows as FillRow[]} />}
-          {kind === 'orders' && <OrdersTable rows={page.rows as OrderRow[]} />}
+          {kind === 'positions' && <PositionsTable rows={page.rows as PositionRow[]} showAccount={showAccount} />}
+          {kind === 'fills' && <FillsTable rows={page.rows as FillRow[]} showAccount={showAccount} />}
+          {kind === 'orders' && <OrdersTable rows={page.rows as OrderRow[]} showAccount={showAccount} />}
         </div>
       )}
 
-      {page && page.total > PAGE_SIZE && (
-        <div className="flex items-center justify-end gap-2 pt-2 text-xs" style={{ color: 'var(--muted)' }}>
+      {page && (
+        <div className="flex items-center justify-end gap-2 pt-2 text-xs flex-wrap" style={{ color: 'var(--muted)' }}>
           <span>{t('history.pageOf', { page: current, pages, total: page.total })}</span>
+          <Select
+            size="sm"
+            className="w-24"
+            value={String(pageSize)}
+            options={PAGE_SIZES.map(n => ({ value: String(n), label: t('history.perPage', { n }) }))}
+            onChange={v => setPageSize(Number(v))}
+          />
           <PagerButton disabled={offset === 0} onClick={() => setOffset(0)}>«</PagerButton>
-          <PagerButton disabled={offset === 0} onClick={() => setOffset(o => Math.max(0, o - PAGE_SIZE))}>‹</PagerButton>
-          <PagerButton disabled={current >= pages} onClick={() => setOffset(o => o + PAGE_SIZE)}>›</PagerButton>
-          <PagerButton disabled={current >= pages} onClick={() => setOffset((pages - 1) * PAGE_SIZE)}>»</PagerButton>
+          <PagerButton disabled={offset === 0} onClick={() => setOffset(o => Math.max(0, o - pageSize))}>‹</PagerButton>
+          <PageJump current={current} pages={pages} onJump={p => setOffset((p - 1) * pageSize)} />
+          <PagerButton disabled={current >= pages} onClick={() => setOffset(o => o + pageSize)}>›</PagerButton>
+          <PagerButton disabled={current >= pages} onClick={() => setOffset((pages - 1) * pageSize)}>»</PagerButton>
         </div>
       )}
     </section>
+  )
+}
+
+/** The page number, editable: type a page and press Enter. */
+function PageJump({ current, pages, onJump }: { current: number; pages: number; onJump: (page: number) => void }) {
+  const [draft, setDraft] = useState(String(current))
+  useEffect(() => { setDraft(String(current)) }, [current])
+  const commit = () => {
+    const n = Math.min(pages, Math.max(1, Math.floor(Number(draft)) || current))
+    setDraft(String(n))
+    if (n !== current) onJump(n)
+  }
+  return (
+    <input
+      value={draft}
+      onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') commit() }}
+      className="w-10 h-6 rounded-md text-center font-mono"
+      style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--foreground)' }}
+    />
   )
 }
 
@@ -284,12 +337,13 @@ function Badge({ children, color, title }: { children: ReactNode; color: string;
   )
 }
 
-function PositionsTable({ rows }: { rows: PositionRow[] }) {
+function PositionsTable({ rows, showAccount }: { rows: PositionRow[]; showAccount: boolean }) {
   const t = useT()
   return (
     <table className="w-full text-xs">
       <thead>
         <tr style={{ color: 'var(--muted)' }}>
+          {showAccount && <Th>{t('history.col.account')}</Th>}
           <Th>{t('history.col.symbol')}</Th>
           <Th>{t('history.col.side')}</Th>
           <Th>{t('history.col.opened')}</Th>
@@ -307,7 +361,8 @@ function PositionsTable({ rows }: { rows: PositionRow[] }) {
       </thead>
       <tbody>
         {rows.map(p => (
-          <tr key={p.id} style={{ borderTop: '1px solid var(--border)' }}>
+          <tr key={`${p.account ?? ''}|${p.id}`} style={{ borderTop: '1px solid var(--border)' }}>
+            {showAccount && <Td mono={false}>{p.account}</Td>}
             <Td>
               {p.symbol}
               {p.partial && <Badge color="var(--warning, #f59e0b)" title={t('history.partialHint')}>{t('history.partial')}</Badge>}
@@ -335,13 +390,14 @@ function PositionsTable({ rows }: { rows: PositionRow[] }) {
   )
 }
 
-function FillsTable({ rows }: { rows: FillRow[] }) {
+function FillsTable({ rows, showAccount }: { rows: FillRow[]; showAccount: boolean }) {
   const t = useT()
   return (
     <table className="w-full text-xs">
       <thead>
         <tr style={{ color: 'var(--muted)' }}>
           <Th>{t('history.col.time')}</Th>
+          {showAccount && <Th>{t('history.col.account')}</Th>}
           <Th>{t('history.col.symbol')}</Th>
           <Th>{t('history.col.side')}</Th>
           <Th right>{t('history.col.qty')}</Th>
@@ -355,8 +411,9 @@ function FillsTable({ rows }: { rows: FillRow[] }) {
       </thead>
       <tbody>
         {rows.map(f => (
-          <tr key={f.fillId} style={{ borderTop: '1px solid var(--border)' }}>
+          <tr key={`${f.account ?? ''}|${f.fillId}`} style={{ borderTop: '1px solid var(--border)' }}>
             <Td>{fmtDateTime(f.ts)}</Td>
+            {showAccount && <Td mono={false}>{f.account}</Td>}
             <Td>{f.symbol}</Td>
             <Td mono={false}><Side side={f.side} positionSide={f.positionSide} /></Td>
             <Td right>{qtyFmt(f.qty)}</Td>
@@ -377,13 +434,14 @@ function FillsTable({ rows }: { rows: FillRow[] }) {
   )
 }
 
-function OrdersTable({ rows }: { rows: OrderRow[] }) {
+function OrdersTable({ rows, showAccount }: { rows: OrderRow[]; showAccount: boolean }) {
   const t = useT()
   return (
     <table className="w-full text-xs">
       <thead>
         <tr style={{ color: 'var(--muted)' }}>
           <Th>{t('history.col.time')}</Th>
+          {showAccount && <Th>{t('history.col.account')}</Th>}
           <Th>{t('history.col.order')}</Th>
           <Th>{t('history.col.symbol')}</Th>
           <Th>{t('history.col.side')}</Th>
@@ -401,11 +459,12 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
         {rows.map(o => {
           const net = o.realized - o.fees
           return (
-            <tr key={o.orderId} style={{ borderTop: '1px solid var(--border)' }}>
+            <tr key={`${o.account ?? ''}|${o.orderId}`} style={{ borderTop: '1px solid var(--border)' }}>
               <Td title={o.firstTs !== o.lastTs ? `${fmtDateTime(o.firstTs)} → ${fmtDateTime(o.lastTs)}` : undefined}>
                 {fmtDateTime(o.lastTs)}
                 {o.firstTs !== o.lastTs && <span style={{ color: 'var(--muted)' }}> · {duration(o.lastTs - o.firstTs)}</span>}
               </Td>
+              {showAccount && <Td mono={false}>{o.account}</Td>}
               <Td title={o.instanceId ?? t('history.unclaimed')}><span style={{ color: 'var(--muted)' }}>{o.orderId}</span></Td>
               <Td>{o.symbol}</Td>
               <Td mono={false}><Side side={o.side} positionSide={o.positionSide} /></Td>

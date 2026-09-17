@@ -36,7 +36,7 @@ import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
 import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
 import { PnlService } from '../pnl/PnlService.js'
-import type { HistoryQuery, PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow, PnlSeriesPoint } from '../pnl/PnlService.js'
+import type { HistoryMember, HistoryQuery, PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow, PnlSeriesPoint } from '../pnl/PnlService.js'
 import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
@@ -152,6 +152,8 @@ async function importPluginFactory(filePath: string): Promise<PluginFactory<unkn
   }
   return factory
 }
+
+export type HistoryKind = 'positions' | 'fills' | 'orders' | 'symbols'
 
 export class OpenWhaleRuntime implements IRuntime {
   private readonly instances = new Map<string, StrategyInstance>()
@@ -991,20 +993,40 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   /**
-   * Trade history of one account from the ledger — positions, fills or
-   * orders. The ledger is keyed by credential, so the account's bound
-   * credential is what is looked up.
+   * Trade history from the ledger — positions, fills or orders — for one
+   * account, or for a set of (account, symbol, side) members such as a
+   * position combination. The ledger is keyed by credential, so each
+   * account's bound credential is what is looked up.
    */
-  async accountHistory(name: string, kind: 'positions' | 'fills' | 'orders' | 'symbols', query: HistoryQuery = {}): Promise<unknown> {
+  async accountHistory(name: string, kind: HistoryKind, query: HistoryQuery = {}): Promise<unknown> {
+    return this.scopedHistory([{ account: name }], kind, query)
+  }
+
+  async scopedHistory(
+    members: Array<{ account: string; symbol?: string; side?: 'long' | 'short' | '*'; instanceId?: string }>,
+    kind: HistoryKind,
+    query: HistoryQuery = {},
+  ): Promise<unknown> {
     if (!this.pnlService) throw new Error('Trade history requires a database-backed runtime')
-    const entity = await this.accountStore.get(name)
-    if (!entity) throw new Error(`Unknown account "${name}"`)
-    const ledger = entity.credential ?? name
+    const scope: HistoryMember[] = []
+    for (const m of members) {
+      const entity = await this.accountStore.get(m.account)
+      // A combination can outlive an account it names; its other legs still have a history.
+      if (!entity) {
+        if (members.length === 1) throw new Error(`Unknown account "${m.account}"`)
+        continue
+      }
+      scope.push({
+        ledger: entity.credential ?? m.account, label: m.account,
+        ...(m.symbol ? { symbol: m.symbol } : {}), ...(m.side ? { side: m.side } : {}),
+        ...(m.instanceId ? { instanceId: m.instanceId } : {}),
+      })
+    }
     switch (kind) {
-      case 'positions': return this.pnlService.accountPositions(ledger, query)
-      case 'fills': return this.pnlService.accountFills(ledger, query)
-      case 'orders': return this.pnlService.accountOrders(ledger, query)
-      case 'symbols': return this.pnlService.accountSymbols(ledger)
+      case 'positions': return this.pnlService.historyPositions(scope, query)
+      case 'fills': return this.pnlService.historyFills(scope, query)
+      case 'orders': return this.pnlService.historyOrders(scope, query)
+      case 'symbols': return this.pnlService.historySymbols(scope)
     }
   }
 

@@ -16,7 +16,7 @@ import { loadOverviewLayout, saveOverviewLayout, resetOverviewLayout } from './o
 import { PositionGroups, type Member } from './positionGroups.js'
 import { getAlertService, type AlertSettings } from './notify/alerts.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
-import type { CompiledLoader, CompiledType, DBCredentialStore, StrategyInstance } from '@openwhaleorg/core'
+import type { CompiledLoader, CompiledType, DBCredentialStore, HistoryKind, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime, getDatabase } from './runtime.js'
 import { PnlCollectorPref } from './pnlCollectorPref.js'
@@ -211,27 +211,29 @@ export function buildRouter(): Router {
   }))
 
   // Trade history from the PnL ledger: positions | fills | orders | symbols
+  const HISTORY_KINDS = new Set(['positions', 'fills', 'orders', 'symbols'])
+  const historyQuery = (q: Record<string, unknown>) => {
+    const num = (k: string): number | undefined => {
+      const v = Number(q[k])
+      return q[k] !== undefined && Number.isFinite(v) ? v : undefined
+    }
+    const symbol = typeof q['symbol'] === 'string' && q['symbol'] ? q['symbol'] : undefined
+    const since = num('since'), until = num('until')
+    return {
+      ...(since !== undefined ? { since } : {}),
+      ...(until !== undefined ? { until } : {}),
+      ...(symbol ? { symbol } : {}),
+      offset: Math.max(0, Math.floor(num('offset') ?? 0)),
+      limit: Math.min(Math.max(Math.floor(num('limit') ?? 50), 1), 500),
+    }
+  }
+
   router.get('/api/accounts/:name/history/:kind', h(async (req, res) => {
     const runtime = await ensureStarted()
-    const kind = req.params['kind']
-    if (kind !== 'positions' && kind !== 'fills' && kind !== 'orders' && kind !== 'symbols') {
-      res.status(404).json({ error: `unknown history kind "${kind}"` })
-      return
-    }
-    const num = (k: string): number | undefined => {
-      const v = Number(req.query[k])
-      return req.query[k] !== undefined && Number.isFinite(v) ? v : undefined
-    }
-    const symbol = typeof req.query['symbol'] === 'string' && req.query['symbol'] ? req.query['symbol'] : undefined
-    const since = num('since'), until = num('until')
+    const kind = req.params['kind']!
+    if (!HISTORY_KINDS.has(kind)) { res.status(404).json({ error: `unknown history kind "${kind}"` }); return }
     try {
-      res.json(await runtime.accountHistory(req.params['name']!, kind, {
-        ...(since !== undefined ? { since } : {}),
-        ...(until !== undefined ? { until } : {}),
-        ...(symbol ? { symbol } : {}),
-        offset: Math.max(0, Math.floor(num('offset') ?? 0)),
-        limit: Math.min(Math.max(Math.floor(num('limit') ?? 50), 1), 500),
-      }))
+      res.json(await runtime.accountHistory(req.params['name']!, kind as HistoryKind, historyQuery(req.query)))
     } catch (err) {
       res.status(400).json({ error: errText(err) })
     }
@@ -982,6 +984,25 @@ export function buildRouter(): Router {
   }))
   router.delete('/api/position-groups/:id', h(async (req, res) => {
     try { await (await groups()).remove(req.params['id']!); res.json({ ok: true }) } catch (err) { groupError(res, err) }
+  }))
+  // A combination's history: its members' slices of the ledger. A strategy's
+  // combination is narrowed to what that instance placed.
+  router.get('/api/position-groups/:id/history/:kind', h(async (req, res) => {
+    const kind = req.params['kind']!
+    if (!HISTORY_KINDS.has(kind)) { res.status(404).json({ error: `unknown history kind "${kind}"` }); return }
+    try {
+      const group = (await (await groups()).list()).find(g => g.id === req.params['id'])
+      if (!group) { res.status(404).json({ error: 'combination not found' }); return }
+      const members = group.members.map(m => ({ ...m, ...(group.instanceId ? { instanceId: group.instanceId } : {}) }))
+      if (members.length === 0) {
+        const summary = { count: 0, volume: 0, fees: 0, feesOther: {}, feeVolume: 0, feeRate: null, realized: 0, funding: 0, net: 0 }
+        res.json(kind === 'symbols' ? [] : { rows: [], total: 0, summary })
+        return
+      }
+      res.json(await (await ensureStarted()).scopedHistory(members, kind as HistoryKind, historyQuery(req.query)))
+    } catch (err) {
+      groupError(res, err)
+    }
   }))
   router.post('/api/position-groups/:id/members', h(async (req, res) => {
     const body = (req.body ?? {}) as { members?: Member[] }
