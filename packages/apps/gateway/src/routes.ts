@@ -210,6 +210,33 @@ export function buildRouter(): Router {
     }
   }))
 
+  // Trade history from the PnL ledger: positions | fills | orders | symbols
+  router.get('/api/accounts/:name/history/:kind', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const kind = req.params['kind']
+    if (kind !== 'positions' && kind !== 'fills' && kind !== 'orders' && kind !== 'symbols') {
+      res.status(404).json({ error: `unknown history kind "${kind}"` })
+      return
+    }
+    const num = (k: string): number | undefined => {
+      const v = Number(req.query[k])
+      return req.query[k] !== undefined && Number.isFinite(v) ? v : undefined
+    }
+    const symbol = typeof req.query['symbol'] === 'string' && req.query['symbol'] ? req.query['symbol'] : undefined
+    const since = num('since'), until = num('until')
+    try {
+      res.json(await runtime.accountHistory(req.params['name']!, kind, {
+        ...(since !== undefined ? { since } : {}),
+        ...(until !== undefined ? { until } : {}),
+        ...(symbol ? { symbol } : {}),
+        offset: Math.max(0, Math.floor(num('offset') ?? 0)),
+        limit: Math.min(Math.max(Math.floor(num('limit') ?? 50), 1), 500),
+      }))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   router.get('/api/accounts/:name/snapshots', h(async (req, res) => {
     const runtime = await ensureStarted()
     const hours = Math.min(Math.max(Number(req.query['hours'] ?? 24) || 24, 1), 24 * 30)

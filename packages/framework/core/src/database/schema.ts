@@ -246,10 +246,13 @@ CREATE TABLE IF NOT EXISTS pnl_fills (
   fee          REAL,
   fee_asset    TEXT,
   ts           INTEGER NOT NULL,
+  position_side TEXT,                  -- LONG / SHORT on hedge-mode accounts, NULL otherwise
   PRIMARY KEY (account, fill_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pnl_fills_instance ON pnl_fills (instance_id, ts);
 CREATE INDEX IF NOT EXISTS idx_pnl_fills_account_symbol ON pnl_fills (account, symbol, ts);
+CREATE INDEX IF NOT EXISTS idx_pnl_fills_account_ts ON pnl_fills (account, ts);
+CREATE INDEX IF NOT EXISTS idx_pnl_fills_account_order ON pnl_fills (account, order_id);
 
 -- Funding is position-level, not order-level: one venue event may split into
 -- several rows, one per instance holding claimed exposure at that moment
@@ -295,4 +298,6 @@ export const MIGRATION_SQL: string[] = [
   // 2026-08-24: implementation-declared account configuration (e.g. a wallet
   // account's chain list) — see AccountImplementation.paramsSchema
   `ALTER TABLE accounts ADD COLUMN params TEXT`,
+  // 2026-09-17: hedge-mode side on ledger fills, so position history keeps LONG and SHORT apart
+  `ALTER TABLE pnl_fills ADD COLUMN position_side TEXT`,
 ]

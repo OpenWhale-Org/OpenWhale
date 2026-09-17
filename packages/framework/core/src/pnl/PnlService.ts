@@ -1,5 +1,9 @@
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import { createLogger } from '../utils/logger.js'
+import {
+  USD_ASSETS, attachFunding, replayPositions, summarize, toFillRow, toOrderRow,
+  type FillHistoryRow, type HistorySummary, type LedgerFill, type LedgerFunding, type OrderHistoryRow, type PositionHistoryRow,
+} from './accountHistory.js'
 
 const log = createLogger('PnlService')
 
@@ -42,6 +46,7 @@ export interface PnlSessionLike {
   fetchFills?(symbol: string, since?: number, limit?: number): Promise<Array<{
     id: string; orderId: string; symbol: string; side: string; qty: number; price: number
     realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number
+    info?: Record<string, unknown>
   }>>
   /**
    * Every symbol's fills in ONE call, for venues whose trade history is scoped
@@ -53,6 +58,7 @@ export interface PnlSessionLike {
   fetchFillsAll?(since?: number, limit?: number): Promise<Array<{
     id: string; orderId: string; symbol: string; side: string; qty: number; price: number
     realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number
+    info?: Record<string, unknown>
   }>>
   fetchFundingHistory?(since?: number, limit?: number): Promise<Array<{
     id?: string; symbol: string; amount: number; asset: string; timestamp: number
@@ -178,6 +184,49 @@ const FILLS_ALL_PAGE = 2000
 /** Pages read in one sweep before giving the venue a rest. 5 × 2000 rows an hour is far past any account here. */
 const FILLS_ALL_MAX_PAGES = 5
 const EPS = 1e-9
+/** Rows read per step when replaying a whole account, with a yield between steps. */
+const HISTORY_PAGE = 20_000
+
+/** Binance hedge mode tags each fill LONG/SHORT; one-way accounts say BOTH, which is no side at all. */
+function hedgeSide(info: Record<string, unknown> | undefined): string | null {
+  const v = String(info?.['positionSide'] ?? '').toUpperCase()
+  return v === 'LONG' || v === 'SHORT' ? v : null
+}
+
+export interface HistoryQuery {
+  since?: number
+  until?: number
+  symbol?: string
+  offset?: number
+  limit?: number
+}
+
+export interface HistoryPage<T> {
+  rows: T[]
+  total: number
+  summary: HistorySummary
+}
+
+type FillDbRow = {
+  fill_id: string; order_id: string; instance_id: string | null; symbol: string; position_side: string | null
+  side: string; qty: number; price: number; realized_pnl: number | null; fee: number | null; fee_asset: string | null; ts: number
+}
+const FILL_COLS = 'fill_id, order_id, instance_id, symbol, position_side, side, qty, price, realized_pnl, fee, fee_asset, ts'
+
+function toLedgerFill(r: FillDbRow): LedgerFill {
+  return {
+    fillId: r.fill_id, orderId: r.order_id, instanceId: r.instance_id, symbol: r.symbol, positionSide: r.position_side,
+    side: r.side === 'sell' ? 'sell' : 'buy', qty: r.qty, price: r.price,
+    realizedPnl: r.realized_pnl, fee: r.fee, feeAsset: r.fee_asset, ts: r.ts,
+  }
+}
+
+/** Replayed positions of one account, kept until the ledger grows. */
+interface PositionCache {
+  maxRowid: number
+  /** `${symbol}\u0000${positionSide}` → that book's positions, funding not yet attached. */
+  books: Map<string, PositionHistoryRow[]>
+}
 
 export class PnlService {
   private readonly db: DatabaseAdapter
@@ -526,7 +575,7 @@ export class PnlService {
     account: string,
     symbol: string,
     fills: Array<{ id: string; orderId: string; symbol: string; side: string; qty: number; price: number
-      realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number }>,
+      realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number; info?: Record<string, unknown> }>,
   ): Promise<void> {
     for (const f of fills) {
       const claim = await this.db.get<{ instance_id: string }>(
@@ -534,11 +583,11 @@ export class PnlService {
         [account, f.orderId])
       await this.db.run(
         `INSERT OR IGNORE INTO pnl_fills
-           (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts, position_side)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [account, f.id, f.orderId, claim?.instance_id ?? null, f.symbol || symbol,
           f.side === 'sell' ? 'sell' : 'buy', f.qty, f.price,
-          f.realizedPnl ?? null, f.fee ?? null, f.feeAsset ?? null, f.timestamp])
+          f.realizedPnl ?? null, f.fee ?? null, f.feeAsset ?? null, f.timestamp, hedgeSide(f.info)])
     }
   }
 
@@ -856,6 +905,181 @@ export class PnlService {
         account: b.account, symbol: b.symbol, qty: b.qty,
         avgEntry: Math.abs(b.qty) > EPS ? b.cost / Math.abs(b.qty) : 0,
       }))
+  }
+
+  // ── Account history ───────────────────────────────────────────────────────
+
+  private readonly positionCache = new Map<string, PositionCache>()
+  private readonly positionBuilds = new Map<string, Promise<PositionCache>>()
+
+  /** Symbols this account has traded, for a filter. */
+  async accountSymbols(account: string): Promise<string[]> {
+    const rows = await this.db.all<{ symbol: string }>(
+      `SELECT DISTINCT symbol FROM pnl_fills WHERE account = ? ORDER BY symbol`, [account])
+    return rows.map(r => r.symbol)
+  }
+
+  private historyWhere(account: string, q: HistoryQuery, tsCol = 'ts'): { sql: string; args: unknown[] } {
+    const parts = ['account = ?']
+    const args: unknown[] = [account]
+    if (q.symbol) { parts.push('symbol = ?'); args.push(q.symbol) }
+    if (q.since !== undefined) { parts.push(`${tsCol} >= ?`); args.push(q.since) }
+    if (q.until !== undefined) { parts.push(`${tsCol} < ?`); args.push(q.until) }
+    return { sql: parts.join(' AND '), args }
+  }
+
+  private async fundingTotal(account: string, q: HistoryQuery): Promise<number> {
+    const w = this.historyWhere(account, q)
+    const rows = await this.db.all<{ asset: string; amount: number }>(
+      `SELECT asset, SUM(amount) AS amount FROM pnl_funding WHERE ${w.sql} GROUP BY asset`, w.args)
+    return rows.filter(r => USD_ASSETS.has(r.asset.toUpperCase())).reduce((s, r) => s + r.amount, 0)
+  }
+
+  /** Fills newest first; the summary covers every fill in the window, not just the page. */
+  async accountFills(account: string, q: HistoryQuery = {}): Promise<HistoryPage<FillHistoryRow>> {
+    const w = this.historyWhere(account, q)
+    const page = await this.db.all<FillDbRow>(
+      `SELECT ${FILL_COLS} FROM pnl_fills WHERE ${w.sql} ORDER BY ts DESC, fill_id LIMIT ? OFFSET ?`,
+      [...w.args, q.limit ?? 50, q.offset ?? 0])
+    const agg = await this.db.all<{ asset: string | null; n: number; volume: number; fee: number; realized: number; zero_volume: number }>(
+      `SELECT UPPER(COALESCE(fee_asset, 'USDT')) AS asset, COUNT(*) AS n, SUM(qty * price) AS volume,
+              SUM(COALESCE(fee, 0)) AS fee, SUM(COALESCE(realized_pnl, 0)) AS realized,
+              SUM(CASE WHEN COALESCE(fee, 0) = 0 THEN qty * price ELSE 0 END) AS zero_volume
+         FROM pnl_fills WHERE ${w.sql} GROUP BY 1`, w.args)
+    return {
+      rows: page.map(r => toFillRow(toLedgerFill(r))),
+      total: agg.reduce((s, a) => s + a.n, 0),
+      summary: await this.summaryFromAgg(account, q, agg),
+    }
+  }
+
+  private async summaryFromAgg(
+    account: string,
+    q: HistoryQuery,
+    agg: Array<{ asset: string | null; n: number; volume: number; fee: number; realized: number; zero_volume: number }>,
+  ): Promise<HistorySummary> {
+    const rows = agg.map(a => {
+      const usd = USD_ASSETS.has(a.asset ?? 'USDT')
+      return {
+        volume: a.volume, realized: a.realized,
+        fees: usd ? a.fee : 0,
+        feesOther: usd || a.fee === 0 ? {} : { [a.asset!]: a.fee },
+        feeVolume: usd ? a.volume : a.zero_volume,
+      }
+    })
+    const s = summarize(rows, await this.fundingTotal(account, q))
+    s.count = agg.reduce((n, a) => n + a.n, 0)
+    return s
+  }
+
+  /** Fills grouped by venue order, newest first. */
+  async accountOrders(account: string, q: HistoryQuery = {}): Promise<HistoryPage<OrderHistoryRow>> {
+    const w = this.historyWhere(account, q)
+    const ids = await this.db.all<{ order_id: string; last_ts: number }>(
+      `SELECT order_id, MAX(ts) AS last_ts FROM pnl_fills WHERE ${w.sql}
+        GROUP BY order_id ORDER BY last_ts DESC, order_id LIMIT ? OFFSET ?`,
+      [...w.args, q.limit ?? 50, q.offset ?? 0])
+    const rows: OrderHistoryRow[] = []
+    for (const { order_id } of ids) {
+      const fills = await this.db.all<FillDbRow>(
+        `SELECT ${FILL_COLS} FROM pnl_fills WHERE account = ? AND order_id = ? ORDER BY ts`, [account, order_id])
+      if (fills.length > 0) rows.push(toOrderRow(fills.map(toLedgerFill)))
+    }
+    const count = await this.db.get<{ n: number }>(
+      `SELECT COUNT(DISTINCT order_id) AS n FROM pnl_fills WHERE ${w.sql}`, w.args)
+    const agg = await this.db.all<{ asset: string | null; n: number; volume: number; fee: number; realized: number; zero_volume: number }>(
+      `SELECT UPPER(COALESCE(fee_asset, 'USDT')) AS asset, COUNT(*) AS n, SUM(qty * price) AS volume,
+              SUM(COALESCE(fee, 0)) AS fee, SUM(COALESCE(realized_pnl, 0)) AS realized,
+              SUM(CASE WHEN COALESCE(fee, 0) = 0 THEN qty * price ELSE 0 END) AS zero_volume
+         FROM pnl_fills WHERE ${w.sql} GROUP BY 1`, w.args)
+    const summary = await this.summaryFromAgg(account, q, agg)
+    summary.count = count?.n ?? 0
+    return { rows, total: count?.n ?? 0, summary }
+  }
+
+  /**
+   * Positions replayed from the account's whole ledger — a position's size
+   * depends on every fill before it, so the window filters the result, never
+   * the replay. Positions overlapping [since, until) are returned, newest
+   * open first; the summary covers all of them.
+   */
+  async accountPositions(account: string, q: HistoryQuery = {}): Promise<HistoryPage<PositionHistoryRow> & { unmatchedFunding: number }> {
+    const cache = await this.positionsFor(account)
+    let all: PositionHistoryRow[] = []
+    for (const list of cache.books.values()) all.push(...list.map(p => ({ ...p, feesOther: { ...p.feesOther } })))
+    const funding = await this.db.all<{ symbol: string; amount: number; asset: string; ts: number }>(
+      `SELECT symbol, SUM(amount) AS amount, asset, ts FROM pnl_funding WHERE account = ? GROUP BY event_key`, [account])
+    const { unmatched } = attachFunding(all, funding as LedgerFunding[])
+    all = all.filter(p =>
+      (!q.symbol || p.symbol === q.symbol)
+      && (q.until === undefined || p.openTs < q.until)
+      && (q.since === undefined || p.closeTs === null || p.closeTs >= q.since))
+    all.sort((a, b) => (b.closeTs ?? Infinity) - (a.closeTs ?? Infinity) || b.openTs - a.openTs)
+    const offset = q.offset ?? 0
+    return {
+      rows: all.slice(offset, offset + (q.limit ?? 50)),
+      total: all.length,
+      summary: summarize(all),
+      unmatchedFunding: unmatched,
+    }
+  }
+
+  private async positionsFor(account: string): Promise<PositionCache> {
+    const head = await this.db.get<{ r: number | null }>(`SELECT MAX(rowid) AS r FROM pnl_fills WHERE account = ?`, [account])
+    const maxRowid = head?.r ?? 0
+    const cached = this.positionCache.get(account)
+    if (cached && cached.maxRowid === maxRowid) return cached
+    const running = this.positionBuilds.get(account)
+    if (running) return running
+    const build = this.buildPositions(account, cached, maxRowid)
+      .then(c => { this.positionCache.set(account, c); return c })
+      .finally(() => this.positionBuilds.delete(account))
+    this.positionBuilds.set(account, build)
+    return build
+  }
+
+  /**
+   * Replay only the books that gained fills since the cached build — each
+   * reread whole, because a late fill can land anywhere in its history. A
+   * first build reads the ledger in rowid pages and yields between them, so
+   * a large account does not hold the event loop the strategies run on.
+   */
+  private async buildPositions(account: string, prev: PositionCache | undefined, maxRowid: number): Promise<PositionCache> {
+    const keyOf = (symbol: string, side: string | null) => `${symbol}\u0000${side ?? ''}`
+    const books = new Map(prev?.books ?? [])
+    const groups = new Map<string, LedgerFill[]>()
+    if (prev) {
+      const touched = await this.db.all<{ symbol: string; position_side: string | null }>(
+        `SELECT DISTINCT symbol, position_side FROM pnl_fills WHERE account = ? AND rowid > ?`, [account, prev.maxRowid])
+      for (const t of touched) {
+        const rows = await this.db.all<FillDbRow>(
+          `SELECT ${FILL_COLS} FROM pnl_fills WHERE account = ? AND symbol = ? AND position_side IS ? ORDER BY ts, rowid`,
+          [account, t.symbol, t.position_side])
+        groups.set(keyOf(t.symbol, t.position_side), rows.map(toLedgerFill))
+        await new Promise(r => setImmediate(r))
+      }
+    } else {
+      let after = 0
+      for (;;) {
+        const rows = await this.db.all<FillDbRow & { rid: number }>(
+          `SELECT rowid AS rid, ${FILL_COLS} FROM pnl_fills WHERE account = ? AND rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?`,
+          [account, after, maxRowid, HISTORY_PAGE])
+        for (const r of rows) {
+          const k = keyOf(r.symbol, r.position_side)
+          const list = groups.get(k) ?? groups.set(k, []).get(k)!
+          list.push(toLedgerFill(r))
+        }
+        if (rows.length < HISTORY_PAGE) break
+        after = rows[rows.length - 1]!.rid
+        await new Promise(r => setImmediate(r))
+      }
+      for (const list of groups.values()) list.sort((a, b) => a.ts - b.ts)
+    }
+    for (const [k, fills] of groups) {
+      const [symbol, side] = k.split('\u0000') as [string, string]
+      books.set(k, replayPositions(symbol, side || null, fills))
+    }
+    return { maxRowid, books }
   }
 
   // ── Watermarks ────────────────────────────────────────────────────────────

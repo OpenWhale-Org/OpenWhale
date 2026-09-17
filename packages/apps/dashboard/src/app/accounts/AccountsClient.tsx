@@ -10,6 +10,7 @@ import type { CredentialTypeInfo } from '@/lib/core-types'
 import type { AccountImplementationInfo } from '@/lib/core-types'
 import { EquityChart } from './EquityChart'
 import { AccountDetail } from './AccountDetail'
+import { AccountHistory } from './AccountHistory'
 import { PositionGroupsPanel, useGroups } from './PositionGroups'
 import { AccountPicker, eligibleCredentialsFor } from './AccountPicker'
 import { CredentialMark } from '@/components/TypeMark'
@@ -390,6 +391,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
               <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3 flex flex-col gap-4">
                 <EquityChart account={selected.name} />
                 {selected.status === 'ready' && <AccountDetail account={selected.name} />}
+                {selected.status === 'ready' && <AccountHistory account={selected.name} />}
               </div>
 
               <div className="shrink-0 flex items-center gap-2 px-4 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
