@@ -240,6 +240,15 @@ export interface ParamFieldDef {
   /** Options for type='options' */
   options?: ParamFieldOption[]
   /**
+   * The options are suggestions, not the allowed set: the form lets the
+   * operator type a value the list does not have.
+   *
+   * Set for lists a script resolves at runtime — an account's symbols, the
+   * live instance ids — where the list says what exists right now, not what
+   * the schema accepts. A Zod enum stays a closed select.
+   */
+  suggestions?: boolean
+  /**
    * Conditional visibility — field is shown only when the referenced
    * sibling field has one of the listed values.
    */

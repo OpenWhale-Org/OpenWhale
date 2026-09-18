@@ -311,6 +311,10 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           for (const f of dependent) {
             const opts = resolved[f.name]
             if (!opts) continue
+            // A suggestion list must not overwrite what was typed: the list is
+            // what the account holds right now, and an operator may be naming
+            // a market it does not hold yet.
+            if (f.suggestions === true) continue
             if (!opts.some(o => String(o.value) === (next[f.name] ?? ''))) { next[f.name] = String(opts[0]?.value ?? ''); changed = true }
           }
           return changed ? next : prev

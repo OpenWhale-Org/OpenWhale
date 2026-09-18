@@ -35,7 +35,7 @@ export interface SelectOption {
   disabled?: boolean
 }
 
-export function Select({ value, options, onChange, placeholder = '—', size = 'md', className = '', style, disabled, searchable }: {
+export function Select({ value, options, onChange, placeholder = '—', size = 'md', className = '', style, disabled, searchable, allowCustom }: {
   value: string
   options: SelectOption[]
   onChange: (value: string) => void
@@ -50,6 +50,16 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
    * type in, and a picker of ninety symbols is unusable without one.
    */
   searchable?: boolean
+  /**
+   * The options are suggestions, not the whole world: what is typed can be
+   * taken as the value. Forces the search box on, offers the typed text as
+   * the first row when it matches no option, and shows a value that is not
+   * in the list as itself rather than as the placeholder.
+   *
+   * For a picker whose list is "what exists right now" — an account's symbols,
+   * an instance id — rather than a closed set the schema defines.
+   */
+  allowCustom?: boolean
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -58,15 +68,22 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const current = options.find(o => o.value === value)
-  const withSearch = searchable ?? options.length >= SEARCH_FROM
+  const listed = options.find(o => o.value === value)
+  const current = listed ?? (allowCustom && value !== '' ? { value, label: value } : undefined)
+  const withSearch = allowCustom === true || (searchable ?? options.length >= SEARCH_FROM)
   /* Matching is on the words, in any order: "bz usdt" finds
      "BZ/USDT:USDT · short $91,395", and so does "usdt bz". */
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const shown = terms.length === 0 ? options : options.filter((o) => {
+  const matched = terms.length === 0 ? options : options.filter((o) => {
     const text = `${o.search ?? (typeof o.label === 'string' ? o.label : '')} ${o.value}`.toLowerCase()
     return terms.every(term => text.includes(term))
   })
+  const typed = query.trim()
+  // 自由输入：列表里没有这一项时，把输入本身作为第一行候选
+  const custom: SelectOption[] = allowCustom && typed !== '' && !options.some(o => o.value === typed)
+    ? [{ value: typed, label: t('ui.useTyped', { text: typed }) }]
+    : []
+  const shown = [...custom, ...matched]
 
   useEffect(() => {
     if (!open) return

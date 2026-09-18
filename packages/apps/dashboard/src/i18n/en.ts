@@ -327,6 +327,7 @@ export const en = {
   'system.pnl.never': 'not since this process started',
   'system.pnl.pausedNote': 'Paused: instance PnL, fees and funding stop updating, and loss-based circuit breakers judge stale data until you resume.',
   'system.pnl.unavailable': 'This runtime has no database, so there is no PnL ledger to collect into.',
+  'ui.useTyped': 'Use “{text}”',
   'ui.filterOptions': 'Type to filter…',
   'ui.noMatch': 'No match',
   'system.tz.title': 'Time zone',

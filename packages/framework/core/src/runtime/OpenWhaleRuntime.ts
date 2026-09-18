@@ -1073,7 +1073,10 @@ export class OpenWhaleRuntime implements IRuntime {
         try {
           const resolved = await def.paramOptions(this)
           fields = fields.map(f => resolved[f.name] !== undefined
-            ? { ...f, type: 'options' as const, options: resolved[f.name]!.map(o => ({ value: o.value, label: o.label })) }
+            ? {
+              ...f, type: 'options' as const, suggestions: true,
+              options: resolved[f.name]!.map(o => ({ value: o.value, label: o.label })),
+            }
             : f)
         } catch { /* advisory */ }
       }

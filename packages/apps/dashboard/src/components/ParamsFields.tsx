@@ -66,6 +66,7 @@ export function ParamsFields({ fields, values, onChange }: {
               className="w-44"
               value={values[f.name] ?? ''}
               onChange={(v) => onChange(f.name, v)}
+              allowCustom={f.suggestions === true}
               options={[
                 { value: '', label: `default${f.default !== undefined ? ` (${String(f.default)})` : ''}` },
                 ...f.options.map(o => ({ value: String(o.value), label: o.label })),
