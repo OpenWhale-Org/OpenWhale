@@ -1,5 +1,6 @@
 import type { SpotExchangeAdapter } from '../types/spot.js'
 import { OwAccount } from '@openwhaleorg/core'
+import { SpotAccountWriter } from './SpotAccountWriter.js'
 import type { IAccountBalance, IOrder, IHistoryRecord } from '../types/account.js'
 import type { Ticker, Kline, OrderBook, ExchangeBalance, ExchangeOrder, ExchangeTrade } from '../types/exchange.js'
 
@@ -22,7 +23,13 @@ export interface SpotAccountOptions {
  * inventing valuations without a price feed would be worse than omitting
  * them); the per-token breakdown always carries everything.
  */
-@OwAccount({ id: 'spot-account', kind: 'exchange/spot', displayName: 'Spot Account (any venue)' })
+@OwAccount({
+  id: 'spot-account',
+  kind: 'exchange/spot',
+  displayName: 'Spot Account (any venue)',
+  // The write half — see PerpAccount for why it is a separate class.
+  writer: SpotAccountWriter,
+})
 export class SpotAccount {
   /** Serializable matching metadata — the framework compares strings, never instanceof. */
   static readonly kind = 'exchange/spot' as const

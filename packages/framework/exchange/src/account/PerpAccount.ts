@@ -1,5 +1,6 @@
 import type { PerpExchangeAdapter } from '../types/perp.js'
 import { OwAccount } from '@openwhaleorg/core'
+import { PerpAccountWriter } from './PerpAccountWriter.js'
 import type { IAccountBalance, IPosition, IOrder, IPnL, IHistoryRecord } from '../types/account.js'
 import type { Ticker, Kline, OrderBook, FundingRateData, ExchangeBalance, ExchangePosition, ExchangeOrder, ExchangeTrade } from '../types/exchange.js'
 
@@ -24,7 +25,14 @@ export interface PerpAccountOptions {
  * Venue subclasses (registered via CredentialTypeDefinition.readers) may add
  * typed venue-specific read methods and pin the venue via `static venueType`.
  */
-@OwAccount({ id: 'perp-account', kind: 'exchange/perp', displayName: 'Perp Account (any venue)' })
+@OwAccount({
+  id: 'perp-account',
+  kind: 'exchange/perp',
+  displayName: 'Perp Account (any venue)',
+  // The write half. Separate class on purpose: what a strategy receives is
+  // still this reader, which has no write methods on it at all.
+  writer: PerpAccountWriter,
+})
 export class PerpAccount {
   /** Serializable matching metadata — the framework compares strings, never instanceof. */
   static readonly kind = 'exchange/perp' as const

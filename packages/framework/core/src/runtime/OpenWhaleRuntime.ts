@@ -14,7 +14,7 @@ import type { LifecycleReason, IStrategy } from '../types/strategy.js'
 import type { CredentialStore } from '../types/credential.js'
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import type { AdapterResolver, CredentialTypeDefinition, CredentialTypeInfo, NamespacedKind, PublicSessionAccessor } from '../types/materialization.js'
-import type { AccountEntity, AccountImplementation, AccountImplementationInfo, AccountSnapshotRecord, AccountSnapshotSample, AccountSnapshotStore, AccountStore, AccountView } from '../types/account.js'
+import type { AccountActionInfo, AccountActionRecord, AccountEntity, AccountImplementation, AccountImplementationInfo, AccountSnapshotRecord, AccountSnapshotSample, AccountSnapshotStore, AccountStore, AccountView } from '../types/account.js'
 import { implementationVenue } from '../types/account.js'
 import { cellVenue } from '../types/materialization.js'
 import { AdapterRegistry } from './AdapterRegistry.js'
@@ -58,6 +58,13 @@ const log = createLogger('OpenWhaleRuntime')
 
 /** How long one illustrationData() answer serves the same form state. */
 const ILLUSTRATION_TTL_MS = 15_000
+
+/**
+ * Synthetic executor name operator account writes are filed under. They are not
+ * an executor — nothing dispatches them — but the executions log is where an
+ * audit looks, so they are written in its shape and under its own directory.
+ */
+const ACCOUNT_ACTION_EXECUTOR = 'account-actions'
 
 /**
  * Resolve a viewer's plot-option request against the options that exist in the
@@ -783,7 +790,11 @@ export class OpenWhaleRuntime implements IRuntime {
       try {
         const { type } = await this.readCredential(entity.credential)
         const snapshotError = this.accountSnapshotErrors.get(entity.name)
-        views.push({ ...entity, kind: impl.kind, type, venue: pinned ?? type, status: 'ready', ...(snapshotError !== undefined ? { snapshotError } : {}) })
+        views.push({
+          ...entity, kind: impl.kind, type, venue: pinned ?? type, status: 'ready',
+          ...(snapshotError !== undefined ? { snapshotError } : {}),
+          ...(impl.actions?.length ? { writable: true } : {}),
+        })
       } catch {
         views.push({ ...entity, kind: impl.kind, status: 'broken', problem: `credential "${entity.credential}" not found` })
       }
@@ -838,6 +849,125 @@ export class OpenWhaleRuntime implements IRuntime {
       }
     }))
     return { sections, errors, ...(impl.sections ? { layout: impl.sections } : {}) }
+  }
+
+  // ── Account writes — the operator half of the declarative panel ─────────────
+
+  /**
+   * Resolve a ready account to the three things every write needs: the stored
+   * entity, its implementation, and a live venue session.
+   *
+   * Kept private on purpose. A caller holding this could build the WRITER, and
+   * the only callers allowed to are the two action methods below.
+   */
+  private async resolveAccountSession(name: string): Promise<{ entity: AccountEntity; impl: AccountImplementation; session: unknown }> {
+    const entity = await this.accountStore.get(name)
+    if (!entity) throw new Error(`Unknown account "${name}"`)
+    if (!entity.credential) throw new Error(`Account "${name}" has no credential bound`)
+    const impl = this.accountImpls.get(entity.implementation)?.impl
+    if (!impl) throw new Error(`Account "${name}" uses unregistered implementation "${entity.implementation}"`)
+    const { type } = await this.readCredential(entity.credential)
+    const venue = implementationVenue(impl) ?? type
+    const session = await this.adapterRegistry.resolve(impl.kind, venue, entity.credential)
+    return { entity, impl, session }
+  }
+
+  /**
+   * The writes this account offers, with their forms — the write half of
+   * `accountDetail`. Live options (open order ids, held symbols) resolve per
+   * call so a dropdown reflects the account as it is now; a resolver failure
+   * costs only the dropdown.
+   */
+  async listAccountActions(name: string): Promise<AccountActionInfo[]> {
+    const { entity, impl, session } = await this.resolveAccountSession(name)
+    if (!impl.actions?.length) return []
+    return Promise.all(impl.actions.map(async (action) => {
+      let fields = action.paramsSchema !== undefined
+        ? BaseStrategyClass.deriveParamFields(action.paramsSchema, z.object({})) ?? []
+        : []
+      if (action.paramOptions !== undefined) {
+        try {
+          const resolved = await action.paramOptions({ session, account: entity.name, ...(entity.params ? { params: entity.params } : {}) })
+          fields = fields.map(f => resolved[f.name] !== undefined
+            ? { ...f, type: 'options' as const, options: resolved[f.name]! }
+            : f)
+        } catch { /* advisory — the field stays a plain input */ }
+      }
+      return {
+        id: action.id,
+        displayName: action.displayName,
+        ...(action.description !== undefined ? { description: action.description } : {}),
+        ...(action.group !== undefined ? { group: action.group } : {}),
+        ...(action.danger !== undefined ? { danger: action.danger } : {}),
+        ...(action.submitLabel !== undefined ? { submitLabel: action.submitLabel } : {}),
+        ...(fields.length > 0 ? { paramsFields: fields } : {}),
+      }
+    }))
+  }
+
+  /**
+   * Run one declared write against the account's venue, then record it.
+   *
+   * Recording is not optional bookkeeping: this is the one path where an order
+   * reaches a venue without an instruction, a queue, or an instance behind it,
+   * so the log is the only answer to "who moved this position?". A failure is
+   * written down too — a rejected order is exactly the kind of thing an
+   * operator goes looking for afterwards.
+   */
+  async runAccountAction(
+    name: string,
+    actionId: string,
+    params: Record<string, unknown>,
+    actor?: string,
+  ): Promise<unknown> {
+    const { entity, impl, session } = await this.resolveAccountSession(name)
+    const action = impl.actions?.find(a => a.id === actionId)
+    if (!action) throw new Error(`Account "${name}" has no action "${actionId}"`)
+    if (!impl.createWriter) throw new Error(`Implementation "${entity.implementation}" declares actions but builds no write view`)
+
+    const parsed = action.paramsSchema !== undefined
+      ? action.paramsSchema.parse(params) as Record<string, unknown>
+      : {}
+    const writer = impl.createWriter(session, entity.name, entity.params) as Record<string, unknown>
+    const fn = writer[actionId]
+    if (typeof fn !== 'function') throw new Error(`Write view for "${name}" has no method "${actionId}"`)
+
+    const instruction = {
+      action: actionId,
+      executorId: ACCOUNT_ACTION_EXECUTOR,
+      params: parsed,
+      accountNames: [entity.name],
+      implementation: entity.implementation,
+      ...(actor !== undefined ? { actor } : {}),
+    }
+    try {
+      const data = await (fn as (p: Record<string, unknown>) => Promise<unknown>).call(writer, parsed)
+      log.info({ account: entity.name, action: actionId, actor }, 'Account action executed')
+      await this.recordAccountAction({ instruction, status: 'success', ...(data !== undefined ? { data } : {}), executedAt: new Date().toISOString() })
+      return data
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      log.error({ account: entity.name, action: actionId, actor, err }, 'Account action failed')
+      await this.recordAccountAction({ instruction, status: 'failed', error, executedAt: new Date().toISOString() })
+      throw err
+    }
+  }
+
+  /**
+   * Append to the executions log under the synthetic executor `account-actions`,
+   * so manual writes surface in the same explorer as strategy order flow.
+   * Best-effort: a write that reached the venue is not un-done by a disk error,
+   * so a failure here logs and the action's own result still stands.
+   */
+  private async recordAccountAction(record: AccountActionRecord): Promise<void> {
+    try {
+      const filePath = getExecutionPath(this.dataDir, ACCOUNT_ACTION_EXECUTOR)
+      await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+      await fs.promises.appendFile(filePath, JSON.stringify(record) + '\n', 'utf8')
+    } catch (err) {
+      log.error({ account: record.instruction.accountNames[0], action: record.instruction.action, err },
+        'Could not record account action — the action itself already ran')
+    }
   }
 
   /** Most recent snapshot per account, keyed by account name. */

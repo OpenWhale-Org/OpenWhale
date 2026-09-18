@@ -61,6 +61,21 @@ export interface AccountImplementation {
   paramsSchema?: ZodObject<ZodRawShape>
   /** Declarative detail panel (see AccountSectionDef). */
   sections?: AccountSectionDef[]
+  /**
+   * The writes this implementation offers (see AccountActionDef). Absent =
+   * read-only, which stays the default: a kind gains a write surface only by
+   * declaring one.
+   */
+  actions?: AccountActionDef[]
+  /**
+   * Build the WRITE view — an object with one method per declared action.
+   *
+   * Deliberately a second constructor rather than methods on the reader: the
+   * reader's lack of write methods is the framework's safety guarantee, and
+   * only the operator action route ever calls this. A kind can therefore gain
+   * a write surface without widening what a strategy can reach.
+   */
+  createWriter?(session: unknown, accountName: string, params?: Record<string, unknown>): unknown
   /** Brand mark for pickers (https URL or data: URI); `icon` is the emoji fallback. */
   logo?: string
   icon?: string
@@ -106,6 +121,98 @@ export interface AccountSectionDef {
   default?: boolean
   /** Text shown when the table is empty. */
   empty?: string
+}
+
+/**
+ * One operator-invokable write on an account — the write half of the
+ * declarative panel, mirroring AccountSectionDef on the read half.
+ *
+ * Declaring an action is all the dashboard needs: `paramsSchema` becomes the
+ * form (the same derivation strategy, monitor and script params use), and the
+ * handler is the writer method named by `id`. The page never learns the kind.
+ *
+ * This is an OPERATOR surface, not a strategy one. Strategy order flow still
+ * travels instruction → queue → executor; these run on a human click, and the
+ * runtime records every one to the executions log so a manual order is as
+ * auditable as an automated one.
+ */
+export interface AccountActionDef {
+  /** Unique within the implementation; also the writer's method name. */
+  id: string
+  displayName: Text
+  description?: Text
+  /** Section header in the action list, e.g. 'Order' / 'Position' / 'Margin'. */
+  group?: Text
+  /**
+   * Moves money or cannot be undone. The dashboard colours it as dangerous and
+   * requires a second, explicit confirmation naming the account before sending.
+   */
+  danger?: boolean
+  /** Label for the submit button; defaults to the action's display name. */
+  submitLabel?: Text
+  /** Params form; validated server-side before the writer is called. */
+  paramsSchema?: ZodObject<ZodRawShape>
+  /**
+   * Live-resolved select options keyed by param name — open order ids, held
+   * symbols, the venue catalogue. Resolved per listing so a dropdown always
+   * reflects the account as it is now; a resolver failure costs only the
+   * dropdown, which degrades to a plain input.
+   */
+  paramOptions?(ctx: AccountActionOptionsContext): Promise<Record<string, import('./definition.js').ParamFieldOption[]>>
+}
+
+export interface AccountActionOptionsContext {
+  /** The account's venue session — the same object the reader wraps. */
+  session: unknown
+  account: string
+  /** The account's declared configuration, as stored on the entity. */
+  params?: Record<string, unknown>
+}
+
+/** Serializable action view (dashboard account write panel). */
+export interface AccountActionInfo {
+  id: string
+  displayName: Text
+  description?: Text
+  group?: Text
+  danger?: boolean
+  submitLabel?: Text
+  paramsFields?: import('./definition.js').ParamFieldDef[]
+}
+
+/**
+ * One recorded operator write, appended to the executions log under the
+ * synthetic executor name `account-actions`.
+ *
+ * Deliberately shaped like an ExecutionResult, down to the `instruction`
+ * envelope: the Executions page already renders that shape, so a manual order
+ * reads there exactly like an automated one instead of as a row of dashes. The
+ * point of writing it down at all is that "who moved this position?" has one
+ * place to look, and a second format with its own viewer defeats that.
+ *
+ * What identifies it as manual: `executorId` is `account-actions`, there is no
+ * `instanceId` or `runId` (no instance and no run decided it), and `actor`
+ * names the operator who clicked.
+ */
+export interface AccountActionRecord {
+  instruction: {
+    action: string
+    /** Always 'account-actions' — the synthetic executor these are filed under. */
+    executorId: string
+    /** As validated, before the writer ran. */
+    params: Record<string, unknown>
+    /** The one account written to, so the page's account filter finds it. */
+    accountNames: string[]
+    /** Operator who invoked it, when the gateway knows one. */
+    actor?: string
+    /** Which implementation's writer ran — the audit's "by what code". */
+    implementation: string
+  }
+  status: 'success' | 'failed'
+  /** Whatever the writer returned (order id, venue payload). */
+  data?: unknown
+  error?: string
+  executedAt: string
 }
 
 /** Resolve an implementation's venue pin, tolerating the legacy `type` spelling. */
@@ -154,6 +261,8 @@ export interface AccountView extends AccountEntity {
   problem?: string
   /** Last equity-snapshot failure (cleared on the next success) — surfaced on the Accounts page. */
   snapshotError?: string
+  /** The implementation declares actions — the dashboard offers the Trade tab. */
+  writable?: boolean
 }
 
 export interface AccountStore {

@@ -78,6 +78,18 @@ export function lowerAccountEntry(entry: AccountClass | AccountImplementation, p
   const meta = owAccountMeta(entry)
   if (!meta) throw new Error(`Plugin "${pluginName}": account class ${entry.name} has no @OwAccount metadata`)
   const venue = meta.venue ?? meta.type
+  const writer = meta.writer
+  if (writer) {
+    // A declared action with no method is unreachable, and would only show up
+    // as a 500 the first time an operator clicked it. Fail at load instead.
+    const orphans = writer.actions.filter(a => typeof (writer.prototype as Record<string, unknown>)[a.id] !== 'function')
+    if (orphans.length > 0) {
+      throw new Error(
+        `Plugin "${pluginName}": account writer ${writer.name} declares action(s) `
+        + `${orphans.map(a => a.id).join(', ')} with no matching method`
+      )
+    }
+  }
   return {
     id: meta.id ?? kebab(entry.name),
     kind: meta.kind,
@@ -88,6 +100,11 @@ export function lowerAccountEntry(entry: AccountClass | AccountImplementation, p
     ...(meta.logo !== undefined ? { logo: meta.logo } : {}),
     ...(meta.icon !== undefined ? { icon: meta.icon } : {}),
     createReader: (session, accountName, params) => new entry(accountName, session as never, params),
+    ...(writer ? {
+      actions: [...writer.actions],
+      createWriter: (session: unknown, accountName: string, params?: Record<string, unknown>) =>
+        new writer(accountName, session as never, params),
+    } : {}),
   }
 }
 

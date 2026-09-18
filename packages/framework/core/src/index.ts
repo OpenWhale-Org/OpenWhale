@@ -84,6 +84,10 @@ export type {
   AccountEntity,
   AccountImplementation,
   AccountImplementationInfo,
+  AccountActionDef,
+  AccountActionInfo,
+  AccountActionOptionsContext,
+  AccountActionRecord,
   AccountView,
   AccountStore,
   AccountSnapshotSample,
@@ -198,7 +202,7 @@ export type { OpenWhalePlugin, PluginContext, PluginFactory, PluginManagerOption
 export { definePlugin } from './plugin/definePlugin.js'
 export type { PluginManifest } from './plugin/definePlugin.js'
 export { OwMonitor, OwAccount, OwExecutor, OwStrategy } from './plugin/componentDecorators.js'
-export type { OwMonitorMeta, OwAccountMeta, OwExecutorMeta, OwStrategyMeta, MonitorClass, AccountClass } from './plugin/componentDecorators.js'
+export type { OwMonitorMeta, OwAccountMeta, OwExecutorMeta, OwStrategyMeta, MonitorClass, AccountClass, AccountWriterClass } from './plugin/componentDecorators.js'
 
 // Compiled
 export { CompiledLoader } from './compiled/CompiledLoader.js'

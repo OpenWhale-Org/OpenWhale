@@ -70,3 +70,58 @@ describe('definePlugin lowering', () => {
     expect(() => factory({ credentials: {} as never, config: {} })).toThrow(/@OwAccount metadata/)
   })
 })
+
+describe('definePlugin lowering — account write views', () => {
+  class Writer {
+    static readonly actions = [{ id: 'send', displayName: 'Send' }]
+    constructor(readonly accountName: string, readonly session: unknown) {}
+    async send(p: Record<string, unknown>) { return { sent: p } }
+  }
+
+  @OwAccount({ kind: 'test/fake' as NamespacedKind, writer: Writer })
+  class WritableAccount {
+    constructor(readonly accountName: string, readonly session: unknown) {}
+  }
+
+  const lower = (accounts: unknown[]) =>
+    definePlugin({ name: 'demo', version: '1.0.0', accounts: accounts as never })({ credentials: {} as never, config: {} })
+      .accounts![0]! as import('../../types/account.js').AccountImplementation
+
+  it('lowers a writer into actions + createWriter, leaving the reader alone', () => {
+    const impl = lower([WritableAccount])
+    expect(impl.actions).toEqual([{ id: 'send', displayName: 'Send' }])
+    const writer = impl.createWriter!({ s: 1 }, 'My Acct') as Writer
+    expect(writer).toBeInstanceOf(Writer)
+    expect(writer.accountName).toBe('My Acct')
+  })
+
+  it('an account with no writer stays read-only — the default, not an opt-out', () => {
+    const impl = lower([FakeAccount])
+    expect(impl.actions).toBeUndefined()
+    expect(impl.createWriter).toBeUndefined()
+  })
+
+  it('the READER carries no write method — the whole point of the second class', () => {
+    const impl = lower([WritableAccount])
+    const reader = impl.createReader({ s: 1 }, 'My Acct') as Record<string, unknown>
+    // Not just "send is absent": nothing callable beyond the constructor, so a
+    // strategy holding this object has no venue write to reach for.
+    expect(reader['send']).toBeUndefined()
+    for (const action of impl.actions ?? []) expect(typeof reader[action.id]).not.toBe('function')
+  })
+
+  it('a declared action with no method fails at LOAD, not on first click', () => {
+    class Orphaned {
+      static readonly actions = [{ id: 'send', displayName: 'Send' }, { id: 'cancle', displayName: 'Cancel' }]
+      constructor(readonly accountName: string, readonly session: unknown) {}
+      async send() { return {} }
+      // `cancel`, not `cancle` — the typo is the bug this check exists to catch.
+      async cancel() { return {} }
+    }
+    @OwAccount({ kind: 'test/fake' as NamespacedKind, writer: Orphaned })
+    class Broken {
+      constructor(readonly accountName: string, readonly session: unknown) {}
+    }
+    expect(() => lower([Broken])).toThrow(/declares action\(s\) cancle with no matching method/)
+  })
+})

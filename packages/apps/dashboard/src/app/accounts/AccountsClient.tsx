@@ -390,7 +390,13 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
 
               <div className="flex-1 min-h-0 overflow-y-auto scroll-hidden px-4 py-3 flex flex-col gap-4">
                 <EquityChart account={selected.name} />
-                {selected.status === 'ready' && <AccountDetail account={selected.name} />}
+                {selected.status === 'ready' && (
+                  <AccountDetail
+                    account={selected.name}
+                    {...(selected.writable !== undefined ? { writable: selected.writable } : {})}
+                    {...(selected.venue !== undefined ? { venue: selected.venue } : {})}
+                  />
+                )}
                 {selected.status === 'ready' && <AccountHistory account={selected.name} />}
               </div>
 

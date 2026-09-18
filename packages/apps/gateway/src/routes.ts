@@ -239,6 +239,37 @@ export function buildRouter(): Router {
     }
   }))
 
+  /**
+   * The writes this account offers, with their forms. Separate from /detail
+   * because it needs live venue reads (open orders, held positions) to fill the
+   * dropdowns — the read panel should not pay for that on every refresh.
+   */
+  router.get('/api/accounts/:name/actions', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      res.json({ actions: localize(await runtime.listAccountActions(req.params['name']!), localeOf(req)) })
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
+  /**
+   * Run one declared write against the venue. The signed-in operator travels
+   * with it: the runtime records every call, and a manual order with no name on
+   * it is the one an audit cannot resolve.
+   */
+  router.post('/api/accounts/:name/actions/:actionId', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
+      const actor = (req as AuthedRequest).user?.username
+      const data = await runtime.runAccountAction(req.params['name']!, req.params['actionId']!, params, actor)
+      res.json({ ok: true, data })
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   router.get('/api/accounts/:name/snapshots', h(async (req, res) => {
     const runtime = await ensureStarted()
     const hours = Math.min(Math.max(Number(req.query['hours'] ?? 24) || 24, 1), 24 * 30)

@@ -49,6 +49,38 @@ describe('readExecutions', () => {
     expect((await readExecutions(dataDir))[0]!.instruction.runId).toBe('run:inst_a:2026-09-01T10:00:00.000Z')
   })
 
+  it('merges operator account writes into the same list, no special case', async () => {
+    write('ccxt', '2026-09-01', [record('2026-09-01T10:00:00.000Z')])
+    // Shape as the runtime writes it: an instruction envelope with no
+    // instanceId and no runId, because a person decided this one.
+    write('account-actions', '2026-09-01', [{
+      instruction: {
+        action: 'closePosition', executorId: 'account-actions',
+        params: { symbol: 'BTC/USDT:USDT', percent: 100 },
+        accountNames: ['BN Main'], implementation: 'exchange/perp-account', actor: 'ja',
+      },
+      status: 'success', data: { orderId: 'ord-9' }, executedAt: '2026-09-01T11:00:00.000Z',
+    }])
+
+    const rows = await readExecutions(dataDir)
+    expect(rows.map(r => r.executedAt)).toEqual(['2026-09-01T11:00:00.000Z', '2026-09-01T10:00:00.000Z'])
+    // Everything the Executions page reads off a row is present, so the manual
+    // write renders like any other rather than as a line of dashes.
+    expect(rows[0]).toMatchObject({ executorId: 'account-actions', status: 'success' })
+    expect(rows[0]!.instruction.action).toBe('closePosition')
+  })
+
+  it('an instance filter never picks up a manual write — no instance made it', async () => {
+    write('ccxt', '2026-09-01', [record('2026-09-01T10:00:00.000Z')])
+    write('account-actions', '2026-09-01', [{
+      instruction: { action: 'closePosition', executorId: 'account-actions', params: {}, accountNames: ['BN Main'], implementation: 'x' },
+      status: 'success', executedAt: '2026-09-01T11:00:00.000Z',
+    }])
+
+    const rows = await readExecutions(dataDir, { instanceId: 'inst_a' })
+    expect(rows.map(r => r.executorId)).toEqual(['ccxt'])
+  })
+
   it('filters by instance and by status', async () => {
     write('ccxt', '2026-09-01', [
       record('2026-09-01T10:00:00.000Z'),

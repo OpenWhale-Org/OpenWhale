@@ -1,7 +1,7 @@
 import type { Text } from '../i18n.js'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { NamespacedKind } from '../types/materialization.js'
-import type { AccountSectionDef } from '../types/account.js'
+import type { AccountSectionDef, AccountActionDef } from '../types/account.js'
 import type { MonitorContext } from '../types/monitorInstance.js'
 import type { BaseMonitor } from '../monitor/BaseMonitor.js'
 
@@ -87,9 +87,25 @@ export interface OwAccountMeta {
   paramsSchema?: ZodObject<ZodRawShape>
   /** Declarative detail panel — see AccountImplementation.sections. */
   sections?: AccountSectionDef[]
+  /**
+   * Optional WRITE view: a class whose static `actions` declares the operator
+   * writes and whose methods implement them. Kept off the reader on purpose —
+   * strategies get the reader, only the operator route constructs this.
+   */
+  writer?: AccountWriterClass
   /** Brand mark for pickers — see AccountImplementation.logo. */
   logo?: string
   icon?: string
+}
+
+/**
+ * Write-view constructor, same shape as a reader's. `actions` is static so the
+ * declaration sits beside the methods implementing it; lowering checks that
+ * every declared id has a method, because a declared action with no method is
+ * unreachable and would otherwise surface as a 500 on first click.
+ */
+export type AccountWriterClass = (new (accountName: string, session: never, params?: Record<string, unknown>) => unknown) & {
+  readonly actions: readonly AccountActionDef[]
 }
 
 const accountMeta = new WeakMap<object, OwAccountMeta>()

@@ -47,7 +47,7 @@ export type {
   PortfolioReport,
   IPortfolioJournal,
 } from './portfolio.js'
-export type { AccountEntity, AccountImplementation, AccountImplementationInfo, AccountView, AccountStore, AccountSnapshotSample, AccountSnapshotRecord, AccountSnapshotStore } from './account.js'
+export type { AccountEntity, AccountImplementation, AccountImplementationInfo, AccountActionDef, AccountActionInfo, AccountActionOptionsContext, AccountActionRecord, AccountView, AccountStore, AccountSnapshotSample, AccountSnapshotRecord, AccountSnapshotStore } from './account.js'
 export type { MonitorImplementation, MonitorContext, MonitorInstanceEntity, MonitorInstanceView, MonitorInstanceStore } from './monitorInstance.js'
 export type { ScriptDefinition, ScriptContext, ScriptResult, ScriptInfo } from './script.js'
 export type {

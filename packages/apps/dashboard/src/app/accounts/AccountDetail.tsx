@@ -5,6 +5,7 @@ import { useColumnWidths, ResizeHandle } from '@/components/ResizableColumns'
 import { useT } from '@/i18n'
 import { fmtDateTime } from '@/lib/time'
 import { RowGroups, useGroups } from './PositionGroups'
+import { AccountActions } from './AccountActions'
 
 /** Shapes follow the exchange read-view interfaces (IAccountBalance/IPosition/IOrder). */
 interface TokenBalance { token: string; free: number; locked: number; total: number; usdValue?: number }
@@ -22,7 +23,15 @@ interface DetailPayload {
   layout?: SectionDef[]
 }
 
-type Tab = 'positions' | 'balance' | 'orders'
+type Tab = 'positions' | 'balance' | 'orders' | typeof TRADE_TAB
+
+/**
+ * The write tab's key. It rides alongside the read sections rather than in its
+ * own pane so an operator closes a position on the same screen that shows it —
+ * and because a section named `trade` on a read view would collide, the key is
+ * one the declared-layout branch checks for explicitly.
+ */
+const TRADE_TAB = '__trade__'
 
 function usd(v: number | undefined): string {
   // A read view that doesn't speak the perp convention leaves fields out —
@@ -134,7 +143,7 @@ function DeclaredKeyValue({ data, def }: { data: Record<string, unknown>; def: S
  * four-column table, and thirds of the pane truncated every symbol and
  * clipped the uPnL column. One section at full width reads instead.
  */
-export function AccountDetail({ account }: { account: string }) {
+export function AccountDetail({ account, writable, venue }: { account: string; writable?: boolean; venue?: string }) {
   const t = useT()
   const [detail, setDetail] = useState<DetailPayload | null>(null)
   const [error, setError] = useState('')
@@ -162,7 +171,16 @@ export function AccountDetail({ account }: { account: string }) {
   }
 
   if (detail.layout && detail.layout.length > 0) {
-    return <DeclaredDetail detail={detail} layout={detail.layout} onReload={() => void load()} />
+    return (
+      <DeclaredDetail
+        detail={detail}
+        layout={detail.layout}
+        onReload={() => void load()}
+        account={account}
+        {...(writable !== undefined ? { writable } : {})}
+        {...(venue !== undefined ? { venue } : {})}
+      />
+    )
   }
 
   const { balance, positions, orders } = detail.sections
@@ -172,6 +190,7 @@ export function AccountDetail({ account }: { account: string }) {
     tabs.push({ key: 'positions', label: positions ? t('accounts.detail.positionsN', { n: positions.length }) : t('accounts.detail.positions') })
   tabs.push({ key: 'balance', label: t('accounts.detail.balance') })
   tabs.push({ key: 'orders', label: orders ? t('accounts.detail.ordersN', { n: orders.length }) : t('accounts.detail.orders') })
+  if (writable) tabs.push({ key: TRADE_TAB, label: t('accounts.detail.trade') })
 
   // A spot account has no positions tab, so the default can point at a tab
   // that isn't there — fall back rather than render an empty pane.
@@ -312,6 +331,8 @@ export function AccountDetail({ account }: { account: string }) {
             )}
           </>
         )}
+
+        {active === TRADE_TAB && <AccountActions account={account} {...(venue !== undefined ? { venue } : {})} />}
       </div>
     </div>
   )
@@ -319,11 +340,20 @@ export function AccountDetail({ account }: { account: string }) {
 
 
 /** The panel for an implementation that declares its own sections. */
-function DeclaredDetail({ detail, layout, onReload }: { detail: DetailPayload; layout: SectionDef[]; onReload: () => void }) {
+function DeclaredDetail({ detail, layout, onReload, account, writable, venue }: {
+  detail: DetailPayload
+  layout: SectionDef[]
+  onReload: () => void
+  account: string
+  writable?: boolean
+  venue?: string
+}) {
   const t = useT()
   const [tab, setTab] = useState<string>(layout.find(sec => sec.default)?.method ?? layout[0]!.method)
-  const active = layout.some(sec => sec.method === tab) ? tab : layout[0]!.method
-  const current = layout.find(sec => sec.method === active)!
+  const known = (key: string) => layout.some(sec => sec.method === key) || (writable === true && key === TRADE_TAB)
+  const active = known(tab) ? tab : layout[0]!.method
+  const trading = active === TRADE_TAB
+  const current = layout.find(sec => sec.method === active) ?? layout[0]!
   const data = detail.sections[current.method]
   const rowsOf = (sec: SectionDef): unknown[] | undefined => {
     const v = detail.sections[sec.method]
@@ -350,16 +380,35 @@ function DeclaredDetail({ detail, layout, onReload }: { detail: DetailPayload; l
               </button>
             )
           })}
+          {writable && (
+            <button
+              onClick={() => setTab(TRADE_TAB)}
+              className="px-3 py-2 text-xs"
+              style={{
+                color: trading ? 'var(--foreground)' : 'var(--muted)',
+                borderBottom: trading ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: '-1px',
+              }}
+            >
+              {t('accounts.detail.trade')}
+            </button>
+          )}
         </div>
         <button onClick={onReload} className="text-xs px-2 py-1 mb-1.5 rounded-md shrink-0" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>
           {t('accounts.detail.refresh')}
         </button>
       </div>
       <div className="pt-3">
-        {detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--danger)' }}>{detail.errors[current.method]}</p>}
-        {data === undefined && !detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.detail.noData')}</p>}
-        {data !== undefined && current.kind === 'table' && Array.isArray(data) && <DeclaredTable rows={data as Array<Record<string, unknown>>} def={current} />}
-        {data !== undefined && current.kind === 'keyvalue' && typeof data === 'object' && data !== null && !Array.isArray(data) && <DeclaredKeyValue data={data as Record<string, unknown>} def={current} />}
+        {trading ? (
+          <AccountActions account={account} {...(venue !== undefined ? { venue } : {})} />
+        ) : (
+          <>
+            {detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--danger)' }}>{detail.errors[current.method]}</p>}
+            {data === undefined && !detail.errors[current.method] && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.detail.noData')}</p>}
+            {data !== undefined && current.kind === 'table' && Array.isArray(data) && <DeclaredTable rows={data as Array<Record<string, unknown>>} def={current} />}
+            {data !== undefined && current.kind === 'keyvalue' && typeof data === 'object' && data !== null && !Array.isArray(data) && <DeclaredKeyValue data={data as Record<string, unknown>} def={current} />}
+          </>
+        )}
       </div>
     </div>
   )

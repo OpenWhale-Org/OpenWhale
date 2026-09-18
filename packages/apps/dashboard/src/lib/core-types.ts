@@ -17,6 +17,7 @@ import type {
   PickerOption as RawPickerOption,
   ScriptInfo as RawScriptInfo,
   AccountImplementationInfo as RawAccountImplementationInfo,
+  AccountActionInfo as RawAccountActionInfo,
   LoadedPluginInfo as RawLoadedPluginInfo,
   MonitorInstanceView as RawMonitorInstanceView,
   CredentialTypeInfo as RawCredentialTypeInfo,
@@ -34,6 +35,7 @@ export type PresetSource = Localized<RawPresetSource>
 export type PickerOption = Localized<RawPickerOption>
 export type ScriptInfo = Localized<RawScriptInfo>
 export type AccountImplementationInfo = Localized<RawAccountImplementationInfo>
+export type AccountActionInfo = Localized<RawAccountActionInfo>
 export type LoadedPluginInfo = Localized<RawLoadedPluginInfo>
 export type MonitorInstanceView = Localized<RawMonitorInstanceView>
 export type CredentialTypeInfo = Localized<RawCredentialTypeInfo>

@@ -75,6 +75,19 @@ export const en = {
   'accounts.detail.noRows': 'No {title}.',
   'accounts.detail.total': 'Total',
   'accounts.detail.available': 'Available',
+  'accounts.detail.trade': 'Trade',
+
+  // ── accounts: write actions ──
+  'accounts.actions.loading': 'Loading actions…',
+  'accounts.actions.loadFailed': 'Could not load this account’s actions.',
+  'accounts.actions.none': 'This account is read-only — its implementation declares no actions.',
+  'accounts.actions.pickOne': 'Pick an action.',
+  'accounts.actions.sending': 'Sending…',
+  'accounts.actions.failed': 'The action failed.',
+  'accounts.actions.confirm': 'Run “{action}” on {account}?',
+  'accounts.actions.confirmYes': 'Yes, run it',
+  'accounts.actions.cancel': 'Cancel',
+
   'accounts.col.symbol': 'Symbol',
   'accounts.col.side': 'Side',
   'accounts.col.value': 'Value',
@@ -303,6 +316,19 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'accounts.detail.noRows': '暂无{title}。',
   'accounts.detail.total': '总额',
   'accounts.detail.available': '可用',
+  'accounts.detail.trade': '交易',
+
+  // ── accounts: write actions ──
+  'accounts.actions.loading': '正在加载操作…',
+  'accounts.actions.loadFailed': '无法加载该账户的操作。',
+  'accounts.actions.none': '该账户只读——它的实现没有声明任何操作。',
+  'accounts.actions.pickOne': '选择一个操作。',
+  'accounts.actions.sending': '发送中…',
+  'accounts.actions.failed': '操作失败。',
+  'accounts.actions.confirm': '确认在 {account} 上执行「{action}」？',
+  'accounts.actions.confirmYes': '确认执行',
+  'accounts.actions.cancel': '取消',
+
   'accounts.col.symbol': '交易对',
   'accounts.col.side': '方向',
   'accounts.col.value': '价值',
