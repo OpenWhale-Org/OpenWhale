@@ -15,7 +15,7 @@ import { HistoryPanel } from './AccountHistory'
 
 export type Side = 'long' | 'short' | '*'
 export interface Member { account: string; symbol: string; side: Side }
-export interface GroupInfo { id: string; name: string; source: 'manual' | 'instance'; instanceId?: string; hidden: boolean; members: Member[] }
+export interface GroupInfo { id: string; name: string; source: 'manual' | 'instance'; instanceId?: string; hidden: boolean; startAt?: string; members: Member[] }
 interface LiveRow { side: 'long' | 'short'; value: number; pnl: number }
 interface LiveMember extends Member { rows: LiveRow[]; error?: string }
 interface LiveGroup extends GroupInfo { members: LiveMember[]; totals: { gross: number; net: number; pnl: number; open: number } }
@@ -28,7 +28,7 @@ async function api(path: string, method: string, body?: unknown): Promise<string
   if (res.ok) { announce(); return undefined }
   return ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `${res.status}`
 }
-export const createGroup = (name: string, members: Member[] = []) => api('/api/position-groups', 'POST', { name, members })
+export const createGroup = (name: string, members: Member[] = [], startAt?: string) => api('/api/position-groups', 'POST', { name, members, startAt: startAt ?? null })
 export const addToGroup = (id: string, members: Member[]) => api(`/api/position-groups/${encodeURIComponent(id)}/members`, 'POST', { members })
 const key = (m: Member) => `${m.account}|${m.symbol}|${m.side}`
 
@@ -37,10 +37,13 @@ const key = (m: Member) => `${m.account}|${m.symbol}|${m.side}`
  * is a rename plus the member difference, because the API adds and removes
  * members rather than replacing the set.
  */
-async function saveGroup(group: GroupInfo | undefined, name: string, members: Member[]): Promise<string | undefined> {
-  if (!group) return createGroup(name, members)
+async function saveGroup(group: GroupInfo | undefined, name: string, members: Member[], startAt: string): Promise<string | undefined> {
+  if (!group) return createGroup(name, members, startAt)
   const base = `/api/position-groups/${encodeURIComponent(group.id)}`
-  if (name !== group.name) { const e = await api(base, 'PATCH', { name }); if (e) return e }
+  if (name !== group.name || startAt !== (group.startAt ?? '')) {
+    // Cleared date → null, which is how the gateway reads "no start date".
+    const e = await api(base, 'PATCH', { name, startAt: startAt || null }); if (e) return e
+  }
   const before = new Set(group.members.map(key)), after = new Set(members.map(key))
   const added = members.filter(m => !before.has(key(m)))
   if (added.length > 0) { const e = await api(`${base}/members`, 'POST', { members: added }); if (e) return e }
@@ -132,21 +135,28 @@ export function PositionGroupsPanel({ accounts }: { accounts: string[] }) {
       )}
       {editing && (
         <GroupDialog group={editing.group} accounts={accounts} onClose={() => setEditing(null)}
-          onSave={async (name, members) => { const e = await saveGroup(editing.group, name, members); if (e) { setError(e); return false } setEditing(null); return true }} />
+          onSave={async (name, members, startAt) => { const e = await saveGroup(editing.group, name, members, startAt); if (e) { setError(e); return false } setEditing(null); return true }} />
       )}
     </div>
   )
 }
 
-/** Name and members of one combination, filled in before anything is saved. */
+/**
+ * Name, start date and members of one combination, filled in before anything
+ * is saved. A strategy's combination opens here too, for its start date alone:
+ * the instance decides its name and members, but when this trade's history
+ * begins is the operator's call.
+ */
 function GroupDialog({ group, accounts, onClose, onSave }: {
   group?: GroupInfo
   accounts: string[]
   onClose: () => void
-  onSave: (name: string, members: Member[]) => Promise<boolean>
+  onSave: (name: string, members: Member[], startAt: string) => Promise<boolean>
 }) {
   const t = useT()
+  const derived = group?.source === 'instance'
   const [name, setName] = useState(group?.name ?? '')
+  const [startAt, setStartAt] = useState(group?.startAt ?? '')
   const [members, setMembers] = useState<Member[]>(group?.members ?? [])
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState<{ account: string; symbol: string; side: Side }>({ account: accounts[0] ?? '', symbol: '', side: '*' })
@@ -166,17 +176,29 @@ function GroupDialog({ group, accounts, onClose, onSave }: {
         e.preventDefault()
         if (!name.trim() || saving) return
         setSaving(true)
-        if (!await onSave(name.trim(), members)) setSaving(false)
+        if (!await onSave(name.trim(), members, startAt)) setSaving(false)
       }}>
         <h2 className="text-base font-semibold">{group ? t('groups.editTitle') : t('groups.createTitle')}</h2>
-        <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }}>
-          {t('groups.nameLabel')}
-          <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={t('groups.newPlaceholder')}
-            className="h-9 px-2 rounded-md text-sm" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-        </label>
+        <div className="flex gap-3 flex-wrap">
+          <label className="flex flex-col gap-1 text-xs flex-1" style={{ color: 'var(--muted)', minWidth: '12rem' }}>
+            {t('groups.nameLabel')}
+            <input autoFocus={!derived} value={name} onChange={e => setName(e.target.value)} placeholder={t('groups.newPlaceholder')} disabled={derived}
+              className="h-9 px-2 rounded-md text-sm" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', opacity: derived ? 0.6 : 1 }} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--muted)' }}>
+            {t('groups.startAtLabel')}
+            <span className="flex items-center gap-1">
+              <input type="date" autoFocus={derived} value={startAt} onChange={e => setStartAt(e.target.value)}
+                className="h-9 px-2 rounded-md text-sm" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+              {startAt && <button type="button" onClick={() => setStartAt('')} className="px-1" style={{ color: 'var(--muted)' }} title={t('groups.startAtClear')}>×</button>}
+            </span>
+          </label>
+        </div>
+        <p className="text-xs" style={{ color: 'var(--muted)', marginTop: '-0.5rem' }}>{t('groups.startAtHint')}</p>
 
         <div className="flex flex-col gap-1">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('groups.membersLabel')}</span>
+          {derived && <p className="text-xs py-1" style={{ color: 'var(--muted)' }}>{t('groups.derivedLocked')}</p>}
           {members.length === 0 && <p className="text-xs py-2" style={{ color: 'var(--muted)' }}>{t('groups.noMembers')}</p>}
           {members.map(m => (
             <div key={key(m)} className="flex items-center gap-2 text-xs py-1" style={{ borderTop: '1px solid var(--border)' }}>
@@ -185,11 +207,13 @@ function GroupDialog({ group, accounts, onClose, onSave }: {
               <span style={{ width: '5rem', color: m.side === '*' ? 'var(--muted)' : m.side === 'long' ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>
                 {m.side === '*' ? t('groups.anySide') : m.side}
               </span>
-              <button type="button" className="px-1" style={{ color: 'var(--muted)' }} title={t('groups.removeMember')}
-                onClick={() => setMembers(prev => prev.filter(x => key(x) !== key(m)))}>×</button>
+              {!derived && (
+                <button type="button" className="px-1" style={{ color: 'var(--muted)' }} title={t('groups.removeMember')}
+                  onClick={() => setMembers(prev => prev.filter(x => key(x) !== key(m)))}>×</button>
+              )}
             </div>
           ))}
-          <div className="flex items-center gap-2 pt-2 flex-wrap" style={{ borderTop: '1px solid var(--border)' }}>
+          {!derived && <div className="flex items-center gap-2 pt-2 flex-wrap" style={{ borderTop: '1px solid var(--border)' }}>
             <Select size="sm" value={draft.account} onChange={(v) => setDraft(d => ({ ...d, account: v, symbol: '' }))} placeholder={t('groups.pickAccount')}
               style={{ width: '11rem' }} options={accounts.map(a => ({ value: a, label: a }))} />
             <Select size="sm" value={draft.symbol} onChange={(v) => setDraft(d => ({ ...d, symbol: v }))} placeholder={t('groups.pickPosition')}
@@ -199,7 +223,7 @@ function GroupDialog({ group, accounts, onClose, onSave }: {
               options={[{ value: '*', label: t('groups.anySide') }, { value: 'long', label: 'long' }, { value: 'short', label: 'short' }]} />
             <button type="button" onClick={addDraft} disabled={!draft.account || !draft.symbol} className="h-8 px-3 rounded-md text-xs"
               style={{ border: '1px solid var(--border)', color: 'var(--foreground)', opacity: !draft.account || !draft.symbol ? 0.5 : 1 }}>{t('groups.addMember')}</button>
-          </div>
+          </div>}
         </div>
 
         <div className="flex items-center justify-end gap-2">
@@ -244,6 +268,9 @@ function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
         <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--border) 60%, transparent)', color: 'var(--muted)' }}>
           {manual ? t('groups.manual') : t('groups.strategy')}
         </span>
+        {g.startAt && (
+          <span className="text-[11px] font-mono" style={{ color: 'var(--muted)' }} title={t('groups.startAtHint')}>{t('groups.since', { d: g.startAt })}</span>
+        )}
         {g.instanceId && <Link href={`/instances/${encodeURIComponent(g.instanceId)}`} onClick={e => e.stopPropagation()} className="text-[11px]" style={{ color: 'var(--accent)' }}>{t('groups.openInstance')}</Link>}
         <span className="flex-1" />
         <span className="text-xs font-mono text-right shrink-0" style={{ color: 'var(--muted)', width: '4.5rem' }}>{t('groups.legs', { n: g.totals.open })}</span>
@@ -260,7 +287,7 @@ function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
           >
             {showHistory ? t('groups.hideHistory') : t('groups.history')}
           </button>
-          {manual && <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={onEdit}>{t('groups.edit')}</button>}
+          <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={onEdit}>{manual ? t('groups.edit') : t('groups.editStartAt')}</button>
           <button className="text-xs px-1.5" style={{ color: 'var(--muted)' }} onClick={() => void onAct(api(base, 'PATCH', { hidden: !g.hidden }))}>{g.hidden ? t('groups.unhide') : t('groups.hide')}</button>
           {manual && (
             <button className="text-xs px-1.5" style={{ color: 'var(--danger, #ef4444)' }} onMouseLeave={() => setConfirmDelete(false)}

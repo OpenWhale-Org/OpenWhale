@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { SQLiteAdapter } from '@openwhaleorg/core'
-import { PositionGroups, liveOf } from '../positionGroups.js'
+import { PositionGroups, liveOf, asDate, startMsOf } from '../positionGroups.js'
 
 let db: SQLiteAdapter
 
@@ -86,6 +86,50 @@ describe('PositionGroups', () => {
     )
     expect(live.members[0]!.error).toBe('venue down')
     expect(live.totals.pnl).toBe(2)
+  })
+
+  it('a start date is kept, cleared, and read as UTC midnight', async () => {
+    const pg = new PositionGroups(db, runtime([]) as never)
+    const g = await pg.create('CL 跨所', [], '2026-09-12')
+    expect((await pg.list()).find(x => x.id === g.id)!.startAt).toBe('2026-09-12')
+    expect(startMsOf(g.startAt)).toBe(Date.parse('2026-09-12T00:00:00Z'))
+
+    await pg.update(g.id, { startAt: null })
+    expect((await pg.list()).find(x => x.id === g.id)!.startAt).toBeUndefined()
+    expect(startMsOf(undefined)).toBeUndefined()
+
+    // A date, however it arrives: an ISO timestamp is cut to its day, junk is nothing.
+    expect(asDate('2026-09-12T08:30:00.000Z')).toBe('2026-09-12')
+    expect(asDate('  2026-09-12 ')).toBe('2026-09-12')
+    expect(asDate('last tuesday')).toBeNull()
+    expect(asDate(1_757_000_000_000)).toBeNull()
+  })
+
+  it('a database created before the start date gets the column added', async () => {
+    // The shape production is on: the table already exists without start_at.
+    await db.run('DROP TABLE IF EXISTS position_groups')
+    await db.run(`CREATE TABLE position_groups (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, instance_id TEXT,
+      hidden INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+    await db.run("INSERT INTO position_groups VALUES ('old', 'legacy', 'manual', NULL, 0, 0, 'x', 'x')")
+    const pg = new PositionGroups(db, runtime([]) as never)
+    const found = (await pg.list()).find(x => x.id === 'old')!
+    expect(found.name).toBe('legacy')
+    expect(found.startAt).toBeUndefined()
+    await pg.update('old', { startAt: '2026-09-01' })
+    expect((await pg.list()).find(x => x.id === 'old')!.startAt).toBe('2026-09-01')
+  })
+
+  it("an instance's combination takes a start date and keeps it across a sync", async () => {
+    const inst = { id: 'inst_a', name: 'BZ/CL', strategyId: 'pair-arb/etf-dual-remote', credentials: { 'engine:venue': 'bn-sub' }, params: { base: { symbolA: 'BZ/USDT:USDT', symbolB: 'CL/USDT:USDT' }, tunable: {} } }
+    const pg = new PositionGroups(db, runtime([inst]) as never)
+    const [g] = (await pg.list()).filter(x => x.source === 'instance')
+    // Members are the instance's, but when its history starts is the operator's.
+    await pg.update(g!.id, { startAt: '2026-09-18' })
+    const after = (await pg.list()).find(x => x.id === g!.id)!
+    expect(after.startAt).toBe('2026-09-18')
+    expect(after.members).toHaveLength(2)
   })
 
   it('a manual combination can be renamed, edited and deleted', async () => {

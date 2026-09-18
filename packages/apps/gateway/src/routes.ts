@@ -13,7 +13,7 @@ import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { z } from 'zod'
 import { loadOverviewLayout, saveOverviewLayout, resetOverviewLayout } from './overviewLayout.js'
-import { PositionGroups, type Member } from './positionGroups.js'
+import { PositionGroups, startMsOf, type Member } from './positionGroups.js'
 import { getAlertService, type AlertSettings } from './notify/alerts.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
 import type { CompiledLoader, CompiledType, DBCredentialStore, HistoryKind, StrategyInstance } from '@openwhaleorg/core'
@@ -1006,11 +1006,11 @@ export function buildRouter(): Router {
     res.json(await (await groups()).live({ includeHidden: req.query['hidden'] === '1' }))
   }))
   router.post('/api/position-groups', h(async (req, res) => {
-    const body = (req.body ?? {}) as { name?: string; members?: Member[] }
-    try { res.json({ group: await (await groups()).create(String(body.name ?? ''), Array.isArray(body.members) ? body.members : []) }) } catch (err) { groupError(res, err) }
+    const body = (req.body ?? {}) as { name?: string; members?: Member[]; startAt?: string | null }
+    try { res.json({ group: await (await groups()).create(String(body.name ?? ''), Array.isArray(body.members) ? body.members : [], body.startAt ?? null) }) } catch (err) { groupError(res, err) }
   }))
   router.patch('/api/position-groups/:id', h(async (req, res) => {
-    const body = (req.body ?? {}) as { name?: string; hidden?: boolean; sortOrder?: number }
+    const body = (req.body ?? {}) as { name?: string; hidden?: boolean; sortOrder?: number; startAt?: string | null }
     try { await (await groups()).update(req.params['id']!, body); res.json({ ok: true }) } catch (err) { groupError(res, err) }
   }))
   router.delete('/api/position-groups/:id', h(async (req, res) => {
@@ -1030,7 +1030,12 @@ export function buildRouter(): Router {
         res.json(kind === 'symbols' ? [] : { rows: [], total: 0, summary })
         return
       }
-      res.json(await (await ensureStarted()).scopedHistory(members, kind as HistoryKind, historyQuery(req.query)))
+      // The combination's start date floors the window: history before it
+      // belongs to whatever the operator traded on these contracts earlier.
+      const query = historyQuery(req.query)
+      const startMs = startMsOf(group.startAt)
+      const since = startMs === undefined ? query.since : Math.max(query.since ?? 0, startMs)
+      res.json(await (await ensureStarted()).scopedHistory(members, kind as HistoryKind, { ...query, ...(since !== undefined ? { since } : {}) }))
     } catch (err) {
       groupError(res, err)
     }

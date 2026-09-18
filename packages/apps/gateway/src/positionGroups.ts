@@ -13,6 +13,12 @@ import type { OpenWhaleRuntime, SQLiteAdapter } from '@openwhaleorg/core'
  * A member is (account, symbol, side). Side '*' matches whichever side is held
  * — a strategy that trades both directions does not know in advance.
  *
+ * A combination may carry a start date. The positions are current either way;
+ * the date is about the ledger: a combination reusing a contract traded before
+ * (or an instance restarted on a new thesis) would otherwise count history that
+ * was never part of this trade. Dates are read as UTC midnight — the ledger's
+ * clock, not the browser's.
+ *
  * Two sources. `manual` combinations are the operator's. `instance`
  * combinations are derived: a strategy that declares positionLegs() gets one
  * combination per instance, kept in step with its bindings and params on every
@@ -29,6 +35,8 @@ export interface Group {
   instanceId?: string
   hidden: boolean
   sortOrder: number
+  /** `YYYY-MM-DD`; history before this day (UTC) is not this combination's. */
+  startAt?: string
   members: Member[]
 }
 
@@ -57,9 +65,14 @@ export class PositionGroups {
         instance_id TEXT,
         hidden      INTEGER NOT NULL DEFAULT 0,
         sort_order  INTEGER NOT NULL DEFAULT 0,
+        start_at    TEXT,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       )`)
+    // Additive migration for combinations created before the start date; the
+    // duplicate-column error on an already-migrated table is the "done" signal
+    // (SQLite has no ADD COLUMN IF NOT EXISTS).
+    await this.db.run('ALTER TABLE position_groups ADD COLUMN start_at TEXT').catch(() => {})
     await this.db.run(`
       CREATE TABLE IF NOT EXISTS position_group_members (
         group_id TEXT NOT NULL,
@@ -75,14 +88,15 @@ export class PositionGroups {
   async list(): Promise<Group[]> {
     await this.ensure()
     await this.syncInstances()
-    const rows = await this.db.all<{ id: string; name: string; source: string; instance_id: string | null; hidden: number; sort_order: number }>(
-      'SELECT id, name, source, instance_id, hidden, sort_order FROM position_groups ORDER BY sort_order, created_at')
+    const rows = await this.db.all<{ id: string; name: string; source: string; instance_id: string | null; hidden: number; sort_order: number; start_at: string | null }>(
+      'SELECT id, name, source, instance_id, hidden, sort_order, start_at FROM position_groups ORDER BY sort_order, created_at')
     const members = await this.db.all<{ group_id: string; account: string; symbol: string; side: string }>(
       'SELECT group_id, account, symbol, side FROM position_group_members ORDER BY account, symbol, side')
     return rows.map(r => ({
       id: r.id, name: r.name, source: r.source === 'instance' ? 'instance' : 'manual',
       ...(r.instance_id ? { instanceId: r.instance_id } : {}),
       hidden: r.hidden === 1, sortOrder: r.sort_order,
+      ...(r.start_at ? { startAt: r.start_at } : {}),
       members: members.filter(m => m.group_id === r.id).map(m => ({ account: m.account, symbol: m.symbol, side: asSide(m.side) })),
     }))
   }
@@ -128,24 +142,27 @@ export class PositionGroups {
     }
   }
 
-  async create(name: string, members: Member[] = []): Promise<Group> {
+  async create(name: string, members: Member[] = [], startAt?: string | null): Promise<Group> {
     await this.ensure()
     const id = randomUUID()
     const now = new Date().toISOString()
     const max = await this.db.get<{ m: number | null }>('SELECT MAX(sort_order) AS m FROM position_groups')
     await this.db.run(
-      "INSERT INTO position_groups (id, name, source, hidden, sort_order, created_at, updated_at) VALUES (?, ?, 'manual', 0, ?, ?, ?)",
-      [id, name.trim() || '未命名组合', (max?.m ?? 0) + 1, now, now])
+      "INSERT INTO position_groups (id, name, source, hidden, sort_order, start_at, created_at, updated_at) VALUES (?, ?, 'manual', 0, ?, ?, ?, ?)",
+      [id, name.trim() || '未命名组合', (max?.m ?? 0) + 1, asDate(startAt), now, now])
     await this.addMembers(id, members)
     return (await this.list()).find(g => g.id === id)!
   }
 
-  async update(id: string, patch: { name?: string; hidden?: boolean; sortOrder?: number }): Promise<void> {
+  async update(id: string, patch: { name?: string; hidden?: boolean; sortOrder?: number; startAt?: string | null }): Promise<void> {
     const g = await this.require(id)
     const now = new Date().toISOString()
     if (patch.name !== undefined && g.source === 'manual') await this.db.run('UPDATE position_groups SET name = ?, updated_at = ? WHERE id = ?', [patch.name.trim() || g.name, now, id])
     if (patch.hidden !== undefined) await this.db.run('UPDATE position_groups SET hidden = ?, updated_at = ? WHERE id = ?', [patch.hidden ? 1 : 0, now, id])
     if (patch.sortOrder !== undefined) await this.db.run('UPDATE position_groups SET sort_order = ?, updated_at = ? WHERE id = ?', [Math.round(patch.sortOrder), now, id])
+    // The start date is the operator's on BOTH sources: an instance decides its
+    // members, but when its history begins is a judgement about the trade.
+    if (patch.startAt !== undefined) await this.db.run('UPDATE position_groups SET start_at = ?, updated_at = ? WHERE id = ?', [asDate(patch.startAt), now, id])
   }
 
   async remove(id: string): Promise<void> {
@@ -216,6 +233,20 @@ export function liveOf(g: Group, detail: Map<string, { rows: Array<{ id: string;
       open: all.length,
     },
   }
+}
+
+/** `YYYY-MM-DD` or null. Anything else — including a full ISO timestamp — is cut to its date. */
+export function asDate(v: unknown): string | null {
+  const m = typeof v === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(v.trim()) : null
+  return m ? m[1]! : null
+}
+
+/** A combination's start date as a ledger timestamp (UTC midnight), if it has one. */
+export function startMsOf(startAt?: string): number | undefined {
+  const date = asDate(startAt)
+  if (!date) return undefined
+  const ms = Date.parse(`${date}T00:00:00Z`)
+  return Number.isFinite(ms) ? ms : undefined
 }
 
 function asSide(s: string): Side {
