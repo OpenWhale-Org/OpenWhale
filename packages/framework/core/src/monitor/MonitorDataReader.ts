@@ -392,6 +392,67 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
     }
   }
 
+  /** The byte range covering [from, to] of a time-ordered file, read and parsed. */
+  private async sliceFile(
+    file: string, from: number, to: number, maxBytes: number,
+  ): Promise<{ records: MonitorRecord<TData>[]; truncated: boolean }> {
+    const size = (await fs.promises.stat(file)).size
+    const fh = await fs.promises.open(file, 'r')
+    try {
+      /** The first whole line at or after `offset`. */
+      const lineAt = async (offset: number): Promise<{ start: number; ts: number } | undefined> => {
+        let chunk = 8192
+        for (;;) {
+          const buf = Buffer.alloc(Math.min(chunk, Math.max(0, size - offset)))
+          if (buf.length === 0) return undefined
+          const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
+          let start = 0
+          if (offset > 0) {
+            const nl = buf.indexOf(0x0a)
+            if (nl < 0 || nl >= bytesRead - 1) { if (offset + bytesRead >= size || chunk >= 4 << 20) return undefined; chunk *= 4; continue }
+            start = nl + 1
+          }
+          const end = buf.indexOf(0x0a, start)
+          if (end < 0 || end >= bytesRead) { if (offset + bytesRead >= size || chunk >= 4 << 20) return undefined; chunk *= 4; continue }
+          const ts = readTs(buf.toString('utf8', start, end))
+          if (ts === undefined) return lineAt(offset + end + 1)
+          return { start: offset + start, ts }
+        }
+      }
+      /** A byte offset at or before the first line with ts >= target. */
+      const offsetBefore = async (target: number): Promise<number> => {
+        let lo = 0, hi = size
+        while (hi - lo > 64 * 1024) {
+          const mid = Math.floor((lo + hi) / 2)
+          const line = await lineAt(mid)
+          if (!line || line.ts >= target) hi = mid
+          else lo = mid
+        }
+        return lo
+      }
+      const lo = await offsetBefore(from)
+      // One block past the last line of the window, so its final record is whole.
+      const hi = Math.min(size, (await offsetBefore(to + 1)) + 64 * 1024 + 8192)
+      const wanted = Math.max(0, hi - lo)
+      const take = Math.min(wanted, maxBytes)
+      const buf = Buffer.alloc(take)
+      await fh.read(buf, 0, take, lo)
+      const records: MonitorRecord<TData>[] = []
+      let start = lo === 0 ? 0 : buf.indexOf(0x0a) + 1
+      if (start <= 0 && lo !== 0) return { records, truncated: wanted > take }
+      for (let nl = buf.indexOf(0x0a, start); nl >= 0; nl = buf.indexOf(0x0a, start)) {
+        const text = buf.toString('utf8', start, nl)
+        start = nl + 1
+        const ts = readTs(text)
+        if (ts === undefined || ts < from || ts > to) continue
+        try { records.push(JSON.parse(text) as MonitorRecord<TData>) } catch { /* a half-written line */ }
+      }
+      return { records, truncated: wanted > take }
+    } finally {
+      await fh.close()
+    }
+  }
+
   /** True when this key's store is past the slurp limit — display layers cap their windows on this. */
   async isOversized(key: string): Promise<boolean> {
     return this.oversized(key)
@@ -402,16 +463,61 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
     return last[last.length - 1] ?? null
   }
 
-  async readRange(key: string, from: number, to: number): Promise<MonitorRecord<TData>[]> {
-    if (await this.oversized(key)) {
-      const out: MonitorRecord<TData>[] = []
-      for await (const r of this.stream(key)) {
-        if (r.ts >= from && r.ts <= to) out.push(r)
-      }
-      return out
+  /**
+   * Every record in [from, to].
+   *
+   * On an oversized store this used to stream the WHOLE file and keep what
+   * fell in the window: on a 2GB engine-quote store (twelve pairs, ~22GB in
+   * all) that is tens of millions of JSON.parse calls, and the gateway is one
+   * thread — the engine audit froze the whole dashboard for minutes. The file
+   * is append-only in time order, so the window is a byte range: bisect to it
+   * and read only that.
+   *
+   * `maxBytes` guards the other end: a window of hours on a busy store is
+   * still hundreds of megabytes, and a caller that wants a curve rather than
+   * every tick should ask `readSampled`. Past the cap this returns what fits
+   * from the START of the window and says so in `truncated`.
+   */
+  async readRange(key: string, from: number, to: number, options?: { maxBytes?: number }): Promise<MonitorRecord<TData>[]> {
+    const { records } = await this.readRangeCapped(key, from, to, options)
+    return records
+  }
+
+  /** `readRange`, plus whether the cap cut the answer short. */
+  async readRangeCapped(
+    key: string, from: number, to: number, options?: { maxBytes?: number },
+  ): Promise<{ records: MonitorRecord<TData>[]; truncated: boolean }> {
+    if (!(await this.oversized(key))) {
+      const all = await this.load(key)
+      return { records: all.filter(r => r.ts >= from && r.ts <= to), truncated: false }
     }
-    const all = await this.load(key)
-    return all.filter(r => r.ts >= from && r.ts <= to)
+    const maxBytes = options?.maxBytes ?? 64 * 1024 * 1024
+    return this.sliceFile(this.filePath(key), from, to, maxBytes)
+  }
+
+  /**
+   * Several windows at once, merged and de-duplicated by timestamp.
+   *
+   * What an audit needs is the ticks AROUND each fill, not the hours between
+   * them. Reading them one window at a time is one bisect each and a few
+   * kilobytes read — the difference between a second and a frozen gateway.
+   */
+  async readWindows(
+    key: string, windows: Array<{ from: number; to: number }>, options?: { maxBytes?: number },
+  ): Promise<MonitorRecord<TData>[]> {
+    if (windows.length === 0) return []
+    // Overlapping windows would read the same bytes twice.
+    const merged: Array<{ from: number; to: number }> = []
+    for (const w of [...windows].sort((a, b) => a.from - b.from)) {
+      const last = merged[merged.length - 1]
+      if (last && w.from <= last.to) last.to = Math.max(last.to, w.to)
+      else merged.push({ ...w })
+    }
+    const budget = options?.maxBytes ?? 64 * 1024 * 1024
+    const each = Math.max(1 << 20, Math.floor(budget / merged.length))
+    const out: MonitorRecord<TData>[] = []
+    for (const w of merged) out.push(...await this.readRange(key, w.from, w.to, { maxBytes: each }))
+    return out.sort((a, b) => a.ts - b.ts)
   }
 
   async count(key: string): Promise<number> {
