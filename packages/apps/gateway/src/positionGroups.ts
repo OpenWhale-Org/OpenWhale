@@ -69,10 +69,13 @@ export class PositionGroups {
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       )`)
-    // Additive migration for combinations created before the start date; the
-    // duplicate-column error on an already-migrated table is the "done" signal
-    // (SQLite has no ADD COLUMN IF NOT EXISTS).
-    await this.db.run('ALTER TABLE position_groups ADD COLUMN start_at TEXT').catch(() => {})
+    // Additive migration for combinations created before the start date.
+    // Asked first rather than run-and-swallow: every read selects start_at, so
+    // an ALTER that failed for any reason other than "already there" (a write
+    // lock, say) must not leave the schema marked ready — that would 500 the
+    // whole panel for the life of the process. Failing here retries next call.
+    const columns = await this.db.all<{ name: string }>('PRAGMA table_info(position_groups)')
+    if (!columns.some(c => c.name === 'start_at')) await this.db.run('ALTER TABLE position_groups ADD COLUMN start_at TEXT')
     await this.db.run(`
       CREATE TABLE IF NOT EXISTS position_group_members (
         group_id TEXT NOT NULL,
