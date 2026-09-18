@@ -110,6 +110,26 @@ describe('definePlugin lowering — account write views', () => {
     for (const action of impl.actions ?? []) expect(typeof reader[action.id]).not.toBe('function')
   })
 
+  it('a venue specialization keeps the kind\'s writer it did not re-declare', () => {
+    // The bug this pins: BinancePerpAccount re-declares @OwAccount to override
+    // PM equity, and the write half went missing for that one venue only.
+    @OwAccount({ id: 'perp-account', kind: 'test/fake' as NamespacedKind, venue: 'acme', displayName: 'Acme' })
+    class AcmeAccount extends WritableAccount {}
+    const impl = lower([AcmeAccount])
+    expect(impl.venue).toBe('acme')
+    expect(impl.displayName).toBe('Acme')
+    expect(impl.actions).toEqual([{ id: 'send', displayName: 'Send' }])
+    expect(impl.createWriter!({ s: 1 }, 'My Acct')).toBeInstanceOf(Writer)
+  })
+
+  it('a venue specialization opts out of writes by saying so', () => {
+    @OwAccount({ kind: 'test/fake' as NamespacedKind, venue: 'readonly-venue', writer: null })
+    class ReadOnlyVenueAccount extends WritableAccount {}
+    const impl = lower([ReadOnlyVenueAccount])
+    expect(impl.actions).toBeUndefined()
+    expect(impl.createWriter).toBeUndefined()
+  })
+
   it('a declared action with no method fails at LOAD, not on first click', () => {
     class Orphaned {
       static readonly actions = [{ id: 'send', displayName: 'Send' }, { id: 'cancle', displayName: 'Cancel' }]

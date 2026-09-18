@@ -91,8 +91,9 @@ export interface OwAccountMeta {
    * Optional WRITE view: a class whose static `actions` declares the operator
    * writes and whose methods implement them. Kept off the reader on purpose —
    * strategies get the reader, only the operator route constructs this.
+   * `null` = this cell takes no writes, even if an ancestor declares some.
    */
-  writer?: AccountWriterClass
+  writer?: AccountWriterClass | null
   /** Brand mark for pickers — see AccountImplementation.logo. */
   logo?: string
   icon?: string
@@ -125,8 +126,36 @@ export function OwAccount(meta: OwAccountMeta): ClassDecorator {
   }
 }
 
+/**
+ * Facets a venue specialization inherits when it doesn't mention them: they
+ * describe the KIND's contract, not this cell's identity. A venue subclass
+ * exists to override one read method (`BinancePerpAccount` → PM equity), and
+ * re-declaring @OwAccount used to silently drop the write half with it, so
+ * that one venue's accounts showed no operator actions while every other
+ * venue's did. Identity fields (id/kind/venue/displayName) are NOT inherited.
+ *
+ * To opt a venue cell out of the kind's writes, declare `writer: null` — a
+ * mentioned key wins over the ancestor's, and lowering reads null as no writer.
+ */
+const INHERITED_ACCOUNT_FACETS = ['paramsSchema', 'sections', 'writer', 'logo', 'icon'] as const
+
+/**
+ * Account metadata for a class, with kind-contract facets folded in from the
+ * nearest decorated ancestor — see {@link INHERITED_ACCOUNT_FACETS}.
+ */
 export function owAccountMeta(ctor: object): OwAccountMeta | undefined {
-  return accountMeta.get(ctor)
+  const own = accountMeta.get(ctor)
+  if (!own) return undefined
+  const merged = { ...own }
+  for (let proto = Object.getPrototypeOf(ctor); proto !== null; proto = Object.getPrototypeOf(proto)) {
+    const inherited = accountMeta.get(proto)
+    if (!inherited) continue
+    for (const facet of INHERITED_ACCOUNT_FACETS) {
+      if (facet in merged || !(facet in inherited)) continue
+      Object.assign(merged, { [facet]: inherited[facet] })
+    }
+  }
+  return merged
 }
 
 export type AccountClass = new (accountName: string, session: never, params?: Record<string, unknown>) => unknown
