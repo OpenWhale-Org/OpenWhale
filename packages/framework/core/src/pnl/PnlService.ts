@@ -64,6 +64,12 @@ export interface PnlSessionLike {
     id?: string; symbol: string; amount: number; asset: string; timestamp: number
   }>>
   fetchPositions?(symbols?: string[]): Promise<Array<{ symbol: string; markPrice: number }>>
+  /**
+   * Contracts this account traded since `since`, whoever placed the order —
+   * read from the venue's account-wide income ledger. Optional: a venue
+   * without one leaves discovery to claims and open positions.
+   */
+  fetchTradedSymbols?(since?: number, limit?: number): Promise<string[]>
 }
 
 /** One point on the realized-PnL curve: a timestamp and the running total. */
@@ -439,11 +445,10 @@ export class PnlService {
     const session = await this.resolveSession(account)
     if (!session?.fetchFills) return
 
-    const claimed = (await this.db.all<{ symbol: string }>(
-      `SELECT DISTINCT symbol FROM pnl_order_claims WHERE account = ?`, [account])).map(r => r.symbol)
+    const symbols = await this.symbolsOf(account, session)
 
-    if (session.fetchFillsAll) await this.collectAllSymbols(account, claimed, session)
-    else for (const symbol of claimed) await this.collectSymbol(account, symbol, session)
+    if (session.fetchFillsAll) await this.collectAllSymbols(account, symbols, session)
+    else for (const symbol of symbols) await this.collectSymbol(account, symbol, session)
 
     if (session.fetchFundingHistory) {
       const since = (await this.watermark(account, 'funding')) ?? Date.now() - this.backfillMs
@@ -461,6 +466,59 @@ export class PnlService {
         await this.setWatermark(account, 'funding', Math.max(...events.map(e => e.timestamp)))
       }
     }
+  }
+
+  /**
+   * Which contracts to read this account's fills for.
+   *
+   * Claims name what OpenWhale placed; the account holds and has held more
+   * than that. Binance's trade history is per symbol, so a contract nobody
+   * listed is a contract nobody reads: a hand-opened position on Binance
+   * SubAccount 2 was missing from that account's history entirely, while the
+   * older accounts looked complete only because the funding bot had already
+   * traded nearly every contract the operator touched.
+   *
+   * Two discovery channels, both account-wide: what is open right now, and
+   * the venue's income ledger (every commission, realized PnL and funding
+   * payment carries its contract). What either finds is remembered, so the
+   * symbol keeps being read after the ledger window has moved past it.
+   */
+  private async symbolsOf(account: string, session: PnlSessionLike): Promise<string[]> {
+    const symbols = new Set((await this.db.all<{ symbol: string }>(
+      `SELECT DISTINCT symbol FROM pnl_order_claims WHERE account = ?`, [account])).map(r => r.symbol))
+    for (const { symbol } of await this.db.all<{ symbol: string }>(
+      `SELECT symbol FROM pnl_symbols WHERE account = ?`, [account])) symbols.add(symbol)
+
+    const found: Array<[string, string]> = []
+    if (session.fetchTradedSymbols) {
+      /* The whole backfill window every sweep, not "since the last fill":
+         a contract traded by hand and closed again leaves no fill in the
+         ledger to measure from, so a window anchored on our own rows would
+         never reach it. One account-wide call an hour is cheap. */
+      try {
+        const from = Date.now() - this.backfillMs
+        for (const symbol of await session.fetchTradedSymbols(from)) found.push([symbol, 'ledger'])
+      } catch (err) {
+        log.warn({ err, account }, 'Traded-symbol discovery failed — this sweep reads the symbols already known')
+      }
+    }
+    if (session.fetchPositions) {
+      try {
+        for (const p of await session.fetchPositions()) if (p.symbol) found.push([p.symbol, 'position'])
+      } catch (err) {
+        log.warn({ err, account }, 'Position read failed — this sweep reads the symbols already known')
+      }
+    }
+    const now = Date.now()
+    for (const [symbol, source] of found) {
+      if (symbols.has(symbol)) continue
+      symbols.add(symbol)
+      log.info({ account, symbol, source }, 'A contract this account traded was not being read — added')
+      await this.db.run(
+        `INSERT OR IGNORE INTO pnl_symbols (account, symbol, source, first_ts) VALUES (?, ?, ?, ?)`,
+        [account, symbol, source, now])
+    }
+    return [...symbols]
   }
 
   /**

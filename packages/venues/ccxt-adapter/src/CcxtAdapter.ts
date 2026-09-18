@@ -455,6 +455,39 @@ export class CcxtAdapter implements PerpExchangeAdapter {
       .sort((a, b) => a.timestamp - b.timestamp)
   }
 
+  /**
+   * Every contract this ACCOUNT traded since `since`, whoever placed the order.
+   *
+   * Binance has no "all my trades" endpoint — `userTrades` needs a symbol — so
+   * a collector that only knows the symbols it placed orders on never sees a
+   * position opened by hand on any other contract (Binance SubAccount 2,
+   * 2026-09-18: manual positions missing from the account's history entirely).
+   * The account-wide income ledger does list every contract that produced a
+   * commission, a realized PnL or a funding payment, which is exactly the
+   * discovery channel that was missing.
+   *
+   * Venues without a ledger endpoint return nothing, and callers fall back to
+   * whatever symbols they already know.
+   */
+  async fetchTradedSymbols(since?: number, limit = 1000): Promise<string[]> {
+    if (!this.exchange.has['fetchLedger']) return []
+    const rows = await this.guard(() => this.exchange.fetchLedger(undefined, since, limit))
+    await this.guard(() => this.exchange.loadMarkets())
+    const byId = new Map<string, string>()
+    for (const market of Object.values(this.exchange.markets)) {
+      if (market?.id && market.symbol) byId.set(String(market.id), market.symbol)
+    }
+    const out = new Set<string>()
+    for (const row of rows) {
+      const info = (row.info ?? {}) as Record<string, unknown>
+      const id = info['symbol']
+      if (typeof id !== 'string' || id === '') continue
+      const symbol = byId.get(id)
+      if (symbol) out.add(symbol)
+    }
+    return [...out]
+  }
+
   // ── Trading ─────────────────────────────────────────────────────────────────
 
   /**

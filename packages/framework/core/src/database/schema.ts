@@ -270,6 +270,18 @@ CREATE TABLE IF NOT EXISTS pnl_funding (
 );
 CREATE INDEX IF NOT EXISTS idx_pnl_funding_instance ON pnl_funding (instance_id, ts);
 
+-- Contracts an account is known to have traded, whoever placed the order.
+-- Binance's trade history is per symbol, so the collector needs a symbol list;
+-- claims alone cover only what OpenWhale placed, and a position opened by hand
+-- on any other contract stayed invisible (2026-09-18).
+CREATE TABLE IF NOT EXISTS pnl_symbols (
+  account   TEXT NOT NULL,
+  symbol    TEXT NOT NULL,
+  source    TEXT NOT NULL,            -- 'ledger' (venue income) | 'position' (held now)
+  first_ts  INTEGER NOT NULL,
+  PRIMARY KEY (account, symbol)
+);
+
 CREATE TABLE IF NOT EXISTS pnl_watermarks (
   account TEXT NOT NULL,
   scope   TEXT NOT NULL,               -- 'fills:<symbol>' | 'funding'
