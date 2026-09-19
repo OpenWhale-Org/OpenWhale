@@ -405,7 +405,7 @@ function TypePicker({
     /* Fills the dialog body: the list is the step, so it should end where the
        dialog does rather than at some fixed pixel height with dead space under
        it. Both columns scroll inside themselves, without a visible track. */
-    <div data-tour="credential-type-list" className="flex-1 min-h-0 flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+    <div data-tour="credential-type-list" className="ow-master-detail flex-1 min-h-0 flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       {/* Category sidebar */}
       <Rail bare width="10rem">
         {categories.map((c) => {
@@ -548,7 +548,7 @@ function AddCredentialForm({
   }
 
   return (
-    <Modal onClose={onCancel} maxWidth="46rem" height="min(82vh, 46rem)">
+    <Modal onClose={onCancel} maxWidth="46rem" height="min(82dvh, 46rem)">
       <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         {step === 'fields' && (
           <button
@@ -784,7 +784,7 @@ function DuplicateCredentialForm({ source, credentialTypes, onSuccess, onCancel 
   }
 
   return (
-    <Modal onClose={onCancel} maxWidth="46rem" height="min(82vh, 46rem)">
+    <Modal onClose={onCancel} maxWidth="46rem" height="min(82dvh, 46rem)">
       <div className="flex items-center gap-2 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <TypeMark
           logo={typeInfo?.logo}

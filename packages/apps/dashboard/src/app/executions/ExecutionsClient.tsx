@@ -151,7 +151,7 @@ export function ExecutionsClient({ instances }: { instances: StrategyInstanceVie
         />
       </div>
 
-      <div className="rounded-lg overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="ow-table-scroll rounded-lg overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="grid gap-2 px-3 py-2 text-xs" style={{ gridTemplateColumns: '9rem 1fr 12rem 8rem 6rem', color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
           <span>{t('executions.col.time')}</span><span>{t('executions.col.action')}</span><span>{t('executions.col.instance')}</span><span>{t('executions.col.executor')}</span><span>{t('executions.col.status')}</span>
         </div>

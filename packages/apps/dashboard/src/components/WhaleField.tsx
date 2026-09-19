@@ -989,7 +989,7 @@ export function WhaleField({ instances, selectedId, onHover, onSelect, handleRef
       tabIndex={0}
       className="relative w-full rounded-lg overflow-hidden outline-none"
       style={{
-        height: 'calc(100vh - 22rem)',
+        height: 'calc(100dvh - 22rem)',
         minHeight: 420,
         background: 'radial-gradient(120% 90% at 50% 0%, #101736 0%, #070a14 62%, #05070f 100%)',
         border: '1px solid var(--border)',

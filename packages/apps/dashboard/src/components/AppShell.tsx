@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Nav } from './Nav'
 import { UserMenu } from './UserMenu'
@@ -44,17 +45,45 @@ export function AppShell({ signedIn, username, children }: { signedIn: boolean; 
   const { t, locale, setLocale } = useI18n()
   const pathname = usePathname()
   const login = pathname === '/login'
+  /*
+   * On a phone the rail is off-screen and the same <Nav /> slides over the
+   * page instead. One nav, two presentations — a second link list would be a
+   * second thing to keep in step.
+   */
+  const [drawer, setDrawer] = useState(false)
+  useEffect(() => { setDrawer(false) }, [pathname])
+  useEffect(() => {
+    if (!drawer) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawer(false) }
+    window.addEventListener('keydown', onKey)
+    // The page behind a covering drawer must not scroll under the finger.
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [drawer])
 
   if (login || !signedIn) return <div className="aurora-theme aurora-login-shell">{children}</div>
 
   return (
-    <div className="aurora-theme aurora-app-shell">
-      <Nav />
+    <div className={`aurora-theme aurora-app-shell${drawer ? ' is-drawer-open' : ''}`}>
+      <Nav onNavigate={() => setDrawer(false)} />
+      {drawer && <button type="button" className="aurora-drawer-backdrop" aria-label={t('nav.closeMenu')} onClick={() => setDrawer(false)} />}
       <div className="aurora-workspace">
         <header className="aurora-topbar">
           <div className="aurora-topbar-context">
+            <button
+              type="button"
+              className="aurora-menu-btn"
+              aria-label={t(drawer ? 'nav.closeMenu' : 'nav.openMenu')}
+              aria-expanded={drawer}
+              onClick={() => setDrawer(v => !v)}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                {drawer ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+              </svg>
+            </button>
             <span className="aurora-live-dot" />
-            <span>OpenWhale</span>
+            <span className="aurora-topbar-brand">OpenWhale</span>
             <span className="aurora-topbar-separator">/</span>
             <strong>{currentLabel(pathname, t)}</strong>
             {/* Pages push their own crumb here — see TopbarSlot. */}

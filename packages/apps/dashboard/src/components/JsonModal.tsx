@@ -42,7 +42,7 @@ export function JsonModal({ title, data, onClose }: { title: string; data: unkno
       onClick={onClose}
     >
       <div
-        className="rounded-lg flex flex-col w-full max-w-3xl max-h-[80vh] overflow-hidden"
+        className="rounded-lg flex flex-col w-full max-w-3xl max-h-[80dvh] overflow-hidden"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         onClick={(e) => e.stopPropagation()}
       >

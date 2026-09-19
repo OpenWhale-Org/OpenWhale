@@ -123,10 +123,10 @@ export function ExplorerClient() {
           panel happened to be tallest, and the records list — capped at its own
           fixed maxHeight — left dead space below it. */}
       <div
-        className="grid gap-3"
+        className="ow-explorer-grid grid gap-3"
         style={{
           gridTemplateColumns: '220px 280px 1fr',
-          height: 'calc(100vh - 15rem)', minHeight: 420,
+          height: 'calc(100dvh - 15rem)', minHeight: 420,
         }}
       >
         {/* Contracts */}

@@ -291,7 +291,7 @@ export function UiDesignClient() {
 
       {/* ── Table ── */}
       <Section title="Tables" blurb="Header in surface + overline type; rows separated by hairlines; numbers right-aligned and tabular; row hover raises the surface.">
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--surface)' }}>

@@ -90,7 +90,7 @@ export function CardPickerModal<T extends CardChoice>({ heading, load, current, 
   const cardCount = list.length - plain.length
 
   return (
-    <Modal onClose={onClose} maxWidth="72rem" height="82vh">
+    <Modal onClose={onClose} maxWidth="72rem" height="82dvh">
       <div className="flex flex-col h-full min-h-0">
         <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex flex-col gap-0.5 min-w-0">

@@ -249,7 +249,7 @@ export function AccountsClient({ initialAccounts, initialSnapshots, implementati
         />
       )}
 
-      <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
+      <div className="ow-master-detail flex gap-3" style={{ height: 'calc(100dvh - 13rem)', minHeight: 460 }}>
         {/* ── roster ─────────────────────────────────────────────────────── */}
         <Rail
           width="21rem"

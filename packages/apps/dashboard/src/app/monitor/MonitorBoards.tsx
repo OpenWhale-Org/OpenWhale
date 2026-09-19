@@ -473,7 +473,7 @@ export function MonitorBoards({ monitorId, keys, emitCount, only, initialKey, ba
 
       <div
         className="grid gap-5"
-        style={{ gridTemplateColumns: bare ? '1fr' : 'repeat(auto-fit, minmax(480px, 1fr))' }}
+        style={{ gridTemplateColumns: bare ? '1fr' : 'repeat(auto-fit, minmax(min(480px, 100%), 1fr))' }}
       >
         {shown!.map((p) => {
           const isExpanded = expanded.has(p.id)

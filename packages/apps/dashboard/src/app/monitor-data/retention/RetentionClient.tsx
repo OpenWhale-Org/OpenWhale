@@ -183,7 +183,7 @@ export function RetentionClient() {
         </div>
       )}
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: 'minmax(300px, 1fr) minmax(360px, 1.35fr)' }}>
+      <div className="ow-stack-grid grid gap-3" style={{ gridTemplateColumns: 'minmax(300px, 1fr) minmax(360px, 1.35fr)' }}>
         {/* ── saved policies ─────────────────────────────────────────────── */}
         <div className="rounded-lg flex flex-col" style={{ ...panelStyle, height: '30rem' }}>
           <div className="px-3 py-2 text-xs font-medium shrink-0 flex items-center justify-between" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
@@ -335,7 +335,7 @@ export function RetentionClient() {
           <span>{t('retention.runHistory')}</span>
           <span>{t('retention.runHistoryHint')}</span>
         </div>
-        <div className="flex-1 overflow-y-auto scroll-hidden">
+        <div className="flex-1 overflow-auto scroll-hidden">
           {runs.length === 0 && (
             <p className="text-xs px-3 py-4" style={{ color: 'var(--muted)' }}>
               {t('retention.nothingPruned')}

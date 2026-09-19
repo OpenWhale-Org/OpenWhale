@@ -103,7 +103,7 @@ export function CompilerClient({ initialJobs }: { initialJobs: CompileJob[] }) {
   }
 
   return (
-    <div className="flex-1 min-h-0 flex gap-3">
+    <div className="ow-master-detail flex-1 min-h-0 flex gap-3">
       {/* ── sessions rail ─────────────────────────────────────────────────── */}
       <Rail
         width="17rem"
@@ -566,7 +566,7 @@ function JobWorkbench({ job, busy, onAct, onChanged }: {
       )}
 
       {/* code | divider | chat */}
-      <div ref={areaRef} className="flex-1 min-h-0 flex">
+      <div ref={areaRef} className="ow-split flex-1 min-h-0 flex">
         {showCode && file && (
           <div className="min-w-0 min-h-0" style={{ flexBasis: showChat ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
             <CodeEditor

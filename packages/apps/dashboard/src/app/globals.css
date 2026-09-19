@@ -254,6 +254,12 @@ body {
 .aurora-topbar-separator { opacity: .4; }
 .aurora-topbar-slot { display: flex; align-items: center; gap: 8px; }
 .aurora-topbar-slot:not(:empty)::before { content: '/'; opacity: .4; }
+/* Phone navigation. The rail is off-screen below 620px; this button slides
+   the very same <Nav /> over the page. Hidden on wider screens, where the
+   rail is always there. */
+.aurora-menu-btn { display: none; align-items: center; justify-content: center; width: 34px; height: 34px; margin-left: -6px; border: 1px solid var(--border); border-radius: 9px; color: #cfc9e6; background: rgba(255,255,255,.03); }
+.aurora-menu-btn:active { background: rgba(255,255,255,.08); }
+.aurora-drawer-backdrop { display: none; position: fixed; inset: 0; z-index: 59; border: 0; background: rgba(6, 8, 16, .62); backdrop-filter: blur(2px); }
 .aurora-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px rgba(50, 214, 160, .8); }
 /* Breathing room under the topbar. The overview hero is the one thing that
    should still sit flush against it, so it pulls this back off. */
@@ -493,7 +499,25 @@ body {
   .aurora-widget-grid > [data-span] { grid-column: span 1; }
   .aurora-widget-grid > [data-rows] { grid-row: auto; }
   .aurora-login-brand { min-height: 36vh; }.aurora-login-brand-content { min-height:36vh }.aurora-logo-lg .aurora-logo-type{font-size:27px}.aurora-login-copy p,.aurora-login-kicker{display:none}.aurora-login-copy h1{font-size:34px}.aurora-login-panel{min-height:64vh;padding:18px}.aurora-login-form{padding:24px}
-  .aurora-sidebar { display:none }.aurora-topbar { padding-inline:16px }.aurora-main { padding-inline:12px }.aurora-overview-hero { margin-inline:-12px;padding-inline:18px }.aurora-widget-grid { padding-top:12px }.aurora-page-head { margin-inline:-12px;padding-inline:12px }.aurora-overview-hero p{max-width:230px}.aurora-new-strategy{font-size:0;width:40px;padding:0;justify-content:center}.aurora-new-strategy span{font-size:17px}.aurora-kpi-grid{grid-template-columns:1fr}.aurora-overview-grid{display:block}.aurora-dashboard-card{margin-top:10px}
+  /* The rail becomes a drawer: off-canvas until the menu button opens it. */
+  .aurora-sidebar { position: fixed; z-index: 60; width: 244px; flex-basis: 244px; transform: translateX(-100%); transition: transform 180ms ease; box-shadow: 18px 0 44px rgba(0,0,0,.45) }
+  .is-drawer-open .aurora-sidebar { transform: none }
+  .is-drawer-open .aurora-drawer-backdrop { display: block }
+  .aurora-logo-type,.aurora-nav-heading,.aurora-nav-link span { display: revert }
+  .aurora-beta { display: inline-flex }
+  .aurora-sidebar-brand { min-height: 72px; align-items: flex-start; justify-content: center; padding: 14px 18px }
+  .aurora-nav-link { justify-content: flex-start; padding: 0 12px; height: 42px }
+  .aurora-menu-btn { display: inline-flex }
+  .aurora-topbar { padding-inline:12px; gap: 8px }
+  .aurora-topbar-brand,.aurora-topbar-separator { display: none }
+  .aurora-topbar-context { min-width: 0; font-size: 12px }
+  .aurora-topbar-context strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  .aurora-topbar-right { gap: 8px }
+  /* dvh, not vh: with vh the page runs under the browser's address bar and the
+     last row of every table sits where the finger cannot reach it. */
+  .aurora-main { height: calc(100dvh - 54px) }
+  .aurora-lang-btn { padding: 3px 7px; font-size: 11px }
+  .aurora-main { padding-inline:12px }.aurora-overview-hero { margin-inline:-12px;padding-inline:18px }.aurora-widget-grid { padding-top:12px }.aurora-page-head { margin-inline:-12px;padding-inline:12px }.aurora-overview-hero p{max-width:230px}.aurora-new-strategy{font-size:0;width:40px;padding:0;justify-content:center}.aurora-new-strategy span{font-size:17px}.aurora-kpi-grid{grid-template-columns:1fr}.aurora-overview-grid{display:block}.aurora-dashboard-card{margin-top:10px}
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -677,6 +701,43 @@ body {
 .aurora-lang-btn { font-size: 11px; padding: 4px 9px; background: transparent; color: var(--muted); border: 0; cursor: pointer; }
 .aurora-lang-btn + .aurora-lang-btn { border-left: 1px solid var(--border); }
 .aurora-lang-btn.is-active { color: var(--foreground); background: var(--accent-soft); }
+
+/* ── Phone: master–detail pages stack ────────────────────────────────────
+   Accounts, Monitor, Executors, Scripts, Plugins, Compiler and Credentials
+   all draw the same shape: a fixed-width <Rail> beside a detail pane, inside
+   a viewport-height row. On a phone that row becomes a column — the rail on
+   top, capped so the detail below it is never pushed off-screen — and the
+   pair grows with its content instead of being pinned to the viewport.
+   !important is needed on purpose: the heights are inline styles. */
+@media (max-width: 760px) {
+  .ow-master-detail { flex-direction: column; height: auto !important; min-height: 0 !important; }
+  .ow-master-detail > * { width: 100% !important; max-width: 100% !important; }
+  .ow-master-detail .ow-rail { width: 100% !important; max-height: 48vh; flex-shrink: 1; }
+  /* A detail pane that was only ever as tall as its row now needs a floor. */
+  .ow-master-detail > :not(.ow-rail) { min-height: 60vh; }
+}
+
+/* Row grids that are tables in all but name — executions, runs — keep their
+   columns and scroll sideways instead of crushing every cell to nothing. */
+@media (max-width: 760px) {
+  .ow-table-scroll { overflow-x: auto !important; }
+  .ow-table-scroll > * { min-width: 46rem; }
+}
+
+/* Draggable splits (monitor, executors, compiler, the instance board) stack
+   on a phone. The divider goes with them: there is no width left to drag. */
+@media (max-width: 760px) {
+  .ow-split { flex-direction: column; align-items: stretch; }
+  .ow-split > * { flex-basis: auto !important; width: 100% !important; }
+  .ow-split > [class*="cursor-col-resize"] { display: none; }
+}
+
+/* Grids whose tracks are wider than a phone: one column, natural height. */
+@media (max-width: 760px) {
+  .ow-stack-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .ow-explorer-grid { grid-template-columns: minmax(0, 1fr) !important; height: auto !important; }
+  .ow-explorer-grid > * { min-height: 16rem; }
+}
 
 /* Instance board: parameters on the left, what the instance sees and did on the right. */
 .board-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }

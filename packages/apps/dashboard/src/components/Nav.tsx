@@ -66,7 +66,7 @@ function NavLink({ href, label, icon, active }: { href: string; label: string; i
   )
 }
 
-export function Nav() {
+export function Nav({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname()
   const { t } = useI18n()
   /*
@@ -81,7 +81,8 @@ export function Nav() {
   }
 
   return (
-    <aside className="aurora-sidebar">
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a click anywhere in the drawer's nav closes it; the links themselves stay the interactive elements
+    <aside className="aurora-sidebar" onClick={onNavigate}>
       <div className="aurora-sidebar-brand">
         <AuroraLogo size="sm" />
         <span className="aurora-beta"><span>AURORA</span><b>BETA</b></span>

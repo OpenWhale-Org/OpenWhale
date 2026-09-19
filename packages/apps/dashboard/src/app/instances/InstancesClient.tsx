@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSortable, DragHandle } from '../../components/Sortable'
 import { useLayout, LayoutSwitch, LAYOUTS } from '../../components/LayoutSwitch'
+import { useIsPhone } from '@/lib/useIsPhone'
 import dynamic from 'next/dynamic'
 import type { WhaleDatum, WhaleFieldHandle } from '../../components/WhaleField'
 
@@ -19,7 +20,7 @@ const WhaleField = dynamic(
       return (
         <div
           className="w-full rounded-lg grid place-items-center text-xs"
-          style={{ height: 'calc(100vh - 22rem)', minHeight: 420, color: 'var(--muted)', border: '1px solid var(--border)' }}
+          style={{ height: 'calc(100dvh - 22rem)', minHeight: 420, color: 'var(--muted)', border: '1px solid var(--border)' }}
         >
           {t('inst.diving')}
         </div>
@@ -1006,6 +1007,14 @@ export function InstancesClient({ initialInstances }: Props) {
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null)
 
   const [layout, setLayout] = useLayout('ow:instances-layout', INSTANCE_LAYOUTS)
+  /*
+   * The list row is a positional grid — icon, name, chips, three PnL columns,
+   * params, actions — that needs 54rem before anything can be read. On a
+   * phone it shows the cards instead; the stored preference is untouched, so
+   * the same browser on a desktop still opens the list it was left on.
+   */
+  const phone = useIsPhone()
+  const viewLayout = phone && layout === 'list' ? 'grid' : layout
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | 'running' | 'stopped'>('all')
   const [sort, setSort] = useState<SortId>('manual')
@@ -1175,7 +1184,7 @@ export function InstancesClient({ initialInstances }: Props) {
             {SORTS.map(o => <option key={o.id} value={o.id}>{t(o.label)}</option>)}
           </select>
           <span className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>
-            {layout === 'whale'
+            {viewLayout === 'whale'
               ? 'drag to orbit · wheel to zoom · arrows to move'
               : reorderable
                 ? 'drag the ⠿ grip to reorder or re-file'
@@ -1234,7 +1243,7 @@ export function InstancesClient({ initialInstances }: Props) {
           It shares ROW_COLUMNS with the rows, so it cannot drift out of
           alignment with them — a header maintained separately eventually
           would. Sticky, because the folder groups make the list long. */}
-      {layout === 'list' && visible.length > 0 && (
+      {viewLayout === 'list' && visible.length > 0 && (
         <div
           className="grid items-center gap-3 px-3 py-1.5 mt-3 sticky z-20 rounded-md"
           style={{
@@ -1273,7 +1282,7 @@ export function InstancesClient({ initialInstances }: Props) {
             {t('inst.clearFilter')}
           </button>
         </div>
-      ) : layout === 'whale' ? (
+      ) : viewLayout === 'whale' ? (
         <WhaleLayout
           instances={visible}
           pnl={pnl}
@@ -1419,9 +1428,9 @@ export function InstancesClient({ initialInstances }: Props) {
                 {(folder === undefined || !collapsedFolders.has(folder)) && (
                 <div
                   data-cards={folder ?? ''}
-                  className={layout === 'grid' ? 'grid gap-3' : 'flex flex-col gap-1.5'}
+                  className={viewLayout === 'grid' ? 'grid gap-3' : 'flex flex-col gap-1.5'}
                   style={{
-                    ...(layout === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } : {}),
+                    ...(viewLayout === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } : {}),
                     ...refileStyle(folder),
                   }}
                 >
@@ -1433,7 +1442,7 @@ export function InstancesClient({ initialInstances }: Props) {
                     style={cardStyle(inst.id)}
                   >
                     {(() => {
-                      const Item = layout === 'list' ? InstanceRow : InstanceCard
+                      const Item = viewLayout === 'list' ? InstanceRow : InstanceCard
                       return <Item
                       instance={inst}
                       {...(reorderable
@@ -1501,6 +1510,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
   onDeactivate: (id: string) => void
 }) {
   const t = useT()
+  const phone = useIsPhone()
   const byId = new Map(instances.map(i => [i.id, i]))
   const hovered = hover ? byId.get(hover.id) : undefined
   const chosen = selected ? byId.get(selected) : undefined
@@ -1621,7 +1631,7 @@ function WhaleLayout({ instances, pnl, hover, selected, onHover, onSelect, onAct
         <div
           className="absolute right-0 top-0 bottom-0 z-10 flex flex-col"
           style={{
-            width: 'min(30rem, 46%)',
+            width: phone ? '92%' : 'min(30rem, 46%)',
             background: 'linear-gradient(270deg, color-mix(in srgb, var(--surface) 96%, transparent) 78%, transparent)',
             borderLeft: '1px solid var(--border)',
           }}
@@ -2273,7 +2283,7 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
     <Modal
       onClose={dismiss}
       maxWidth="58rem"
-      height="min(90vh, calc(100vh - 2rem))"
+      height="min(90dvh, calc(100dvh - 2rem))"
       maximizable
       persistKey="ow:instance-dialog-maximized"
     >

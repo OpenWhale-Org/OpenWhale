@@ -223,7 +223,7 @@ export function InstanceBoardClient({ instanceId }: { instanceId: string }) {
             </div>
           </div>
           {/* left | divider | right — the divider drags, as on the Executors page. */}
-          <div ref={areaRef} className="flex items-start">
+          <div ref={areaRef} className="ow-split flex items-start">
             <div className="min-w-0" hidden={view === 'right'} style={{ flexBasis: view === 'split' ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
               <InstanceAccountsPanel instance={instance} onSaved={pull} />
               <InstanceParamsPanel instance={instance} onSaved={pull} />
@@ -572,7 +572,7 @@ function QuickParamsDialog({ fields, quick, pinned, onSave, onClose }: {
   const label = (f: ParamFieldDef) => typeof f.displayName === 'string' ? f.displayName : f.name
   const groups: Array<['base' | 'tunable', ParamFieldDef[]]> = [['base', fields.filter(f => f.group === 'base')], ['tunable', fields.filter(f => f.group === 'tunable')]]
   return (
-    <Modal onClose={onClose} maxWidth="44rem" height="80vh">
+    <Modal onClose={onClose} maxWidth="44rem" height="80dvh">
       <div className="flex flex-col h-full min-h-0">
         <div className="px-5 pt-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <h2 className="text-base font-semibold">{t('board.quick.dialogTitle')}</h2>

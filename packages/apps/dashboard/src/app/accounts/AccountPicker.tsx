@@ -111,7 +111,7 @@ export function AccountPicker({ implementations, credentials, credentialTypes, o
   }
 
   return (
-    <Modal onClose={onClose} maxWidth="64rem" height="min(80vh, 44rem)" maximizable persistKey="ow.modal.account-picker">
+    <Modal onClose={onClose} maxWidth="64rem" height="min(80dvh, 44rem)" maximizable persistKey="ow.modal.account-picker">
       <div className="flex items-center justify-between px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <div>
           <div className="text-sm font-medium">{t('accounts.picker.title')}</div>

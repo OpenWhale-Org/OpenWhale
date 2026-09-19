@@ -11,7 +11,7 @@ export default async function CompilerPage() {
   return (
     // Fills the main area exactly (topbar 54px + main padding 22px/28px) so
     // the workbench owns the viewport and nothing on the page scrolls.
-    <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 104px)' }}>
+    <div className="flex flex-col gap-3" style={{ height: 'calc(100dvh - 104px)' }}>
       <div className="shrink-0 flex items-center gap-3">
         <h1 className="text-2xl font-semibold">{t('compiler.title')}</h1>
         <span

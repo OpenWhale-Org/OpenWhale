@@ -119,7 +119,7 @@ export function MonitorClient({ monitors, instances: initialInstances, implement
   }
 
   return (
-    <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
+    <div className="ow-master-detail flex gap-3" style={{ height: 'calc(100dvh - 13rem)', minHeight: 460 }}>
       {/* ── Left: monitors grouped by package ── */}
       <Rail width="18rem">
         {statuses.length === 0 && monitors.length === 0 && (
@@ -319,7 +319,7 @@ function MonitorDetail({ status, events, connected, onChanged, instances, implem
           alone. Giving them equal billing on one screen is what made this page
           hard to read; the charts were a band in the middle of five forms. */}
 
-      <div ref={areaRef} className="flex items-start">
+      <div ref={areaRef} className="ow-split flex items-start">
       {showBoard && (
         <div className="flex flex-col gap-3 min-w-0" style={{ flexBasis: showManage ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
           <MonitorBoards

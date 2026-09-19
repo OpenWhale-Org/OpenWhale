@@ -328,7 +328,7 @@ export function Tour() {
       <div className="ow-tour" aria-live="polite">
         <div className="ow-tour-dim" />
         {blockers(null).map((b, k) => <div key={k} className="ow-tour-block" style={b} />)}
-        <div className="ow-tour-card ow-tour-welcome" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 420 }}>
+        <div className="ow-tour-card ow-tour-welcome" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(420px, calc(100vw - 24px))' }}>
           <div className="ow-tour-step">{t('tour.welcome.kicker')}</div>
           <h3>{t('tour.welcome.title')}</h3>
           <p>{t('tour.welcome.p1')}</p>

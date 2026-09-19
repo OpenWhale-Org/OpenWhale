@@ -97,7 +97,7 @@ export function ScriptsClient() {
   return (
     <div>
       {header}
-      <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
+      <div className="ow-master-detail flex gap-3" style={{ height: 'calc(100dvh - 13rem)', minHeight: 460 }}>
         {/* ── rail: scripts by package ─────────────────────────────────── */}
         <Rail
           width="18rem"
@@ -596,7 +596,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
               className="w-full rounded-md"
               style={{
                 background: 'var(--background)', border: '1px solid var(--border)',
-                ...(expanded ? { height: '80vh' } : { height: 480, minHeight: 160, resize: 'vertical' as const }),
+                ...(expanded ? { height: '80dvh' } : { height: 480, minHeight: 160, resize: 'vertical' as const }),
               }}
             />
           ) : (

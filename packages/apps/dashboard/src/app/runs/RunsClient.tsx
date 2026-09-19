@@ -126,7 +126,7 @@ export function RunsClient({ instances }: { instances: StrategyInstanceView[] })
         </span>
       </div>
 
-      <div className="rounded-lg overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="ow-table-scroll rounded-lg overflow-clip" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="grid gap-2 px-3 py-2 text-xs" style={{ gridTemplateColumns: '9rem 7rem 12rem 1fr 10rem', color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
           <span>{t('runs.col.time')}</span><span>{t('runs.col.outcome')}</span><span>{t('runs.col.instance')}</span><span>{t('runs.col.error')}</span><span>{t('runs.col.run')}</span>
         </div>

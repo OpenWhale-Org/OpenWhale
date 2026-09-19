@@ -23,6 +23,8 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
   'nav.group.automate': '自动化',
   'nav.group.develop': '开发',
   'nav.group.settings': '设置',
+  'nav.openMenu': '打开菜单',
+  'nav.closeMenu': '关闭菜单',
   'nav.language': '语言',
   'nav.overview': '总览',
   'nav.start': '快速上手',

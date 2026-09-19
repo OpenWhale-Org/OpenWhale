@@ -122,7 +122,7 @@ export function PluginsClient({ initialPlugins, initialRegistry, credentialTypes
         </button>
       </div>
 
-      <div className="flex gap-3" style={{ height: 'calc(100vh - 16rem)', minHeight: 460 }}>
+      <div className="ow-master-detail flex gap-3" style={{ height: 'calc(100dvh - 16rem)', minHeight: 460 }}>
         {/* ── rail ─────────────────────────────────────────────────────────── */}
         <Rail
           width="18rem"

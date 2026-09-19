@@ -116,7 +116,11 @@ export function Modal({ onClose, maxWidth = '48rem', height, maximizable, persis
           // The panel sits inside the overlay's 1rem padding, so "full" is the
           // viewport minus that — never taller than the screen it renders on.
           maxWidth: full ? '100%' : maxWidth,
-          height: full ? 'calc(100vh - 2rem)' : height,
+          height: full ? 'calc(100dvh - 2rem)' : height,
+          // A caller's fixed height is a wish, not a promise: on a phone it is
+          // routinely taller than the screen, and the panel's own footer (Save,
+          // Cancel) would then be unreachable.
+          maxHeight: 'calc(100dvh - 2rem)',
           transition: 'max-width 120ms ease, height 120ms ease',
         }}
         onMouseDown={(e) => e.stopPropagation()}

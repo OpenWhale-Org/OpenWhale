@@ -50,7 +50,7 @@ export function ExecutorsClient({ initialExecutors, credentials, credentialTypes
   }
 
   return (
-    <div className="flex gap-3" style={{ height: 'calc(100vh - 13rem)', minHeight: 460 }}>
+    <div className="ow-master-detail flex gap-3" style={{ height: 'calc(100dvh - 13rem)', minHeight: 460 }}>
       {/* ── Left: executors grouped by package ── */}
       <Rail width="18rem">
         {initialExecutors.length === 0 && (
@@ -226,7 +226,7 @@ function ExecutorDetail({ executor, credentials, credentialTypes }: {
       )}
 
       {/* fire | divider | records + logs */}
-      <div ref={areaRef} className="flex-1 min-h-0 flex">
+      <div ref={areaRef} className="ow-split flex-1 min-h-0 flex">
         {showFire && (
           <div className="min-w-0 min-h-0 overflow-y-auto scroll-hidden" style={{ flexBasis: showRecords ? `${splitPct}%` : '100%', flexGrow: 0, flexShrink: 0 }}>
       {/* Manual fire console */}

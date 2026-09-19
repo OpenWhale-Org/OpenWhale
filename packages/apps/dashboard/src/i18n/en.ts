@@ -25,6 +25,8 @@ export const en = {
   'nav.group.automate': 'AUTOMATE',
   'nav.group.develop': 'DEVELOP',
   'nav.group.settings': 'SETTINGS',
+  'nav.openMenu': 'Open menu',
+  'nav.closeMenu': 'Close menu',
   'nav.language': 'Language',
   'nav.overview': 'Overview',
   'nav.start': 'Getting started',

@@ -36,7 +36,9 @@ export function Rail({ width = '18rem', header, search, footer, children, bare =
 }) {
   return (
     <div
-      className={`flex flex-col min-h-0 shrink-0 ${bare ? '' : 'rounded-lg overflow-hidden'} ${className}`}
+      /* ow-rail: the phone stylesheet widens this to the full column and caps
+         its height — see globals.css, the master-detail media query. */
+      className={`ow-rail flex flex-col min-h-0 shrink-0 ${bare ? '' : 'rounded-lg overflow-hidden'} ${className}`}
       style={{
         width,
         ...(bare
