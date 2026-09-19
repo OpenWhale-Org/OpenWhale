@@ -286,7 +286,7 @@ export default definePlugin((ctx) => ({
 | [`@openwhaleorg/exchange`](./packages/framework/exchange) | kind `exchange/perp` 与 `exchange/spot`：账户视图、交易执行器、行情 monitor |
 | [`@openwhaleorg/web3`](./packages/framework/web3) | kind `web3/chain`：EVM 会话、钱包账户、`web3/evm` 与 `web3/rpc` 凭证类型 |
 | [`@openwhaleorg/ccxt-adapter`](./packages/venues/ccxt-adapter) | 交易所适配器的 ccxt 实现与数据驱动的平台名册 |
-| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | 平台插件：凭证类型、适配器格、平台特化账户 |
+| [`@openwhaleorg/hyperliquid`](./packages/venues/hyperliquid) / [`whaledance`](./packages/venues/whaledance) / [`binance`](./packages/venues/binance) / [`aster`](./packages/venues/aster) | 平台插件：凭证类型、适配器格、平台特化账户与委托钱包 |
 | [`@openwhaleorg/gateway`](./packages/apps/gateway) | 后端：运行时、认证、REST + SSE API、编译服务、插件安装 |
 | [`@openwhaleorg/dashboard`](./packages/apps/dashboard) | Next.js 前端 |
 | [`@openwhaleorg/examples`](./packages/strategies/examples) | 参考策略：动量、均值回归、定投、LLM 分析、跟单 |

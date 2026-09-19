@@ -23,7 +23,7 @@ export interface ExecutionQuery {
   instanceId?: string
   /** Only this executor's log directory — the id, as it appears on disk. */
   executorId?: string
-  /** 'success' | 'failed' | 'skipped' | 'dry-run' */
+  /** 'success' | 'failed' | 'pending' | 'unknown' | 'skipped' | 'dry-run' */
   status?: string
   /** Only executions at or after this epoch ms. */
   since?: number
