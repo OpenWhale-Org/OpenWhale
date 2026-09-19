@@ -64,6 +64,8 @@ export class PositionGroups {
         source      TEXT NOT NULL,
         instance_id TEXT,
         hidden      INTEGER NOT NULL DEFAULT 0,
+        -- 1 = hidden 跟着实例状态走，操作员没表过态（见 syncInstances）
+        hidden_auto INTEGER NOT NULL DEFAULT 0,
         sort_order  INTEGER NOT NULL DEFAULT 0,
         start_at    TEXT,
         created_at  TEXT NOT NULL,
@@ -76,6 +78,11 @@ export class PositionGroups {
     // whole panel for the life of the process. Failing here retries next call.
     const columns = await this.db.all<{ name: string }>('PRAGMA table_info(position_groups)')
     if (!columns.some(c => c.name === 'start_at')) await this.db.run('ALTER TABLE position_groups ADD COLUMN start_at TEXT')
+    /* 1 = 这一行的 hidden 是同步按实例状态给的，操作员还没表过态。同上，
+       先问再加。 */
+    if (!columns.some(c => c.name === 'hidden_auto')) {
+      await this.db.run('ALTER TABLE position_groups ADD COLUMN hidden_auto INTEGER NOT NULL DEFAULT 0')
+    }
     await this.db.run(`
       CREATE TABLE IF NOT EXISTS position_group_members (
         group_id TEXT NOT NULL,
@@ -126,12 +133,19 @@ export class PositionGroups {
       if (members.length === 0) continue
       const id = `instance:${inst.id}`
       live.add(id)
-      // hidden and sort_order are the operator's: an upsert keeps them.
+      /* 停着的实例，它的组合默认收起来：那些腿多半已经平了，留在列表里只是
+         每秒重复一次「无持仓」。默认而已——操作员在卡片上点过隐藏/取消隐藏
+         之后（`hidden_auto` 归 0），这里就不再插手，实例再停也不动它。
+         sort_order 一直是操作员的。 */
+      const hidden = inst.active === false ? 1 : 0
       await this.db.run(
-        `INSERT INTO position_groups (id, name, source, instance_id, hidden, sort_order, created_at, updated_at)
-         VALUES (?, ?, 'instance', ?, 0, 0, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`,
-        [id, inst.name, inst.id, now, now])
+        `INSERT INTO position_groups (id, name, source, instance_id, hidden, hidden_auto, sort_order, created_at, updated_at)
+         VALUES (?, ?, 'instance', ?, ?, 1, 0, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           hidden = CASE WHEN position_groups.hidden_auto = 1 THEN excluded.hidden ELSE position_groups.hidden END,
+           updated_at = excluded.updated_at`,
+        [id, inst.name, inst.id, hidden, now, now])
       await this.db.run('DELETE FROM position_group_members WHERE group_id = ?', [id])
       for (const m of uniq(members)) {
         await this.db.run('INSERT OR IGNORE INTO position_group_members (group_id, account, symbol, side) VALUES (?, ?, ?, ?)', [id, m.account, m.symbol, m.side])
@@ -161,7 +175,8 @@ export class PositionGroups {
     const g = await this.require(id)
     const now = new Date().toISOString()
     if (patch.name !== undefined && g.source === 'manual') await this.db.run('UPDATE position_groups SET name = ?, updated_at = ? WHERE id = ?', [patch.name.trim() || g.name, now, id])
-    if (patch.hidden !== undefined) await this.db.run('UPDATE position_groups SET hidden = ?, updated_at = ? WHERE id = ?', [patch.hidden ? 1 : 0, now, id])
+    // 点过一次隐藏/取消隐藏，这一行的 hidden 就是操作员的了，同步不再改它
+    if (patch.hidden !== undefined) await this.db.run('UPDATE position_groups SET hidden = ?, hidden_auto = 0, updated_at = ? WHERE id = ?', [patch.hidden ? 1 : 0, now, id])
     if (patch.sortOrder !== undefined) await this.db.run('UPDATE position_groups SET sort_order = ?, updated_at = ? WHERE id = ?', [Math.round(patch.sortOrder), now, id])
     // The start date is the operator's on BOTH sources: an instance decides its
     // members, but when its history begins is a judgement about the trade.

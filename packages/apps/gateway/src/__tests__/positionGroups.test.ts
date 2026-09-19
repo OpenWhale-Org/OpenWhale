@@ -10,7 +10,7 @@ const accounts = [
   { name: 'BN Spot', credential: 'bn-sub', kind: 'exchange/spot' },
 ]
 
-function runtime(instances: Array<{ id: string; name: string; strategyId: string; credentials?: Record<string, string>; params?: unknown }>) {
+function runtime(instances: Array<{ id: string; name: string; strategyId: string; active?: boolean; credentials?: Record<string, string>; params?: unknown }>) {
   const positions: Record<string, Array<{ id: string; side: string; value: number; pnl: number }>> = {
     'BN Sub': [
       { id: 'CL/USDT:USDT', side: 'short', value: 80_000, pnl: 864 },
@@ -130,6 +130,26 @@ describe('PositionGroups', () => {
     const after = (await pg.list()).find(x => x.id === g!.id)!
     expect(after.startAt).toBe('2026-09-18')
     expect(after.members).toHaveLength(2)
+  })
+
+  it("一个停着的实例，它的组合默认收起来；操作员表过态就归操作员", async () => {
+    const inst = { id: 'inst_a', name: 'BZ/CL', strategyId: 'pair-arb/etf-dual-remote', active: false, credentials: { 'engine:venue': 'bn-sub' }, params: { base: { symbolA: 'BZ/USDT:USDT', symbolB: 'CL/USDT:USDT' }, tunable: {} } }
+    const rt = runtime([inst])
+    const pg = new PositionGroups(db, rt as never)
+    expect((await pg.list()).find(g => g.source === 'instance')!.hidden).toBe(true)
+
+    // 实例跑起来了：还没人表过态，跟着状态走
+    inst.active = true
+    expect((await pg.list()).find(g => g.source === 'instance')!.hidden).toBe(false)
+
+    // 操作员自己收起来了：之后实例怎么变都不再动它
+    const g = (await pg.list()).find(x => x.source === 'instance')!
+    await pg.update(g.id, { hidden: true })
+    inst.active = false
+    expect((await pg.list()).find(x => x.id === g.id)!.hidden).toBe(true)
+    await pg.update(g.id, { hidden: false })
+    inst.active = false
+    expect((await pg.list()).find(x => x.id === g.id)!.hidden).toBe(false)
   })
 
   it('a manual combination can be renamed, edited and deleted', async () => {

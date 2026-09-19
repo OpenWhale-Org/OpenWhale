@@ -29,7 +29,6 @@ async function api(path: string, method: string, body?: unknown): Promise<string
   return ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `${res.status}`
 }
 export const createGroup = (name: string, members: Member[] = [], startAt?: string) => api('/api/position-groups', 'POST', { name, members, startAt: startAt ?? null })
-export const addToGroup = (id: string, members: Member[]) => api(`/api/position-groups/${encodeURIComponent(id)}/members`, 'POST', { members })
 const key = (m: Member) => `${m.account}|${m.symbol}|${m.side}`
 
 /**
@@ -361,31 +360,22 @@ function GroupCard({ g, collapsed, onToggle, onEdit, onAct }: {
   )
 }
 
-/** In an account's positions table: which combinations a row is in, and adding it to one. */
+/**
+ * In an account's positions table: which combinations this row belongs to.
+ *
+ * Read-only on purpose. Membership is edited in one place — the Combinations
+ * panel — so the same trade is not assembled from two different screens.
+ */
 export function RowGroups({ account, symbol, side, groups }: { account: string; symbol: string; side: 'long' | 'short'; groups: GroupInfo[] }) {
   const t = useT()
   const mine = groups.filter(g => g.members.some(m => m.account === account && m.symbol === symbol && (m.side === '*' || m.side === side)))
-  const addable = groups.filter(g => g.source === 'manual' && !mine.includes(g))
-  const member: Member = { account, symbol, side }
+  if (mine.length === 0) return null
   return (
     <span className="inline-flex items-center gap-1 flex-wrap justify-end">
       {mine.map(g => (
         <span key={g.id} className="text-[11px] px-1.5 rounded-full whitespace-nowrap" title={g.source === 'instance' ? t('groups.strategy') : t('groups.manual')}
           style={{ background: 'color-mix(in srgb, var(--accent) 18%, transparent)', color: 'var(--accent)' }}>{g.name}</span>
       ))}
-      <select value="" className="text-[11px] rounded px-1 h-5" style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--muted)', width: '1.75rem' }}
-        title={t('groups.addTo')}
-        onChange={(e) => {
-          const v = e.target.value
-          if (v === '__new__') {
-            const name = window.prompt(t('groups.newPrompt'), symbol.split('/')[0])
-            if (name) void createGroup(name, [member])
-          } else if (v) void addToGroup(v, [member])
-        }}>
-        <option value="">+</option>
-        {addable.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        <option value="__new__">{t('groups.newEllipsis')}</option>
-      </select>
     </span>
   )
 }
