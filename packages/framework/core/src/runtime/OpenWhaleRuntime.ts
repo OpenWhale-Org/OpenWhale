@@ -616,6 +616,26 @@ export class OpenWhaleRuntime implements IRuntime {
     let records = n > 0 ? await reader.readLast(key, n)
       : oversized ? (reader.readSampled ? await reader.readSampled(key, PLOT_SAMPLE) : await reader.readLast(key, PLOT_CAP))
       : await reader.readAll(key)
+    /* A PICKER cannot be built from a time-even sample.
+     *
+     * The sample keeps one record per time target, which is right for a curve
+     * over months and wrong for "which capture do I want to look at": the
+     * settlement-session monitor emits one record per CONTRACT per settlement
+     * instant, so a dozen captures share a minute and eleven of them vanish
+     * from the list. The board then offers one token per hour — a different
+     * one each time, whichever the sample happened to land on.
+     *
+     * So panels that offer a choice get the newest stretch at full resolution
+     * on top of the overview: the tail is what an operator picks from, and it
+     * comes from the same cache the old whole-history answer used. Older
+     * captures stay sampled — a complete list over the whole file would mean
+     * parsing all of it, which is what `oversized` exists to avoid.
+     */
+    if (n <= 0 && oversized && def.options) {
+      const tail = await reader.readLast(key, PLOT_CAP)
+      const from = tail[0]?.ts
+      if (from !== undefined) records = [...records.filter(r => r.ts < from), ...tail]
+    }
     if (n <= 0 && oversized && focus && reader.readSampled && focus.to > focus.from) {
       const detail = await reader.readSampled(key, PLOT_FOCUS, focus.from, focus.to)
       const merged = new Map<number, (typeof records)[number]>()

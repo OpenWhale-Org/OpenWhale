@@ -5,6 +5,7 @@ import os from 'os'
 import { OpenWhaleRuntime } from '../../runtime/OpenWhaleRuntime.js'
 import { BaseMonitor, MonitorMode } from '../BaseMonitor.js'
 import type { CredentialStore, MonitorPlotDef } from '../../index.js'
+import { MonitorDataReaderImpl } from '../MonitorDataReader.js'
 
 const credentialStore: CredentialStore = {
   set: async () => ({ id: 'x', name: 'x', type: 'x', createdAt: '', updatedAt: '' }),
@@ -153,5 +154,104 @@ describe('multi-select resolution', () => {
     const res = await series('multi')
     expect(res.options?.map(o => o.value)).toEqual(['A', 'B', 'C'])
     expect(res.options?.filter(o => o.default).map(o => o.value)).toEqual(['A', 'B'])
+  })
+})
+
+/**
+ * A store too big to slurp answers "all history" with a time-even sample, and
+ * captures that share an instant are exactly what such a sample cannot show.
+ * The settlement-session board is made of these: a dozen contracts settle at
+ * the same minute, and the picker offered one of them — a different one each
+ * hour, whichever the sample happened to land on.
+ */
+describe('a picker over a store too big to slurp', () => {
+  interface Capture extends Record<string, unknown> { token: string }
+
+  /** Twelve settlements an hour apart, five contracts captured at each. */
+  const captures = (): Array<{ ts: number; data: Capture }> => {
+    const rows: Array<{ ts: number; data: Capture }> = []
+    for (let h = 0; h < 12; h++) {
+      for (const token of ['A', 'B', 'C', 'D', 'E']) {
+        rows.push({ ts: 1_000_000 + h * 3_600_000 + token.charCodeAt(0), data: { token } })
+      }
+    }
+    return rows
+  }
+
+  /** The shape of a big store: sampled history, exact tail. */
+  class SampledReader {
+    readonly rows = captures()
+    async isOversized() { return true }
+    /** One record per settlement — what a time-even sample leaves of a cluster. */
+    async readSampled() {
+      const first = new Map<number, { ts: number; data: Capture }>()
+      for (const r of this.rows) {
+        const settlement = Math.floor(r.ts / 3_600_000)
+        if (!first.has(settlement)) first.set(settlement, r)
+      }
+      return [...first.values()]
+    }
+    async readLast(_key: string, n: number) { return this.rows.slice(-n) }
+    async readAll() { return this.rows }
+    async readLatest() { return this.rows[this.rows.length - 1] ?? null }
+    async readRange() { return this.rows }
+    async count() { return this.rows.length }
+    async keys() { return ['k'] }
+    stream() { throw new Error('not used') }
+  }
+
+  class CaptureMonitor extends BaseMonitor<string, Capture> {
+    override readonly mode = MonitorMode.Subscribe
+    readonly reader = new SampledReader()
+    get monitorName() { return 'captures' }
+    protected override startSubscribe(): void {}
+    protected override stopSubscribe(): void {}
+    override getReader() { return this.reader as never }
+    override plots(): MonitorPlotDef<Capture>[] {
+      return [
+        {
+          id: 'pick',
+          title: 'Which capture',
+          kind: 'line',
+          options: (records) => records.map(r => ({ value: `${r.data.token}@${r.ts}`, label: r.data.token })),
+          extract: () => [],
+        },
+        {
+          id: 'curve',
+          title: 'No picker here',
+          kind: 'line',
+          extract: (records) => [{ label: 'all', points: records.map(r => ({ x: r.ts, y: 1 })) }],
+        },
+      ]
+    }
+  }
+
+  const runtimeWith = (m: CaptureMonitor) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-plot-cluster-'))
+    const rt = new OpenWhaleRuntime({ dataDir: dir, credentialStore })
+    rt.registerMonitor({ id: 'captures', name: 'Captures', source: 'builtin', createdAt: '', updatedAt: '' }, m)
+    return rt
+  }
+
+  it('lists every capture of the newest settlements, not one of them', async () => {
+    const m = new CaptureMonitor({ dataDir: os.tmpdir() })
+    const res = await runtimeWith(m).monitorPlotSeries('captures', 'pick', 'k', 0)
+    const newest = 1_000_000 + 11 * 3_600_000
+    const atNewest = (res.options ?? []).filter(o => Number(o.value.split('@')[1]) >= newest)
+    expect(atNewest.map(o => o.label).sort()).toEqual(['A', 'B', 'C', 'D', 'E'])
+  })
+
+  it('leaves the sampled overview alone for the older stretch', async () => {
+    const m = new CaptureMonitor({ dataDir: os.tmpdir() })
+    const res = await runtimeWith(m).monitorPlotSeries('captures', 'pick', 'k', 0)
+    // The oldest settlement is still represented — the tail did not replace history
+    expect((res.options ?? []).some(o => Number(o.value.split('@')[1]) < 1_000_000 + 3_600_000)).toBe(true)
+  })
+
+  it('a panel with no picker still pays only for the sample', async () => {
+    const m = new CaptureMonitor({ dataDir: os.tmpdir() })
+    const res = await runtimeWith(m).monitorPlotSeries('captures', 'curve', 'k', 0)
+    // 12 settlements, one record each: the tail was never read
+    expect(res.series[0]!.points).toHaveLength(12)
   })
 })
