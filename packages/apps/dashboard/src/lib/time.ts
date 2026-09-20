@@ -81,6 +81,26 @@ export function fmtDateTime(v: TimeLike, extra: Intl.DateTimeFormatOptions = {})
   return date(v).toLocaleString(undefined, opts(extra))
 }
 
+/**
+ * 2026/9/13 14:08:55.123 — where the order of two rows in the same second is
+ * the point, as in a fill list: the venue stamps fills to the millisecond and
+ * a high-frequency account puts dozens inside one second.
+ *
+ * `fractionalSecondDigits` is formatted separately rather than passed to
+ * toLocaleString: some locales drop it, and a timestamp that silently loses
+ * its milliseconds is worse than one that never had them.
+ */
+export function fmtDateTimeMs(v: TimeLike): string {
+  const d = date(v)
+  const ms = Number.isNaN(d.getTime()) ? '000' : String(msIn(d)).padStart(3, '0')
+  return `${fmtDateTime(d)}.${ms}`
+}
+
+/** Milliseconds as the ACTIVE zone sees them — whole-second offsets aside, the same. */
+function msIn(d: Date): number {
+  return d.getMilliseconds()
+}
+
 /** 2026/9/13 */
 export function fmtDate(v: TimeLike, extra: Intl.DateTimeFormatOptions = {}): string {
   return date(v).toLocaleDateString(undefined, opts(extra))

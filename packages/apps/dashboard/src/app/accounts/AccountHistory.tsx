@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Select } from '@/components/Select'
 import { DataTable, type Column, type SortState } from '@/components/DataTable'
 import { useT } from '@/i18n'
-import { fmtDateTime } from '@/lib/time'
+import { fmtDateTime, fmtDateTimeMs } from '@/lib/time'
 
 /**
  * Trade history of one account, read from the PnL ledger: positions (fills
@@ -414,11 +414,11 @@ function PositionsTable({ rows, showAccount, sort, onSort }: TableProps<Position
       </span>
     ) },
     { id: 'side', label: t('history.col.side'), sort: 'side', width: 96, render: p => <Side side={p.side} positionSide={p.positionSide} /> },
-    { id: 'opened', label: t('history.col.opened'), sort: 'openTs', width: 150, render: p => <span className="font-mono">{fmtDateTime(p.openTs)}</span> },
-    { id: 'closed', label: t('history.col.closed'), sort: 'closeTs', width: 190, render: p => (
+    { id: 'opened', label: t('history.col.opened'), sort: 'openTs', width: 176, render: p => <span className="font-mono">{fmtDateTimeMs(p.openTs)}</span> },
+    { id: 'closed', label: t('history.col.closed'), sort: 'closeTs', width: 220, render: p => (
       p.closeTs === null
         ? <Badge color="var(--accent)" title={t('history.openHint', { qty: qtyFmt(p.openQty) })}>{t('history.open')}</Badge>
-        : <span className="font-mono">{fmtDateTime(p.closeTs)} <span style={{ color: 'var(--muted)' }}>· {duration(p.closeTs - p.openTs)}</span></span>
+        : <span className="font-mono">{fmtDateTimeMs(p.closeTs)} <span style={{ color: 'var(--muted)' }}>· {duration(p.closeTs - p.openTs)}</span></span>
     ) },
     { id: 'maxSize', label: t('history.col.maxSize'), sort: 'maxNotional', align: 'right', width: 104, render: p => <span className="font-mono" title={qtyFmt(p.maxQty)}>{usd(p.maxNotional)}</span> },
     { id: 'entryExit', label: t('history.col.entryExit'), align: 'right', width: 200, render: p => (
@@ -439,7 +439,7 @@ function PositionsTable({ rows, showAccount, sort, onSort }: TableProps<Position
 function FillsTable({ rows, showAccount, sort, onSort }: TableProps<FillRow>) {
   const t = useT()
   const columns = useMemo<Array<Column<FillRow>>>(() => withAccount(showAccount, t('history.col.account'), [
-    { id: 'time', label: t('history.col.time'), sort: 'ts', width: 150, render: f => <span className="font-mono">{fmtDateTime(f.ts)}</span> },
+    { id: 'time', label: t('history.col.time'), sort: 'ts', width: 176, render: f => <span className="font-mono">{fmtDateTimeMs(f.ts)}</span> },
     { id: 'symbol', label: t('history.col.symbol'), sort: 'symbol', grow: true, render: f => <span className="font-mono">{f.symbol}</span> },
     { id: 'side', label: t('history.col.side'), sort: 'side', width: 96, render: f => <Side side={f.side} positionSide={f.positionSide} /> },
     { id: 'qty', label: t('history.col.qty'), sort: 'qty', align: 'right', width: 104, render: f => <span className="font-mono">{qtyFmt(f.qty)}</span> },
@@ -461,9 +461,9 @@ function FillsTable({ rows, showAccount, sort, onSort }: TableProps<FillRow>) {
 function OrdersTable({ rows, showAccount, sort, onSort }: TableProps<OrderRow>) {
   const t = useT()
   const columns = useMemo<Array<Column<OrderRow>>>(() => withAccount(showAccount, t('history.col.account'), [
-    { id: 'time', label: t('history.col.time'), sort: 'lastTs', width: 176, render: o => (
-      <span className="font-mono" title={o.firstTs !== o.lastTs ? `${fmtDateTime(o.firstTs)} → ${fmtDateTime(o.lastTs)}` : undefined}>
-        {fmtDateTime(o.lastTs)}
+    { id: 'time', label: t('history.col.time'), sort: 'lastTs', width: 200, render: o => (
+      <span className="font-mono" title={o.firstTs !== o.lastTs ? `${fmtDateTimeMs(o.firstTs)} → ${fmtDateTimeMs(o.lastTs)}` : undefined}>
+        {fmtDateTimeMs(o.lastTs)}
         {o.firstTs !== o.lastTs && <span style={{ color: 'var(--muted)' }}> · {duration(o.lastTs - o.firstTs)}</span>}
       </span>
     ) },
