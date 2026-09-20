@@ -33,7 +33,7 @@ describe('backfillAccount', () => {
           .map(f => ({ id: f.id, orderId: f.id, symbol, side: 'buy', qty: 1, price: 10, fee: 0.01, feeAsset: 'USDT', timestamp: f.ts }))
       },
     }
-    const svc = new PnlService({ db, resolveSession: async () => session })
+    const svc = new PnlService({ db, resolveSession: async () => session, backfillPaceMs: 0 })
     return { svc, db, asked }
   }
 
@@ -70,7 +70,7 @@ describe('backfillAccount', () => {
         return [{ id: `g${since}`, orderId: 'o', symbol, side: 'sell', qty: 2, price: 5, timestamp: (since ?? 0) + 1 }]
       },
     }
-    const svc = new PnlService({ db, resolveSession: async () => session })
+    const svc = new PnlService({ db, resolveSession: async () => session, backfillPaceMs: 0 })
     const report = await svc.backfillAccount('acct', { from: Date.now() - 10 * DAY })
 
     expect(report.skipped).toEqual(['BAD/USDT:USDT'])

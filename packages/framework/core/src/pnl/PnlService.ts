@@ -173,6 +173,8 @@ export interface PnlServiceOptions {
   intervalMs?: number
   /** How far back the first collection reaches when no watermark exists. Default 3 days. */
   backfillMs?: number
+  /** Pause between a deep backfill's venue calls, ms. Default 200; 0 in tests. */
+  backfillPaceMs?: number
 }
 
 const KICK_DEBOUNCE_MS = 30_000
@@ -191,6 +193,7 @@ const FILL_RECHECK_MS = 10 * 60_000
 const FILLS_ALL_PAGE = 2000
 /** Pages read in one sweep before giving the venue a rest. 5 × 2000 rows an hour is far past any account here. */
 const FILLS_ALL_MAX_PAGES = 5
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 const EPS = 1e-9
 /** Rows read per step when replaying a whole account, with a yield between steps. */
 const HISTORY_PAGE = 20_000
@@ -200,6 +203,12 @@ const DEEP_BACKFILL_MS = 90 * 24 * 3600_000
 const FILL_WINDOW_MS = 6 * 24 * 3600_000
 /** The income ledger has no range cap, but 1000 rows per page does — a week at a time. */
 const LEDGER_WINDOW_MS = 7 * 24 * 3600_000
+/**
+ * Breath between venue calls during a backfill. Hyperliquid answered 429 to a
+ * back-to-back walk (2026-09-20); the whole point of this job is that it can
+ * take its time.
+ */
+const BACKFILL_PACE_MS = 200
 
 /** Oldest first, each window [start, end) no longer than `span`. */
 export function timeWindows(from: number, to: number, span: number): Array<[number, number]> {
@@ -310,6 +319,7 @@ export class PnlService {
   private readonly resolveSession: PnlServiceOptions['resolveSession']
   private readonly intervalMs: number
   private readonly backfillMs: number
+  private readonly backfillPace: number
   private timer: ReturnType<typeof setInterval> | null = null
   private kickTimer: ReturnType<typeof setTimeout> | null = null
   private collecting = false
@@ -340,6 +350,7 @@ export class PnlService {
      */
     this.intervalMs = options.intervalMs ?? (Number(process.env['OPENWHALE_PNL_INTERVAL_MS']) || 10 * 60_000)
     this.backfillMs = options.backfillMs ?? 3 * 24 * 3600_000
+    this.backfillPace = options.backfillPaceMs ?? BACKFILL_PACE_MS
   }
 
   start(): void {
@@ -759,6 +770,23 @@ export class PnlService {
 
   // ── Deep backfill ─────────────────────────────────────────────────────────
 
+  /**
+   * One venue call, with a pause after it and one retry on failure. A
+   * backfill is a long walk, not a race: pacing keeps it inside the venue's
+   * budget, and a single 429 in the middle should cost a second, not a
+   * contract's history.
+   */
+  private async paced<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call()
+    } catch {
+      await sleep(this.backfillPace * 10)
+      return await call()
+    } finally {
+      await sleep(this.backfillPace)
+    }
+  }
+
   /** Every account the ledger knows: claims, discovered contracts, recorded fills. */
   async ledgerAccounts(): Promise<string[]> {
     const rows = await this.db.all<{ account: string }>(
@@ -814,7 +842,7 @@ export class PnlService {
       for (const [start, end] of windows) {
         progress('symbols', done, windows.length)
         try {
-          for (const symbol of await session.fetchTradedSymbols(start, 1000, end)) {
+          for (const symbol of await this.paced(() => session.fetchTradedSymbols!(start, 1000, end))) {
             if (symbols.has(symbol)) continue
             symbols.add(symbol)
             if (!before.has(symbol)) report.discovered++
@@ -840,7 +868,7 @@ export class PnlService {
       let failed = false
       for (const [start, end] of timeWindows(from, now, FILL_WINDOW_MS)) {
         try {
-          const fills = await session.fetchFills(symbol, start, 1000, end)
+          const fills = await this.paced(() => session.fetchFills!(symbol, start, 1000, end))
           if (fills.length === 0) continue
           await this.recordFills(account, symbol, fills)
           added += fills.length

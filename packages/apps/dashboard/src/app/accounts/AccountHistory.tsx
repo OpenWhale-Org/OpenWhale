@@ -87,7 +87,69 @@ function duration(ms: number): string {
 
 /** One account's history. */
 export function AccountHistory({ account }: { account: string }) {
-  return <HistoryPanel base={`/api/accounts/${encodeURIComponent(account)}/history`} />
+  return <HistoryPanel base={`/api/accounts/${encodeURIComponent(account)}/history`} backfillAccount={account} />
+}
+
+/**
+ * Pull this account's history from the venue, as far back as it still serves.
+ *
+ * The routine collector reads a few days of the contracts it knows about;
+ * this walks the account-wide ledger for every contract it ever traded and
+ * fetches each one's fills. Minutes of venue calls, so it runs detached and
+ * this button just watches.
+ */
+function BackfillButton({ account, onDone }: { account: string; onDone: () => void }) {
+  const t = useT()
+  const [state, setState] = useState<{ running: boolean; progress: string } | null>(null)
+  const [error, setError] = useState('')
+  const wasRunning = useRef(false)
+
+  useEffect(() => {
+    if (!state?.running) return
+    const timer = setInterval(() => {
+      void fetch('/api/pnl/backfill')
+        .then(r => (r.ok ? r.json() : null))
+        .then((s: { running: boolean; progress: string } | null) => {
+          if (!s) return
+          setState(s)
+          if (wasRunning.current && !s.running) { wasRunning.current = false; onDone() }
+          if (s.running) wasRunning.current = true
+        })
+        .catch(() => {})
+    }, 2_000)
+    return () => clearInterval(timer)
+  }, [state?.running, onDone])
+
+  async function start() {
+    setError('')
+    try {
+      const r = await fetch('/api/pnl/backfill', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account, days: 90 }),
+      })
+      const body = await r.json() as { error?: string }
+      if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`)
+      wasRunning.current = true
+      setState({ running: true, progress: '' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      {error && <span className="text-xs" style={{ color: 'var(--danger)' }}>{error}</span>}
+      {state?.running && <span className="text-[11px] font-mono" style={{ color: 'var(--muted)' }}>{state.progress || '…'}</span>}
+      <button
+        onClick={() => void start()}
+        disabled={state?.running}
+        title={t('history.backfillHint')}
+        className="text-xs px-2 py-1 rounded-md"
+        style={{ border: '1px solid var(--border)', color: state?.running ? 'var(--muted)' : 'var(--foreground)' }}
+      >
+        {state?.running ? t('history.backfilling') : t('history.backfill')}
+      </button>
+    </span>
+  )
 }
 
 /**
@@ -95,7 +157,7 @@ export function AccountHistory({ account }: { account: string }) {
  * or a combination (`showAccount` adds the column, since its rows come from
  * several accounts).
  */
-export function HistoryPanel({ base, showAccount = false }: { base: string; showAccount?: boolean }) {
+export function HistoryPanel({ base, showAccount = false, backfillAccount }: { base: string; showAccount?: boolean; backfillAccount?: string }) {
   const t = useT()
   const [pageSize, setPageSizeState] = useState<number>(() => {
     try {
@@ -196,6 +258,7 @@ export function HistoryPanel({ base, showAccount = false }: { base: string; show
             ))}
           </div>
           <Select size="sm" className="w-44" value={symbol} options={symbolOptions} onChange={setSymbol} searchable />
+          {backfillAccount && <BackfillButton account={backfillAccount} onDone={() => setNonce(n => n + 1)} />}
           <button
             onClick={() => setNonce(n => n + 1)}
             className="text-xs px-2 py-1 rounded-md"

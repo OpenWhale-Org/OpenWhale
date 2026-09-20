@@ -206,6 +206,9 @@ function isPositionModeMismatch(err: unknown): boolean {
   return /-4061|position\s*side\s*does\s*not\s*match|posSide|position mode/i.test(msg)
 }
 
+/** Ledger pages read per window before giving up — a thousand rows each. */
+const LEDGER_MAX_PAGES = 40
+
 export class CcxtAdapter implements PerpExchangeAdapter {
   protected readonly exchange: ccxt.Exchange
   /** Cached position mode, and the in-flight read that concurrent callers share. */
@@ -472,20 +475,41 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    */
   async fetchTradedSymbols(since?: number, limit = 1000, until?: number): Promise<string[]> {
     if (!this.exchange.has['fetchLedger']) return []
-    const params = until !== undefined ? { endTime: until } : {}
-    const rows = await this.guard(() => this.exchange.fetchLedger(undefined, since, limit, params))
     await this.guard(() => this.exchange.loadMarkets())
     const byId = new Map<string, string>()
     for (const market of Object.values(this.exchange.markets)) {
       if (market?.id && market.symbol) byId.set(String(market.id), market.symbol)
     }
+
+    /*
+     * Page to the END of the window, not just its first page.
+     *
+     * The ledger is capped at 1000 rows per call and a busy account writes
+     * that many in hours — every fill leaves a commission row and every close
+     * a realized-PnL row. Binance SubAccount 2 runs a high-frequency
+     * strategy: a week's window returned its first thousand rows, which
+     * covered three contracts, and the rest of the account's contracts (AKE
+     * among them) looked as though they had never traded. Each page resumes
+     * at the last row's timestamp; a short page means the window is done.
+     */
     const out = new Set<string>()
-    for (const row of rows) {
-      const info = (row.info ?? {}) as Record<string, unknown>
-      const id = info['symbol']
-      if (typeof id !== 'string' || id === '') continue
-      const symbol = byId.get(id)
-      if (symbol) out.add(symbol)
+    let cursor = since
+    for (let page = 0; page < LEDGER_MAX_PAGES; page++) {
+      const params = until !== undefined ? { endTime: until } : {}
+      const rows = await this.guard(() => this.exchange.fetchLedger(undefined, cursor, limit, params))
+      for (const row of rows) {
+        const info = (row.info ?? {}) as Record<string, unknown>
+        const id = info['symbol']
+        if (typeof id !== 'string' || id === '') continue
+        const symbol = byId.get(id)
+        if (symbol) out.add(symbol)
+      }
+      if (rows.length < limit) break
+      const newest = Math.max(...rows.map(r => r.timestamp ?? 0))
+      // A page whose rows share one millisecond cannot be advanced past;
+      // stop rather than ask for the same thousand rows for ever.
+      if (!Number.isFinite(newest) || newest <= 0 || newest === cursor) break
+      cursor = newest
     }
     return [...out]
   }
