@@ -26,24 +26,41 @@ interface CollectorStatus {
   unavailable?: boolean
 }
 
+interface BackfillState {
+  running: boolean
+  startedAt?: number
+  finishedAt?: number
+  accounts: string[]
+  done: string[]
+  progress: string
+  reports: Array<{ account: string; fills?: number; discovered?: number; symbols?: unknown[]; skipped?: string[]; error?: string }>
+}
+
 export function SystemClient() {
   const t = useT()
   const [status, setStatus] = useState<CollectorStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [backfill, setBackfill] = useState<BackfillState | null>(null)
 
   const pull = useCallback(async () => {
     try {
       const r = await fetch('/api/pnl/collector')
       if (r.ok) setStatus(await r.json() as CollectorStatus)
     } catch { /* keep what we had */ }
+    try {
+      const r = await fetch('/api/pnl/backfill')
+      if (r.ok) setBackfill(await r.json() as BackfillState)
+    } catch { /* keep what we had */ }
   }, [])
 
   useEffect(() => {
     void pull()
-    const timer = setInterval(() => void pull(), 10_000)
+    // While a backfill walks the venue it reports per contract; a ten-second
+    // refresh would look stuck.
+    const timer = setInterval(() => void pull(), backfill?.running ? 2_000 : 10_000)
     return () => clearInterval(timer)
-  }, [pull])
+  }, [pull, backfill?.running])
 
   async function toggle() {
     if (!status) return
@@ -69,6 +86,23 @@ export function SystemClient() {
     try {
       const r = await fetch('/api/pnl/collect', { method: 'POST' })
       if (!r.ok) throw new Error(await r.text())
+      await pull()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function startBackfill() {
+    setBusy(true)
+    setError('')
+    try {
+      const r = await fetch('/api/pnl/backfill', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 90 }),
+      })
+      const body = await r.json() as { error?: string }
+      if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`)
       await pull()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -106,6 +140,10 @@ export function SystemClient() {
             <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !status || status.unavailable} onClick={() => void collectNow()}>
               {t('system.pnl.collectNow')}
             </button>
+            <button type="button" className="btn btn-secondary btn-sm" title={t('system.pnl.backfillHint')}
+              disabled={busy || backfill?.running || !status || status.unavailable} onClick={() => void startBackfill()}>
+              {backfill?.running ? t('system.pnl.backfilling') : t('system.pnl.backfill')}
+            </button>
             <button type="button" disabled={busy || !status || status.unavailable} onClick={() => void toggle()}
               className={running ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm'}>
               {busy ? '…' : running ? t('system.pnl.pause') : t('system.pnl.resume')}
@@ -127,6 +165,28 @@ export function SystemClient() {
         )}
         {status?.paused && (
           <p className="text-xs rounded-md px-3 py-2" style={{ background: 'var(--surface-inset)', color: 'var(--warning)' }}>{t('system.pnl.pausedNote')}</p>
+        )}
+        {backfill && (backfill.running || backfill.reports.length > 0) && (
+          <div className="rounded-md px-3 py-2 text-xs flex flex-col gap-1" style={{ background: 'var(--surface-inset)' }}>
+            <span style={{ color: 'var(--muted)' }}>
+              {backfill.running
+                ? t('system.pnl.backfillProgress', { done: backfill.done.length, total: backfill.accounts.length, detail: backfill.progress || '…' })
+                : t('system.pnl.backfillDone', { at: backfill.finishedAt ? fmtDateTime(backfill.finishedAt) : '' })}
+            </span>
+            {backfill.reports.map((r, i) => (
+              <span key={`${r.account}-${i}`} className="font-mono">
+                {r.error
+                  ? `${r.account}: ${r.error}`
+                  : t('system.pnl.backfillRow', {
+                      account: r.account,
+                      fills: r.fills ?? 0,
+                      symbols: (r.symbols ?? []).length,
+                      discovered: r.discovered ?? 0,
+                    })}
+                {r.skipped && r.skipped.length > 0 && ` · ${t('system.pnl.backfillPartial', { n: r.skipped.length })}`}
+              </span>
+            ))}
+          </div>
         )}
         {status?.unavailable && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('system.pnl.unavailable')}</p>}
         {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}

@@ -85,7 +85,12 @@ export interface PerpExchangeAdapter extends SpotExchangeAdapter {
    * these to claimed order ids. Optional — venues without a trade-history
    * API omit it and PnL collection degrades to claims-only.
    */
-  fetchFills?(symbol: string, since?: number, limit?: number): Promise<ExchangeFill[]>
+  /**
+   * `until` bounds the window at the far end. Venues cap how much history one
+   * request may span (Binance: 7 days), so reaching further back means asking
+   * for one window at a time rather than one long range.
+   */
+  fetchFills?(symbol: string, since?: number, limit?: number, until?: number): Promise<ExchangeFill[]>
 
   /**
    * Funding payments across the account since a watermark, oldest first.

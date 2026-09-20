@@ -658,6 +658,47 @@ export function buildRouter(): Router {
     res.json({ ok: true })
   }))
 
+  /*
+   * Deep backfill: pull every contract's history the venue still serves.
+   *
+   * Minutes of venue calls, so it runs detached and the page polls. One at a
+   * time across the whole engine: the sweep and the backfill would otherwise
+   * queue behind each other's rate budget.
+   */
+  router.post('/api/pnl/backfill', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    const body = (req.body ?? {}) as { account?: unknown; days?: unknown }
+    const account = typeof body.account === 'string' && body.account ? body.account : undefined
+    const days = Math.min(Math.max(Math.floor(Number(body.days) || 90), 1), 90)
+    if (backfill.running) { res.status(409).json({ error: 'a backfill is already running', state: backfill }); return }
+    const accounts = account ? [account] : await runtime.pnlLedgerAccounts()
+    if (accounts.length === 0) { res.status(400).json({ error: 'no accounts with a ledger' }); return }
+
+    backfill = { running: true, startedAt: Date.now(), accounts, done: [], phase: 'symbols', progress: '', reports: [] }
+    void (async () => {
+      for (const name of accounts) {
+        try {
+          const report = await runtime.backfillPnlHistory(name, days, (p) => {
+            backfill.phase = p.phase
+            backfill.progress = `${name} · ${p.phase} ${p.done}/${p.total}${p.symbol ? ` · ${p.symbol}` : ''}`
+          })
+          backfill.reports.push(report)
+        } catch (err) {
+          backfill.reports.push({ account: name, error: errText(err) })
+        }
+        backfill.done.push(name)
+      }
+      backfill.running = false
+      backfill.finishedAt = Date.now()
+      backfill.progress = ''
+    })()
+    res.json({ ok: true, accounts })
+  }))
+
+  router.get('/api/pnl/backfill', h(async (_req, res) => {
+    res.json(backfill)
+  }))
+
   router.get('/api/instances/:id/scope', h(async (req, res) => {
     const runtime = await ensureStarted()
     res.json(runtime.instanceScope(req.params['id']!))
@@ -991,6 +1032,18 @@ export function buildRouter(): Router {
 
   /* ── Position combinations ───────────────────────────────────────────────
      Positions across accounts read as one trade — see positionGroups.ts. */
+  /** The deep backfill's state — one run at a time, readable while it works. */
+  let backfill: {
+    running: boolean
+    startedAt?: number
+    finishedAt?: number
+    accounts: string[]
+    done: string[]
+    phase: string
+    progress: string
+    reports: unknown[]
+  } = { running: false, accounts: [], done: [], phase: '', progress: '', reports: [] }
+
   let positionGroups: PositionGroups | undefined
   const groups = async (): Promise<PositionGroups> => {
     positionGroups ??= new PositionGroups(getDatabase(), await ensureStarted())

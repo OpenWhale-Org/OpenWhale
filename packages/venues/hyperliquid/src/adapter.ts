@@ -234,8 +234,8 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * Subtract it back off so the PnL ledger records what the account was
    * actually charged.
    */
-  override async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
-    return this.netBuilderFee(await super.fetchFills(symbol, since, limit))
+  override async fetchFills(symbol: string, since?: number, limit = 500, until?: number): Promise<ExchangeFill[]> {
+    return this.netBuilderFee(await super.fetchFills(symbol, since, limit, until))
   }
 
   /**

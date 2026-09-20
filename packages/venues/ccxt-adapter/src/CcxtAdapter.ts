@@ -411,8 +411,9 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    * first, and surfaces realizedPnl/fee per fill (binance futures carries
    * realizedPnl in the raw payload; venues without it leave it undefined).
    */
-  async fetchFills(symbol: string, since?: number, limit = 500): Promise<ExchangeFill[]> {
-    return this.mapFills(await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit)), symbol)
+  async fetchFills(symbol: string, since?: number, limit = 500, until?: number): Promise<ExchangeFill[]> {
+    const params = until !== undefined ? { endTime: until } : {}
+    return this.mapFills(await this.guard(() => this.exchange.fetchMyTrades(symbol, since, limit, params)), symbol)
   }
 
   protected mapFills(trades: Awaited<ReturnType<ccxt.Exchange['fetchMyTrades']>>, symbol?: string): ExchangeFill[] {
@@ -469,9 +470,10 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    * Venues without a ledger endpoint return nothing, and callers fall back to
    * whatever symbols they already know.
    */
-  async fetchTradedSymbols(since?: number, limit = 1000): Promise<string[]> {
+  async fetchTradedSymbols(since?: number, limit = 1000, until?: number): Promise<string[]> {
     if (!this.exchange.has['fetchLedger']) return []
-    const rows = await this.guard(() => this.exchange.fetchLedger(undefined, since, limit))
+    const params = until !== undefined ? { endTime: until } : {}
+    const rows = await this.guard(() => this.exchange.fetchLedger(undefined, since, limit, params))
     await this.guard(() => this.exchange.loadMarkets())
     const byId = new Map<string, string>()
     for (const market of Object.values(this.exchange.markets)) {

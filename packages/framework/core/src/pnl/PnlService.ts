@@ -43,7 +43,7 @@ export interface OrderClaim {
 
 /** Structural view of the adapter capabilities the collector uses — core cannot import venue packages. */
 export interface PnlSessionLike {
-  fetchFills?(symbol: string, since?: number, limit?: number): Promise<Array<{
+  fetchFills?(symbol: string, since?: number, limit?: number, until?: number): Promise<Array<{
     id: string; orderId: string; symbol: string; side: string; qty: number; price: number
     realizedPnl?: number; fee?: number; feeAsset?: string; timestamp: number
     info?: Record<string, unknown>
@@ -64,6 +64,8 @@ export interface PnlSessionLike {
     id?: string; symbol: string; amount: number; asset: string; timestamp: number
   }>>
   fetchPositions?(symbols?: string[]): Promise<Array<{ symbol: string; markPrice: number }>>
+  /** Contracts this account has traded, from the venue's account-wide ledger. */
+  fetchTradedSymbols?(since?: number, limit?: number, until?: number): Promise<string[]>
   /**
    * Contracts this account traded since `since`, whoever placed the order —
    * read from the venue's account-wide income ledger. Optional: a venue
@@ -192,6 +194,39 @@ const FILLS_ALL_MAX_PAGES = 5
 const EPS = 1e-9
 /** Rows read per step when replaying a whole account, with a yield between steps. */
 const HISTORY_PAGE = 20_000
+/** How far a deep backfill reaches: what Binance still serves (three months). */
+const DEEP_BACKFILL_MS = 90 * 24 * 3600_000
+/** Binance refuses a userTrades range longer than 7 days; six leaves slack. */
+const FILL_WINDOW_MS = 6 * 24 * 3600_000
+/** The income ledger has no range cap, but 1000 rows per page does — a week at a time. */
+const LEDGER_WINDOW_MS = 7 * 24 * 3600_000
+
+/** Oldest first, each window [start, end) no longer than `span`. */
+export function timeWindows(from: number, to: number, span: number): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  for (let start = from; start < to; start += span) out.push([start, Math.min(start + span, to)])
+  return out
+}
+
+export interface BackfillProgress {
+  phase: 'symbols' | 'fills'
+  done: number
+  total: number
+  symbol?: string
+}
+
+export interface BackfillReport {
+  account: string
+  from: number
+  /** Contracts that yielded rows, and how many the venue returned for each. */
+  symbols: Array<{ symbol: string; fills: number }>
+  /** Rows returned; duplicates already in the ledger are included in this count. */
+  fills: number
+  /** Contracts the account-wide ledger revealed that nothing had recorded. */
+  discovered: number
+  /** Contracts with at least one failed window — their history may be partial. */
+  skipped: string[]
+}
 
 /** Binance hedge mode tags each fill LONG/SHORT; one-way accounts say BOTH, which is no side at all. */
 function hedgeSide(info: Record<string, unknown> | undefined): string | null {
@@ -720,6 +755,108 @@ export class PnlService {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [account, eventKey, h.instance_id, ev.symbol, share, ev.asset, shared, ev.timestamp])
     }
+  }
+
+  // ── Deep backfill ─────────────────────────────────────────────────────────
+
+  /** Every account the ledger knows: claims, discovered contracts, recorded fills. */
+  async ledgerAccounts(): Promise<string[]> {
+    const rows = await this.db.all<{ account: string }>(
+      `SELECT account FROM pnl_order_claims
+       UNION SELECT account FROM pnl_symbols
+       UNION SELECT account FROM pnl_fills
+       ORDER BY account`)
+    return rows.map(r => r.account)
+  }
+
+  /**
+   * Everything the venue will still serve, not just the last few days.
+   *
+   * The routine sweep reads a short window: it exists to stay current, and on
+   * Binance each symbol costs its own request. But the venue keeps three
+   * months, and a ledger that starts when OpenWhale happened to notice a
+   * contract makes every position before that look like it opened out of
+   * nothing. This walks the whole retained span instead, once, on demand:
+   *
+   *   1. the account-wide income ledger, in windows, for WHICH contracts
+   *      traded — the only account-scoped view Binance offers;
+   *   2. each contract's fills, in windows small enough for the venue to
+   *      answer (7 days on Binance), oldest window first.
+   *
+   * Everything inserts with INSERT OR IGNORE, so running it twice is free and
+   * running it beside the collector is safe. Watermarks only move forward.
+   */
+  async backfillAccount(
+    account: string,
+    opts: { from?: number; onProgress?: (p: BackfillProgress) => void } = {},
+  ): Promise<BackfillReport> {
+    const session = await this.resolveSession(account)
+    if (!session) throw new Error(`No session for account "${account}"`)
+    const from = opts.from ?? Date.now() - DEEP_BACKFILL_MS
+    const now = Date.now()
+    const report: BackfillReport = { account, from, symbols: [], fills: 0, discovered: 0, skipped: [] }
+    const progress = (phase: BackfillProgress['phase'], done: number, total: number, symbol?: string) =>
+      opts.onProgress?.({ phase, done, total, ...(symbol ? { symbol } : {}) })
+
+    // ── 1. which contracts ──────────────────────────────────────────────
+    // What was known BEFORE this run, so "discovered" counts what the deep
+    // walk actually turned up (symbolsOf already does one short discovery).
+    const before = new Set((await this.db.all<{ symbol: string }>(
+      `SELECT symbol FROM pnl_symbols WHERE account = ?
+       UNION SELECT symbol FROM pnl_order_claims WHERE account = ?
+       UNION SELECT DISTINCT symbol FROM pnl_fills WHERE account = ?`,
+      [account, account, account])).map(r => r.symbol))
+    const symbols = new Set(await this.symbolsOf(account, session))
+    for (const symbol of symbols) if (!before.has(symbol)) report.discovered++
+    if (session.fetchTradedSymbols) {
+      const windows = timeWindows(from, now, LEDGER_WINDOW_MS)
+      let done = 0
+      for (const [start, end] of windows) {
+        progress('symbols', done, windows.length)
+        try {
+          for (const symbol of await session.fetchTradedSymbols(start, 1000, end)) {
+            if (symbols.has(symbol)) continue
+            symbols.add(symbol)
+            if (!before.has(symbol)) report.discovered++
+            await this.db.run(
+              `INSERT OR IGNORE INTO pnl_symbols (account, symbol, source, first_ts) VALUES (?, ?, 'ledger', ?)`,
+              [account, symbol, Date.now()])
+          }
+        } catch (err) {
+          log.warn({ err, account, start, end }, 'Backfill: ledger window failed — its contracts may stay unknown')
+        }
+        done++
+      }
+    }
+
+    // ── 2. each contract's fills, window by window ──────────────────────
+    if (!session.fetchFills) return report
+    const list = [...symbols].sort()
+    let index = 0
+    for (const symbol of list) {
+      progress('fills', index, list.length, symbol)
+      index++
+      let added = 0
+      let failed = false
+      for (const [start, end] of timeWindows(from, now, FILL_WINDOW_MS)) {
+        try {
+          const fills = await session.fetchFills(symbol, start, 1000, end)
+          if (fills.length === 0) continue
+          await this.recordFills(account, symbol, fills)
+          added += fills.length
+        } catch (err) {
+          failed = true
+          log.warn({ err, account, symbol, start, end }, 'Backfill: fill window failed')
+        }
+      }
+      if (failed) report.skipped.push(symbol)
+      if (added > 0) {
+        report.symbols.push({ symbol, fills: added })
+        report.fills += added
+      }
+    }
+    progress('fills', list.length, list.length)
+    return report
   }
 
   // ── Aggregation ───────────────────────────────────────────────────────────

@@ -36,7 +36,7 @@ import type { StrategyRunTrace } from '../types/strategy.js'
 import { BaseStrategy } from '../strategy/BaseStrategy.js'
 import type { ScriptDefinition, ScriptInfo, ScriptResult } from '../types/script.js'
 import { PnlService } from '../pnl/PnlService.js'
-import type { HistoryMember, HistoryQuery, PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow, PnlSeriesPoint } from '../pnl/PnlService.js'
+import type { BackfillProgress, BackfillReport, HistoryMember, HistoryQuery, PnlSessionLike, PnlSummary, PnlFillRow, PnlPositionRow, PnlSeriesPoint } from '../pnl/PnlService.js'
 import type { StrategyRunEvent } from '../trigger/TriggerManager.js'
 import { createMonitorRegistry, createExecutorRegistry, createStrategyRegistry } from '../registry/Registry.js'
 import type { MonitorRegistry, ExecutorRegistry, StrategyRegistry } from '../registry/Registry.js'
@@ -1193,6 +1193,27 @@ export class OpenWhaleRuntime implements IRuntime {
   /** Force a collection pass now (dashboard refresh button). */
   async collectPnlNow(): Promise<void> {
     await this.pnlService?.collect()
+  }
+
+  /** Ledger accounts (credential names) the collector knows about. */
+  async pnlLedgerAccounts(): Promise<string[]> {
+    return this.pnlService?.ledgerAccounts() ?? []
+  }
+
+  /**
+   * Pull every contract's history the venue still serves for one account —
+   * the on-demand deep read behind the routine sweep. See PnlService.
+   */
+  async backfillPnlHistory(
+    account: string,
+    days = 90,
+    onProgress?: (p: BackfillProgress) => void,
+  ): Promise<BackfillReport> {
+    if (!this.pnlService) throw new Error('Trade history requires a database-backed runtime')
+    return this.pnlService.backfillAccount(account, {
+      from: Date.now() - days * 24 * 3600_000,
+      ...(onProgress ? { onProgress } : {}),
+    })
   }
 
   /** The PnL collector's switch and last sweep; undefined on a runtime without a database. */
