@@ -61,6 +61,37 @@ describe('replayPositions', () => {
     expect(rows[1]).toMatchObject({ partial: false, side: 'long', openTs: 3, closeTs: null })
   })
 
+  it('a remainder too small to trade closes the round trip and opens the next as dust', () => {
+    // 0.02 of a $153 contract is $3 — under Binance's $5 minimum, so it can
+    // never be closed. Without the dust rule these 6 fills were ONE position.
+    const rows = replayPositions('MSTR', 'LONG', [
+      fill({ side: 'buy', qty: 10, price: 153, ts: 1 }),
+      fill({ side: 'sell', qty: 9.98, price: 154, ts: 2, realizedPnl: 9.98 }),
+      fill({ side: 'buy', qty: 8, price: 152, ts: 3 }),
+      fill({ side: 'sell', qty: 8, price: 155, ts: 4, realizedPnl: 24 }),
+    ])
+    expect(rows.map(r => [r.side, r.openTs, r.closeTs, r.carried ?? false])).toEqual([
+      ['long', 1, 2, false],     // the round trip, closed at its dust
+      ['long', 2, 4, true],      // dust carried, traded again, closed at dust again
+      ['long', 4, null, true],   // and what is still held
+    ])
+    expect(rows[0]!.maxQty).toBe(10)
+    expect(rows[1]!.maxQty).toBeCloseTo(8.02, 10)
+    // The dust is carried, not invented: both rows' entries stay sane.
+    expect(rows[0]!.avgEntry).toBe(153)
+    expect(rows[1]!.avgEntry).toBeCloseTo((0.02 * 153 + 8 * 152) / 8.02, 10)
+  })
+
+  it('dust with no further fills stays open, so the view still shows what is held', () => {
+    const rows = replayPositions('MSTR', 'LONG', [
+      fill({ side: 'buy', qty: 10, price: 153, ts: 1 }),
+      fill({ side: 'sell', qty: 9.98, price: 154, ts: 2, realizedPnl: 9.98 }),
+    ])
+    expect(rows).toHaveLength(2)
+    expect(rows[1]).toMatchObject({ closeTs: null, carried: true, fills: 0 })
+    expect(rows[1]!.openQty).toBeCloseTo(0.02, 10)
+  })
+
   it('fees paid in BNB stay out of the USD total and out of the rate', () => {
     const [p] = replayPositions('X', null, [
       fill({ side: 'buy', qty: 1, price: 100, ts: 1, fee: 0.001, feeAsset: 'BNB' }),

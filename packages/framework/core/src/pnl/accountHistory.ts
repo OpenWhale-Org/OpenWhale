@@ -112,6 +112,11 @@ export interface PositionHistoryRow extends FeeTotals {
   avgExit: number | null
   /** Size still held; 0 once closed. */
   openQty: number
+  /**
+   * Opened with the dust the previous round trip could not close, rather than
+   * by a fill of its own. A carried row with no fills IS that leftover.
+   */
+  carried?: boolean
   fills: number
   orders: number
   volume: number
@@ -129,6 +134,24 @@ export interface PositionHistoryRow extends FeeTotals {
 }
 
 const REL_EPS = 1e-7
+/**
+ * What counts as flat.
+ *
+ * A round trip rarely lands on exactly zero: each close leaves a remainder
+ * below the venue's lot step, and once that remainder is worth less than the
+ * venue's minimum order it CANNOT be closed at all (Binance: $5). Requiring
+ * an exact zero made every such remainder weld the next round trip onto the
+ * last: 46 fills over four days on Binance SubAccount 2's MSTR long, dozens
+ * of separate trades, reported as one position that never closed and a "max
+ * size" of $1,663 that was never held at once.
+ *
+ * So a position closes when what is left is dust — under five dollars, or
+ * half a percent of the size it reached. The dust itself is not discarded: it
+ * opens the next position, which is why the open rows still add up to what
+ * the exchange holds.
+ */
+const DUST_USD = 5
+const DUST_FRACTION = 0.005
 
 export function feeRateOf(fees: number, usdFeeVolume: number): number | null {
   return usdFeeVolume > 0 ? fees / usdFeeVolume : null
@@ -275,17 +298,33 @@ export function replayPositions(symbol: string, positionSide: string | null, fil
     book.exitQty += closing
     touch(book, f, closing, share)
     const rest = f.qty - closing
-    if (Math.abs(book.qty) <= REL_EPS * Math.max(1, book.row.maxQty)) {
+    const left = Math.abs(book.qty)
+    const flat = left <= REL_EPS * Math.max(1, book.row.maxQty)
+      || left * f.price < DUST_USD
+      || left <= DUST_FRACTION * book.row.maxQty
+    if (flat) {
+      const avgEntry = book.entryQty > 0 ? book.entryCost / book.entryQty : f.price
+      const dust = flat && left > REL_EPS * Math.max(1, book.row.maxQty) ? book.qty : 0
       book.qty = 0
       finish(book, f.ts)
       book = undefined
       if (rest > REL_EPS * Math.max(1, f.qty)) {
+        // The fill crossed through flat: its remainder opens the other side.
         book = open(f, -dir as 1 | -1, false)
         book.qty = -dir * rest
         book.entryCost = rest * f.price
         book.entryQty = rest
         book.row.maxQty = rest
         touch(book, f, rest, 1 - share)
+      } else if (dust !== 0) {
+        // Untradeable remainder: it is still held, so it becomes the next
+        // position — open, with no fills of its own until one arrives.
+        book = open(f, dust > 0 ? 1 : -1, false)
+        book.qty = dust
+        book.entryCost = Math.abs(dust) * avgEntry
+        book.entryQty = Math.abs(dust)
+        book.row.maxQty = Math.abs(dust)
+        book.row.carried = true
       }
     }
   }
