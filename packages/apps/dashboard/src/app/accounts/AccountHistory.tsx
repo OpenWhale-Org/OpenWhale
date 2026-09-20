@@ -48,6 +48,7 @@ type Loaded = Page<unknown> & { kind: Kind }
 
 const PAGE_SIZES = [20, 50, 100, 200] as const
 const PAGE_SIZE_KEY = 'ow:history:pageSize'
+const LAYOUT_KEY = 'ow:history:layout'
 const RANGES = [
   { key: '1d', ms: 24 * 3600_000 },
   { key: '7d', ms: 7 * 24 * 3600_000 },
@@ -178,6 +179,19 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
   const [symbols, setSymbols] = useState<string[]>([])
   const [offset, setOffset] = useState(0)
   const [sort, setSort] = useState<SortState | undefined>(undefined)
+  /*
+   * Two readings of the same rows. The table compares — one line each, sort
+   * by any column. The cards read one trade at a time, the way a venue's own
+   * position history does, and they are what fits a phone.
+   */
+  const [layout, setLayoutState] = useState<'table' | 'cards'>('table')
+  useEffect(() => {
+    try { if (localStorage.getItem(LAYOUT_KEY) === 'cards') setLayoutState('cards') } catch { /* private mode */ }
+  }, [])
+  const setLayout = (v: 'table' | 'cards') => {
+    setLayoutState(v)
+    try { localStorage.setItem(LAYOUT_KEY, v) } catch { /* private mode */ }
+  }
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const request = useRef(0)
   const [loading, setLoading] = useState(false)
@@ -264,6 +278,19 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
               </button>
             ))}
           </div>
+          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            {(['table', 'cards'] as const).map(v => (
+              <button
+                key={v}
+                onClick={() => setLayout(v)}
+                className="text-xs px-2 py-1"
+                title={t(`history.layout.${v}Hint`)}
+                style={{ background: layout === v ? 'var(--accent)' : 'transparent', color: layout === v ? 'white' : 'var(--muted)' }}
+              >
+                {t(`history.layout.${v}`)}
+              </button>
+            ))}
+          </div>
           <Select size="sm" className="w-44" value={symbol} options={symbolOptions} onChange={setSymbol} searchable />
           {backfillAccount && <BackfillButton account={backfillAccount} onDone={() => setNonce(n => n + 1)} />}
           <button
@@ -284,10 +311,11 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
       {page && page.rows.length === 0 && <p className="text-xs py-3" style={{ color: 'var(--muted)' }}>{t('history.empty')}</p>}
 
       {page && page.rows.length > 0 && (
-        <div className="overflow-x-auto scroll-hidden" style={{ opacity: loading ? 0.6 : 1 }}>
-          {kind === 'positions' && <PositionsTable rows={page.rows as PositionRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
-          {kind === 'fills' && <FillsTable rows={page.rows as FillRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
-          {kind === 'orders' && <OrdersTable rows={page.rows as OrderRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
+        <div className={layout === 'cards' ? '' : 'overflow-x-auto scroll-hidden'} style={{ opacity: loading ? 0.6 : 1 }}>
+          {layout === 'cards' && <HistoryCards kind={kind} rows={page.rows} showAccount={showAccount} />}
+          {layout === 'table' && kind === 'positions' && <PositionsTable rows={page.rows as PositionRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
+          {layout === 'table' && kind === 'fills' && <FillsTable rows={page.rows as FillRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
+          {layout === 'table' && kind === 'orders' && <OrdersTable rows={page.rows as OrderRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
         </div>
       )}
 
@@ -392,6 +420,151 @@ function Badge({ children, color, title }: { children: ReactNode; color: string;
     <span title={title} className="text-[10px] px-1 py-px rounded ml-1" style={{ border: `1px solid ${color}`, color }}>
       {children}
     </span>
+  )
+}
+
+/**
+ * One trade per card, the way a venue's own position history reads: what it
+ * made, what it cost, and when — without the eye travelling across thirteen
+ * columns. The table stays for comparing many rows at once.
+ */
+function HistoryCards({ kind, rows, showAccount }: { kind: Kind; rows: unknown[]; showAccount: boolean }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {kind === 'positions' && (rows as PositionRow[]).map(p => <PositionCard key={`${p.account ?? ''}|${p.id}`} p={p} showAccount={showAccount} />)}
+      {kind === 'fills' && (rows as FillRow[]).map(f => <FillCard key={`${f.account ?? ''}|${f.fillId}`} f={f} showAccount={showAccount} />)}
+      {kind === 'orders' && (rows as OrderRow[]).map(o => <OrderCard key={`${o.account ?? ''}|${o.orderId}`} o={o} showAccount={showAccount} />)}
+    </div>
+  )
+}
+
+const cardStyle = { background: 'var(--surface)', border: '1px solid var(--border)' } as const
+
+/** A label above its value, the card's unit of information. */
+function Field({ label, value, color, title, align = 'left' }: {
+  label: string; value: ReactNode; color?: string | undefined; title?: string; align?: 'left' | 'right'
+}) {
+  return (
+    <div className={`flex flex-col gap-0.5 min-w-0 ${align === 'right' ? 'items-end text-right' : ''}`} title={title}>
+      <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{label}</span>
+      <span className="text-sm font-mono truncate" style={color ? { color } : undefined}>{value}</span>
+    </div>
+  )
+}
+
+function CardHead({ symbol, side, positionSide, account, showAccount, badge }: {
+  symbol: string; side: string; positionSide: string | null; account?: string | undefined; showAccount: boolean; badge?: ReactNode
+}) {
+  const bullish = side === 'long' || side === 'buy'
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[11px] px-1.5 py-0.5 rounded" style={{
+        background: bullish ? 'color-mix(in srgb, var(--success) 18%, transparent)' : 'color-mix(in srgb, var(--danger) 18%, transparent)',
+        color: bullish ? 'var(--success)' : 'var(--danger)',
+      }}>{side}</span>
+      <span className="text-base font-semibold font-mono truncate">{symbol}</span>
+      {positionSide && <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{positionSide}</span>}
+      {showAccount && account && <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{account}</span>}
+      <span className="flex-1" />
+      {badge}
+    </div>
+  )
+}
+
+function PositionCard({ p, showAccount }: { p: PositionRow; showAccount: boolean }) {
+  const t = useT()
+  // Return on the size actually carried. Not the venue's ROI: that divides by
+  // the margin behind the position, and the ledger has no leverage in it.
+  const roi = p.maxNotional > 0 ? (p.net / p.maxNotional) * 100 : null
+  const closed = p.closeTs !== null
+  const status = closed
+    ? (p.carried && p.fills === 0 ? t('history.dust') : t('history.card.closed'))
+    : t('history.open')
+
+  return (
+    <div className="rounded-lg px-3 py-2.5 flex flex-col gap-2.5" style={cardStyle}>
+      <CardHead
+        symbol={p.symbol} side={p.side} positionSide={p.positionSide} account={p.account} showAccount={showAccount}
+        badge={
+          <span className="flex items-center gap-2">
+            {p.partial && <Badge color="var(--warning, #f59e0b)" title={t('history.partialHint')}>{t('history.partial')}</Badge>}
+            <span className="text-xs" style={{ color: closed ? 'var(--muted)' : 'var(--accent)' }}>{status}</span>
+          </span>
+        }
+      />
+      <div className="grid gap-y-2.5 gap-x-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(7.5rem, 1fr))' }}>
+        <Field label={t('history.card.realizedUsd')} value={signedUsd(p.realized)} color={tone(p.realized)} />
+        <Field label={t('history.card.roi')} value={roi === null ? '—' : `${roi > 0 ? '+' : ''}${roi.toFixed(2)}%`}
+          color={tone(p.net)} title={t('history.card.roiHint')} />
+        <Field label={t('history.card.maxSize')} value={usd(p.maxNotional)} title={qtyFmt(p.maxQty)} align="right" />
+        <Field label={t('history.card.entry')} value={priceFmt(p.avgEntry)} />
+        <Field label={t('history.card.exit')} value={p.avgExit === null ? '—' : priceFmt(p.avgExit)} />
+        <Field label={t('history.card.volume')} value={usd(p.volume)} align="right" />
+        <Field label={t('history.col.fees')} value={<FeeCell t={p} />} />
+        <Field label={t('history.col.funding')} value={signedUsd(p.funding)} color={tone(p.funding)} />
+        <Field label={t('history.col.net')} value={signedUsd(p.net)} color={tone(p.net)} title={t('history.netHint')} align="right" />
+      </div>
+      <div className="flex flex-col gap-1 pt-1 text-xs" style={{ borderTop: '1px solid var(--border)', color: 'var(--muted)' }}>
+        <span className="flex justify-between gap-3">
+          <span>{t('history.col.opened')}</span>
+          <span className="font-mono">{fmtDateTimeMs(p.openTs)}</span>
+        </span>
+        <span className="flex justify-between gap-3">
+          <span>{t('history.col.closed')}</span>
+          <span className="font-mono">
+            {closed ? `${fmtDateTimeMs(p.closeTs!)} · ${duration(p.closeTs! - p.openTs)}` : '—'}
+          </span>
+        </span>
+        <span className="flex justify-between gap-3">
+          <span title={t('history.col.fillsOrdersHint')}>{t('history.col.fillsOrders')}</span>
+          <span className="font-mono">{p.fills} / {p.orders} · {t('history.card.rate', { rate: p.feeRate === null ? '—' : `${(p.feeRate * 10_000).toFixed(2)} bp` })}</span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function FillCard({ f, showAccount }: { f: FillRow; showAccount: boolean }) {
+  const t = useT()
+  return (
+    <div className="rounded-lg px-3 py-2.5 flex flex-col gap-2.5" style={cardStyle}>
+      <CardHead symbol={f.symbol} side={f.side} positionSide={f.positionSide} account={f.account} showAccount={showAccount}
+        badge={<span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{fmtDateTimeMs(f.ts)}</span>} />
+      <div className="grid gap-y-2.5 gap-x-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(7.5rem, 1fr))' }}>
+        <Field label={t('history.col.qty')} value={qtyFmt(f.qty)} />
+        <Field label={t('history.col.price')} value={priceFmt(f.price)} />
+        <Field label={t('history.col.notional')} value={usd(f.notional)} align="right" />
+        <Field label={t('history.col.fees')} value={f.fee === null ? '—' : `${qtyFmt(f.fee)} ${f.feeAsset ?? ''}`} />
+        <Field label={t('history.col.feeRate')} value={<RateCell rate={f.feeRate} />} />
+        <Field label={t('history.col.realized')} value={f.realizedPnl === null ? '—' : signedUsd(f.realizedPnl)} color={tone(f.realizedPnl ?? 0)} align="right" />
+      </div>
+      <span className="text-[11px] font-mono truncate" style={{ color: 'var(--muted)' }} title={f.instanceId ?? t('history.unclaimed')}>
+        {t('history.col.order')} {f.orderId}
+      </span>
+    </div>
+  )
+}
+
+function OrderCard({ o, showAccount }: { o: OrderRow; showAccount: boolean }) {
+  const t = useT()
+  const net = o.realized - o.fees
+  return (
+    <div className="rounded-lg px-3 py-2.5 flex flex-col gap-2.5" style={cardStyle}>
+      <CardHead symbol={o.symbol} side={o.side} positionSide={o.positionSide} account={o.account} showAccount={showAccount}
+        badge={<span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{fmtDateTimeMs(o.lastTs)}</span>} />
+      <div className="grid gap-y-2.5 gap-x-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(7.5rem, 1fr))' }}>
+        <Field label={t('history.col.fills')} value={String(o.fills)} />
+        <Field label={t('history.col.qty')} value={qtyFmt(o.qty)} />
+        <Field label={t('history.col.avgPrice')} value={priceFmt(o.avgPrice)} align="right" />
+        <Field label={t('history.col.notional')} value={usd(o.notional)} />
+        <Field label={t('history.col.fees')} value={<FeeCell t={o} />} />
+        <Field label={t('history.col.net')} value={signedUsd(net)} color={tone(net)} title={t('history.col.orderNetHint')} align="right" />
+      </div>
+      <span className="text-[11px] font-mono truncate" style={{ color: 'var(--muted)' }} title={o.instanceId ?? t('history.unclaimed')}>
+        {t('history.col.order')} {o.orderId}
+        {o.firstTs !== o.lastTs && ` · ${duration(o.lastTs - o.firstTs)}`}
+      </span>
+    </div>
   )
 }
 
