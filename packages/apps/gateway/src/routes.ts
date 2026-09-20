@@ -218,11 +218,15 @@ export function buildRouter(): Router {
       return q[k] !== undefined && Number.isFinite(v) ? v : undefined
     }
     const symbol = typeof q['symbol'] === 'string' && q['symbol'] ? q['symbol'] : undefined
+    const sort = typeof q['sort'] === 'string' && q['sort'] ? q['sort'] : undefined
+    const dir = q['dir'] === 'asc' ? 'asc' as const : q['dir'] === 'desc' ? 'desc' as const : undefined
     const since = num('since'), until = num('until')
     return {
       ...(since !== undefined ? { since } : {}),
       ...(until !== undefined ? { until } : {}),
       ...(symbol ? { symbol } : {}),
+      ...(sort ? { sort } : {}),
+      ...(dir ? { dir } : {}),
       offset: Math.max(0, Math.floor(num('offset') ?? 0)),
       limit: Math.min(Math.max(Math.floor(num('limit') ?? 50), 1), 500),
     }

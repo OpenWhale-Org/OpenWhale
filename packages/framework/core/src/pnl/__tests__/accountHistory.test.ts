@@ -237,3 +237,40 @@ describe('PnlService account history', () => {
     ]).toEqual(['LONG', 'SHORT', 'SHORT', 'LONG', 'LONG'])
   })
 })
+
+describe('history sorting', () => {
+  async function seeded() {
+    const db = new SQLiteAdapter({ filePath: ':memory:' })
+    await db.initialize()
+    const put = (id: string, symbol: string, qty: number, price: number, ts: number, fee: number) => db.run(
+      `INSERT INTO pnl_fills (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts)
+       VALUES ('acct', ?, ?, NULL, ?, 'buy', ?, ?, 0, ?, 'USDT', ?)`, [id, id, symbol, qty, price, fee, ts])
+    await put('a', 'B/USDT:USDT', 1, 10, 3_000, 0.03)
+    await put('b', 'A/USDT:USDT', 5, 10, 1_000, 0.01)
+    await put('c', 'C/USDT:USDT', 2, 10, 2_000, 0.02)
+    return new PnlService({ db, resolveSession: async () => null })
+  }
+
+  it('orders fills by any allowed column, in both directions', async () => {
+    const svc = await seeded()
+    const bySymbol = await svc.historyFills(ACCT, { sort: 'symbol', dir: 'asc' })
+    expect(bySymbol.rows.map(r => r.symbol)).toEqual(['A/USDT:USDT', 'B/USDT:USDT', 'C/USDT:USDT'])
+    const byNotional = await svc.historyFills(ACCT, { sort: 'notional', dir: 'desc' })
+    expect(byNotional.rows.map(r => r.notional)).toEqual([50, 20, 10])
+  })
+
+  it('ignores a column that is not on the list, rather than trusting it', async () => {
+    const svc = await seeded()
+    const page = await svc.historyFills(ACCT, { sort: 'qty; DROP TABLE pnl_fills', dir: 'asc' })
+    expect(page.rows.map(r => r.fillId)).toEqual(['a', 'c', 'b'])   // the default: newest first
+    expect(page.total).toBe(3)
+  })
+
+  it('orders replayed positions too', async () => {
+    const svc = await seeded()
+    const asc = await svc.historyPositions(ACCT, { sort: 'symbol', dir: 'asc' })
+    expect(asc.rows.map(r => r.symbol)).toEqual(['A/USDT:USDT', 'B/USDT:USDT', 'C/USDT:USDT'])
+    const byVolume = await svc.historyPositions(ACCT, { sort: 'volume', dir: 'desc' })
+    expect(byVolume.rows.map(r => r.volume)).toEqual([50, 20, 10])
+  })
+})

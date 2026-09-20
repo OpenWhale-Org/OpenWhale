@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Select } from '@/components/Select'
+import { DataTable, type Column, type SortState } from '@/components/DataTable'
 import { useT } from '@/i18n'
 import { fmtDateTime } from '@/lib/time'
 
@@ -37,6 +38,8 @@ interface PositionRow extends FeeTotals {
   openTs: number; closeTs: number | null; maxQty: number; maxNotional: number; avgEntry: number; avgExit: number | null
   openQty: number; fills: number; orders: number; volume: number; realized: number; funding: number; net: number
   instanceIds: string[]; partial: boolean
+  /** Opened with the dust the previous round trip could not close. */
+  carried?: boolean
 }
 
 interface Page<T> { rows: T[]; total: number; summary: Summary; unmatchedFunding?: number }
@@ -174,6 +177,7 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
   const [symbol, setSymbol] = useState('')
   const [symbols, setSymbols] = useState<string[]>([])
   const [offset, setOffset] = useState(0)
+  const [sort, setSort] = useState<SortState | undefined>(undefined)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const request = useRef(0)
   const [loading, setLoading] = useState(false)
@@ -189,7 +193,9 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
       .catch(() => setSymbols([]))
   }, [base])
 
-  useEffect(() => { setOffset(0) }, [kind, range, symbol, pageSize])
+  useEffect(() => { setOffset(0) }, [kind, range, symbol, pageSize, sort])
+  // Each view has its own columns, so a sort from the last one means nothing here.
+  useEffect(() => { setSort(undefined) }, [kind])
 
   const load = useCallback(async () => {
     const id = ++request.current
@@ -199,6 +205,7 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
     const ms = RANGES.find(r => r.key === range)!.ms
     if (ms > 0) params.set('since', String(Date.now() - ms))
     if (symbol) params.set('symbol', symbol)
+    if (sort) { params.set('sort', sort.key); params.set('dir', sort.dir) }
     try {
       const res = await fetch(`${base}/${kind}?${params}`)
       const body = await res.json() as Page<unknown> & { error?: string }
@@ -212,7 +219,7 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
     } finally {
       if (id === request.current) setLoading(false)
     }
-  }, [base, kind, range, symbol, offset, pageSize, t])
+  }, [base, kind, range, symbol, offset, pageSize, sort, t])
 
   useEffect(() => { void load() }, [load, nonce])
 
@@ -278,9 +285,9 @@ export function HistoryPanel({ base, showAccount = false, backfillAccount }: { b
 
       {page && page.rows.length > 0 && (
         <div className="overflow-x-auto scroll-hidden" style={{ opacity: loading ? 0.6 : 1 }}>
-          {kind === 'positions' && <PositionsTable rows={page.rows as PositionRow[]} showAccount={showAccount} />}
-          {kind === 'fills' && <FillsTable rows={page.rows as FillRow[]} showAccount={showAccount} />}
-          {kind === 'orders' && <OrdersTable rows={page.rows as OrderRow[]} showAccount={showAccount} />}
+          {kind === 'positions' && <PositionsTable rows={page.rows as PositionRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
+          {kind === 'fills' && <FillsTable rows={page.rows as FillRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
+          {kind === 'orders' && <OrdersTable rows={page.rows as OrderRow[]} showAccount={showAccount} sort={sort} onSort={setSort} />}
         </div>
       )}
 
@@ -371,18 +378,6 @@ function SummaryStrip({ kind, page }: { kind: Kind; page: Page<unknown> }) {
   )
 }
 
-function Th({ children, right, title }: { children: ReactNode; right?: boolean; title?: string }) {
-  return <th title={title} className={`py-1 pr-3 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}>{children}</th>
-}
-
-function Td({ children, right, color, mono = true, title }: { children: ReactNode; right?: boolean; color?: string | undefined; mono?: boolean; title?: string }) {
-  return (
-    <td title={title} className={`py-1 pr-3 whitespace-nowrap ${right ? 'text-right' : ''} ${mono ? 'font-mono' : ''}`} style={color ? { color } : undefined}>
-      {children}
-    </td>
-  )
-}
-
 function Side({ side, positionSide }: { side: string; positionSide: string | null }) {
   const bullish = side === 'long' || side === 'buy'
   return (
@@ -400,149 +395,95 @@ function Badge({ children, color, title }: { children: ReactNode; color: string;
   )
 }
 
-function PositionsTable({ rows, showAccount }: { rows: PositionRow[]; showAccount: boolean }) {
-  const t = useT()
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr style={{ color: 'var(--muted)' }}>
-          {showAccount && <Th>{t('history.col.account')}</Th>}
-          <Th>{t('history.col.symbol')}</Th>
-          <Th>{t('history.col.side')}</Th>
-          <Th>{t('history.col.opened')}</Th>
-          <Th>{t('history.col.closed')}</Th>
-          <Th right>{t('history.col.maxSize')}</Th>
-          <Th right>{t('history.col.entryExit')}</Th>
-          <Th right title={t('history.col.fillsOrdersHint')}>{t('history.col.fillsOrders')}</Th>
-          <Th right>{t('history.col.volume')}</Th>
-          <Th right>{t('history.col.fees')}</Th>
-          <Th right>{t('history.col.feeRate')}</Th>
-          <Th right>{t('history.col.funding')}</Th>
-          <Th right>{t('history.col.realized')}</Th>
-          <Th right title={t('history.netHint')}>{t('history.col.net')}</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(p => (
-          <tr key={`${p.account ?? ''}|${p.id}`} style={{ borderTop: '1px solid var(--border)' }}>
-            {showAccount && <Td mono={false}>{p.account}</Td>}
-            <Td>
-              {p.symbol}
-              {p.partial && <Badge color="var(--warning, #f59e0b)" title={t('history.partialHint')}>{t('history.partial')}</Badge>}
-            </Td>
-            <Td mono={false}><Side side={p.side} positionSide={p.positionSide} /></Td>
-            <Td>{fmtDateTime(p.openTs)}</Td>
-            <Td>
-              {p.closeTs === null
-                ? <Badge color="var(--accent)" title={t('history.openHint', { qty: qtyFmt(p.openQty) })}>{t('history.open')}</Badge>
-                : <span title={fmtDateTime(p.closeTs)}>{fmtDateTime(p.closeTs)} <span style={{ color: 'var(--muted)' }}>· {duration(p.closeTs - p.openTs)}</span></span>}
-            </Td>
-            <Td right title={`${qtyFmt(p.maxQty)}`}>{usd(p.maxNotional)}</Td>
-            <Td right>{priceFmt(p.avgEntry)} → {p.avgExit === null ? '—' : priceFmt(p.avgExit)}</Td>
-            <Td right>{p.fills} / {p.orders}</Td>
-            <Td right>{usd(p.volume)}</Td>
-            <Td right><FeeCell t={p} /></Td>
-            <Td right><RateCell rate={p.feeRate} /></Td>
-            <Td right color={tone(p.funding)}>{signedUsd(p.funding)}</Td>
-            <Td right color={tone(p.realized)}>{signedUsd(p.realized)}</Td>
-            <Td right color={tone(p.net)}>{signedUsd(p.net)}</Td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
+type TableProps<T> = { rows: T[]; showAccount: boolean; sort: SortState | undefined; onSort: (s: SortState | undefined) => void }
+
+/** The account column only exists on a view that spans several accounts. */
+function withAccount<T extends { account?: string }>(showAccount: boolean, label: string, rest: Array<Column<T>>): Array<Column<T>> {
+  const account: Column<T> = { id: 'account', label, sort: 'account', width: 120, render: r => r.account ?? '—' }
+  return showAccount ? [account, ...rest] : rest
 }
 
-function FillsTable({ rows, showAccount }: { rows: FillRow[]; showAccount: boolean }) {
+function PositionsTable({ rows, showAccount, sort, onSort }: TableProps<PositionRow>) {
   const t = useT()
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr style={{ color: 'var(--muted)' }}>
-          <Th>{t('history.col.time')}</Th>
-          {showAccount && <Th>{t('history.col.account')}</Th>}
-          <Th>{t('history.col.symbol')}</Th>
-          <Th>{t('history.col.side')}</Th>
-          <Th right>{t('history.col.qty')}</Th>
-          <Th right>{t('history.col.price')}</Th>
-          <Th right>{t('history.col.notional')}</Th>
-          <Th right>{t('history.col.fees')}</Th>
-          <Th right>{t('history.col.feeRate')}</Th>
-          <Th right>{t('history.col.realized')}</Th>
-          <Th>{t('history.col.order')}</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(f => (
-          <tr key={`${f.account ?? ''}|${f.fillId}`} style={{ borderTop: '1px solid var(--border)' }}>
-            <Td>{fmtDateTime(f.ts)}</Td>
-            {showAccount && <Td mono={false}>{f.account}</Td>}
-            <Td>{f.symbol}</Td>
-            <Td mono={false}><Side side={f.side} positionSide={f.positionSide} /></Td>
-            <Td right>{qtyFmt(f.qty)}</Td>
-            <Td right>{priceFmt(f.price)}</Td>
-            <Td right>{usd(f.notional)}</Td>
-            <Td right>
-              {f.fee === null ? '—' : `${qtyFmt(f.fee)} ${f.feeAsset ?? ''}`}
-            </Td>
-            <Td right><RateCell rate={f.feeRate} /></Td>
-            <Td right color={tone(f.realizedPnl ?? 0)}>{f.realizedPnl === null ? '—' : signedUsd(f.realizedPnl)}</Td>
-            <Td title={f.instanceId ?? t('history.unclaimed')}>
-              <span style={{ color: 'var(--muted)' }}>{f.orderId}</span>
-            </Td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
+  const columns = useMemo<Array<Column<PositionRow>>>(() => withAccount(showAccount, t('history.col.account'), [
+    { id: 'symbol', label: t('history.col.symbol'), sort: 'symbol', grow: true, render: p => (
+      <span className="font-mono">
+        {p.symbol}
+        {p.partial && <Badge color="var(--warning, #f59e0b)" title={t('history.partialHint')}>{t('history.partial')}</Badge>}
+        {p.carried && p.fills === 0 && <Badge color="var(--muted)" title={t('history.dustHint')}>{t('history.dust')}</Badge>}
+      </span>
+    ) },
+    { id: 'side', label: t('history.col.side'), sort: 'side', width: 96, render: p => <Side side={p.side} positionSide={p.positionSide} /> },
+    { id: 'opened', label: t('history.col.opened'), sort: 'openTs', width: 150, render: p => <span className="font-mono">{fmtDateTime(p.openTs)}</span> },
+    { id: 'closed', label: t('history.col.closed'), sort: 'closeTs', width: 190, render: p => (
+      p.closeTs === null
+        ? <Badge color="var(--accent)" title={t('history.openHint', { qty: qtyFmt(p.openQty) })}>{t('history.open')}</Badge>
+        : <span className="font-mono">{fmtDateTime(p.closeTs)} <span style={{ color: 'var(--muted)' }}>· {duration(p.closeTs - p.openTs)}</span></span>
+    ) },
+    { id: 'maxSize', label: t('history.col.maxSize'), sort: 'maxNotional', align: 'right', width: 104, render: p => <span className="font-mono" title={qtyFmt(p.maxQty)}>{usd(p.maxNotional)}</span> },
+    { id: 'entryExit', label: t('history.col.entryExit'), align: 'right', width: 200, render: p => (
+      <span className="font-mono">{priceFmt(p.avgEntry)} → {p.avgExit === null ? '—' : priceFmt(p.avgExit)}</span>
+    ) },
+    { id: 'fillsOrders', label: t('history.col.fillsOrders'), sort: 'fills', align: 'right', width: 96, title: t('history.col.fillsOrdersHint'), render: p => <span className="font-mono">{p.fills} / {p.orders}</span> },
+    { id: 'volume', label: t('history.col.volume'), sort: 'volume', align: 'right', width: 104, render: p => <span className="font-mono">{usd(p.volume)}</span> },
+    { id: 'fees', label: t('history.col.fees'), sort: 'fees', align: 'right', width: 96, render: p => <span className="font-mono"><FeeCell t={p} /></span> },
+    { id: 'feeRate', label: t('history.col.feeRate'), sort: 'feeRate', align: 'right', width: 88, render: p => <span className="font-mono"><RateCell rate={p.feeRate} /></span> },
+    { id: 'funding', label: t('history.col.funding'), sort: 'funding', align: 'right', width: 92, render: p => <span className="font-mono" style={{ color: tone(p.funding) }}>{signedUsd(p.funding)}</span> },
+    { id: 'realized', label: t('history.col.realized'), sort: 'realized', align: 'right', width: 96, render: p => <span className="font-mono" style={{ color: tone(p.realized) }}>{signedUsd(p.realized)}</span> },
+    { id: 'net', label: t('history.col.net'), sort: 'net', align: 'right', width: 96, title: t('history.netHint'), render: p => <span className="font-mono" style={{ color: tone(p.net) }}>{signedUsd(p.net)}</span> },
+  ]), [showAccount, t])
+
+  return <DataTable tableId="history.positions" columns={columns} rows={rows} rowKey={p => `${p.account ?? ''}|${p.id}`} sort={sort} onSort={onSort} minWidth="72rem" />
 }
 
-function OrdersTable({ rows, showAccount }: { rows: OrderRow[]; showAccount: boolean }) {
+function FillsTable({ rows, showAccount, sort, onSort }: TableProps<FillRow>) {
   const t = useT()
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr style={{ color: 'var(--muted)' }}>
-          <Th>{t('history.col.time')}</Th>
-          {showAccount && <Th>{t('history.col.account')}</Th>}
-          <Th>{t('history.col.order')}</Th>
-          <Th>{t('history.col.symbol')}</Th>
-          <Th>{t('history.col.side')}</Th>
-          <Th right>{t('history.col.fills')}</Th>
-          <Th right>{t('history.col.qty')}</Th>
-          <Th right>{t('history.col.avgPrice')}</Th>
-          <Th right>{t('history.col.notional')}</Th>
-          <Th right>{t('history.col.fees')}</Th>
-          <Th right>{t('history.col.feeRate')}</Th>
-          <Th right>{t('history.col.realized')}</Th>
-          <Th right title={t('history.col.orderNetHint')}>{t('history.col.net')}</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(o => {
-          const net = o.realized - o.fees
-          return (
-            <tr key={`${o.account ?? ''}|${o.orderId}`} style={{ borderTop: '1px solid var(--border)' }}>
-              <Td title={o.firstTs !== o.lastTs ? `${fmtDateTime(o.firstTs)} → ${fmtDateTime(o.lastTs)}` : undefined}>
-                {fmtDateTime(o.lastTs)}
-                {o.firstTs !== o.lastTs && <span style={{ color: 'var(--muted)' }}> · {duration(o.lastTs - o.firstTs)}</span>}
-              </Td>
-              {showAccount && <Td mono={false}>{o.account}</Td>}
-              <Td title={o.instanceId ?? t('history.unclaimed')}><span style={{ color: 'var(--muted)' }}>{o.orderId}</span></Td>
-              <Td>{o.symbol}</Td>
-              <Td mono={false}><Side side={o.side} positionSide={o.positionSide} /></Td>
-              <Td right>{o.fills}</Td>
-              <Td right>{qtyFmt(o.qty)}</Td>
-              <Td right>{priceFmt(o.avgPrice)}</Td>
-              <Td right>{usd(o.notional)}</Td>
-              <Td right><FeeCell t={o} /></Td>
-              <Td right><RateCell rate={o.feeRate} /></Td>
-              <Td right color={tone(o.realized)}>{signedUsd(o.realized)}</Td>
-              <Td right color={tone(net)}>{signedUsd(net)}</Td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
+  const columns = useMemo<Array<Column<FillRow>>>(() => withAccount(showAccount, t('history.col.account'), [
+    { id: 'time', label: t('history.col.time'), sort: 'ts', width: 150, render: f => <span className="font-mono">{fmtDateTime(f.ts)}</span> },
+    { id: 'symbol', label: t('history.col.symbol'), sort: 'symbol', grow: true, render: f => <span className="font-mono">{f.symbol}</span> },
+    { id: 'side', label: t('history.col.side'), sort: 'side', width: 96, render: f => <Side side={f.side} positionSide={f.positionSide} /> },
+    { id: 'qty', label: t('history.col.qty'), sort: 'qty', align: 'right', width: 104, render: f => <span className="font-mono">{qtyFmt(f.qty)}</span> },
+    { id: 'price', label: t('history.col.price'), sort: 'price', align: 'right', width: 112, render: f => <span className="font-mono">{priceFmt(f.price)}</span> },
+    { id: 'notional', label: t('history.col.notional'), sort: 'notional', align: 'right', width: 104, render: f => <span className="font-mono">{usd(f.notional)}</span> },
+    { id: 'fees', label: t('history.col.fees'), sort: 'fee', align: 'right', width: 112, render: f => <span className="font-mono">{f.fee === null ? '—' : `${qtyFmt(f.fee)} ${f.feeAsset ?? ''}`}</span> },
+    { id: 'feeRate', label: t('history.col.feeRate'), sort: 'feeRate', align: 'right', width: 88, render: f => <span className="font-mono"><RateCell rate={f.feeRate} /></span> },
+    { id: 'realized', label: t('history.col.realized'), sort: 'realizedPnl', align: 'right', width: 96, render: f => (
+      <span className="font-mono" style={{ color: tone(f.realizedPnl ?? 0) }}>{f.realizedPnl === null ? '—' : signedUsd(f.realizedPnl)}</span>
+    ) },
+    { id: 'order', label: t('history.col.order'), sort: 'orderId', width: 140, render: f => (
+      <span className="font-mono" style={{ color: 'var(--muted)' }} title={f.instanceId ?? t('history.unclaimed')}>{f.orderId}</span>
+    ) },
+  ]), [showAccount, t])
+
+  return <DataTable tableId="history.fills" columns={columns} rows={rows} rowKey={f => `${f.account ?? ''}|${f.fillId}`} sort={sort} onSort={onSort} minWidth="64rem" />
+}
+
+function OrdersTable({ rows, showAccount, sort, onSort }: TableProps<OrderRow>) {
+  const t = useT()
+  const columns = useMemo<Array<Column<OrderRow>>>(() => withAccount(showAccount, t('history.col.account'), [
+    { id: 'time', label: t('history.col.time'), sort: 'lastTs', width: 176, render: o => (
+      <span className="font-mono" title={o.firstTs !== o.lastTs ? `${fmtDateTime(o.firstTs)} → ${fmtDateTime(o.lastTs)}` : undefined}>
+        {fmtDateTime(o.lastTs)}
+        {o.firstTs !== o.lastTs && <span style={{ color: 'var(--muted)' }}> · {duration(o.lastTs - o.firstTs)}</span>}
+      </span>
+    ) },
+    { id: 'order', label: t('history.col.order'), sort: 'orderId', width: 140, render: o => (
+      <span className="font-mono" style={{ color: 'var(--muted)' }} title={o.instanceId ?? t('history.unclaimed')}>{o.orderId}</span>
+    ) },
+    { id: 'symbol', label: t('history.col.symbol'), sort: 'symbol', grow: true, render: o => <span className="font-mono">{o.symbol}</span> },
+    { id: 'side', label: t('history.col.side'), sort: 'side', width: 96, render: o => <Side side={o.side} positionSide={o.positionSide} /> },
+    { id: 'fills', label: t('history.col.fills'), sort: 'fills', align: 'right', width: 88, render: o => <span className="font-mono">{o.fills}</span> },
+    { id: 'qty', label: t('history.col.qty'), sort: 'qty', align: 'right', width: 104, render: o => <span className="font-mono">{qtyFmt(o.qty)}</span> },
+    { id: 'avgPrice', label: t('history.col.avgPrice'), sort: 'avgPrice', align: 'right', width: 112, render: o => <span className="font-mono">{priceFmt(o.avgPrice)}</span> },
+    { id: 'notional', label: t('history.col.notional'), sort: 'notional', align: 'right', width: 104, render: o => <span className="font-mono">{usd(o.notional)}</span> },
+    { id: 'fees', label: t('history.col.fees'), sort: 'fees', align: 'right', width: 96, render: o => <span className="font-mono"><FeeCell t={o} /></span> },
+    { id: 'feeRate', label: t('history.col.feeRate'), sort: 'feeRate', align: 'right', width: 88, render: o => <span className="font-mono"><RateCell rate={o.feeRate} /></span> },
+    { id: 'realized', label: t('history.col.realized'), sort: 'realized', align: 'right', width: 96, render: o => <span className="font-mono" style={{ color: tone(o.realized) }}>{signedUsd(o.realized)}</span> },
+    { id: 'net', label: t('history.col.net'), align: 'right', width: 96, title: t('history.col.orderNetHint'), render: o => {
+      const net = o.realized - o.fees
+      return <span className="font-mono" style={{ color: tone(net) }}>{signedUsd(net)}</span>
+    } },
+  ]), [showAccount, t])
+
+  return <DataTable tableId="history.orders" columns={columns} rows={rows} rowKey={o => `${o.account ?? ''}|${o.orderId}`} sort={sort} onSort={onSort} minWidth="72rem" />
 }

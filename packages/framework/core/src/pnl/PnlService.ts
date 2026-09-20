@@ -249,6 +249,45 @@ export interface HistoryQuery {
   symbol?: string
   offset?: number
   limit?: number
+  /** Column to order by; see FILL_SORTS / ORDER_SORTS / POSITION_SORTS. */
+  sort?: string
+  dir?: 'asc' | 'desc'
+}
+
+/**
+ * Sortable columns, as SQL expressions. A whitelist rather than a mapping
+ * built from the request: the value lands inside an ORDER BY, where a string
+ * from outside would be an injection.
+ */
+const FILL_SORTS: Record<string, string> = {
+  ts: 'ts', symbol: 'symbol', side: 'side', qty: 'qty', price: 'price',
+  notional: 'qty * price', fee: 'COALESCE(fee, 0)', realizedPnl: 'COALESCE(realized_pnl, 0)',
+  feeRate: 'CASE WHEN qty * price > 0 THEN COALESCE(fee, 0) / (qty * price) ELSE 0 END',
+  account: 'account', orderId: 'order_id',
+}
+const ORDER_SORTS: Record<string, string> = {
+  lastTs: 'MAX(ts)', firstTs: 'MIN(ts)', symbol: 'symbol', side: 'side',
+  fills: 'COUNT(*)', qty: 'SUM(qty)', notional: 'SUM(qty * price)',
+  avgPrice: 'SUM(qty * price) / NULLIF(SUM(qty), 0)',
+  fees: 'SUM(COALESCE(fee, 0))', realized: 'SUM(COALESCE(realized_pnl, 0))',
+  feeRate: 'SUM(COALESCE(fee, 0)) / NULLIF(SUM(qty * price), 0)',
+  account: 'account', orderId: 'order_id',
+}
+
+function orderBy(sorts: Record<string, string>, q: HistoryQuery, fallback: string): string {
+  const expr = q.sort ? sorts[q.sort] : undefined
+  const dir = q.dir === 'asc' ? 'ASC' : 'DESC'
+  return expr ? `${expr} ${dir}, ${fallback}` : `${fallback} DESC, ${sorts['symbol']}`
+}
+
+/** Position rows are replayed in memory, so their sort is a comparator. */
+const POSITION_SORTS: Record<string, (p: PositionHistoryRow) => number | string> = {
+  symbol: p => p.symbol, side: p => p.side, openTs: p => p.openTs,
+  closeTs: p => p.closeTs ?? Number.MAX_SAFE_INTEGER,
+  duration: p => (p.closeTs ?? Date.now()) - p.openTs,
+  maxNotional: p => p.maxNotional, volume: p => p.volume, fees: p => p.fees,
+  feeRate: p => p.feeRate ?? -Infinity, funding: p => p.funding, realized: p => p.realized,
+  net: p => p.net, fills: p => p.fills, orders: p => p.orders, account: p => p.account ?? '',
 }
 
 /** One slice of the ledger a history view covers. No symbol = the whole account. */
@@ -1262,7 +1301,7 @@ export class PnlService {
   async historyFills(scope: HistoryScope, q: HistoryQuery = {}): Promise<HistoryPage<FillHistoryRow>> {
     const w = await this.scopeWhere(scope, q)
     const page = await this.db.all<FillDbRow & { account: string }>(
-      `SELECT account, ${FILL_COLS} FROM pnl_fills WHERE ${w.sql} ORDER BY ts DESC, fill_id LIMIT ? OFFSET ?`,
+      `SELECT account, ${FILL_COLS} FROM pnl_fills WHERE ${w.sql} ORDER BY ${orderBy(FILL_SORTS, q, 'ts')}, fill_id LIMIT ? OFFSET ?`,
       [...w.args, q.limit ?? 50, q.offset ?? 0])
     const labels = this.labelOf(scope)
     const rows: FillHistoryRow[] = []
@@ -1276,7 +1315,7 @@ export class PnlService {
     const w = await this.scopeWhere(scope, q)
     const ids = await this.db.all<{ account: string; order_id: string; last_ts: number }>(
       `SELECT account, order_id, MAX(ts) AS last_ts FROM pnl_fills WHERE ${w.sql}
-        GROUP BY account, order_id ORDER BY last_ts DESC, order_id LIMIT ? OFFSET ?`,
+        GROUP BY account, order_id ORDER BY ${orderBy(ORDER_SORTS, q, 'MAX(ts)')}, order_id LIMIT ? OFFSET ?`,
       [...w.args, q.limit ?? 50, q.offset ?? 0])
     const labels = this.labelOf(scope)
     const byOrder = new Map<string, { account: string; fills: LedgerFill[] }>(
@@ -1337,7 +1376,19 @@ export class PnlService {
       (!q.symbol || p.symbol === q.symbol)
       && (q.until === undefined || p.openTs < q.until)
       && (q.since === undefined || p.closeTs === null || p.closeTs >= q.since))
-    all.sort((a, b) => (b.closeTs ?? Infinity) - (a.closeTs ?? Infinity) || b.openTs - a.openTs)
+    const pick = q.sort ? POSITION_SORTS[q.sort] : undefined
+    if (pick) {
+      const sign = q.dir === 'asc' ? 1 : -1
+      all.sort((a, b) => {
+        const x = pick(a), y = pick(b)
+        const cmp = typeof x === 'string' || typeof y === 'string'
+          ? String(x).localeCompare(String(y))
+          : (x as number) - (y as number)
+        return cmp !== 0 ? sign * cmp : b.openTs - a.openTs
+      })
+    } else {
+      all.sort((a, b) => (b.closeTs ?? Infinity) - (a.closeTs ?? Infinity) || b.openTs - a.openTs)
+    }
     const offset = q.offset ?? 0
     return {
       rows: all.slice(offset, offset + (q.limit ?? 50)),

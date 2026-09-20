@@ -45,7 +45,11 @@ export function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEven
   const t = useT()
   return (
     <span
+      // Marked so a header that is also draggable can tell a resize from a
+      // reorder: the pointer went down on the edge, not on the label.
+      data-resize-handle
       onMouseDown={onMouseDown}
+      onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       title={t('ui.dragToResize')}
       className="absolute top-0 right-0 h-full cursor-col-resize select-none"
