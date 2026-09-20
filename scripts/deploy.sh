@@ -116,7 +116,18 @@ fi
 if [ "$SKIP_BUILD" = 0 ]; then
   step "Build: packages, dashboard${DEPLOY_PLUGINS:+, plugins}"
   (cd "$REPO_ROOT" && pnpm -r --filter '!@openwhaleorg/dashboard' build)
-  (cd "$REPO_ROOT/packages/apps/dashboard" && NEXT_DIST_DIR=.next-deploy npx next build)
+  # A build killed part-way (OOM, a dropped SSH, ^C) leaves .next-deploy's
+  # webpack cache referring to pack files it no longer has, and every later
+  # build dies on ENOENT for one of them — twice on 2026-09-20 alone. The
+  # cache is a build accelerator, not state: a failed build clears it and
+  # builds again rather than asking somebody to remember this.
+  (
+    cd "$REPO_ROOT/packages/apps/dashboard"
+    NEXT_DIST_DIR=.next-deploy npx next build && exit 0
+    echo "dashboard build failed — clearing .next-deploy and trying once more" >&2
+    rm -rf .next-deploy
+    NEXT_DIST_DIR=.next-deploy npx next build
+  )
   for entry in $DEPLOY_PLUGINS; do
     dir="${entry%%:*}"
     [ -d "$dir" ] || { echo "plugin path not found: $dir" >&2; exit 1; }
