@@ -3,6 +3,7 @@ import { generateText } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { TypeSafeClient, noul } from '@typesafe-ai/sdk'
 import type { CredentialTypeDefinition } from '../types/materialization.js'
 import type { RawCredentialData } from '../types/credential.js'
 
@@ -63,6 +64,21 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
     schema: z.object({ apiKey: apiKeyField }),
     test: async (data: RawCredentialData) => {
       await generateTest(createGoogleGenerativeAI({ apiKey: data['apiKey'] as string })('gemini-2.0-flash'))
+    },
+  },
+  {
+    type: 'typesafe-ai',
+    displayName: 'TypeSafe (Jev)',
+    category: 'AI Provider',
+    icon: '⚖️',
+    description: 'Jev — judgments with probabilities instead of generated text. Used by evaluate(), not by llm().',
+    documentationUrl: 'https://docs.typesafe.ai/sdk/javascript',
+    schema: z.object({ apiKey: apiKeyField }),
+    test: async (data: RawCredentialData) => {
+      // One trivial judgment proves the key end to end; a model listing would
+      // pass for a key with no evaluation entitlement.
+      const client = new TypeSafeClient({ apiKey: data['apiKey'] as string })
+      await client.systemOne({ state: 'ping', questions: { ok: noul('Is this text non-empty?') } })
     },
   },
   {

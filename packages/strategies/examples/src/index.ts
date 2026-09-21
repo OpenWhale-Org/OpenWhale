@@ -3,6 +3,7 @@ export { MomentumBreakoutStrategy } from './strategies/MomentumBreakoutStrategy.
 export { MeanReversionStrategy } from './strategies/MeanReversionStrategy.js'
 export { ScheduledAccumulationStrategy } from './strategies/ScheduledAccumulationStrategy.js'
 export { AiAnalystStrategy } from './strategies/AiAnalystStrategy.js'
+export { JevScalperStrategy } from './strategies/JevScalperStrategy.js'
 export * from './indicators.js'
 export { examplesPlugin } from './plugin.js'
 

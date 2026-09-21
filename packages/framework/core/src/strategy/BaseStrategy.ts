@@ -15,6 +15,9 @@ import { nanoid } from 'nanoid'
 import { getDataDir } from '../utils/paths.js'
 import { createLogger, runInLogScope, subscribeLogs } from '../utils/logger.js'
 import { LlmClient } from './llm.js'
+import { EvaluationClient } from './evaluate.js'
+import type { JudgeOptions, JudgeResult } from './evaluate.js'
+import type { Questions } from '@typesafe-ai/sdk'
 import type { CoreMessage, LlmCallOptions, LlmCallSettings } from './llm.js'
 import type { LanguageModel } from 'ai'
 import { HttpClient } from './HttpClient.js'
@@ -368,6 +371,7 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
   private portfolioJournalInstance?: IPortfolioJournal
   private httpClient?: HttpClient
   private readonly llmClient: LlmClient
+  private readonly evaluationClient = new EvaluationClient()
   private llmBindings: Record<string, LlmSlotBinding> = {}
   private injectedParams?: StrategyParams
   private injectedReaders: unknown[] = []
@@ -885,6 +889,35 @@ export abstract class BaseStrategy<TDecl extends StrategyDeclarations = Strategy
       ...(slot.credentialName !== undefined ? { credentialName: slot.credentialName } : {}),
       ...(Object.keys(slot.settings).length > 0 ? { settings: slot.settings } : {}),
     }, this.credentialStore)
+  }
+
+  /**
+   * Ask an evaluation model (TypeSafe's Jev) named questions about a state.
+   *
+   * Named `judge` rather than `evaluate`: `evaluate(context)` is the strategy's
+   * own decision method, and one class cannot mean two things by one word.
+   *
+   * Judgment, not generation: every question is answered in parallel with a
+   * probability attached, in a fraction of a chat model's time, and what
+   * comes back is already a number to threshold on. Use it where code needs
+   * semantic understanding on a tight clock; use `llm()` where you need prose
+   * or a long chain of reasoning.
+   *
+   * @example
+   * const { answers } = await this.judge({
+   *   state: { book, recentTrades },
+   *   questions: {
+   *     pressure: choice('Which side is pressing?', { buyers: null, sellers: null, neither: null }),
+   *     spike: noul('Is `recentTrades` a one-off spike rather than a trend?'),
+   *   },
+   * })
+   * if (answers.pressure.confidence > 0.8) …
+   */
+  protected async judge<const Q extends Questions>(options: JudgeOptions<Q>): Promise<JudgeResult<Q>> {
+    if (!this.credentialStore) {
+      throw new Error('judge() requires a CredentialStore — make sure the runtime has injected one.')
+    }
+    return this.evaluationClient.judge(options, this.credentialStore)
   }
 
   /**
