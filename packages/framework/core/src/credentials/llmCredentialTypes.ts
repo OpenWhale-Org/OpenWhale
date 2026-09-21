@@ -70,6 +70,7 @@ export const llmCredentialTypes: CredentialTypeDefinition[] = [
     type: 'typesafe-ai',
     displayName: 'TypeSafe (Jev)',
     category: 'AI Provider',
+    logo: '/brands/typesafe.png',
     icon: '⚖️',
     description: 'Jev — judgments with probabilities instead of generated text. Used by evaluate(), not by llm().',
     documentationUrl: 'https://docs.typesafe.ai/sdk/javascript',
