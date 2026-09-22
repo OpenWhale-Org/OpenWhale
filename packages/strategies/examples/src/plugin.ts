@@ -5,6 +5,7 @@ import { MeanReversionStrategy } from './strategies/MeanReversionStrategy.js'
 import { ScheduledAccumulationStrategy } from './strategies/ScheduledAccumulationStrategy.js'
 import { AiAnalystStrategy } from './strategies/AiAnalystStrategy.js'
 import { JevScalperStrategy } from './strategies/JevScalperStrategy.js'
+import { JevQuoterStrategy } from './strategies/JevQuoterStrategy.js'
 
 /**
  * Example strategies — a reference library, not a venue plugin.
@@ -20,6 +21,7 @@ import { JevScalperStrategy } from './strategies/JevScalperStrategy.js'
  *   - `scheduled-accumulation`  — cron DCA with dip sizing
  *   - `ai-analyst`              — LLM verdict, code-enforced risk
  *   - `jev-scalper`             — evaluation-model judgment in a one-second loop
+ *   - `jev-quoter`              — the same model picking which side to REST a quote on
  *   - `copy-trading`            — mirrors another address's fills
  *
  * They are meant to be read and copied. Each file is self-contained apart
@@ -39,6 +41,7 @@ export const examplesPlugin = definePlugin({
     ScheduledAccumulationStrategy,
     AiAnalystStrategy,
     JevScalperStrategy,
+    JevQuoterStrategy,
     CopyTradingStrategy,
   ],
 })

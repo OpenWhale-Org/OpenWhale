@@ -35,7 +35,10 @@ const log = createLogger('JevScalper')
  * the cooldown. A model that is wrong should cost a clip, never the account.
  *
  * Requires a `typesafe-ai` credential (Credentials → TypeSafe (Jev)).
- * Dry run by default — leave it that way until the trace reads sensibly.
+ *
+ * Turn the instance's Dry run switch ON before activating: the engine then
+ * records what this would have done and queues none of it. Leave it on until
+ * the trace reads sensibly — the judgments are logged either way.
  */
 const decls = {
   monitors: [
@@ -78,10 +81,8 @@ export class JevScalperStrategy extends BaseStrategy<typeof decls> {
       description: 'Hard cap on |exposure|, enforced in code whatever the model says',
       i18n: { 'zh-CN': { displayName: '最大仓位（USD）', description: '|敞口| 硬上限，无论模型说什么都由代码强制' } },
     }),
-    dryRun: z.boolean().default(true).meta({
-      displayName: 'Dry Run', i18n: { 'zh-CN': { displayName: '模拟运行' } },
-    }),
   })
+
 
   readonly tunableParamsSchema = z.object({
     minCallIntervalMs: z.number().int().min(250).default(1_000).meta({
@@ -149,7 +150,7 @@ export class JevScalperStrategy extends BaseStrategy<typeof decls> {
   }
 
   async evaluate(context: StrategyContext): Promise<ReturnType<BaseStrategy['instruction']>[]> {
-    const { symbol, notionalUsd, maxPositionUsd, dryRun } = this.baseParamsSchema.parse(this.params.base)
+    const { symbol, notionalUsd, maxPositionUsd } = this.baseParamsSchema.parse(this.params.base)
     const t = this.tunableParamsSchema.parse(this.params.tunable)
     const key = this.key(this.params)
 
@@ -261,7 +262,6 @@ export class JevScalperStrategy extends BaseStrategy<typeof decls> {
       amount: allowedUsd / book.mid,
       ...(reduceOnly ? { reduceOnly: true } : {}),
       slippage: t.slippage,
-      dryRun,
     }, ['main'])]
   }
 }
