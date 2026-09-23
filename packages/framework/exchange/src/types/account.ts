@@ -35,6 +35,12 @@ export interface IPosition {
    * a number for — the panel shows a dash instead.
    */
   leverage?: number
+  /**
+   * How `leverage` was arrived at: 'margin' = notional ÷ the margin actually
+   * behind the position, 'venue' = the number the venue reports for the
+   * symbol. Absent leverage means neither was available.
+   */
+  leverageBasis?: 'margin' | 'venue'
   marginMode?: 'cross' | 'isolated'
 }
 

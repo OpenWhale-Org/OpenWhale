@@ -14,6 +14,7 @@ interface PositionRow {
   id: string; side: 'long' | 'short'; value: number; pnl: number
   /** Absent when the venue reports neither — the cell shows a dash rather than a guess. */
   leverage?: number
+  leverageBasis?: 'margin' | 'venue'
   marginMode?: 'cross' | 'isolated'
 }
 interface OrderRow { id: string; side: 'buy' | 'sell'; value: number; status: 'open' | 'partial' }
@@ -49,6 +50,24 @@ type Translate = ReturnType<typeof useT>
 
 const marginTitle = (mode: 'cross' | 'isolated' | undefined, t: Translate): string | undefined =>
   mode === undefined ? undefined : t(mode === 'cross' ? 'accounts.margin.cross' : 'accounts.margin.isolated')
+
+/** Say which number this is: the one the margin implies, or the one the venue names. */
+function leverageTitle(p: PositionRow, t: Translate): string | undefined {
+  const parts = [
+    p.leverageBasis === 'margin' ? t('accounts.leverage.byMargin')
+      : p.leverageBasis === 'venue' ? t('accounts.leverage.byVenue')
+      : t('accounts.leverage.unknown'),
+    marginTitle(p.marginMode, t),
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
+/** Notional over equity — how far the whole account is stretched. */
+function accountLeverage(positions: PositionRow[], equity: number | undefined): number | undefined {
+  if (!equity || equity <= 0 || positions.length === 0) return undefined
+  const notional = positions.reduce((sum, p) => sum + Math.abs(p.value), 0)
+  return notional > 0 ? notional / equity : undefined
+}
 
 const marginShort = (mode: 'cross' | 'isolated', t: Translate): string =>
   t(mode === 'cross' ? 'accounts.margin.cross.short' : 'accounts.margin.isolated.short')
@@ -248,6 +267,18 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
           <>
             {detail.errors['positions'] && <p className="text-xs" style={{ color: 'var(--danger, #ef4444)' }}>{detail.errors['positions']}</p>}
             {positions?.length === 0 && <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('accounts.detail.noPositions')}</p>}
+            {positions && positions.length > 0 && (() => {
+              const lev = accountLeverage(positions, balance?.usd.total)
+              return lev === undefined ? null : (
+                <p className="text-xs pb-2" style={{ color: 'var(--muted)' }} title={t('accounts.leverage.accountHint')}>
+                  {t('accounts.leverage.account')}{' '}
+                  <span className="font-mono" style={{ color: 'var(--foreground)' }}>{trimZeros(lev)}x</span>{' '}
+                  <span>
+                    ({usd(positions.reduce((sum, p) => sum + Math.abs(p.value), 0))} / {usd(balance!.usd.total)})
+                  </span>
+                </p>
+              )
+            })()}
             {positions && positions.length > 0 && (
               <div className="overflow-x-auto scroll-hidden">
                 <table className="w-full text-xs" style={{ minWidth: '17rem' }}>
@@ -268,7 +299,7 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
                         <td className="py-1">
                           <span style={{ color: p.side === 'long' ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>{p.side}</span>
                         </td>
-                        <td className="py-1 text-right font-mono" title={marginTitle(p.marginMode, t)}>
+                        <td className="py-1 text-right font-mono" title={leverageTitle(p, t)}>
                           {p.leverage === undefined ? <span style={{ color: 'var(--muted)' }}>—</span> : `${trimZeros(p.leverage)}x`}
                           {p.marginMode && <span className="ml-1 text-[10px]" style={{ color: 'var(--muted)' }}>{marginShort(p.marginMode, t)}</span>}
                         </td>

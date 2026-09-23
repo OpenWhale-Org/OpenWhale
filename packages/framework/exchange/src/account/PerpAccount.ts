@@ -81,14 +81,25 @@ export class PerpAccount {
     const positions = await this.session.fetchPositions()
     return positions
       .filter(p => p.contracts !== 0)
-      .map(p => ({
-        id: p.symbol,
-        side: p.side,
-        value: p.notional,
-        pnl: p.unrealizedPnl,
-        ...(p.leverage > 0 ? { leverage: p.leverage } : {}),
-        ...(p.marginMode ? { marginMode: p.marginMode } : {}),
-      }))
+      .map(p => {
+        /*
+         * What the position is actually running at, not what the symbol is
+         * configured for: notional over the margin behind it. The two agree
+         * on an isolated position at its configured leverage and part ways
+         * everywhere else — and on accounts where the venue reports no
+         * leverage at all, the margin is still there to divide by.
+         */
+        const byMargin = p.initialMargin > 0 ? p.notional / p.initialMargin : 0
+        const leverage = byMargin > 0 ? byMargin : p.leverage
+        return {
+          id: p.symbol,
+          side: p.side,
+          value: p.notional,
+          pnl: p.unrealizedPnl,
+          ...(leverage > 0 ? { leverage, leverageBasis: byMargin > 0 ? 'margin' as const : 'venue' as const } : {}),
+          ...(p.marginMode ? { marginMode: p.marginMode } : {}),
+        }
+      })
   }
 
   /**

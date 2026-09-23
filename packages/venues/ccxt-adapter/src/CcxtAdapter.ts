@@ -1105,7 +1105,9 @@ export class CcxtAdapter implements PerpExchangeAdapter {
       markPrice: p.markPrice ?? 0,
       notional: p.notional ?? 0,
       unrealizedPnl: p.unrealizedPnl ?? 0,
-      leverage: p.leverage ?? 1,
+      // 0 = the venue reported none. A default of 1 was indistinguishable
+      // from a real 1x, and every caller then believed the fabrication.
+      leverage: p.leverage ?? 0,
       marginMode: p.marginMode ?? 'cross',
       initialMargin: p.initialMargin ?? 0,
       maintenanceMargin: p.maintenanceMargin ?? 0,
