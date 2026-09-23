@@ -1,10 +1,39 @@
 import { OwAccount } from '@openwhaleorg/core'
-import type { WhaleDanceWalletSession } from './types.js'
+import type { WalletBalance, WhaleDanceWalletSession } from './types.js'
+
+function walletTotals(balance: WalletBalance): { totalUsd: number; availableUsd: number } {
+  const perpEquity = Number(balance.accountValue)
+  const perpWithdrawable = Number(balance.withdrawable)
+  const spotUsdc = Number(balance.spotUsdc)
+
+  // In a unified account, spot USDC already includes the collateral backing
+  // perp positions. Perp equity alone omits idle funds; summing both counts
+  // the position collateral twice. Older accounts without spot USDC use perp.
+  if (spotUsdc > 0) {
+    return {
+      totalUsd: spotUsdc,
+      availableUsd: Math.max(0, spotUsdc - perpEquity + perpWithdrawable),
+    }
+  }
+
+  return { totalUsd: perpEquity, availableUsd: perpWithdrawable }
+}
 
 const sections = [
   { method: 'identity', title: 'Identity', kind: 'keyvalue' as const, default: true },
   { method: 'policy', title: 'Policy', kind: 'keyvalue' as const },
-  { method: 'balance', title: 'Balance', kind: 'keyvalue' as const },
+  {
+    method: 'balance', title: 'Balance', kind: 'keyvalue' as const,
+    columns: [
+      { key: 'totalUsd', label: 'Total', format: 'usd' as const },
+      { key: 'availableUsd', label: 'Available', format: 'usd' as const },
+      { key: 'spotUsdc', label: 'Spot USDC', format: 'mono' as const },
+      { key: 'accountValue', label: 'Perp Equity', format: 'mono' as const },
+      { key: 'withdrawable', label: 'Perp Withdrawable', format: 'mono' as const },
+      { key: 'totalMarginUsed', label: 'Margin Used', format: 'mono' as const },
+      { key: 'loading', label: 'Loading' },
+    ],
+  },
   {
     method: 'positions', title: 'Positions', kind: 'table' as const, count: true, empty: 'No open positions',
     columns: [
@@ -71,12 +100,15 @@ export class WhaleDanceWalletAccount {
     }
   }
 
-  balance() { return this.session.getBalance() }
+  async balance() {
+    const balance = await this.session.getBalance()
+    return { ...balance, ...walletTotals(balance) }
+  }
   positions() { return this.session.getPositions() }
   orders() { return this.session.getOrders() }
 
   async snapshot(): Promise<{ equity: number; available?: number }> {
-    const balance = await this.session.getBalance()
-    return { equity: Number(balance.accountValue), available: Number(balance.withdrawable) }
+    const { totalUsd, availableUsd } = walletTotals(await this.session.getBalance())
+    return { equity: totalUsd, available: availableUsd }
   }
 }
