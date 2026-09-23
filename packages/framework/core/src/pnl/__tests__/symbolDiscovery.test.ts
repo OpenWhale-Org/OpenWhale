@@ -38,7 +38,7 @@ describe('symbol discovery', () => {
     })
 
     await svc.collect()
-    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'PENDLE/USDT:USDT', 'CLAIMED/USDT:USDT'])
+    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'CLAIMED/USDT:USDT', 'PENDLE/USDT:USDT'])
 
     // Remembered: the next sweep reads them even when the venue reports neither.
     const quiet = new PnlService({
@@ -51,7 +51,7 @@ describe('symbol discovery', () => {
     })
     asked.length = 0
     await quiet.collect()
-    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'PENDLE/USDT:USDT', 'CLAIMED/USDT:USDT'])
+    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'CLAIMED/USDT:USDT', 'PENDLE/USDT:USDT'])
     expect((await d.all<{ symbol: string; source: string }>(`SELECT symbol, source FROM pnl_symbols ORDER BY symbol`)))
       .toEqual([
         { symbol: 'AAVE/USDC:USDC', source: 'position' },
