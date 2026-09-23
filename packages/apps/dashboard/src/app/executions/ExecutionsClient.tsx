@@ -22,7 +22,7 @@ import { fmtTime } from '@/lib/time'
 
 interface ExecutionRecord {
   executorId: string
-  status: 'success' | 'failed' | 'skipped' | 'dry-run'
+  status: 'success' | 'failed' | 'pending' | 'unknown' | 'skipped' | 'dry-run'
   executedAt: string
   error?: string
   data?: Record<string, unknown>
@@ -40,6 +40,8 @@ interface ExecutionRecord {
 const STATUS_COLOR: Record<string, string> = {
   success: 'var(--success)',
   failed: 'var(--danger)',
+  pending: 'var(--warning)',
+  unknown: 'var(--warning)',
   skipped: 'var(--muted)',
   'dry-run': 'var(--warning)',
 }
@@ -54,6 +56,8 @@ function statusLabel(t: T, status: string): string {
   switch (status) {
     case 'success': return t('executions.status.success')
     case 'failed': return t('executions.status.failed')
+    case 'pending': return t('executions.status.pending')
+    case 'unknown': return t('executions.status.unknown')
     case 'skipped': return t('executions.status.skipped')
     case 'dry-run': return t('executions.status.dryRun')
     default: return status
@@ -144,6 +148,8 @@ export function ExecutionsClient({ instances }: { instances: StrategyInstanceVie
             { value: '', label: t('executions.anyStatus') },
             { value: 'success', label: statusLabel(t, 'success') },
             { value: 'failed', label: statusLabel(t, 'failed') },
+            { value: 'pending', label: statusLabel(t, 'pending') },
+            { value: 'unknown', label: statusLabel(t, 'unknown') },
             { value: 'skipped', label: statusLabel(t, 'skipped') },
             { value: 'dry-run', label: statusLabel(t, 'dry-run') },
           ]}

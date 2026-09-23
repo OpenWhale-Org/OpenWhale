@@ -108,6 +108,9 @@ importers:
       '@openwhaleorg/web3':
         specifier: workspace:*
         version: link:../../framework/web3
+      '@openwhaleorg/whaledance':
+        specifier: workspace:*
+        version: link:../../venues/whaledance
       express:
         specifier: ^4.21.0
         version: 4.22.2
@@ -435,6 +438,25 @@ importers:
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.39
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
+
+  packages/venues/whaledance:
+    dependencies:
+      zod:
+        specifier: ^4.4.1
+        version: 4.4.1
+    devDependencies:
+      '@openwhaleorg/core':
+        specifier: workspace:*
+        version: link:../../framework/core
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.39)(lightningcss@1.32.0)
