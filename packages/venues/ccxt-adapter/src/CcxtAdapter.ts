@@ -464,8 +464,8 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    *
    * Binance has no "all my trades" endpoint — `userTrades` needs a symbol — so
    * a collector that only knows the symbols it placed orders on never sees a
-   * position opened by hand on any other contract (Binance SubAccount 2,
-   * 2026-09-18: manual positions missing from the account's history entirely).
+   * position opened by hand on any other contract (observed 2026-09-18:
+   * hand-opened positions missing from an account's history entirely).
    * The account-wide income ledger does list every contract that produced a
    * commission, a realized PnL or a funding payment, which is exactly the
    * discovery channel that was missing.
@@ -486,11 +486,11 @@ export class CcxtAdapter implements PerpExchangeAdapter {
      *
      * The ledger is capped at 1000 rows per call and a busy account writes
      * that many in hours — every fill leaves a commission row and every close
-     * a realized-PnL row. Binance SubAccount 2 runs a high-frequency
-     * strategy: a week's window returned its first thousand rows, which
-     * covered three contracts, and the rest of the account's contracts (AKE
-     * among them) looked as though they had never traded. Each page resumes
-     * at the last row's timestamp; a short page means the window is done.
+     * a realized-PnL row. On an account running a high-frequency strategy a
+     * week's window returned its first thousand rows, which covered three
+     * contracts, and every other contract the account had traded looked as
+     * though it never had. Each page resumes at the last row's timestamp; a
+     * short page means the window is done.
      */
     const out = new Set<string>()
     let cursor = since

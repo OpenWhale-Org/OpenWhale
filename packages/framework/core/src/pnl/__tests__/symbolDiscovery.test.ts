@@ -7,17 +7,17 @@ import { PnlService } from '../PnlService.js'
  *
  * Binance serves trade history one symbol at a time, so the collector works
  * from a symbol list. Claims alone made that list, and a position opened by
- * hand on any other contract never entered the ledger — on Binance SubAccount
- * 2 (2026-09-18) the account's history was missing every manual trade, while
- * the older accounts looked complete only because the funding bot had already
- * traded nearly every contract the operator touched.
+ * hand on any other contract never entered the ledger — observed 2026-09-18
+ * on a fresh account, whose history was missing every manual trade. Older
+ * accounts looked complete only because a bot had already traded nearly
+ * every contract their operator touched.
  */
 
 async function db(): Promise<SQLiteAdapter> {
   const d = new SQLiteAdapter({ filePath: ':memory:' })
   await d.initialize()
   await d.run(
-    `INSERT INTO pnl_order_claims (account, order_id, instance_id, symbol, ts) VALUES ('acct', 'o1', 'inst', 'SKDD/USDT:USDT', ?)`,
+    `INSERT INTO pnl_order_claims (account, order_id, instance_id, symbol, ts) VALUES ('acct', 'o1', 'inst', 'CLAIMED/USDT:USDT', ?)`,
     [Date.now()])
   return d
 }
@@ -38,7 +38,7 @@ describe('symbol discovery', () => {
     })
 
     await svc.collect()
-    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'PENDLE/USDT:USDT', 'SKDD/USDT:USDT'])
+    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'PENDLE/USDT:USDT', 'CLAIMED/USDT:USDT'])
 
     // Remembered: the next sweep reads them even when the venue reports neither.
     const quiet = new PnlService({
@@ -51,7 +51,7 @@ describe('symbol discovery', () => {
     })
     asked.length = 0
     await quiet.collect()
-    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'PENDLE/USDT:USDT', 'SKDD/USDT:USDT'])
+    expect(asked.sort()).toEqual(['AAVE/USDC:USDC', 'PENDLE/USDT:USDT', 'CLAIMED/USDT:USDT'])
     expect((await d.all<{ symbol: string; source: string }>(`SELECT symbol, source FROM pnl_symbols ORDER BY symbol`)))
       .toEqual([
         { symbol: 'AAVE/USDC:USDC', source: 'position' },
@@ -71,6 +71,6 @@ describe('symbol discovery', () => {
       }) as never,
     })
     await svc.collect()
-    expect(asked).toEqual(['SKDD/USDT:USDT'])
+    expect(asked).toEqual(['CLAIMED/USDT:USDT'])
   })
 })

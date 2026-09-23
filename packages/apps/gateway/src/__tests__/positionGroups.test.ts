@@ -6,7 +6,7 @@ let db: SQLiteAdapter
 
 const accounts = [
   { name: 'BN Sub', credential: 'bn-sub', kind: 'exchange/perp' },
-  { name: 'Oil Master', credential: 'hl-oil', kind: 'exchange/perp' },
+  { name: 'Perp B', credential: 'perp-b', kind: 'exchange/perp' },
   { name: 'BN Spot', credential: 'bn-sub', kind: 'exchange/spot' },
 ]
 
@@ -17,7 +17,7 @@ function runtime(instances: Array<{ id: string; name: string; strategyId: string
       { id: 'CL/USDT:USDT', side: 'long', value: 22_000, pnl: 1_424 },
       { id: 'BZ/USDT:USDT', side: 'short', value: 84_000, pnl: -5_305 },
     ],
-    'Oil Master': [{ id: 'XYZ-CL/USDC:USDC', side: 'long', value: 79_000, pnl: -700 }],
+    'Perp B': [{ id: 'BAR/USDC:USDC', side: 'long', value: 79_000, pnl: -700 }],
   }
   return {
     listInstanceViews: async () => instances,
@@ -40,9 +40,9 @@ afterEach(async () => { await (db as unknown as { close?: () => Promise<void> })
 describe('PositionGroups', () => {
   it('a manual combination spans accounts and adds up what its members hold', async () => {
     const pg = new PositionGroups(db, runtime([]) as never)
-    const g = await pg.create('CL 跨所', [
+    const g = await pg.create('Cross-venue spread', [
       { account: 'BN Sub', symbol: 'CL/USDT:USDT', side: 'short' },
-      { account: 'Oil Master', symbol: 'XYZ-CL/USDC:USDC', side: '*' },
+      { account: 'Perp B', symbol: 'BAR/USDC:USDC', side: '*' },
     ])
     expect(g.members).toHaveLength(2)
     const { groups } = await pg.live()
@@ -72,7 +72,7 @@ describe('PositionGroups', () => {
     await pg.update(g!.id, { hidden: true })
     ;[g] = (await pg.list()).filter(x => x.source === 'instance')
     expect(g!.hidden).toBe(true)
-    await expect(pg.addMembers(g!.id, [{ account: 'Oil Master', symbol: 'X', side: '*' }])).rejects.toThrow()
+    await expect(pg.addMembers(g!.id, [{ account: 'Perp B', symbol: 'X', side: '*' }])).rejects.toThrow()
     await expect(pg.remove(g!.id)).rejects.toThrow()
 
     rt.listInstanceViews = async () => []
@@ -90,7 +90,7 @@ describe('PositionGroups', () => {
 
   it('a start date is kept, cleared, and read as UTC midnight', async () => {
     const pg = new PositionGroups(db, runtime([]) as never)
-    const g = await pg.create('CL 跨所', [], '2026-09-12')
+    const g = await pg.create('Cross-venue spread', [], '2026-09-12')
     expect((await pg.list()).find(x => x.id === g.id)!.startAt).toBe('2026-09-12')
     expect(startMsOf(g.startAt)).toBe(Date.parse('2026-09-12T00:00:00Z'))
 
@@ -132,17 +132,17 @@ describe('PositionGroups', () => {
     expect(after.members).toHaveLength(2)
   })
 
-  it("一个停着的实例，它的组合默认收起来；操作员表过态就归操作员", async () => {
+  it('a stopped instance hides its combination by default; once the operator says otherwise, that wins', async () => {
     const inst = { id: 'inst_a', name: 'BZ/CL', strategyId: 'pair-arb/etf-dual-remote', active: false, credentials: { 'engine:venue': 'bn-sub' }, params: { base: { symbolA: 'BZ/USDT:USDT', symbolB: 'CL/USDT:USDT' }, tunable: {} } }
     const rt = runtime([inst])
     const pg = new PositionGroups(db, rt as never)
     expect((await pg.list()).find(g => g.source === 'instance')!.hidden).toBe(true)
 
-    // 实例跑起来了：还没人表过态，跟着状态走
+    // The instance is running and nobody has said otherwise: follow the state.
     inst.active = true
     expect((await pg.list()).find(g => g.source === 'instance')!.hidden).toBe(false)
 
-    // 操作员自己收起来了：之后实例怎么变都不再动它
+    // The operator hid it: no state change touches it again.
     const g = (await pg.list()).find(x => x.source === 'instance')!
     await pg.update(g.id, { hidden: true })
     inst.active = false

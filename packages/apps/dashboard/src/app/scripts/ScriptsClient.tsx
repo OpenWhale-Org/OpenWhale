@@ -689,6 +689,7 @@ function isoToLocalInput(iso: string): string {
  * the input so the two never get confused. An ISO string can also be pasted.
  */
 function DateTimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const t = useT()
   const d = value ? new Date(value) : undefined
   const valid = d !== undefined && !Number.isNaN(d.getTime())
   return (
@@ -707,14 +708,14 @@ function DateTimeInput({ value, onChange }: { value: string; onChange: (v: strin
           className="rounded-md px-2 py-1.5 text-sm font-mono"
           style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--border)', minWidth: '16rem', colorScheme: 'dark light' }}
         />
-        <button type="button" onClick={() => onChange(new Date().toISOString())} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>现在</button>
-        {value && <button type="button" onClick={() => onChange('')} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>清空</button>}
+        <button type="button" onClick={() => onChange(new Date().toISOString())} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>{t('ui.now')}</button>
+        {value && <button type="button" onClick={() => onChange('')} className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}>{t('ui.clear')}</button>}
       </span>
       <input
         type="text"
         value={value}
         onChange={e => onChange(e.target.value.trim())}
-        placeholder="或粘贴 ISO 时间，如 2026-09-14T18:45:49.677Z"
+        placeholder={t('ui.orPasteIso')}
         className="rounded-md px-2 py-1 text-xs font-mono"
         style={{ background: 'var(--background)', color: valid || !value ? 'var(--muted)' : 'var(--danger, #e5484d)', border: '1px solid var(--border)', minWidth: '16rem' }}
       />

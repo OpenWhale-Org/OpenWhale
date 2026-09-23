@@ -141,9 +141,9 @@ const REL_EPS = 1e-7
  * below the venue's lot step, and once that remainder is worth less than the
  * venue's minimum order it CANNOT be closed at all (Binance: $5). Requiring
  * an exact zero made every such remainder weld the next round trip onto the
- * last: 46 fills over four days on Binance SubAccount 2's MSTR long, dozens
- * of separate trades, reported as one position that never closed and a "max
- * size" of $1,663 that was never held at once.
+ * last: on one high-frequency account a contract's 46 fills over four days —
+ * dozens of separate round trips — were reported as ONE position that never
+ * closed, with a "max size" thirty times anything actually held at once.
  *
  * So a position closes when what is left is dust — under five dollars, or
  * half a percent of the size it reached. The dust itself is not discarded: it

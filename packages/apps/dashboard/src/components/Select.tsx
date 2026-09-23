@@ -79,7 +79,7 @@ export function Select({ value, options, onChange, placeholder = '—', size = '
     return terms.every(term => text.includes(term))
   })
   const typed = query.trim()
-  // 自由输入：列表里没有这一项时，把输入本身作为第一行候选
+  // Free text: when the list has no such entry, the typed value itself is offered as the first row.
   const custom: SelectOption[] = allowCustom && typed !== '' && !options.some(o => o.value === typed)
     ? [{ value: typed, label: t('ui.useTyped', { text: typed }) }]
     : []

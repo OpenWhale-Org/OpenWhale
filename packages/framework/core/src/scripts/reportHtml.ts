@@ -142,7 +142,8 @@ tfoot td{border-top:1px solid var(--rule-2);border-bottom:none;background:var(--
 .alarm{font-family:var(--f-sans);font-size:13.5px;color:var(--loss);background:var(--loss-soft);border-left:3px solid var(--loss);padding:10px 14px;margin:8px 0 0}
 .empty{font-family:var(--f-sans);font-size:13px;color:var(--ink-3);background:var(--surface);border:1px solid var(--rule);padding:14px 16px;margin:0 0 10px}
 .lede{font-size:17px;color:var(--ink-2);max-width:66ch;margin:0 0 26px}
-/* 跳转目标不要贴在窗口顶边 —— 标题被工具栏压住就等于没跳对 */
+/* A jump target must not sit flush against the top: a heading hidden under
+   the toolbar is a jump that did not arrive. */
 section[id],h3[id],h4[id]{scroll-margin-top:18px}
 a.jump{color:inherit;text-decoration:none;border-bottom:1px dotted var(--rule-2)}
 a.jump:hover{color:var(--accent);border-bottom-color:var(--accent)}
@@ -164,18 +165,22 @@ footer{border-top:1px solid var(--rule);padding-top:18px;font-family:var(--f-san
 footer code{font-family:var(--f-mono);font-size:11.5px}`
 
 /**
- * 图例开关。
+ * The legend's switches.
  *
- * SVG 由服务端画好，所以**没有脚本也是一张完整的图** —— 这里只负责隐藏/显示，
- * 而不是负责把图画出来。JS 挂了、被禁了、或者我写错了，读者失去的是交互，
- * 不是整张图。
+ * The server draws the SVG, so **the chart is whole without any script** —
+ * this only hides and shows. If the JS breaks, is blocked, or is simply
+ * wrong, the reader loses the interaction, not the picture.
  *
- * 隐藏之后还要重算纵轴：会去隐藏一条线，多半正是因为它把纵轴撑得别的线全挤成
- * 一条 —— 不重算的话点了跟没点一样。重算走 SVG 变换而不是重画：把折线放进一个
- * <g>，纵向缩放它，再把刻度文字和右端标签按新标度改写。线宽用
- * vector-effect 顶住，否则缩放会把它一起拉粗。
+ * Hiding a series has to rescale the y axis too: the reason to hide one is
+ * usually that it stretches the axis until everything else is a flat line,
+ * and without the rescale the click changes nothing. The rescale is an SVG
+ * transform rather than a redraw — the paths go in a <g>, it is scaled
+ * vertically, and the tick labels and right-hand labels are rewritten to the
+ * new scale. Stroke width is pinned with vector-effect, or scaling would
+ * thicken it too.
  *
- * 不用 localStorage：这份文件在沙箱 iframe 里是不透明源，碰存储会直接抛。
+ * No localStorage: inside a sandboxed iframe this file is an opaque origin,
+ * where touching storage throws.
  */
 const LEGEND_JS = `
 (function(){
@@ -198,7 +203,8 @@ const LEGEND_JS = `
         })
       })
       if (!P || !plot) return
-      // 全关就保持原标度，免得除零，也免得给出一张空白但刻度乱跳的图
+      // All off: keep the original scale — no division by zero, and no blank
+      // chart whose ticks have wandered.
       var lo = Infinity, hi = -Infinity
       on.forEach(function(b){ lo = Math.min(lo, num(b, 'data-min', 0)); hi = Math.max(hi, num(b, 'data-max', 0)) })
       if (!isFinite(lo) || !isFinite(hi)) { lo = P.lo; hi = P.hi }

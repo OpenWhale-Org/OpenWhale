@@ -59,9 +59,9 @@ describe('BaseExecutor lanes', () => {
   it('an instruction waits for every lane it needs, not just the first', async () => {
     const ex = new LaneExecutor(4, 50, 'lanes-multi')
     await drain(ex, [
-      { tag: 'x', lanes: 'main|SKDD' },
-      { tag: 'y', lanes: 'main|SKUU' },
-      { tag: 'both', lanes: 'main|SKDD,main|SKUU' },
+      { tag: 'x', lanes: 'main|BBB' },
+      { tag: 'y', lanes: 'main|AAA' },
+      { tag: 'both', lanes: 'main|BBB,main|AAA' },
     ])
     expect(ex.marks.indexOf('start:y')).toBeLessThan(ex.marks.indexOf('end:x'))   // x and y overlap
     expect(ex.marks.indexOf('start:both')).toBeGreaterThan(ex.marks.indexOf('end:x'))
