@@ -93,6 +93,11 @@ export const en = {
 
   'accounts.col.symbol': 'Symbol',
   'accounts.col.side': 'Side',
+  'accounts.col.leverage': 'Leverage',
+  'accounts.margin.cross': 'Cross margin',
+  'accounts.margin.cross.short': 'cross',
+  'accounts.margin.isolated': 'Isolated margin',
+  'accounts.margin.isolated.short': 'iso',
   'accounts.col.value': 'Value',
   'accounts.col.upnl': 'uPnL',
   'accounts.col.token': 'Token',
@@ -355,6 +360,11 @@ export const zhCN: Partial<Record<keyof typeof en, string>> = {
 
   'accounts.col.symbol': '交易对',
   'accounts.col.side': '方向',
+  'accounts.col.leverage': '杠杆',
+  'accounts.margin.cross': '全仓保证金',
+  'accounts.margin.cross.short': '全仓',
+  'accounts.margin.isolated': '逐仓保证金',
+  'accounts.margin.isolated.short': '逐仓',
   'accounts.col.value': '价值',
   'accounts.col.upnl': '未实现盈亏',
   'accounts.col.token': '代币',

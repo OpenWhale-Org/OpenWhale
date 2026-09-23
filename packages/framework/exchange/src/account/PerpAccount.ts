@@ -86,6 +86,8 @@ export class PerpAccount {
         side: p.side,
         value: p.notional,
         pnl: p.unrealizedPnl,
+        ...(p.leverage > 0 ? { leverage: p.leverage } : {}),
+        ...(p.marginMode ? { marginMode: p.marginMode } : {}),
       }))
   }
 

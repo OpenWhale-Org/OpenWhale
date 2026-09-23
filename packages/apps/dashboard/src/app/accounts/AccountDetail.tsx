@@ -10,7 +10,12 @@ import { AccountActions } from './AccountActions'
 /** Shapes follow the exchange read-view interfaces (IAccountBalance/IPosition/IOrder). */
 interface TokenBalance { token: string; free: number; locked: number; total: number; usdValue?: number }
 interface BalanceSection { usd: { available: number; total: number }; tokens: TokenBalance[] }
-interface PositionRow { id: string; side: 'long' | 'short'; value: number; pnl: number }
+interface PositionRow {
+  id: string; side: 'long' | 'short'; value: number; pnl: number
+  /** Absent when the venue reports neither — the cell shows a dash rather than a guess. */
+  leverage?: number
+  marginMode?: 'cross' | 'isolated'
+}
 interface OrderRow { id: string; side: 'buy' | 'sell'; value: number; status: 'open' | 'partial' }
 
 /** Mirrors core's AccountSectionDef/AccountColumnDef — a declared layout, when the implementation ships one. */
@@ -38,6 +43,19 @@ function usd(v: number | undefined): string {
   // show a dash rather than crash the pane.
   if (typeof v !== 'number' || Number.isNaN(v)) return '—'
   return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+}
+
+type Translate = ReturnType<typeof useT>
+
+const marginTitle = (mode: 'cross' | 'isolated' | undefined, t: Translate): string | undefined =>
+  mode === undefined ? undefined : t(mode === 'cross' ? 'accounts.margin.cross' : 'accounts.margin.isolated')
+
+const marginShort = (mode: 'cross' | 'isolated', t: Translate): string =>
+  t(mode === 'cross' ? 'accounts.margin.cross.short' : 'accounts.margin.isolated.short')
+
+/** 20 rather than 20.0, but 12.5 stays 12.5 — venues report both. */
+function trimZeros(v: number): string {
+  return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2)))
 }
 
 function fmtCell(value: unknown, col: ColumnDef): { text: string; color?: string } {
@@ -237,6 +255,7 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
                     <tr style={{ color: 'var(--muted)' }}>
                       <th className="text-left py-1 font-medium">{t('accounts.col.symbol')}</th>
                       <th className="text-left py-1 font-medium">{t('accounts.col.side')}</th>
+                      <th className="text-right py-1 font-medium">{t('accounts.col.leverage')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.value')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.upnl')}</th>
                       <th className="text-right py-1 font-medium pl-3">{t('groups.col.groups')}</th>
@@ -248,6 +267,10 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
                         <td className="py-1 font-mono">{p.id}</td>
                         <td className="py-1">
                           <span style={{ color: p.side === 'long' ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>{p.side}</span>
+                        </td>
+                        <td className="py-1 text-right font-mono" title={marginTitle(p.marginMode, t)}>
+                          {p.leverage === undefined ? <span style={{ color: 'var(--muted)' }}>—</span> : `${trimZeros(p.leverage)}x`}
+                          {p.marginMode && <span className="ml-1 text-[10px]" style={{ color: 'var(--muted)' }}>{marginShort(p.marginMode, t)}</span>}
                         </td>
                         <td className="py-1 text-right font-mono">{usd(p.value)}</td>
                         <td className="py-1 text-right font-mono" style={{ color: p.pnl >= 0 ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>

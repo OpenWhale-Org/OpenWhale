@@ -29,6 +29,13 @@ export interface IPosition {
   side: 'long' | 'short'
   value: number       // Current market value (USD-denominated, always positive)
   pnl: number         // Unrealized PnL (USD-denominated)
+  /**
+   * Leverage the venue reports for this position, and the margin it sits in.
+   * Both optional: a venue that does not report them is not worth inventing
+   * a number for — the panel shows a dash instead.
+   */
+  leverage?: number
+  marginMode?: 'cross' | 'isolated'
 }
 
 export interface IOrder {
