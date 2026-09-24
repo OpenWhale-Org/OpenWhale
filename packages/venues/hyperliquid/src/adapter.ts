@@ -341,6 +341,21 @@ export class HyperliquidAdapter extends CcxtAdapter {
         },
       },
     })
+
+    /* Which builder a session pays, said once when it is built.
+     *
+     * A fill carries `builderFee` but not the address, and the rate only shows
+     * as a ratio nobody computes by eye, so a session quietly running the
+     * default looks exactly like one running a configured builder — which is
+     * how a credential saved with its builder fields blank went a full day
+     * charging 0.01% to the wrong address before anyone noticed. Sessions are
+     * cached per credential, so this is one line each, not one per order. */
+    if (credentials?.walletAddress) {
+      this.log.info(
+        { builder: builder === false ? 'off' : builder, rateBp: builder === false ? 0 : tenths / 10, feeRate: builder === false ? undefined : feeRate },
+        'Hyperliquid session builder fee',
+      )
+    }
   }
 
   /** perpDexs list cache — the builder-dex roster changes rarely. */
