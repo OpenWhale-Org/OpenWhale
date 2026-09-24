@@ -510,8 +510,24 @@ export class HyperliquidAdapter extends CcxtAdapter {
      * strategy holding two XYZ legs reconciled against an empty list. A read
      * that fails is retried next minute; a read that lies is acted on now.
      */
+    /*
+     * The shared read must not depend on who asked for it.
+     *
+     * `clearinghouse` de-duplicates by (account, dex) — but this closure used
+     * to carry the CALLER's symbols, so a second caller arriving while the
+     * first was in flight received a list already filtered to the first
+     * caller's contracts, then filtered it again to its own and got nothing.
+     * A two-leg script inspecting both legs at once is exactly that race, and
+     * it read one leg as flat: on 2026-09-24 a reduce on an account holding
+     * BTC long and ETH short refused, saying the BTC position did not exist.
+     *
+     * The venue returns the whole account state either way — `clearinghouseState`
+     * takes no symbol — so asking for everything costs the same request and
+     * makes the shared answer true for every caller. The slice happens below,
+     * per caller, where it belongs.
+     */
     const [main, ...perDex] = await Promise.all([
-      needMain ? this.clearinghouse('', () => super.fetchPositions(symbols)) : Promise.resolve([] as ExchangePosition[]),
+      needMain ? this.clearinghouse('', () => super.fetchPositions()) : Promise.resolve([] as ExchangePosition[]),
       ...wantedDexes.map((dex) => this.clearinghouse(dex, async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const raw = await this.guard(() => this.exchange.fetchPositions(undefined, { dex })) as any[]
