@@ -142,6 +142,18 @@ tfoot td{border-top:1px solid var(--rule-2);border-bottom:none;background:var(--
 .alarm{font-family:var(--f-sans);font-size:13.5px;color:var(--loss);background:var(--loss-soft);border-left:3px solid var(--loss);padding:10px 14px;margin:8px 0 0}
 .empty{font-family:var(--f-sans);font-size:13px;color:var(--ink-3);background:var(--surface);border:1px solid var(--rule);padding:14px 16px;margin:0 0 10px}
 .lede{font-size:17px;color:var(--ink-2);max-width:66ch;margin:0 0 26px}
+/* A report is read as a table first and a document second. The prose that
+   explains how each column is derived matters once, and after that it is a
+   wall between the reader and the numbers — so it starts folded away and the
+   header carries the switch. Scoped to PARAGRAPHS: dim is also a cell class
+   and a span class, and those are data. */
+.prose{display:inline-flex;align-items:center;gap:8px;margin:0 0 18px;font-family:var(--f-mono);font-size:12px;color:var(--ink-3);cursor:pointer;user-select:none}
+.prose input{appearance:none;-webkit-appearance:none;width:30px;height:16px;margin:0;border-radius:9px;background:var(--surface-2);border:1px solid var(--rule);position:relative;cursor:pointer;transition:background .12s,border-color .12s}
+.prose input::after{content:"";position:absolute;top:1px;left:1px;width:12px;height:12px;border-radius:50%;background:var(--ink-3);transition:transform .12s,background .12s}
+.prose input:checked{background:var(--accent-soft);border-color:var(--accent)}
+.prose input:checked::after{transform:translateX(14px);background:var(--accent)}
+.prose input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body.terse p.lede,body.terse p.dim,body.terse p.note,body.terse footer{display:none}
 /* A jump target must not sit flush against the top: a heading hidden under
    the toolbar is a jump that did not arrive. */
 section[id],h3[id],h4[id]{scroll-margin-top:18px}
@@ -182,6 +194,22 @@ footer code{font-family:var(--f-mono);font-size:11.5px}`
  * No localStorage: inside a sandboxed iframe this file is an opaque origin,
  * where touching storage throws.
  */
+/* `terse` ships ON in the markup, so the prose never flashes before the
+   script runs. The stored preference only ever turns it back off. */
+const PROSE_JS = `
+(function(){
+  var box = document.getElementById('prose'); if(!box) return;
+  var show = false;
+  try { show = localStorage.getItem('ow-report-prose') === '1' } catch(e) {}
+  box.checked = show;
+  document.body.classList.toggle('terse', !show);
+  box.addEventListener('change', function(){
+    document.body.classList.toggle('terse', !box.checked);
+    try { localStorage.setItem('ow-report-prose', box.checked ? '1' : '0') } catch(e) {}
+  });
+})();
+`
+
 const LEGEND_JS = `
 (function(){
   function num(el, name, dflt){ var v = parseFloat(el.getAttribute(name)); return isNaN(v) ? dflt : v }
@@ -261,11 +289,12 @@ export function page(o: PageOptions): string {
 ${REPORT_CSS}
 </style>
 </head>
-<body>
+<body class="terse">
 <div class="wrap">
 <header>
   <div class="eyebrow">${esc(o.eyebrow)}</div>
   <h1>${esc(o.h1)}</h1>
+  <label class="prose"><input type="checkbox" id="prose"><span>Notes</span></label>
   ${o.lede !== undefined ? `<p class="lede">${esc(o.lede)}</p>` : ''}
   ${ident}
 </header>
@@ -273,7 +302,7 @@ ${figs}
 ${o.body}
 <footer>${o.footer}</footer>
 </div>
-<script>${LEGEND_JS}${o.script ?? ''}</script>
+<script>${PROSE_JS}${LEGEND_JS}${o.script ?? ''}</script>
 </body>
 </html>`
 }
