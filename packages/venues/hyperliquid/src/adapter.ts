@@ -162,6 +162,46 @@ export interface HyperliquidCredentials {
   testnet?: boolean
   /** Route the builder fee elsewhere, or pass false to charge none at all. */
   builder?: string | false
+  /**
+   * The rate that builder charges, in TENTHS of a basis point — the venue's
+   * own unit for the `f` field. 50 = 5bp = 0.05%.
+   *
+   * Left unset it is {@link BUILDER_TENTHS_BP}, which is what every program
+   * charged before this field existed. The on-chain approval ceiling is
+   * derived from it rather than fixed, because an approval that does not
+   * cover the rate makes the venue reject every order carrying the code.
+   */
+  builderFeeTenthsBp?: number
+}
+
+/**
+ * The per-order builder override: reserved, and refused.
+ *
+ * The builder a fill is credited to is a property of the CREDENTIAL, not of
+ * the order — the approval that makes it valid is signed with the trader's
+ * key for one specific builder address, and the adapter instance holding that
+ * client is cached per (kind, venue, credential) and shared by every strategy
+ * bound to it. ccxt reads `builder`/`feeInt` off `exchange.options` and offers
+ * no per-order channel, so "let a strategy set its own rate" would mean
+ * mutating shared state between concurrent orders.
+ *
+ * The name is claimed here so the contract is visible, and it throws rather
+ * than being ignored: silently dropping a fee override is the same failure
+ * shape as ccxt's own silent disable, and that one has already cost us a
+ * debugging session. Whoever implements it must build the action by hand —
+ * see createOrderWithPriority — and must not touch `exchange.options`.
+ */
+const ORDER_BUILDER_KEYS = ['builder', 'builderFee', 'builderFeeTenthsBp', 'builderAddress']
+
+export function refuseOrderBuilderOverride(params: PerpOrderParams): void {
+  const extra = params.params
+  if (!extra) return
+  const named = ORDER_BUILDER_KEYS.filter(k => extra[k] !== undefined)
+  if (named.length === 0) return
+  throw new TerminalAdapterError(
+    `per-order builder override is not implemented (${named.join(', ')}). ` +
+      'The builder and its rate come from the credential; see HyperliquidCredentials.builderFeeTenthsBp.'
+  )
 }
 
 /**
@@ -269,6 +309,12 @@ export class HyperliquidAdapter extends CcxtAdapter {
   /** Keyless form (no credentials) = public data only — used by the market monitors. */
   constructor(credentials?: Partial<HyperliquidCredentials>) {
     const builder = credentials?.builder ?? BUILDER_ADDRESS
+    const tenths = credentials?.builderFeeTenthsBp ?? BUILDER_TENTHS_BP
+    // The approval is a CEILING and the venue rejects an order whose rate
+    // exceeds it, so the two cannot be configured apart. At the default this
+    // renders the exact string BUILDER_MAX_FEE_RATE held — 10 → "0.01%" — so
+    // a program that sets nothing is unchanged down to the character.
+    const feeRate = `${Number((tenths * 0.001).toFixed(6))}%`
     super({
       exchangeId: 'hyperliquid',
       ...(credentials?.walletAddress ? { walletAddress: credentials.walletAddress } : {}),
@@ -291,7 +337,7 @@ export class HyperliquidAdapter extends CcxtAdapter {
           },
           ...(builder === false
             ? { builderFee: false }
-            : { builderFee: true, builder, feeInt: BUILDER_TENTHS_BP, feeRate: BUILDER_MAX_FEE_RATE }),
+            : { builderFee: true, builder, feeInt: tenths, feeRate }),
         },
       },
     })
@@ -486,6 +532,7 @@ export class HyperliquidAdapter extends CcxtAdapter {
    * its default slippage tolerance.
    */
   override async createOrder(params: PerpOrderParams): Promise<ExchangeOrder> {
+    refuseOrderBuilderOverride(params)
     if (params.type === 'market' && params.price === undefined) {
       const ticker = await this.fetchTicker(params.symbol)
       if (ticker.last > 0) return this.createOrder({ ...params, price: ticker.last })

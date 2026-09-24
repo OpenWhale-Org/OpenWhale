@@ -5,11 +5,42 @@ import type { RawCredentialData } from '@openwhaleorg/core'
 import { HyperliquidAdapter } from './adapter.js'
 import { UserTradesMonitor } from './monitor.js'
 
-const build = (data: RawCredentialData) => new HyperliquidAdapter({
+/**
+ * The fields a Hyperliquid credential holds, exported so a plugin that adds
+ * to them extends this rather than retyping it — three fields is few enough
+ * to copy and exactly few enough for a copy to drift unnoticed.
+ */
+export const hyperliquidCredentialSchema = z.object({
+  walletAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).meta({ displayName: 'Wallet Address', placeholder: '0x...' }),
+  privateKey: z.string().optional().meta({ displayName: 'Private Key', password: true, description: 'Leave empty for read-only' }),
+  testnet: z.boolean().default(false).meta({ displayName: 'Testnet' }),
+})
+
+/**
+ * A trading session from stored credential data.
+ *
+ * `builder` and `builderFeeTenthsBp` are read if the data carries them and
+ * left to their defaults otherwise. This plugin's own schema declares neither
+ * — routing the fee somewhere else is policy, and policy belongs to whoever
+ * has a reason. A plugin that declares those fields and registers its own
+ * cell gets the behaviour for free by calling this.
+ */
+export const buildHyperliquidAdapter = (data: RawCredentialData) => new HyperliquidAdapter({
   walletAddress: data['walletAddress'] as string,
   ...(data['privateKey'] ? { privateKey: data['privateKey'] as string } : {}),
   testnet: (data['testnet'] as boolean | undefined) ?? false,
+  ...(data['builderAddress'] ? { builder: data['builderAddress'] as string } : {}),
+  ...(data['builderFeeBp'] !== undefined && data['builderFeeBp'] !== null && data['builderFeeBp'] !== ''
+    ? { builderFeeTenthsBp: Math.round(Number(data['builderFeeBp']) * 10) }
+    : {}),
 })
+
+/** Connectivity check shared with any plugin that extends this credential. */
+export const testHyperliquidCredential = async (data: RawCredentialData): Promise<void> => {
+  await buildHyperliquidAdapter(data).fetchBalance()
+}
+
+const build = buildHyperliquidAdapter
 
 /**
  * Hyperliquid venue plugin — a pure manifest.
@@ -59,12 +90,8 @@ export const hyperliquidPlugin = definePlugin({
       icon: '💧',
       description: 'Perp DEX. Wallet address alone is read-only; add a private key to trade.',
       documentationUrl: 'https://hyperliquid.gitbook.io/hyperliquid-docs',
-      schema: z.object({
-        walletAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).meta({ displayName: 'Wallet Address', placeholder: '0x...' }),
-        privateKey: z.string().optional().meta({ displayName: 'Private Key', password: true, description: 'Leave empty for read-only' }),
-        testnet: z.boolean().default(false).meta({ displayName: 'Testnet' }),
-      }),
-      test: async (data) => { await build(data).fetchBalance() },
+      schema: hyperliquidCredentialSchema,
+      test: testHyperliquidCredential,
     },
   ],
 
