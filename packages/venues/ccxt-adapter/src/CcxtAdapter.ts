@@ -620,7 +620,21 @@ export class CcxtAdapter implements PerpExchangeAdapter {
       delete extra['priorityFallback']
     }
     if (params.reduceOnly !== undefined) extra.reduceOnly = params.reduceOnly
-    if (params.timeInForce !== undefined) extra.timeInForce = params.timeInForce
+    /*
+     * Post-only goes through ccxt's own flag, not through the string.
+     *
+     * Every venue spells it differently — Binance wants GTX, Hyperliquid wants
+     * `Alo` — and ccxt already owns that translation behind `postOnly`. Passing
+     * the unified 'PO' through as a timeInForce only works where a venue's ccxt
+     * implementation happens to list it: Binance does, Hyperliquid does not. It
+     * lowercases and re-capitalizes whatever it is given, so 'PO' reached the
+     * venue as `{"limit":{"tif":"Po"}}` — not a variant of its tif enum, so the
+     * request failed to deserialize before any validation could name the field
+     * (2026-09-28: a BBO leg on HYPE, 422 "Failed to deserialize the JSON body
+     * into the target type", with nothing in the message pointing at `tif`).
+     */
+    if (params.timeInForce === 'PO') extra.postOnly = true
+    else if (params.timeInForce !== undefined) extra.timeInForce = params.timeInForce
     if (params.clientOrderId !== undefined) extra.clientOrderId = params.clientOrderId
     if (params.positionSide !== undefined && this.supportsPositionSide) {
       extra.positionSide = positionSideForVenue(this.exchange.id, params.positionSide)
