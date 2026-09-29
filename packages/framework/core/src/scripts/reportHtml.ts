@@ -31,6 +31,23 @@ export const signed = (v: number, d = 2): string => `${v >= 0 ? '+' : ''}${v.toF
     green everywhere has no colour at all. */
 export const cls = (v: number): string => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'dim')
 
+/**
+ * A timestamp the reader can re-zone.
+ *
+ * Rendered UTC into the markup so the file is correct with JavaScript off or
+ * broken — which is the state these reports are usually read in six months
+ * later, from a file:// URL. The epoch milliseconds ride along in `data-ts`
+ * and the switch in the header rewrites every one of them in place.
+ *
+ * The date is not optional: an audit window routinely crosses midnight, and a
+ * column running 14:52 → 01:15 with no date cannot be told from a sort that
+ * has gone wrong.
+ */
+export const stamp = (ms: number | undefined): string =>
+  (ms === undefined || !Number.isFinite(ms)
+    ? '—'
+    : `<time data-ts="${ms}">${new Date(ms).toISOString().slice(5, 23).replace('T', ' ')}</time>`)
+
 export interface Figure { k: string; v: string; n?: string; cls?: string }
 
 export interface PageOptions {
@@ -153,6 +170,10 @@ tfoot td{border-top:1px solid var(--rule-2);border-bottom:none;background:var(--
 .prose input:checked{background:var(--accent-soft);border-color:var(--accent)}
 .prose input:checked::after{transform:translateX(14px);background:var(--accent)}
 .prose input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Timestamps are written UTC, because a report is usually read somewhere
+   other than where it was produced; the switch is next to Notes so the two
+   reader-preference controls live in one place. */
+.prose.tz{margin-left:18px}
 body.terse p.lede,body.terse p.dim,body.terse p.note,body.terse footer{display:none}
 /* A jump target must not sit flush against the top: a heading hidden under
    the toolbar is a jump that did not arrive. */
@@ -206,6 +227,64 @@ const PROSE_JS = `
   box.addEventListener('change', function(){
     document.body.classList.toggle('terse', !box.checked);
     try { localStorage.setItem('ow-report-prose', box.checked ? '1' : '0') } catch(e) {}
+  });
+})();
+`
+
+/*
+ * UTC or the reader's own clock.
+ *
+ * Every `<time data-ts>` in the page is rewritten in place, and the choice is
+ * announced so anything that draws its own timestamps — a chart axis, a
+ * tooltip — can follow without knowing about this code. It is published on
+ * the root element too, so CSS and late-rendered nodes can read it.
+ *
+ * UTC stays the default and the markup's own value: a report mailed to
+ * someone else must not silently mean a different hour in their browser than
+ * it did in the sender's.
+ */
+const TZ_JS = `
+(function(){
+  var box = document.getElementById('tz'); if(!box) return;
+  /* Not every report has timestamps. A switch that visibly does nothing is
+     worse than no switch, so it only appears where there is something to
+     re-zone. */
+  if (!document.querySelector('[data-ts]')) {
+    var lbl = box.closest('label'); if (lbl) lbl.style.display = 'none';
+    return;
+  }
+  var pad = function(n){ return n < 10 ? '0' + n : '' + n }
+  var local = false;
+  try { local = localStorage.getItem('ow-report-tz') === 'local' } catch(e) {}
+
+  function fmt(ms){
+    var d = new Date(ms);
+    var M = local ? d.getMonth() + 1 : d.getUTCMonth() + 1;
+    var D = local ? d.getDate() : d.getUTCDate();
+    var h = local ? d.getHours() : d.getUTCHours();
+    var m = local ? d.getMinutes() : d.getUTCMinutes();
+    var s = local ? d.getSeconds() : d.getUTCSeconds();
+    var f = local ? d.getMilliseconds() : d.getUTCMilliseconds();
+    return pad(M) + '-' + pad(D) + ' ' + pad(h) + ':' + pad(m) + ':' + pad(s) + '.' + String(f).padStart(3, '0');
+  }
+
+  function apply(){
+    document.documentElement.setAttribute('data-tz', local ? 'local' : 'utc');
+    var nodes = document.querySelectorAll('[data-ts]');
+    for (var i = 0; i < nodes.length; i++) {
+      var v = Number(nodes[i].getAttribute('data-ts'));
+      if (isFinite(v)) nodes[i].textContent = fmt(v);
+    }
+    window.owTz = { local: local, fmt: fmt };
+    window.dispatchEvent(new CustomEvent('owtzchange'));
+  }
+
+  box.checked = local;
+  apply();
+  box.addEventListener('change', function(){
+    local = box.checked;
+    try { localStorage.setItem('ow-report-tz', local ? 'local' : 'utc') } catch(e) {}
+    apply();
   });
 })();
 `
@@ -295,6 +374,7 @@ ${REPORT_CSS}
   <div class="eyebrow">${esc(o.eyebrow)}</div>
   <h1>${esc(o.h1)}</h1>
   <label class="prose"><input type="checkbox" id="prose"><span>Notes</span></label>
+  <label class="prose tz"><input type="checkbox" id="tz"><span>Local time</span></label>
   ${o.lede !== undefined ? `<p class="lede">${esc(o.lede)}</p>` : ''}
   ${ident}
 </header>
@@ -302,7 +382,7 @@ ${figs}
 ${o.body}
 <footer>${o.footer}</footer>
 </div>
-<script>${PROSE_JS}${LEGEND_JS}${o.script ?? ''}</script>
+<script>${PROSE_JS}${TZ_JS}${LEGEND_JS}${o.script ?? ''}</script>
 </body>
 </html>`
 }
