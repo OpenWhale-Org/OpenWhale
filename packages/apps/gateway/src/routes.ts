@@ -422,6 +422,28 @@ export function buildRouter(): Router {
   }))
 
   /**
+   * The runs currently in flight, so Stop can be a command rather than a
+   * hang-up. Keyed by a per-run id the stream announces in its first frame.
+   *
+   * Hanging up is not enough on its own: between the browser and this process
+   * sit a Next rewrite and nginx, and a teardown that has to survive both of
+   * them is not something a live-order script should depend on. An explicit
+   * POST reaches the controller whatever the stream is doing.
+   */
+  const runningScripts = new Map<string, AbortController>()
+
+  /**
+   * Stop a run. Idempotent, and honest about a run that has already finished:
+   * the operator gets 'unknown', not a silent 200 that reads like a success.
+   */
+  router.post('/api/scripts/runs/:runId/stop', h(async (req, res) => {
+    const ctrl = runningScripts.get(req.params['runId'] ?? '')
+    if (ctrl === undefined) { res.status(404).json({ stopped: false, reason: 'unknown' }); return }
+    ctrl.abort()
+    res.json({ stopped: true })
+  }))
+
+  /**
    * Streaming run — NDJSON, one JSON object per line.
    *
    * The unary route above is capped by whatever sits in front of it: the
@@ -444,14 +466,37 @@ export function buildRouter(): Router {
     res.setHeader('X-Accel-Buffering', 'no')
     res.flushHeaders?.()
 
-    const write = (frame: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(frame) + '\n') }
+    // Writing into a socket the client has dropped is not an error in Node —
+    // it is silently discarded — so the guard is about the response being
+    // finished or destroyed, not about whether anyone is listening.
+    const write = (frame: unknown) => { if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify(frame) + '\n') }
     // A script can be busy for a long stretch without a word (one slow venue
     // round trip). The heartbeat is what actually holds the proxy open then.
     const beat = setInterval(() => write({ type: 'ping' }), 10_000)
-    // Stop = the client closes the stream. The script sees it as an abort
-    // signal and returns early with what it has.
+
     const abort = new AbortController()
-    req.on('close', () => abort.abort())
+    /*
+     * Disconnect is read off the RESPONSE, not the request.
+     *
+     * Since Node 16 an IncomingMessage emits 'close' when the request has been
+     * *completed*, and express.json() completes it before this handler is even
+     * called. So `req.on('close')` here was one of two bugs depending on
+     * timing: attached synchronously it aborted every run at once, and
+     * attached after the `await` above — which is what actually happened — it
+     * arrived too late for an event that had already fired, and the signal
+     * then never fired at all. That is why Stop did nothing while a live
+     * position-add kept placing slices (2026-09-29).
+     *
+     * res 'close' fires when the socket actually goes away, which is the
+     * event we meant all along.
+     */
+    res.on('close', () => { if (!res.writableEnded) abort.abort() })
+
+    const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    runningScripts.set(runId, abort)
+    // First frame, before any work: Stop has to be reachable from the instant
+    // the run starts, not once the script gets around to its first emit.
+    write({ type: 'run', id: runId })
     try {
       const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
       const result = await runtime.runScript(
@@ -463,6 +508,7 @@ export function buildRouter(): Router {
     } catch (err) {
       write({ type: 'error', error: errText(err) })
     } finally {
+      runningScripts.delete(runId)
       clearInterval(beat)
       if (!res.writableEnded) res.end()
     }

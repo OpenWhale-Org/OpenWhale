@@ -253,8 +253,17 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
     try { localStorage.setItem(PARAMS_KEY(script.id), JSON.stringify(values)) } catch { /* no storage: the form still works */ }
   }, [script.id, values])
   const [running, setRunning] = useState(false)
-  /** The in-flight stream; Stop aborts it, which the gateway relays to the script. */
+  /** Stop has been sent and we are waiting for the script's own wrap-up. */
+  const [stopping, setStopping] = useState(false)
+  /** The in-flight stream; Stop aborts it once the server has been told. */
   const abortRef = useRef<AbortController | null>(null)
+  /**
+   * The run id the gateway announces in its first frame. Stop posts to it, so
+   * stopping is a request the server answers rather than a dropped connection
+   * two proxies have to relay. Null until the frame arrives, and Stop then
+   * falls back to hanging up.
+   */
+  const runIdRef = useRef<string | null>(null)
   const [result, setResult] = useState<ScriptOutput | null>(null)
   const [runError, setRunError] = useState('')
   const [view, setView] = useState<'report' | 'html' | 'json'>('report')
@@ -367,6 +376,31 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
     })
   }, [script.paramsFields])
 
+  /**
+   * Stop the run on the server, and then keep reading.
+   *
+   * Hanging up was the old Stop, and it told the operator nothing: the script
+   * writes its own wrap-up on the way out — which slice it stopped at, how
+   * much of each leg actually went on, what the venue says is held now — and
+   * that is exactly the part you need when you have stopped a live add
+   * halfway. So the stream stays open until the script says it is done.
+   *
+   * A second press gives up waiting and hangs up, which is all Stop ever did.
+   */
+  async function stop() {
+    if (stopping) { abortRef.current?.abort(); return }
+    setStopping(true)
+    const id = runIdRef.current
+    if (id !== null) {
+      try {
+        const res = await fetch(`/api/scripts/runs/${encodeURIComponent(id)}/stop`, { method: 'POST' })
+        if (res.ok) return
+      } catch { /* fall through to hanging up */ }
+    }
+    // No id yet, or an older gateway with no stop route: hang up as before.
+    abortRef.current?.abort()
+  }
+
   async function run() {
     setRunning(true)
     setRunError('')
@@ -381,6 +415,8 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
       const base = `/api/scripts/${encodeURIComponent(owner!)}/${encodeURIComponent(rest.join('/'))}`
       const abort = new AbortController()
       abortRef.current = abort
+      runIdRef.current = null
+      setStopping(false)
       const post = (path: string) => fetch(base + path, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }), signal: abort.signal,
       })
@@ -412,9 +448,10 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           buffer = parts.pop() ?? ''
           for (const part of parts) {
             if (!part.trim()) continue
-            let frame: { type?: string; text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
+            let frame: { type?: string; id?: string; text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
             try { frame = JSON.parse(part) } catch { continue }
-            if (frame.type === 'line') { lines.push(frame.text ?? ''); setResult({ text: lines.join('\n') }) }
+            if (frame.type === 'run') runIdRef.current = frame.id ?? null
+            else if (frame.type === 'line') { lines.push(frame.text ?? ''); setResult({ text: lines.join('\n') }) }
             else if (frame.type === 'result') done = { text: frame.text ?? '', ...(frame.json !== undefined ? { json: frame.json } : {}), ...(frame.files?.length ? { files: frame.files } : {}) }
             else if (frame.type === 'error') failed = frame.error ?? t('scripts.failed')
           }
@@ -438,6 +475,8 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) setRunError(err instanceof Error ? err.message : String(err))
     } finally {
       abortRef.current = null
+      runIdRef.current = null
+      setStopping(false)
       setRunning(false)
     }
   }
@@ -456,12 +495,12 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         <div className="shrink-0 flex items-center gap-1">
           {running && (
             <button
-              onClick={() => abortRef.current?.abort()}
+              onClick={() => void stop()}
               className="px-3 py-1.5 rounded-md text-sm"
               style={{ border: '1px solid var(--danger, #ef4444)', color: 'var(--danger, #ef4444)' }}
-              title={t('scripts.stopTitle')}
+              title={stopping ? t('scripts.stopAgainTitle') : t('scripts.stopTitle')}
             >
-              {t('scripts.stop')}
+              {stopping ? t('scripts.stopping') : t('scripts.stop')}
             </button>
           )}
           {fields.some(f => f.type === 'options') && (
