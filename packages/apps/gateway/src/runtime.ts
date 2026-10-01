@@ -28,8 +28,12 @@ let credentialStoreSingleton: DBCredentialStore | undefined
 let startPromise: Promise<void> | undefined
 
 function createRuntime(): OpenWhaleRuntime {
-  // Set log level — getLogger() returns the pino root instance, level can be changed at runtime
-  getLogger().level = process.env['LOG_LEVEL'] ?? 'debug'
+  // Set log level — getLogger() returns the pino root instance, level can be
+  // changed at runtime. The default is info, not debug: the gateway runs ~20
+  // instances and every strategy run logs a debug record whether or not it
+  // did anything, which on its own wrote 8.6 GB a day to syslog and filled
+  // the server's disk (2026-10-01). LOG_LEVEL=debug still turns it back on.
+  getLogger().level = process.env['LOG_LEVEL'] ?? 'info'
 
   const dbPath =
     process.env['OPENWHALE_DB_PATH'] ||

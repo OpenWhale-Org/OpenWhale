@@ -6,7 +6,22 @@ export type LogLevel = pino.Level
 
 export type Logger = pino.Logger
 
-const isDev = process.env['NODE_ENV'] !== 'production'
+/**
+ * Pretty logs are for a human watching a terminal, and the only reliable sign
+ * of one is a TTY.
+ *
+ * NODE_ENV alone was the test, and nobody sets NODE_ENV on a server — so
+ * production ran the prettifier: every record became five lines of key-value
+ * pairs wrapped in ANSI escapes, rsyslog rewrote each escape as the four
+ * literal characters `#033` and stamped all five lines with a 90-byte
+ * timestamp prefix. One "nothing happened" record cost ~550 bytes instead of
+ * ~120, and /var/log/syslog reached 52 GB and filled the disk (2026-10-01).
+ *
+ * NODE_ENV still forces it off, for a foreground production run.
+ */
+export function prettyWanted(): boolean {
+  return process.env['NODE_ENV'] !== 'production' && process.stdout.isTTY === true
+}
 
 /**
  * The dev-mode log prettifier, loaded only if it is both wanted and present.
@@ -19,7 +34,7 @@ const isDev = process.env['NODE_ENV'] !== 'production'
  * engine to refuse to start, and JSON on stdout is a perfectly good fallback.
  */
 function prettyStream(): NodeJS.WritableStream {
-  if (!isDev) return process.stdout
+  if (!prettyWanted()) return process.stdout
   try {
     const load = createRequire(import.meta.url)
     const pretty = load('pino-pretty') as (opts: unknown) => NodeJS.WritableStream
