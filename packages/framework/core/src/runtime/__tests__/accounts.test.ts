@@ -228,6 +228,31 @@ describe('account entities', () => {
     expect(series[0]!.equity).toBe(1234.5)
   })
 
+  it('reads one account live for the picker, without writing a snapshot', async () => {
+    const runtime = setupRuntime()
+    runtime.registerAccountImplementation('test', {
+      id: 'snap-account', kind: 'test/fake', type: 'venue-a',
+      createReader: (session) => ({
+        venue: () => (session as FakeSession).venue,
+        snapshot: async () => ({ equity: 1234.5, available: 1000 }),
+      }),
+    })
+    await runtime.saveAccount({ name: 'Snappy', implementation: 'test/snap-account', credential: 'A Key' })
+
+    const live = await runtime.liveAccountSnapshot('Snappy')
+    expect(live).toMatchObject({ equity: 1234.5, available: 1000 })
+    expect(live.ts).toBeGreaterThan(0)
+    // A read for a form is not a sample: the equity history stays untouched
+    expect(await runtime.accountEquitySeries('Snappy', 0)).toHaveLength(0)
+  })
+
+  it('says why an account cannot be read live, instead of answering zero', async () => {
+    const runtime = setupRuntime()
+    await runtime.saveAccount({ name: 'Plain', implementation: 'fakes/fake-account', credential: 'B Key' })
+    await expect(runtime.liveAccountSnapshot('Plain')).rejects.toThrow(/does not report its equity/)
+    await expect(runtime.liveAccountSnapshot('Nobody')).rejects.toThrow(/Unknown account/)
+  })
+
   it('refuses to delete an account bound by an active instance', async () => {
     const runtime = setupRuntime()
     const now = new Date().toISOString()

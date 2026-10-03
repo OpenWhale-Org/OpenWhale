@@ -997,6 +997,29 @@ export class OpenWhaleRuntime implements IRuntime {
   }
 
   /**
+   * One account's equity, read from the venue now and not stored.
+   *
+   * The same `snapshot()` the periodic sampler calls, so every account type
+   * answers in the same shape — a perp account and a Boros account both say
+   * equity / available in USD, which is what a picker binding accounts to a
+   * strategy needs to show. Throws when the account cannot be read, so the
+   * caller can say why rather than show a zero.
+   */
+  async liveAccountSnapshot(name: string): Promise<AccountSnapshotSample & { ts: number }> {
+    const entity = await this.accountStore.get(name)
+    if (!entity) throw new Error(`Unknown account "${name}"`)
+    if (!entity.credential) throw new Error(`Account "${name}" has no credential bound`)
+    const impl = this.accountImpls.get(entity.implementation)?.impl
+    if (!impl) throw new Error(`Account "${name}" uses unregistered implementation "${entity.implementation}"`)
+    const { type } = await this.readCredential(entity.credential)
+    const venue = implementationVenue(impl) ?? type
+    const session = await this.adapterRegistry.resolve(impl.kind, venue, entity.credential)
+    const reader = impl.createReader(session, entity.name, entity.params) as { snapshot?: () => Promise<AccountSnapshotSample> }
+    if (typeof reader.snapshot !== 'function') throw new Error(`Account "${name}" does not report its equity`)
+    return { ...(await reader.snapshot()), ts: Date.now() }
+  }
+
+  /**
    * Sample every ready account whose read view implements `snapshot()` —
    * equity is a READ, so the capability lives on the read view; views without
    * it are skipped silently. Per-account failures log and continue.

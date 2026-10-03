@@ -201,6 +201,17 @@ export function buildRouter(): Router {
     }
   }))
 
+  // One account's equity, read live — for the account picker in the instance
+  // form. Lighter than /detail: one venue call, not balance + positions + orders.
+  router.get('/api/accounts/:name/live', h(async (req, res) => {
+    const runtime = await ensureStarted()
+    try {
+      res.json(await runtime.liveAccountSnapshot(req.params['name']!))
+    } catch (err) {
+      res.status(400).json({ error: errText(err) })
+    }
+  }))
+
   router.get('/api/accounts/:name/detail', h(async (req, res) => {
     const runtime = await ensureStarted()
     try {

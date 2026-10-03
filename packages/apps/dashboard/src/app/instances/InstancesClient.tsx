@@ -2421,6 +2421,10 @@ function InstanceForm({ initial, preselectStrategyId, onSuccess, onCancel }: {
                           </optgroup>
                         )}
                       </select>
+                      {/* A legacy credential binding has no account entity to read */}
+                      {eligible.some(a => a.name === slotBindings[slot.label]) && (
+                        <AccountBalance name={slotBindings[slot.label]!} />
+                      )}
                     </div>
                   )
                 })}
@@ -2650,6 +2654,80 @@ function EmptyState({ onNew }: { onNew: () => void }) {
         style={{ background: 'var(--accent)', color: '#fff' }}
       >
         + Activate your first strategy
+      </button>
+    </div>
+  )
+}
+
+// ── Account balance ───────────────────────────────────────────────────────────
+
+const usd = (v: number): string =>
+  `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/** How often a bound account's balance is re-read while the form is open. */
+const BALANCE_REFRESH_MS = 15_000
+
+/**
+ * The bound account's equity, read from the venue while the form is open.
+ *
+ * Shown where the account is chosen because that is where it decides
+ * something: the notional entered further down only means anything against
+ * what the account actually holds. Every account type answers through the
+ * same snapshot, so a Boros account and a perp account read alike. A failed
+ * read says why instead of showing $0, which would look like an empty account.
+ */
+function AccountBalance({ name }: { name: string }) {
+  const t = useT()
+  const [state, setState] = useState<
+    | { kind: 'loading' }
+    | { kind: 'ok'; equity: number; available?: number; ts: number }
+    | { kind: 'error'; message: string }
+  >({ kind: 'loading' })
+  const [nonce, setNonce] = useState(0)
+
+  useEffect(() => {
+    let live = true
+    const read = async () => {
+      try {
+        const res = await fetch(`/api/accounts/${encodeURIComponent(name)}/live`)
+        const body = await res.json() as { equity?: number; available?: number; ts?: number; error?: string }
+        if (!live) return
+        if (!res.ok || typeof body.equity !== 'number') setState({ kind: 'error', message: body.error ?? `HTTP ${res.status}` })
+        else setState({ kind: 'ok', equity: body.equity, ...(typeof body.available === 'number' ? { available: body.available } : {}), ts: body.ts ?? Date.now() })
+      } catch (err) {
+        if (live) setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    // A different account is a different number: never show the last one's
+    setState({ kind: 'loading' })
+    void read()
+    const timer = setInterval(() => { void read() }, BALANCE_REFRESH_MS)
+    return () => { live = false; clearInterval(timer) }
+  }, [name, nonce])
+
+  return (
+    <div className="flex items-center gap-2 shrink-0 text-xs font-mono tabular-nums" style={{ color: 'var(--muted)' }}>
+      {state.kind === 'loading' && <span>{t('instance.balance.loading')}</span>}
+      {state.kind === 'ok' && (
+        <span title={t('instance.balance.asOf', { time: new Date(state.ts).toLocaleTimeString() })}>
+          {t('instance.balance.equity')} <span style={{ color: 'var(--foreground)' }}>{usd(state.equity)}</span>
+          {state.available !== undefined && <> · {t('instance.balance.available')} <span style={{ color: 'var(--foreground)' }}>{usd(state.available)}</span></>}
+        </span>
+      )}
+      {state.kind === 'error' && (
+        <span style={{ color: 'var(--danger)' }} title={state.message}>
+          {t('instance.balance.failed')}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => setNonce(n => n + 1)}
+        className="w-6 h-6 inline-flex items-center justify-center rounded"
+        style={{ border: '1px solid var(--border)' }}
+        title={t('instance.balance.refresh')}
+        aria-label={t('instance.balance.refresh')}
+      >
+        ↻
       </button>
     </div>
   )
