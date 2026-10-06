@@ -39,7 +39,7 @@ const TAIL_CHUNK = 1 << 20
  * append-rarely store, so (stamp, n) stays valid across a whole session of
  * clicking. Single slot: this cache exists to absorb click storms, not to
  * hold data sets. */
-let tailCache: { file: string; stamp: string; n: number; records: unknown[] } | null = null
+let tailCache: { file: string; stamp: string; n: number; maxBytes?: number; records: unknown[] } | null = null
 const tailInFlight = new Map<string, Promise<unknown[]>>()
 /**
  * Line counts, remembered per file and advanced incrementally.
@@ -141,6 +141,16 @@ export function sampleByTime<T extends { ts: number }>(records: T[], points: num
 
 const sampledCache = new Map<string, { at: number; records: unknown[] }>()
 const SAMPLED_TTL_MS = 30_000
+/** Concurrent polls of the same overview share one read. */
+const sampledInFlight = new Map<string, Promise<unknown[]>>()
+/**
+ * Raw JSON a sampled read may parse. Records are not a unit of cost: one
+ * funding-rates snapshot is ~140KB, and a 2000-point overview of it parsed
+ * ~280MB per request — plus ~560MB of probe text held beside it. A dashboard
+ * polling that panel took the gateway's 4GB heap down every ten minutes
+ * (2026-10-05/06, 104 restarts, one of them mid funding cycle).
+ */
+const SAMPLE_BYTE_BUDGET = 16 << 20
 
 export class MonitorDataReaderImpl<TData = Record<string, unknown>>
   implements MonitorDataReader<TData>
@@ -195,14 +205,18 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
     return out
   }
 
-  async readLast(key: string, n: number): Promise<MonitorRecord<TData>[]> {
-    if (await this.oversized(key)) return this.tailRecords(key, n)
+  async readLast(key: string, n: number, maxBytes?: number): Promise<MonitorRecord<TData>[]> {
+    if (await this.oversized(key)) return this.tailRecords(key, n, maxBytes)
     const all = await this.load(key)
     return all.slice(-n)
   }
 
-  /** Backwards chunked read of the last n records; deduped and cached per (file, stamp, n). */
-  private async tailRecords(key: string, n: number): Promise<MonitorRecord<TData>[]> {
+  /**
+   * Backwards chunked read of the last n records; deduped and cached per
+   * (file, stamp, n, maxBytes). With maxBytes the read stops once that much is
+   * in hand, keeping at least one complete record.
+   */
+  private async tailRecords(key: string, n: number, maxBytes?: number): Promise<MonitorRecord<TData>[]> {
     const file = this.filePath(key)
     let stat
     try {
@@ -212,10 +226,10 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
       throw err
     }
     const stamp = `${stat.mtimeMs}:${stat.size}`
-    if (tailCache && tailCache.file === file && tailCache.stamp === stamp && tailCache.n === n)
+    if (tailCache && tailCache.file === file && tailCache.stamp === stamp && tailCache.n === n && tailCache.maxBytes === maxBytes)
       return tailCache.records as MonitorRecord<TData>[]
 
-    const flightKey = `${file}\n${stamp}\n${n}`
+    const flightKey = `${file}\n${stamp}\n${n}\n${maxBytes ?? ''}`
     const flying = tailInFlight.get(flightKey)
     if (flying) return (await flying) as MonitorRecord<TData>[]
 
@@ -223,7 +237,9 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
       const fh = await fs.promises.open(file, 'r')
       try {
         let pos = stat.size
-        let acc = Buffer.alloc(0)
+        const chunks: Buffer[] = []
+        let bytes = 0
+        let newlines = 0
         // Byte-level accumulation: a UTF-8 char split at a chunk seam stays
         // intact because decoding happens once, after the seams are joined.
         while (pos > 0) {
@@ -231,12 +247,15 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
           pos -= size
           const chunk = Buffer.alloc(size)
           await fh.read(chunk, 0, size, pos)
-          acc = Buffer.concat([chunk, acc])
-          let newlines = 0
-          for (let i = 0; i < acc.length; i++) if (acc[i] === 0x0a) newlines++
+          chunks.unshift(chunk)
+          bytes += size
+          for (let i = 0; i < chunk.length; i++) if (chunk[i] === 0x0a) newlines++
           // n+1 newlines guarantee n COMPLETE lines even if the front is partial.
           if (newlines > n) break
+          // Two newlines guarantee one complete line; past the budget, stop there.
+          if (maxBytes !== undefined && bytes >= maxBytes && newlines > 1) break
         }
+        const acc = Buffer.concat(chunks)
         let text = acc.toString('utf8')
         // Reading mid-file: the front fragment belongs to a line we did not
         // fully read — drop through the first newline.
@@ -246,7 +265,7 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
           .filter(l => l.trim().length > 0)
           .slice(-n)
           .map(l => JSON.parse(l) as MonitorRecord<TData>)
-        tailCache = { file, stamp, n, records }
+        tailCache = { file, stamp, n, ...(maxBytes !== undefined ? { maxBytes } : {}), records }
         return records
       } finally {
         await fh.close()
@@ -285,9 +304,19 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
     const cacheKey = from === undefined && to === undefined ? `${file}|${points}` : undefined
     const cached = cacheKey ? sampledCache.get(cacheKey) : undefined
     if (cached && Date.now() - cached.at < SAMPLED_TTL_MS) return cached.records as MonitorRecord<TData>[]
-    const records = await this.sampleFile(file, points, from, to, inWindow)
+    const flightKey = `${file}|${points}|${from ?? ''}|${to ?? ''}`
+    const flying = sampledInFlight.get(flightKey)
+    if (flying) return (await flying) as MonitorRecord<TData>[]
+    const read = this.sampleFile(file, points, from, to, inWindow)
+    sampledInFlight.set(flightKey, read)
+    let records: MonitorRecord<TData>[]
+    try {
+      records = await read
+    } finally {
+      sampledInFlight.delete(flightKey)
+    }
     if (cacheKey) {
-      if (sampledCache.size >= 32) sampledCache.delete(sampledCache.keys().next().value!)
+      if (sampledCache.size >= 8) sampledCache.delete(sampledCache.keys().next().value!)
       sampledCache.set(cacheKey, { at: Date.now(), records })
     }
     return records
@@ -353,7 +382,7 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
       let lo = 0, hi = size
       if (from !== undefined) lo = await offsetBefore(from)
       if (to !== undefined) hi = Math.min(size, (await offsetBefore(to + 1)) + 64 * 1024 + 8192)
-      if (hi - lo <= 16 << 20) {
+      if (hi - lo <= SAMPLE_BYTE_BUDGET) {
         // Start at a line boundary: lo can land mid-line.
         const first = lo === 0 ? { start: 0 } : await lineAt(lo)
         if (!first) return []
@@ -361,6 +390,9 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
         return sampleByTime(parse(lines), points)
       }
 
+      // Wide records buy fewer points: the probes and the picks both hold text.
+      const head = await lineAt(lo)
+      if (head) points = Math.min(points, Math.max(16, Math.floor(SAMPLE_BYTE_BUDGET / (2 * (head.text.length + 1)))))
       const probes = Math.min(4096, Math.max(64, points * 2))
       const samples: Line[] = []
       for (let i = 0; i <= probes; i++) {

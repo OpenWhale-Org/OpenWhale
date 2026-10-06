@@ -1346,7 +1346,8 @@ export function buildRouter(): Router {
     const reader = monitor.getReader()
     const key = req.params['key']!
     const n = Math.min(1000, Math.max(1, Number(req.query['n']) || 50))
-    const [records, total] = await Promise.all([reader.readLast(key, n), reader.count(key)])
+    // Bounded in bytes too: 1000 wide snapshots is ~140MB of JSON.
+    const [records, total] = await Promise.all([reader.readLast(key, n, 16 << 20), reader.count(key)])
     res.json({ records, total })
   }))
 

@@ -8,7 +8,12 @@ export interface MonitorDataReader<TData = Record<string, unknown>> {
   /** List all keys that have data stored for this monitor. */
   keys(): Promise<string[]>
 
-  readLast(key: string, n: number): Promise<MonitorRecord<TData>[]>
+  /**
+   * The newest n records. `maxBytes` bounds a DISPLAY read: fewer records come
+   * back when n of them would exceed it (a funding-rates snapshot is ~140KB a
+   * line, so 1000 of them is 140MB of JSON before a single object is built).
+   */
+  readLast(key: string, n: number, maxBytes?: number): Promise<MonitorRecord<TData>[]>
 
   /**
    * Every stored record for a key, oldest first — no caller-side cap.
@@ -32,7 +37,8 @@ export interface MonitorDataReader<TData = Record<string, unknown>> {
   /**
    * About `points` records spread evenly over the store's time span — how a
    * display asks an oversized store for "all history" without reading it.
-   * Optional: absent on readers that never face large files.
+   * Optional: absent on readers that never face large files. Wide records
+   * reduce `points`: the read is bounded in bytes, not in records.
    */
   readSampled?(key: string, points: number, from?: number, to?: number): Promise<MonitorRecord<TData>[]>
 

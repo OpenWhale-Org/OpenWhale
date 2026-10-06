@@ -53,6 +53,30 @@ describe('readSampled', () => {
     expect(wide[wide.length - 1]!.ts).toBeGreaterThan(live0 + 19.5 * 3_600_000)
   })
 
+  it('wide records buy fewer points: the read is bounded in bytes', async () => {
+    // The funding-rates shape: one ~200KB snapshot a minute, ~60MB on disk.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-sampled-wide-'))
+    const pad = 'r'.repeat(200_000)
+    const t0 = 1_780_000_000_000
+    const fd = fs.openSync(path.join(dir, 'k.jsonl'), 'w')
+    for (let m = 0; m < 300; m++) fs.writeSync(fd, JSON.stringify({ ts: t0 + m * 60_000, data: { pad } }) + '\n')
+    fs.closeSync(fd)
+    const reader = new MonitorDataReaderImpl<{ pad: string }>(dir, { slurpLimit: 1 })
+    const got = await reader.readSampled('k', 2000)
+    // 16MB of probes at ~400KB per probed pick: dozens of points, not 2000 —
+    // and still the whole span.
+    expect(got.length).toBeGreaterThanOrEqual(16)
+    expect(got.length).toBeLessThanOrEqual(45)
+    expect(got[0]!.ts).toBe(t0)
+    expect(got[got.length - 1]!.ts).toBeGreaterThan(t0 + 290 * 60_000)
+    // The tail obeys the same budget, keeping at least one record.
+    const tail = await reader.readLast('k', 1000, 4 << 20)
+    expect(tail.length).toBeGreaterThanOrEqual(1)
+    expect(tail.length).toBeLessThanOrEqual(26)
+    expect(tail[tail.length - 1]!.ts).toBe(t0 + 299 * 60_000)
+    expect(await reader.readLast('k', 1000)).toHaveLength(300)
+  })
+
   it('a small store samples in memory the same way', async () => {
     const recs = Array.from({ length: 1000 }, (_, i) => ({ ts: i * 10 }))
     const got = sampleByTime(recs, 11)

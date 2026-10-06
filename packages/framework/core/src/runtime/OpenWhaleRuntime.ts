@@ -613,8 +613,11 @@ export class OpenWhaleRuntime implements IRuntime {
     // the overview — so the zoom shows every second while panning out still
     // has the whole span to go to.
     const PLOT_FOCUS = 5_000
-    let records = n > 0 ? await reader.readLast(key, n)
-      : oversized ? (reader.readSampled ? await reader.readSampled(key, PLOT_SAMPLE) : await reader.readLast(key, PLOT_CAP))
+    // Records are not a unit of cost — a funding-rates snapshot is ~140KB — so
+    // every tail read here is bounded in bytes as well (2026-10-06 OOM loop).
+    const PLOT_BYTES = 16 << 20
+    let records = n > 0 ? await reader.readLast(key, n, PLOT_BYTES)
+      : oversized ? (reader.readSampled ? await reader.readSampled(key, PLOT_SAMPLE) : await reader.readLast(key, PLOT_CAP, PLOT_BYTES))
       : await reader.readAll(key)
     /* A PICKER cannot be built from a time-even sample.
      *
@@ -632,7 +635,7 @@ export class OpenWhaleRuntime implements IRuntime {
      * parsing all of it, which is what `oversized` exists to avoid.
      */
     if (n <= 0 && oversized && def.options) {
-      const tail = await reader.readLast(key, PLOT_CAP)
+      const tail = await reader.readLast(key, PLOT_CAP, PLOT_BYTES)
       const from = tail[0]?.ts
       if (from !== undefined) records = [...records.filter(r => r.ts < from), ...tail]
     }
