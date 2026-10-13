@@ -153,7 +153,9 @@ if [ -n "$DEPLOY_PLUGINS" ]; then
     dir="${entry%%:*}"
     remote="$DEPLOY_REMOTE_PLUGINS"
     [ "$entry" != "$dir" ] && remote="${entry#*:}"
-    "${SSH[@]}" "$DEPLOY_HOST" "mkdir -p '$remote'"
+    # One connection per plugin in quick succession: the server drops one now
+    # and then before the banner, so this is retried like the syncs are.
+    retry "${SSH[@]}" "$DEPLOY_HOST" "mkdir -p '$remote'"
     "${RSYNC[@]}" --delete --exclude node_modules --exclude .git \
       "$dir" "$DEPLOY_HOST:$remote/"
   done
