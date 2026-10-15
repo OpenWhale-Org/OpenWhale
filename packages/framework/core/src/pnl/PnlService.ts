@@ -646,12 +646,23 @@ export class PnlService {
       return
     }
 
+    /*
+     * Grouped by the side the REPLAY will read, not by the stored column.
+     * Rows written before position_side existed hold NULL and have their side
+     * inferred (inferHedgeSide); grouping on the raw column splits one book
+     * into a legacy half and a current half, and the two halves then disagree
+     * with the venue by equal and opposite amounts — NVDA read as −0.47 on no
+     * side and +0.47 on SHORT, one position pretending to be two.
+     */
+    const side = (await this.isHedge(account))
+      ? `COALESCE(position_side, CASE WHEN (side = 'buy') = (COALESCE(realized_pnl, 0) = 0) THEN 'LONG' ELSE 'SHORT' END)`
+      : `position_side`
     const books = await this.db.all<{ symbol: string; position_side: string | null; net: number; last_ts: number; price: number | null }>(
-      `SELECT symbol, position_side,
+      `SELECT symbol, ${side} AS position_side,
               SUM(CASE WHEN side = 'buy' THEN qty ELSE -qty END) AS net,
               MAX(ts)                                           AS last_ts,
               SUM(qty * price) / NULLIF(SUM(qty), 0)            AS price
-         FROM pnl_fills WHERE account = ? GROUP BY symbol, position_side`, [account])
+         FROM pnl_fills WHERE account = ? GROUP BY symbol, ${side}`, [account])
 
     const now = Date.now()
     for (const book of books) {

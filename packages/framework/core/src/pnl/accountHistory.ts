@@ -298,12 +298,22 @@ export function replayPositions(symbol: string, positionSide: string | null, fil
   for (; i < fills.length; i++) {
     const f = fills[i]!
     const signed = f.side === 'buy' ? f.qty : -f.qty
+    /*
+     * A reconciliation moves quantity and nothing else: its price is the
+     * mark at the moment the disagreement was noticed, not a price anyone
+     * traded at. Letting it into the averages would put today's mark on a
+     * position that closed in July — and at a size that outweighs every real
+     * fill in the row.
+     */
+    const recon = f.orderId === RECON_ORDER_ID
     book ??= open(f, signed > 0 ? 1 : -1, false)
     const dir = book.row.side === 'long' ? 1 : -1
     if (Math.sign(signed) === dir) {
       book.qty += signed
-      book.entryCost += f.qty * f.price
-      book.entryQty += f.qty
+      if (!recon) {
+        book.entryCost += f.qty * f.price
+        book.entryQty += f.qty
+      }
       book.row.maxQty = Math.max(book.row.maxQty, Math.abs(book.qty))
       touch(book, f, f.qty, 1)
       continue
@@ -312,8 +322,10 @@ export function replayPositions(symbol: string, positionSide: string | null, fil
     const closing = Math.min(f.qty, held)
     const share = f.qty > 0 ? closing / f.qty : 1
     book.qty += dir * -closing
-    book.exitCost += closing * f.price
-    book.exitQty += closing
+    if (!recon) {
+      book.exitCost += closing * f.price
+      book.exitQty += closing
+    }
     touch(book, f, closing, share)
     const rest = f.qty - closing
     const left = Math.abs(book.qty)

@@ -96,6 +96,21 @@ describe('reconcileAccount', () => {
     expect(await recons(db)).toHaveLength(0)
   })
 
+  it('reads a legacy fill under the side the replay gives it, not as a book of its own', async () => {
+    const now = Date.now()
+    const { db, svc } = await setup([])
+    await claim(db)
+    // 一个 SHORT 往返：开仓的卖出是 position_side 列存在之前写的（NULL），平仓的买入带着 SHORT
+    await fill(db, { id: '1', symbol: 'NVDA/USDT:USDT', ps: null, side: 'sell', qty: 5, ts: now - QUIET - MIN })
+    await db.run(`UPDATE pnl_fills SET realized_pnl = 0 WHERE fill_id = '1'`)
+    await fill(db, { id: '2', symbol: 'NVDA/USDT:USDT', ps: 'SHORT', side: 'buy', qty: 5, ts: now - QUIET })
+    await db.run(`UPDATE pnl_fills SET realized_pnl = 1.5 WHERE fill_id = '2'`)
+    await svc.collect()
+
+    // 两笔合起来就是平的；按原始列分组会看成 null −5 和 SHORT +5 两个账本，各修一次
+    expect(await recons(db)).toHaveLength(0)
+  })
+
   it('writes nothing when reconciliation is off, so an install can watch first', async () => {
     const now = Date.now()
     const { db, svc } = await setup([], { reconcile: false })
@@ -129,6 +144,18 @@ describe('reconcileAccount', () => {
 })
 
 describe('replayPositions', () => {
+  it('keeps a reconciliation out of the entry and exit averages', () => {
+    const base = { symbol: 'HOME/USDT:USDT', positionSide: 'LONG', instanceId: null, feeAsset: 'USDT' }
+    const rows = replayPositions('HOME/USDT:USDT', 'LONG', [
+      // 7 月以 0.01 开的仓，10 月才被对账行合上，标记价 0.004
+      { ...base, fillId: '1', orderId: 'o1', side: 'buy', qty: 1000, price: 0.01, realizedPnl: 0, fee: 1, ts: 1 },
+      { ...base, fillId: 'recon:9:LONG', orderId: RECON_ORDER_ID, side: 'sell', qty: 1000, price: 0.004, realizedPnl: null, fee: null, ts: 9 },
+    ] as never)
+    expect(rows[0]!.avgEntry).toBeCloseTo(0.01, 10)
+    expect(rows[0]!.avgExit).toBeNull()      // 没有人在那个价上卖过
+    expect(rows[0]!.maxQty).toBeCloseTo(1000, 10)
+  })
+
   it('treats a reconciliation as quantity only', () => {
     const base = { symbol: 'SKUU/USDT:USDT', positionSide: 'LONG', instanceId: null, feeAsset: 'USDT' }
     const rows = replayPositions('SKUU/USDT:USDT', 'LONG', [
