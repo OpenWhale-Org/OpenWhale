@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { AsyncLocalStorage } from 'async_hooks'
 import type { DatabaseAdapter, Row } from './DatabaseAdapter.js'
-import { SCHEMA_SQL, MIGRATION_SQL } from './schema.js'
+import { SCHEMA_SQL, MIGRATION_SQL, REBUILD_SQL } from './schema.js'
 
 export interface SQLiteAdapterOptions {
   /** Absolute path to the .db file. Directories are created automatically. */
@@ -48,6 +48,39 @@ export class SQLiteAdapter implements DatabaseAdapter {
         // Already applied (duplicate column) — additive migrations only
       }
     }
+    if (this.rebuild()) {
+      // A rebuild drops the old table, and its indexes go with it. SCHEMA_SQL
+      // is all IF NOT EXISTS, so running it again puts them back and leaves
+      // everything else untouched.
+      this.db.exec(SCHEMA_SQL)
+    }
+  }
+
+  /**
+   * Apply the table rebuilds this database still needs.
+   *
+   * Unlike the additive migrations, these are not idempotent-by-error: each
+   * is guarded by reading the live DDL, and a failure is fatal rather than
+   * swallowed — a half-rebuilt ledger must not be served as if it were whole.
+   */
+  private rebuild(): boolean {
+    const db = this.getDb()
+    let applied = false
+    for (const { table, want, sql } of REBUILD_SQL) {
+      const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
+        .get(table) as { sql?: string } | undefined
+      if (!row?.sql || row.sql.includes(want)) continue
+      db.exec('BEGIN')
+      try {
+        for (const statement of sql) db.exec(statement)
+        db.exec('COMMIT')
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw new Error(`Rebuild of "${table}" failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      applied = true
+    }
+    return applied
   }
 
   async run(sql: string, params: unknown[] = []): Promise<number> {

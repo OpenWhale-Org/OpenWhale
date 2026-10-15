@@ -247,7 +247,9 @@ CREATE TABLE IF NOT EXISTS pnl_fills (
   fee_asset    TEXT,
   ts           INTEGER NOT NULL,
   position_side TEXT,                  -- LONG / SHORT on hedge-mode accounts, NULL otherwise
-  PRIMARY KEY (account, fill_id)
+  -- Per contract, because that is how venues number trades: Binance restarts
+  -- its futures trade ids for every symbol, so one account's contracts collide.
+  PRIMARY KEY (account, symbol, fill_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pnl_fills_instance ON pnl_fills (instance_id, ts);
 CREATE INDEX IF NOT EXISTS idx_pnl_fills_account_symbol ON pnl_fills (account, symbol, ts);
@@ -312,4 +314,65 @@ export const MIGRATION_SQL: string[] = [
   `ALTER TABLE accounts ADD COLUMN params TEXT`,
   // 2026-09-17: hedge-mode side on ledger fills, so position history keeps LONG and SHORT apart
   `ALTER TABLE pnl_fills ADD COLUMN position_side TEXT`,
+]
+
+/**
+ * Migrations that rebuild a table, for a change ADD COLUMN cannot express.
+ *
+ * `want` is matched against the live table's stored DDL: SQLite keeps the
+ * CREATE TABLE text verbatim, so a database already on the new shape is left
+ * alone and a rebuild never runs twice. Each one's statements run in a single
+ * transaction, and SCHEMA_SQL is re-executed afterwards to put back the
+ * indexes that went with the dropped table.
+ *
+ * Unlike SCHEMA_SQL, a rebuild's DDL is frozen at the time it was written. It
+ * describes the shape the table had to reach then, not the shape it has now,
+ * so a later column belongs in an ALTER above and not in here.
+ */
+export const REBUILD_SQL: Array<{ table: string; want: string; sql: string[] }> = [
+  {
+    /*
+     * 2026-10-15: a fill's identity is per contract, not per account.
+     *
+     * Binance numbers futures trades per symbol, so two contracts held in one
+     * account share an id space and collide. The collector inserts OR IGNORE,
+     * which made every collision a silent discard of a real fill: SKUU's fill
+     * 971319 was dropped because an APP fill five days earlier already held
+     * that id. Three such drops in one closing burst left the ledger 6.76
+     * SKUU long against a venue position that was flat, and a position row
+     * that could never reach flat went on to swallow the next 858 fills.
+     *
+     * Rebuilding only widens the key, so no row is lost on the way across —
+     * what was unique before stays unique now.
+     */
+    table: 'pnl_fills',
+    want: 'PRIMARY KEY (account, symbol, fill_id)',
+    sql: [
+      `DROP TABLE IF EXISTS pnl_fills_rebuild`,
+      `CREATE TABLE pnl_fills_rebuild (
+         account      TEXT NOT NULL,
+         fill_id      TEXT NOT NULL,
+         order_id     TEXT NOT NULL,
+         instance_id  TEXT,
+         symbol       TEXT NOT NULL,
+         side         TEXT NOT NULL,
+         qty          REAL NOT NULL,
+         price        REAL NOT NULL,
+         realized_pnl REAL,
+         fee          REAL,
+         fee_asset    TEXT,
+         ts           INTEGER NOT NULL,
+         position_side TEXT,
+         PRIMARY KEY (account, symbol, fill_id)
+       )`,
+      `INSERT INTO pnl_fills_rebuild
+         (account, fill_id, order_id, instance_id, symbol, side, qty, price,
+          realized_pnl, fee, fee_asset, ts, position_side)
+       SELECT account, fill_id, order_id, instance_id, symbol, side, qty, price,
+              realized_pnl, fee, fee_asset, ts, position_side
+         FROM pnl_fills`,
+      `DROP TABLE pnl_fills`,
+      `ALTER TABLE pnl_fills_rebuild RENAME TO pnl_fills`,
+    ],
+  },
 ]
