@@ -2,7 +2,7 @@ import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
 import { heldUntil } from '../types/adapter/errors.js'
 import { createLogger } from '../utils/logger.js'
 import {
-  USD_ASSETS, attachFunding, replayPositions, summarize, toFillRow, toOrderRow,
+  RECON_ORDER_ID, USD_ASSETS, attachFunding, replayPositions, summarize, toFillRow, toOrderRow,
   type FillHistoryRow, type HistorySummary, type LedgerFill, type LedgerFunding, type OrderHistoryRow, type PositionHistoryRow,
 } from './accountHistory.js'
 
@@ -64,7 +64,13 @@ export interface PnlSessionLike {
   fetchFundingHistory?(since?: number, limit?: number): Promise<Array<{
     id?: string; symbol: string; amount: number; asset: string; timestamp: number
   }>>
-  fetchPositions?(symbols?: string[]): Promise<Array<{ symbol: string; markPrice: number }>>
+  fetchPositions?(symbols?: string[]): Promise<Array<{
+    symbol: string; markPrice: number
+    /** Direction and size, for reconciling the ledger against what is held. */
+    side?: string; contracts?: number
+    /** Raw venue payload; hedge-mode accounts name the side in it. */
+    info?: unknown
+  }>>
   /** Contracts this account has traded, from the venue's account-wide ledger. */
   fetchTradedSymbols?(since?: number, limit?: number, until?: number): Promise<string[]>
   /**
@@ -176,6 +182,12 @@ export interface PnlServiceOptions {
   backfillMs?: number
   /** Pause between a deep backfill's venue calls, ms. Default 200; 0 in tests. */
   backfillPaceMs?: number
+  /**
+   * Write the corrections that reconcileAccount finds, rather than only
+   * logging them. Defaults to OPENWHALE_PNL_RECONCILE=1, so an install can
+   * watch what it would do before letting it do it.
+   */
+  reconcile?: boolean
 }
 
 const KICK_DEBOUNCE_MS = 30_000
@@ -224,6 +236,13 @@ const LEDGER_WINDOW_MS = 7 * 24 * 3600_000
  * take its time.
  */
 const BACKFILL_PACE_MS = 200
+/**
+ * How long a book must have been quiet before its residue is believed.
+ *
+ * The ETF pairs fill in bursts and the collector trails them by seconds, so a
+ * book read mid-burst is not drifted — it is merely ahead of the ledger.
+ */
+const RECONCILE_QUIET_MS = 10 * 60_000
 
 /** Oldest first, each window [start, end) no longer than `span`. */
 export function timeWindows(from: number, to: number, span: number): Array<[number, number]> {
@@ -257,6 +276,9 @@ function hedgeSide(info: Record<string, unknown> | undefined): string | null {
   const v = String(info?.['positionSide'] ?? '').toUpperCase()
   return v === 'LONG' || v === 'SHORT' ? v : null
 }
+
+/** One replayed book: a contract, and on a hedge-mode account a side of it. */
+const bookKey = (symbol: string, positionSide: string | null) => `${symbol}\u0000${positionSide ?? ''}`
 
 export interface HistoryQuery {
   since?: number
@@ -374,6 +396,7 @@ export class PnlService {
   private readonly intervalMs: number
   private readonly backfillMs: number
   private readonly backfillPace: number
+  private readonly reconcile: boolean
   private timer: ReturnType<typeof setInterval> | null = null
   private kickTimer: ReturnType<typeof setTimeout> | null = null
   private collecting = false
@@ -406,6 +429,7 @@ export class PnlService {
     this.intervalMs = options.intervalMs ?? (Number(process.env['OPENWHALE_PNL_INTERVAL_MS']) || 10 * 60_000)
     this.backfillMs = options.backfillMs ?? 3 * 24 * 3600_000
     this.backfillPace = options.backfillPaceMs ?? BACKFILL_PACE_MS
+    this.reconcile = options.reconcile ?? process.env['OPENWHALE_PNL_RECONCILE'] === '1'
   }
 
   start(): void {
@@ -564,6 +588,8 @@ export class PnlService {
       }
     }
 
+    await this.reconcileAccount(account, session)
+
     if (session.fetchFundingHistory) {
       const since = (await this.watermark(account, 'funding')) ?? Date.now() - this.backfillMs
       let events
@@ -579,6 +605,79 @@ export class PnlService {
       if (events.length > 0) {
         await this.setWatermark(account, 'funding', Math.max(...events.map(e => e.timestamp)))
       }
+    }
+  }
+
+  /**
+   * The venue holds what it holds; the ledger is a reconstruction of it.
+   *
+   * A fill that never reached the ledger leaves a book that can never read as
+   * flat, and since a position row closes only at flat, every later fill
+   * folds into a row that stays open for ever. SKUU carried 6.76 phantom
+   * contracts from 2026-09-27 and swallowed the 858 fills that came after,
+   * which is why it had not appeared in that account's recent positions
+   * since. The fills that caused it are past Binance's seven-day userTrades
+   * window, so no re-read can bring them back: the position itself is the
+   * only surviving evidence of what is actually held.
+   *
+   * So the position is read, and a book that disagrees with it is corrected
+   * by a row that says exactly that — no order, no instance, no price anyone
+   * traded at, no fee, no realized PnL. The quantity is real and the rest is
+   * not claimed to be.
+   *
+   * Two things are deliberately left alone. A book that traded within
+   * RECONCILE_QUIET_MS, because the collector trails a burst by seconds and
+   * a book read mid-burst is ahead of the ledger rather than drifted. And a
+   * position the ledger has never seen at all: the sweep adds its contract
+   * and reads its fills next cycle, and inventing a position is a different
+   * act from correcting one.
+   */
+  private async reconcileAccount(account: string, session: PnlSessionLike): Promise<void> {
+    if (!session.fetchPositions) return
+    let held: Map<string, { qty: number; price: number }>
+    try {
+      held = new Map((await session.fetchPositions()).map(p => {
+        const side = hedgeSide(p.info as Record<string, unknown> | undefined)
+        const qty = Math.abs(p.contracts ?? 0) * (String(p.side).toLowerCase() === 'short' ? -1 : 1)
+        return [bookKey(p.symbol, side), { qty, price: p.markPrice }] as const
+      }))
+    } catch (err) {
+      log.warn({ err, account }, 'Position read failed — the ledger is not reconciled this cycle')
+      return
+    }
+
+    const books = await this.db.all<{ symbol: string; position_side: string | null; net: number; last_ts: number; price: number | null }>(
+      `SELECT symbol, position_side,
+              SUM(CASE WHEN side = 'buy' THEN qty ELSE -qty END) AS net,
+              MAX(ts)                                           AS last_ts,
+              SUM(qty * price) / NULLIF(SUM(qty), 0)            AS price
+         FROM pnl_fills WHERE account = ? GROUP BY symbol, position_side`, [account])
+
+    const now = Date.now()
+    for (const book of books) {
+      if (now - book.last_ts < RECONCILE_QUIET_MS) continue
+      const key = bookKey(book.symbol, book.position_side)
+      const venue = held.get(key)
+      const diff = (venue?.qty ?? 0) - book.net
+      // Summing thousands of fills leaves float dust far below any real size.
+      if (Math.abs(diff) <= EPS * Math.max(1, Math.abs(book.net))) continue
+
+      const detail = {
+        account, symbol: book.symbol, positionSide: book.position_side,
+        ledger: book.net, venue: venue?.qty ?? 0, qty: Math.abs(diff),
+        side: diff > 0 ? 'buy' : 'sell',
+      }
+      if (!this.reconcile) {
+        log.info(detail, 'Ledger disagrees with the venue — reconciliation is off, nothing written')
+        continue
+      }
+      await this.db.run(
+        `INSERT OR IGNORE INTO pnl_fills
+           (account, fill_id, order_id, instance_id, symbol, side, qty, price, realized_pnl, fee, fee_asset, ts, position_side)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+        [account, `${RECON_ORDER_ID}:${now}:${book.position_side ?? ''}`, RECON_ORDER_ID,
+          book.symbol, detail.side, Math.abs(diff), venue?.price ?? book.price ?? 0, now, book.position_side])
+      log.warn(detail, 'Ledger corrected to the venue position')
     }
   }
 

@@ -117,6 +117,12 @@ export interface PositionHistoryRow extends FeeTotals {
    * by a fill of its own. A carried row with no fills IS that leftover.
    */
   carried?: boolean
+  /**
+   * Closed, wholly or partly, by a correction to the venue's position rather
+   * than by a fill. The quantity is real — the venue holds what it holds —
+   * but no price, fee or realized PnL came with it.
+   */
+  reconciled?: boolean
   fills: number
   orders: number
   volume: number
@@ -150,6 +156,11 @@ const REL_EPS = 1e-7
  * opens the next position, which is why the open rows still add up to what
  * the exchange holds.
  */
+/**
+ * Order id carried by a ledger row that corrects the book to the venue's
+ * position instead of recording a trade. See PnlService.reconcileAccount.
+ */
+export const RECON_ORDER_ID = 'recon'
 const DUST_USD = 5
 const DUST_FRACTION = 0.005
 
@@ -236,6 +247,13 @@ export function replayPositions(symbol: string, positionSide: string | null, fil
   })
 
   const touch = (b: OpenBook, f: LedgerFill, qty: number, share: number) => {
+    /*
+     * A reconciliation moved the quantity, nothing else. It carries no price
+     * anyone traded at, no fee and no realized PnL, so counting it as a fill
+     * would put volume the account never traded into the row and dilute its
+     * fee rate with notional that was never charged.
+     */
+    if (f.orderId === RECON_ORDER_ID) { b.row.reconciled = true; return }
     b.row.fills++
     b.row.volume += qty * f.price
     b.row.realized += (f.realizedPnl ?? 0) * share
