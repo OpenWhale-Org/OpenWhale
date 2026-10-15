@@ -142,7 +142,7 @@ export type { PageOptions as ReportPageOptions, Figure as ReportFigure } from '.
 export type { PluginLoadOptions } from './runtime/OpenWhaleRuntime.js'
 
 // Adapter error taxonomy (value exports)
-export { AdapterError, RetryableAdapterError, TerminalAdapterError, isTerminalError } from './types/adapter/errors.js'
+export { AdapterError, RetryableAdapterError, TerminalAdapterError, isTerminalError, heldUntil } from './types/adapter/errors.js'
 
 // Credentials
 export { DBCredentialStore } from './credentials/DBCredentialStore.js'

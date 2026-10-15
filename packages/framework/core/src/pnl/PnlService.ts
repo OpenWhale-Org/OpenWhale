@@ -1,4 +1,5 @@
 import type { DatabaseAdapter } from '../database/DatabaseAdapter.js'
+import { heldUntil } from '../types/adapter/errors.js'
 import { createLogger } from '../utils/logger.js'
 import {
   USD_ASSETS, attachFunding, replayPositions, summarize, toFillRow, toOrderRow,
@@ -194,6 +195,20 @@ const FILLS_ALL_PAGE = 2000
 /** Pages read in one sweep before giving the venue a rest. 5 × 2000 rows an hour is far past any account here. */
 const FILLS_ALL_MAX_PAGES = 5
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+/**
+ * How much of the collection interval a routine sweep may spread itself over.
+ *
+ * Binance has no account-wide fills endpoint, so a sweep is one userTrades
+ * (weight 5) per symbol the account has ever touched — some six hundred on
+ * this install, which used to go out back to back: ~2,900 weight in three
+ * minutes of a 2,400-a-minute IP budget shared with the ETF engine. On
+ * 2026-10-14 that sweep, landing while the engine's own burst was already
+ * being throttled, turned a two-minute IP ban into a forty-four-minute one.
+ * Spread over most of the interval the same sweep costs ~350 weight a minute.
+ */
+const SWEEP_SHARE = 0.6
+/** The longest pause between two symbol reads; a small account need not crawl. */
+const SWEEP_PACE_MAX_MS = 1_000
 const EPS = 1e-9
 /** Rows read per step when replaying a whole account, with a yield between steps. */
 const HISTORY_PAGE = 20_000
@@ -383,9 +398,10 @@ export class PnlService {
      * than the data it judges — an hourly collector makes "loss over the last
      * 15 minutes" a sentence with no meaning behind it. The cost is bounded by
      * the one venue that has no bulk endpoint: only Hyperliquid implements
-     * fetchFillsAll, so Binance costs one fetchMyTrades per claimed symbol per
-     * cycle. At ~156 claimed symbols that is ~78 weight/minute against a
-     * 2400/minute budget, and collect() already refuses to overlap itself.
+     * fetchFillsAll, so Binance costs one fetchMyTrades (weight 5) per symbol
+     * the account has touched, per cycle — paced across SWEEP_SHARE of the
+     * interval so the whole sweep stays a fraction of the 2400/minute IP
+     * budget, and collect() already refuses to overlap itself.
      */
     this.intervalMs = options.intervalMs ?? (Number(process.env['OPENWHALE_PNL_INTERVAL_MS']) || 10 * 60_000)
     this.backfillMs = options.backfillMs ?? 3 * 24 * 3600_000
@@ -517,6 +533,13 @@ export class PnlService {
         try {
           await this.collectAccount(account)
         } catch (err) {
+          const until = heldUntil(err)
+          if (until !== undefined) {
+            // The venue said stop. Every further call this cycle would fail
+            // the same way, locally; the next cycle reads what was missed.
+            log.warn({ account, until: new Date(until).toISOString() }, 'Venue REST is held — sweep abandoned this cycle')
+            break
+          }
           log.warn({ err, account }, 'PnL collection failed for account — next cycle retries')
         }
       }
@@ -533,7 +556,13 @@ export class PnlService {
     const symbols = await this.symbolsOf(account, session)
 
     if (session.fetchFillsAll) await this.collectAllSymbols(account, symbols, session)
-    else for (const symbol of symbols) await this.collectSymbol(account, symbol, session)
+    else {
+      const pace = Math.min(SWEEP_PACE_MAX_MS, Math.floor(this.intervalMs * SWEEP_SHARE / Math.max(1, symbols.length)))
+      for (const [i, symbol] of symbols.entries()) {
+        if (i > 0 && pace > 0) await sleep(pace)
+        await this.collectSymbol(account, symbol, session)
+      }
+    }
 
     if (session.fetchFundingHistory) {
       const since = (await this.watermark(account, 'funding')) ?? Date.now() - this.backfillMs
@@ -635,6 +664,8 @@ export class PnlService {
     try {
       fills = await session.fetchFills(symbol, since + 1, 1000)
     } catch (err) {
+      // A held venue fails every symbol the same way: let the sweep stop.
+      if (heldUntil(err) !== undefined) throw err
       log.warn({ err, account, symbol }, 'fetchFills failed — symbol skipped this cycle')
       return
     }

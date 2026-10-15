@@ -2,3 +2,4 @@ export { CcxtAdapter, canFetchPositionMode, positionSideForVenue } from './CcxtA
 export { venueRequestUsage, onVenueMinute } from './requestMeter.js'
 export type { VenueMinute } from './requestMeter.js'
 export type { CcxtAdapterOptions } from './CcxtAdapter.js'
+export { restHeldUntil, VenueHeldError } from './restHold.js'

@@ -7,6 +7,7 @@ import type {
 } from '@openwhaleorg/exchange'
 import { RetryableAdapterError, TerminalAdapterError, createLogger } from '@openwhaleorg/core'
 import { meterRequests } from './requestMeter.js'
+import { gateRequests } from './restHold.js'
 import { shareMarketMap } from './marketMap.js'
 
 /**
@@ -267,6 +268,8 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     // Counts what this process asks of the venue, per endpoint, per minute.
     // Measurement only — it paces nothing and delays nothing.
     meterRequests(this.exchange as unknown as Parameters<typeof meterRequests>[0])
+    // A venue that answered 418/429 is not asked again until the time it named.
+    gateRequests(this.exchange as unknown as Parameters<typeof gateRequests>[0])
     if (options.testnet) this.exchange.setSandboxMode(true)
     // One market walk per venue, shared by every adapter on it; a failed walk
     // is retried, not memoised. Keyed after sandbox mode: testnet has its own map.
