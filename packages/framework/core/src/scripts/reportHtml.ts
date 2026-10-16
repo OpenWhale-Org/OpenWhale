@@ -96,7 +96,7 @@ const REPORT_CSS = `:root{
 }
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--f-serif);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1240px;margin:0 auto;padding:0 22px 80px}
+.wrap{max-width:1680px;margin:0 auto;padding:0 22px 80px}
 header{border-bottom:1px solid var(--rule);padding:48px 0 24px;margin-bottom:32px;display:flex;flex-direction:column;gap:14px}
 .eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
 h1{font-size:clamp(28px,4vw,42px);font-weight:600;margin:0;line-height:1.14;letter-spacing:-.01em;text-wrap:balance}
