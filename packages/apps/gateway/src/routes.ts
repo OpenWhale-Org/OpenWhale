@@ -16,7 +16,7 @@ import { loadOverviewLayout, saveOverviewLayout, resetOverviewLayout } from './o
 import { PositionGroups, startMsOf, type Member } from './positionGroups.js'
 import { getAlertService, type AlertSettings } from './notify/alerts.js'
 import { aggregateAccountEquity, BaseStrategy, decodeMonitorKey, getDataDir, recentLogs, localize, normalizeLocale } from '@openwhaleorg/core'
-import type { CompiledLoader, CompiledType, DBCredentialStore, HistoryKind, StrategyInstance } from '@openwhaleorg/core'
+import type { CompiledLoader, CompiledType, DBCredentialStore, HistoryKind, ScriptResult, StrategyInstance } from '@openwhaleorg/core'
 import type { CompilerSettings } from '@openwhaleorg/compiler'
 import { ensureStarted, getRuntime, getDatabase } from './runtime.js'
 import { PnlCollectorPref } from './pnlCollectorPref.js'
@@ -444,6 +444,50 @@ export function buildRouter(): Router {
   const runningScripts = new Map<string, AbortController>()
 
   /**
+   * Attachments too big to ride the result frame.
+   *
+   * The stream is newline-delimited JSON, so a report travels as ONE line;
+   * at 21 MB (a month of a high-frequency account's fills, 2026-10-18) that
+   * line reached nginx intact and died somewhere between the CDN and the
+   * browser — the run's only output, lost after the venue had been read.
+   * Past the threshold a file is held here for a while and the frame carries
+   * a URL instead; the browser fetches it as an ordinary download, which
+   * every hop in between handles without ceremony. Small files still travel
+   * inline, so an older dashboard keeps working.
+   */
+  const LARGE_FILE_BYTES = 1_000_000
+  const RUN_FILES_TTL_MS = 30 * 60_000
+  const runFiles = new Map<string, { at: number; files: NonNullable<ScriptResult['files']> }>()
+  const sweepRunFiles = () => {
+    const cutoff = Date.now() - RUN_FILES_TTL_MS
+    for (const [id, rec] of runFiles) if (rec.at < cutoff) runFiles.delete(id)
+  }
+  const detachLargeFiles = (runId: string, result: ScriptResult): ScriptResult => {
+    if (!result.files?.length) return result
+    sweepRunFiles()
+    const held: NonNullable<ScriptResult['files']> = []
+    const files = result.files.map((f, i) => {
+      const size = Buffer.byteLength(f.content, 'utf8')
+      if (size < LARGE_FILE_BYTES) return f
+      held[i] = f
+      return { name: f.name, ...(f.mime ? { mime: f.mime } : {}), content: '', size, url: `/api/scripts/runs/${runId}/files/${i}` }
+    })
+    if (held.length > 0) runFiles.set(runId, { at: Date.now(), files: held })
+    return { ...result, files }
+  }
+
+  router.get('/api/scripts/runs/:runId/files/:index', h(async (req, res) => {
+    sweepRunFiles()
+    const file = runFiles.get(req.params['runId'] ?? '')?.files[Number(req.params['index'])]
+    if (!file) { res.status(404).json({ error: 'No such file, or it has expired — run the script again' }); return }
+    const inline = req.query['inline'] === '1'
+    res.setHeader('Content-Type', file.mime ?? 'text/plain; charset=utf-8')
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.send(file.content)
+  }))
+
+  /**
    * Stop a run. Idempotent, and honest about a run that has already finished:
    * the operator gets 'unknown', not a silent 200 that reads like a success.
    */
@@ -515,7 +559,7 @@ export function buildRouter(): Router {
         (line) => write({ type: 'line', text: line }),
         abort.signal,
       )
-      write({ type: 'result', ...result })
+      write({ type: 'result', ...detachLargeFiles(runId, result) })
     } catch (err) {
       write({ type: 'error', error: errText(err) })
     } finally {

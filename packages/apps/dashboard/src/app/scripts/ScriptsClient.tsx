@@ -154,11 +154,12 @@ export function ScriptsClient() {
   )
 }
 
-interface ScriptFile { name: string; mime?: string; content: string }
+/** `content` travels inline for small files; a large one is held by the gateway and named by `url`. */
+interface ScriptFile { name: string; mime?: string; content?: string; size?: number; url?: string }
 interface ScriptOutput { text: string; json?: unknown; files?: ScriptFile[] }
 
-const sizeLabel = (s: string): string => {
-  const kb = new Blob([s]).size / 1024
+const sizeLabel = (f: ScriptFile): string => {
+  const kb = (f.size ?? new Blob([f.content ?? '']).size) / 1024
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(kb))} KB`
 }
 
@@ -172,7 +173,8 @@ const sizeLabel = (s: string): string => {
  * the dashboard's own document.
  */
 function openFile(file: ScriptFile): void {
-  const blob = new Blob([file.content], { type: file.mime ?? 'text/html;charset=utf-8' })
+  if (file.url) { window.open(`${file.url}?inline=1`, '_blank', 'noopener'); return }
+  const blob = new Blob([file.content ?? ''], { type: file.mime ?? 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   window.open(url, '_blank', 'noopener')
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
@@ -183,11 +185,20 @@ function openFile(file: ScriptFile): void {
  * server, so there is no URL to link and nothing left behind after the save.
  */
 function downloadFile(file: ScriptFile): void {
-  const blob = new Blob([file.content], { type: file.mime ?? 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
   a.download = file.name
+  if (file.url) {
+    // Held by the gateway: an ordinary download, the way a 20 MB report
+    // survives the proxies that dropped it as one streamed frame.
+    a.href = file.url
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    return
+  }
+  const blob = new Blob([file.content ?? ''], { type: file.mime ?? 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  a.href = url
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -430,6 +441,10 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        // Where the next newline search starts: a frame can be megabytes, and
+        // rescanning the whole buffer on every chunk made a large report take
+        // minutes to arrive.
+        let scanFrom = 0
         const lines: string[] = []
         let done: ScriptOutput | undefined
         let failed: string | undefined
@@ -444,8 +459,12 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
           buffer += decoder.decode(chunk.value, { stream: true })
           // Frames are newline-delimited; a chunk can split one in half, so the
           // trailing partial stays in the buffer until its newline arrives.
-          const parts = buffer.split('\n')
-          buffer = parts.pop() ?? ''
+          const parts: string[] = []
+          for (let nl = buffer.indexOf('\n', scanFrom); nl !== -1; nl = buffer.indexOf('\n')) {
+            parts.push(buffer.slice(0, nl))
+            buffer = buffer.slice(nl + 1)
+          }
+          scanFrom = buffer.length
           for (const part of parts) {
             if (!part.trim()) continue
             let frame: { type?: string; id?: string; text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
@@ -560,7 +579,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                   onClick={() => openFile(f)}
                   className="text-xs px-2 py-0.5 rounded"
                   style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}
-                  title={`${f.name} · ${f.mime ?? 'text/plain'} · ${sizeLabel(f.content)}`}
+                  title={`${f.name} · ${f.mime ?? 'text/plain'} · ${sizeLabel(f)}`}
                 >
                   {t('scripts.open')}
                 </button>
@@ -568,7 +587,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                   onClick={() => downloadFile(f)}
                   className="text-xs px-2 py-0.5 rounded"
                   style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-                  title={t('scripts.saveTitle', { name: f.name, size: sizeLabel(f.content) })}
+                  title={t('scripts.saveTitle', { name: f.name, size: sizeLabel(f) })}
                 >
                   ⤓
                 </button>
@@ -580,7 +599,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
                 // is up is what the reader means by "this".
                 const shown = view === 'json' && result.json !== undefined
                   ? JSON.stringify(result.json, null, 2)
-                  : view === 'html' && htmlFile
+                  : view === 'html' && htmlFile?.content
                     ? htmlFile.content
                     : result.text
                 try {
@@ -630,7 +649,7 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
              */
             <iframe
               title={htmlFile.name}
-              srcDoc={htmlFile.content}
+              {...(htmlFile.url ? { src: `${htmlFile.url}?inline=1` } : { srcDoc: htmlFile.content ?? '' })}
               sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
               className="w-full rounded-md"
               style={{

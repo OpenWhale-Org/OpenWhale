@@ -361,13 +361,15 @@ export const accountHistoryScript: ScriptDefinition = {
         const e = openByKey.get(`${pos.symbol}|${positionSide}`)
         const quote = quoteOf(pos.symbol)
         const margin = pos.marginMode === 'isolated' && Number(info['isolatedMargin']) > 0 ? Number(info['isolatedMargin']) : pos.initialMargin
+        // positionRisk v3 carries no leverage; the symbol's configured one does.
+        const leverage = pos.leverage > 0 ? pos.leverage : (leverageOf(pos.symbol, pos.side) ?? 0)
         const breakEven = Number(info['breakEvenPrice'])
         const updateTime = Number(info['updateTime'])
         return {
           symbol: pos.symbol, positionSide, direction: pos.side,
           qty: Math.abs(pos.contracts) * (pos.contractSize || 1), notional: Math.abs(pos.notional),
           entryPrice: pos.entryPrice, markPrice: pos.markPrice,
-          leverage: pos.leverage, marginMode: pos.marginMode, margin, unrealizedPnl: pos.unrealizedPnl,
+          leverage, marginMode: pos.marginMode, margin, unrealizedPnl: pos.unrealizedPnl,
           truncated: e === undefined || e.truncated,
           ...(Number.isFinite(breakEven) && breakEven > 0 ? { breakEvenPrice: breakEven } : {}),
           ...(pos.liquidationPrice !== undefined && pos.liquidationPrice > 0 ? { liquidationPrice: pos.liquidationPrice } : {}),
@@ -459,8 +461,30 @@ export const accountHistoryScript: ScriptDefinition = {
 
 // ── HTML ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Fills as columns, not objects: a month of a high-frequency account is a
+ * hundred thousand rows, and the field names were most of the 21 MB the
+ * first report weighed. The page rebuilds the objects on load.
+ */
+function compactFills(fills: FillRow[]): { symbols: string[]; feeAssets: string[]; rows: Array<Array<string | number | null>> } {
+  const symbols: string[] = [], feeAssets: string[] = []
+  const symIdx = new Map<string, number>(), feeIdx = new Map<string, number>()
+  const idx = (m: Map<string, number>, list: string[], v: string) => {
+    let i = m.get(v)
+    if (i === undefined) { i = list.length; list.push(v); m.set(v, i) }
+    return i
+  }
+  const sideIdx: Record<string, number> = { BOTH: 0, LONG: 1, SHORT: 2 }
+  const rows = fills.map(f => [
+    f.id, f.orderId, f.time, idx(symIdx, symbols, f.symbol), f.side === 'sell' ? 1 : 0, sideIdx[f.positionSide] ?? 0,
+    f.qty, f.price, f.realizedPnl ?? null, f.fee ?? null, f.feeAsset === undefined ? -1 : idx(feeIdx, feeAssets, f.feeAsset),
+    f.maker === undefined ? -1 : f.maker ? 1 : 0,
+  ])
+  return { symbols, feeAssets, rows }
+}
+
 export function renderHtml(report: Report): string {
-  const data = JSON.stringify(report).replace(/</g, '\\u003c')
+  const data = JSON.stringify({ ...report, fills: [], fillCols: compactFills(report.fills) }).replace(/</g, '\\u003c')
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -504,6 +528,12 @@ export function renderHtml(report: Report): string {
   .card .head { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; }
   .card .when { color:var(--muted); font-size:12px; }
   .view { display:none; } .view.on { display:block; }
+  .chartbar { display:flex; gap:16px; align-items:center; flex-wrap:wrap; padding:8px 0; color:var(--muted); }
+  .chartbar label { cursor:pointer; } .chartbar .hint { font-size:11px; }
+  .chartbar b { color:var(--text); font-weight:500; }
+  .chartwrap { position:relative; }
+  #cv { width:100%; height:460px; display:block; background:var(--panel); border:1px solid var(--line); border-radius:6px; cursor:crosshair; touch-action:none; }
+  .tip { position:absolute; pointer-events:none; display:none; background:#1e2329; border:1px solid var(--line); border-radius:4px; padding:6px 8px; font-size:12px; white-space:nowrap; z-index:2; }
   @media (max-width: 720px) { header, .tabs, .bar, .totals, main { padding-left:16px; padding-right:16px; } }
 </style>
 </head>
@@ -526,6 +556,7 @@ ${report.complete ? '' : `<div class="note">⚠ 数据不完整：${report.notes
   <div class="tab" data-view="history">仓位历史<small id="n-history"></small></div>
   <div class="tab" data-view="fills">历史成交<small id="n-fills"></small></div>
   <div class="tab" data-view="funding">资金费用<small id="n-funding"></small></div>
+  <div class="tab" data-view="curve">收益曲线<small id="n-curve"></small></div>
 </div>
 <div class="bar">
   <label>合约 <input id="q" placeholder="筛选，如 SOXS" size="18"></label>
@@ -538,9 +569,25 @@ ${report.complete ? '' : `<div class="note">⚠ 数据不完整：${report.notes
   <div id="history" class="view"></div>
   <div id="fills" class="view"></div>
   <div id="funding" class="view"></div>
+  <div id="curve" class="view">
+    <div class="chartbar">
+      <label><input type="checkbox" id="s-trade" checked> 交易盈亏</label>
+      <label><input type="checkbox" id="s-fee" checked> 扣手续费</label>
+      <label><input type="checkbox" id="s-net" checked> 净值（含资金费）</label>
+      <span class="hint">滚轮缩放 · 拖动平移 · 双击复原</span>
+      <span id="curve-stats"></span>
+    </div>
+    <div class="chartwrap"><canvas id="cv"></canvas><div id="tip" class="tip"></div></div>
+  </div>
 </main>
 <script>
 const R = ${data};
+(() => {
+  const c = R.fillCols, ps = ['BOTH', 'LONG', 'SHORT'];
+  R.fills = c.rows.map(r => ({ id: r[0], orderId: r[1], time: r[2], symbol: c.symbols[r[3]], side: r[4] ? 'sell' : 'buy', positionSide: ps[r[5]],
+    qty: r[6], price: r[7], quoteQty: r[6] * r[7], realizedPnl: r[8] === null ? undefined : r[8], fee: r[9] === null ? undefined : r[9],
+    feeAsset: r[10] < 0 ? undefined : c.feeAssets[r[10]], maker: r[11] < 0 ? undefined : r[11] === 1 }));
+})();
 const $ = s => document.querySelector(s);
 const state = { view: 'positions', q: '', tz: 'local', style: 'table', from: '', to: '', sort: {} };
 try { state.tz = localStorage.getItem('ow.tz') || 'local'; state.style = localStorage.getItem('ow.style') || 'table'; } catch {}
@@ -664,6 +711,109 @@ function renderFunding() {
     rows.map(r => '<tr><td class="l">' + fmtT(r.timestamp) + '</td><td class="l sym">' + esc(r.symbol) + '</td><td class="' + cls(r.amount) + '">' + sg(r.amount, 6) + '</td><td class="l">' + esc(r.asset) + '</td><td class="l">' + (r.attributed ? '已计入仓位' : '<span class="pill">无对应仓位</span>') + '</td></tr>').join('') + '</tbody></table>';
 }
 
+// ── Equity curve: 0 at the first fill, then every fill's realized PnL and
+// every funding payment, in time order. Three readings of the same walk.
+const chart = { x0: null, x1: null, pts: [], drag: null, dirty: true };
+function curveSeries() {
+  const ev = [];
+  for (const f of R.fills) if (match(f.symbol) && inRange(f.time)) ev.push({ t: f.time, trade: f.realizedPnl || 0, fee: f.feeAsset === quote(f.symbol) ? (f.fee || 0) : 0, fund: 0, sym: f.symbol, kind: 'fill', side: f.side, qty: f.qty, price: f.price });
+  for (const u of R.funding) if (match(u.symbol) && inRange(u.timestamp)) ev.push({ t: u.timestamp, trade: 0, fee: 0, fund: u.amount, sym: u.symbol, kind: 'funding' });
+  ev.sort((a, b) => a.t - b.t);
+  const pts = [];
+  if (ev.length) pts.push({ t: ev[0].t, trade: 0, afterFee: 0, net: 0, e: null });
+  let a = 0, b = 0, c = 0;
+  for (const e of ev) { a += e.trade; b += e.trade - e.fee; c += e.trade - e.fee + e.fund; pts.push({ t: e.t, trade: a, afterFee: b, net: c, e }); }
+  return pts;
+}
+function curveStats(pts) {
+  if (!pts.length) return '';
+  let peak = -Infinity, dd = 0, peakT = 0;
+  for (const p of pts) { if (p.net > peak) { peak = p.net; peakT = p.t; } dd = Math.min(dd, p.net - peak); }
+  const last = pts[pts.length - 1];
+  return '终值 <b class="' + cls(last.net) + '">' + sg(last.net) + '</b> · 峰值 <b class="' + cls(peak) + '">' + sg(peak) + '</b> (' + fmtT(peakT) + ') · 最大回撤 <b class="down">' + n(dd) + '</b> · 事件 <b>' + (pts.length - 1) + '</b>';
+}
+function drawCurve() {
+  const cv = $('#cv'); if (!cv.isConnected || !$('#curve').classList.contains('on')) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const pts = chart.pts; if (pts.length < 2) { g.fillStyle = '#848e9c'; g.font = '13px sans-serif'; g.fillText('区间内没有成交', 20, 30); return; }
+  const L = 70, Rm = 16, T = 16, B = 34;
+  const tMin = pts[0].t, tMax = pts[pts.length - 1].t;
+  const x0 = chart.x0 ?? tMin, x1 = chart.x1 ?? (tMax === tMin ? tMin + 60000 : tMax);
+  const show = { trade: $('#s-trade').checked, afterFee: $('#s-fee').checked, net: $('#s-net').checked };
+  // y range over the visible window, holding the value from just before it.
+  let yMin = 0, yMax = 0, lo = lower(pts, x0); if (lo > 0) lo--;
+  for (let i = lo; i < pts.length && pts[i].t <= x1 + (x1 - x0); i++) for (const k of ['trade', 'afterFee', 'net']) if (show[k]) { yMin = Math.min(yMin, pts[i][k]); yMax = Math.max(yMax, pts[i][k]); }
+  if (yMax === yMin) { yMax += 1; yMin -= 1; } const pad = (yMax - yMin) * 0.08; yMin -= pad; yMax += pad;
+  const X = t => L + (t - x0) / (x1 - x0) * (W - L - Rm), Y = v => T + (yMax - v) / (yMax - yMin) * (H - T - B);
+  chart.X = X; chart.Y = Y; chart.x0v = x0; chart.x1v = x1;
+  g.font = '11px sans-serif'; g.textBaseline = 'middle';
+  // grid
+  const ySteps = 6; g.strokeStyle = '#2b3139'; g.fillStyle = '#848e9c'; g.textAlign = 'right';
+  for (let i = 0; i <= ySteps; i++) { const v = yMin + (yMax - yMin) * i / ySteps, y = Y(v); g.beginPath(); g.moveTo(L, y); g.lineTo(W - Rm, y); g.stroke(); g.fillText(n(v, Math.abs(yMax - yMin) < 10 ? 2 : 0), L - 6, y); }
+  const span = x1 - x0, xSteps = Math.max(2, Math.floor((W - L - Rm) / 110)); g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let i = 0; i <= xSteps; i++) { const t = x0 + span * i / xSteps, x = X(t); g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); const s = fmtT(t); g.fillText(span > 2 * 86400000 ? s.slice(0, 10) : s.slice(5, 16), x, H - B + 6); }
+  // zero line
+  if (yMin < 0 && yMax > 0) { g.strokeStyle = '#555'; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(W - Rm, Y(0)); g.stroke(); g.setLineDash([]); }
+  g.save(); g.beginPath(); g.rect(L, T, W - L - Rm, H - T - B); g.clip();
+  const colors = { trade: '#848e9c', afterFee: '#f0b90b', net: '#0ecb81' };
+  for (const k of ['trade', 'afterFee', 'net']) {
+    if (!show[k]) continue;
+    g.strokeStyle = colors[k]; g.lineWidth = k === 'net' ? 1.6 : 1; g.beginPath();
+    let started = false, lastX = -1;
+    for (let i = lo; i < pts.length; i++) {
+      const p = pts[i]; if (p.t > x1 && started) { g.lineTo(X(p.t), Y(pts[i - 1][k])); g.lineTo(X(p.t), Y(p[k])); break; }
+      const x = X(p.t), y = Y(p[k]);
+      if (!started) { g.moveTo(x, y); started = true; } else { if (i > lo) g.lineTo(x, Y(pts[i - 1][k])); g.lineTo(x, y); }
+      lastX = x;
+    }
+    g.stroke();
+  }
+  g.restore();
+  // legend
+  g.textAlign = 'left'; g.textBaseline = 'middle'; let lx = L + 8;
+  for (const [k, label] of [['trade', '交易盈亏'], ['afterFee', '扣手续费'], ['net', '净值']]) { if (!show[k]) continue; g.fillStyle = colors[k]; g.fillRect(lx, T + 4, 10, 3); g.fillStyle = '#eaecef'; g.fillText(label, lx + 14, T + 6); lx += 14 + g.measureText(label).width + 16; }
+}
+function lower(pts, t) { let a = 0, b = pts.length; while (a < b) { const m = (a + b) >> 1; if (pts[m].t < t) a = m + 1; else b = m; } return a; }
+function renderCurve() {
+  chart.pts = curveSeries();
+  $('#n-curve').textContent = '(' + Math.max(0, chart.pts.length - 1) + ')';
+  $('#curve-stats').innerHTML = curveStats(chart.pts);
+  drawCurve();
+}
+(() => {
+  const cv = $('#cv'), tip = $('#tip');
+  const clampView = () => { const p = chart.pts; if (!p.length) return; const a = p[0].t, b = p[p.length - 1].t; const w = chart.x1 - chart.x0; if (chart.x0 < a) { chart.x0 = a; chart.x1 = a + w; } if (chart.x1 > b) { chart.x1 = b; chart.x0 = Math.max(a, b - w); } };
+  cv.addEventListener('wheel', e => {
+    e.preventDefault(); if (!chart.X) return;
+    const rect = cv.getBoundingClientRect(), mx = e.clientX - rect.left;
+    const x0 = chart.x0v, x1 = chart.x1v, t = x0 + (mx - 70) / (cv.clientWidth - 70 - 16) * (x1 - x0);
+    const k = e.deltaY > 0 ? 1.25 : 0.8, span = Math.max(60000, (x1 - x0) * k);
+    chart.x0 = t - (t - x0) * k; chart.x1 = chart.x0 + span; clampView(); drawCurve();
+  }, { passive: false });
+  cv.addEventListener('pointerdown', e => { chart.drag = { x: e.clientX, x0: chart.x0v, x1: chart.x1v }; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointerup', () => { chart.drag = null; });
+  cv.addEventListener('dblclick', () => { chart.x0 = chart.x1 = null; drawCurve(); });
+  cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
+  cv.addEventListener('pointermove', e => {
+    if (!chart.X) return;
+    const rect = cv.getBoundingClientRect(), mx = e.clientX - rect.left;
+    if (chart.drag) { const dt = (e.clientX - chart.drag.x) / (cv.clientWidth - 70 - 16) * (chart.drag.x1 - chart.drag.x0); chart.x0 = chart.drag.x0 - dt; chart.x1 = chart.drag.x1 - dt; clampView(); drawCurve(); return; }
+    const t = chart.x0v + (mx - 70) / (cv.clientWidth - 70 - 16) * (chart.x1v - chart.x0v);
+    const pts = chart.pts; if (pts.length < 2) return;
+    let i = lower(pts, t); if (i >= pts.length) i = pts.length - 1; if (i > 0 && t - pts[i - 1].t < pts[i].t - t) i--;
+    const p = pts[i], ev = p.e;
+    tip.innerHTML = fmtT(p.t) + '<br>净值 <b class="' + cls(p.net) + '">' + sg(p.net) + '</b> · 扣费 ' + sg(p.afterFee) + ' · 交易 ' + sg(p.trade) +
+      (ev ? '<br>' + esc(ev.sym) + (ev.kind === 'fill' ? ' ' + (ev.side === 'buy' ? '买' : '卖') + ' ' + n(ev.qty, 4) + ' @ ' + px(ev.price) + ' 盈亏 ' + sg(ev.trade, 4) + (ev.fee ? ' 费 ' + n(ev.fee, 4) : '') : ' 资金费 ' + sg(ev.fund, 4)) : '<br>起点');
+    tip.style.display = 'block';
+    const tx = Math.min(mx + 14, cv.clientWidth - tip.offsetWidth - 8), ty = Math.max(0, e.clientY - rect.top - tip.offsetHeight - 12);
+    tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+  });
+  for (const id of ['s-trade', 's-fee', 's-net']) $('#' + id).addEventListener('change', drawCurve);
+  window.addEventListener('resize', drawCurve);
+})();
+
 function render() {
   for (const el of document.querySelectorAll('.tab')) el.classList.toggle('on', el.dataset.view === state.view);
   for (const el of document.querySelectorAll('.view')) el.classList.toggle('on', el.id === state.view);
@@ -672,6 +822,7 @@ function render() {
   $('#history').innerHTML = renderHistory();
   $('#fills').innerHTML = renderFills();
   $('#funding').innerHTML = renderFunding();
+  renderCurve();
 }
 document.addEventListener('click', e => {
   const tab = e.target.closest('.tab');
