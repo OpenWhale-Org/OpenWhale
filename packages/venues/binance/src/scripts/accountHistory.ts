@@ -110,6 +110,10 @@ export interface HistoryRow {
   openAvg: number
   closeAvg: number
   tradePnl: number
+  /** Quote traded over the episode, both directions. */
+  volumeUsd: number
+  /** Largest exposure, at the opening average. */
+  maxNotional: number
   fees: Record<string, number>
   quoteFees: number
   funding: number
@@ -339,7 +343,8 @@ export const accountHistoryScript: ScriptDefinition = {
         symbol: e.symbol, positionSide: e.positionSide, direction: e.direction,
         openedAt: e.openedAt, truncated: e.truncated,
         closedQty: e.closedQty, maxQty: e.maxQty, openAvg: e.openAvg, closeAvg: e.closeAvg,
-        tradePnl: e.tradePnl, fees: e.fees, quoteFees, funding: e.funding,
+        tradePnl: e.tradePnl, volumeUsd: e.volume, maxNotional: e.maxQty * (e.openAvg > 0 ? e.openAvg : e.closeAvg),
+        fees: e.fees, quoteFees, funding: e.funding,
         net: e.tradePnl - quoteFees + e.funding,
         fillCount: e.fillCount, fillIds: e.fillIds, quote,
         ...(e.closedAt !== undefined ? { closedAt: e.closedAt } : {}),
@@ -528,6 +533,13 @@ export function renderHtml(report: Report): string {
   .card .head { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; }
   .card .when { color:var(--muted); font-size:12px; }
   .view { display:none; } .view.on { display:block; }
+  .btn { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:5px 10px; font:inherit; cursor:pointer; }
+  .pop { display:none; position:absolute; top:32px; left:0; z-index:5; background:#1e2329; border:1px solid var(--line); border-radius:6px; padding:8px 12px; min-width:200px; box-shadow:0 6px 24px rgba(0,0,0,.4); }
+  .pop.on { display:block; }
+  .pop label { display:block; padding:3px 0; cursor:pointer; white-space:nowrap; }
+  .pop .pophead { color:var(--muted); font-size:11px; padding-bottom:6px; border-bottom:1px solid var(--line); margin-bottom:6px; }
+  .pop a { color:var(--accent); float:right; }
+  th[draggable] { cursor:grab; } th.dragover { border-left:2px solid var(--accent); }
   .chartbar { display:flex; gap:16px; align-items:center; flex-wrap:wrap; padding:8px 0; color:var(--muted); }
   .chartbar label { cursor:pointer; } .chartbar .hint { font-size:11px; }
   .chartbar b { color:var(--text); font-weight:500; }
@@ -563,6 +575,7 @@ ${report.complete ? '' : `<div class="note">⚠ 数据不完整：${report.notes
   <label>时间 <select id="from"><option value="">区间起点</option></select> → <select id="to"><option value="">区间终点</option></select></label>
   <label>时区 <select id="tz"><option value="local">本机</option><option value="Asia/Shanghai">北京</option><option value="UTC">UTC</option></select></label>
   <label>风格 <select id="style"><option value="table">表格</option><option value="cards">卡片</option></select></label>
+  <span style="position:relative"><button id="colbtn" class="btn">字段</button><div id="colpick" class="pop"></div></span>
 </div>
 <main>
   <div id="positions" class="view on"></div>
@@ -636,7 +649,104 @@ function sortRows(rows, view, defKey, defDir) {
 function th(view, key, label, left) {
   const s = state.sort[view];
   const on = s && s.key === key;
-  return '<th class="' + (left ? 'l ' : '') + (on ? 'sorted ' + s.dir : '') + '" data-view="' + view + '" data-key="' + key + '">' + label + '</th>';
+  return '<th class="' + (left ? 'l ' : '') + (on ? 'sorted ' + s.dir : '') + '" data-view="' + view + '" data-key="' + key + '"' + (COLS[view] ? ' draggable="true"' : '') + '>' + label + '</th>';
+}
+
+// ── Tables: columns the reader can reorder (drag a header) and show or hide
+// (the 字段 button). Kept per table in this browser.
+const sym = r => '<span class="sym">' + esc(r.symbol) + '</span>';
+const money = (k, d = 2) => ({ r: r => sg(r[k], d), cls: r => cls(r[k]) });
+const COLS = {
+  positions: [
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + '<span class="pill">' + r.leverage + 'x</span><span class="pill">' + (r.marginMode === 'isolated' ? '逐仓' : '全仓') + '</span>' + side(r) },
+    { k: 'qty', l: '数量', r: r => n(r.qty, 4) },
+    { k: 'notional', l: '名义价值', r: r => n(r.notional) },
+    { k: 'entryPrice', l: '开仓价格', r: r => px(r.entryPrice) },
+    { k: 'breakEvenPrice', l: '损益两平价', r: r => r.breakEvenPrice ? px(r.breakEvenPrice) : '—' },
+    { k: 'markPrice', l: '标记价格', r: r => px(r.markPrice) },
+    { k: 'liquidationPrice', l: '强平价格', r: r => r.liquidationPrice ? px(r.liquidationPrice) : '—' },
+    { k: 'margin', l: '保证金', r: r => n(r.margin) },
+    { k: 'unrealizedPnl', l: '未实现盈亏', ...money('unrealizedPnl') },
+    { k: 'roiPct', l: '回报率', r: r => sg(r.roiPct) + '%', cls: r => cls(r.roiPct) },
+    { k: 'realizedSoFar', l: '本仓已实现', ...money('realizedSoFar') },
+    { k: 'feesSoFar', l: '本仓手续费', r: r => n(r.feesSoFar), hide: true },
+    { k: 'fundingSoFar', l: '本仓资金费', ...money('fundingSoFar') },
+    { k: 'openedAt', l: '开仓时间', r: r => r.openedAt ? fmtT(r.openedAt) : '区间前' },
+    { k: 'updateTime', l: '最后更新', r: r => fmtT(r.updateTime), hide: true },
+  ],
+  history: [
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + (r.leverage ? '<span class="pill">' + r.leverage + 'x</span>' : '') + side(r) + (r.closedAt ? '' : '<span class="pill">持仓中</span>') + (r.truncated ? '<span class="pill">区间前开仓</span>' : '') },
+    { k: 'tradePnl', l: '已实现盈亏', ...money('tradePnl') },
+    { k: 'roiPct', l: '收益率', r: r => sg(r.roiPct) + '%', cls: r => cls(r.roiPct) },
+    { k: 'closedQty', l: '已平仓量', r: r => n(r.closedQty, 4) },
+    { k: 'openAvg', l: '开仓价格', r: r => px(r.openAvg) },
+    { k: 'closeAvg', l: '平仓均价', r: r => px(r.closeAvg) },
+    { k: 'maxQty', l: '最大未平仓量', r: r => n(r.maxQty, 4) },
+    { k: 'maxNotional', l: '最大名义 (USD)', r: r => n(r.maxNotional) },
+    { k: 'volumeUsd', l: '交易量 (USD)', r: r => n(r.volumeUsd) },
+    { k: 'quoteFees', l: '手续费', r: r => n(r.quoteFees) },
+    { k: 'funding', l: '资金费', ...money('funding') },
+    { k: 'net', l: '净盈亏', ...money('net') },
+    { k: 'fillCount', l: '成交', r: r => r.fillCount },
+    { k: 'positionSide', l: '持仓方向', left: true, r: r => r.positionSide, hide: true },
+    { k: 'openedAt', l: '开仓时间', r: r => r.truncated ? '区间前' : fmtT(r.openedAt) },
+    { k: 'closedAt', l: '最后平仓时间', r: r => r.closedAt ? fmtT(r.closedAt) : '—' },
+  ],
+  fills: [
+    { k: 'time', l: '时间', left: true, r: r => fmtT(r.time) },
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) },
+    { k: 'positionSide', l: '持仓方向', left: true, r: r => r.positionSide, hide: !R.hedged },
+    { k: 'side', l: '方向', left: true, r: r => r.side === 'buy' ? '买入' : '卖出', cls: r => r.side === 'buy' ? 'up' : 'down' },
+    { k: 'price', l: '价格', r: r => px(r.price) },
+    { k: 'qty', l: '数量', r: r => n(r.qty, 4) },
+    { k: 'quoteQty', l: '成交额', r: r => n(r.quoteQty) },
+    { k: 'fee', l: '手续费', r: r => r.fee !== undefined ? n(r.fee, 6) + ' ' + esc(r.feeAsset || '') : '—' },
+    { k: 'realizedPnl', l: '已实现盈亏', r: r => r.realizedPnl !== undefined ? sg(r.realizedPnl, 4) : '—', cls: r => cls(r.realizedPnl) },
+    { k: 'maker', l: 'Maker', left: true, r: r => r.maker === undefined ? '—' : r.maker ? '是' : '否' },
+    { k: 'orderId', l: '订单号', left: true, r: r => esc(r.orderId) },
+    { k: 'id', l: '成交号', left: true, r: r => esc(r.id), hide: true },
+  ],
+  funding: [
+    { k: 'timestamp', l: '时间', left: true, r: r => fmtT(r.timestamp) },
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) },
+    { k: 'amount', l: '金额', r: r => sg(r.amount, 6), cls: r => cls(r.amount) },
+    { k: 'asset', l: '资产', left: true, r: r => esc(r.asset) },
+    { k: 'attributed', l: '归属', left: true, r: r => r.attributed ? '已计入仓位' : '<span class="pill">无对应仓位</span>' },
+  ],
+};
+state.cols = {};
+function colState(view) {
+  let st = state.cols[view];
+  if (st) return st;
+  const defs = COLS[view];
+  st = { order: defs.map(c => c.k), hidden: defs.filter(c => c.hide).map(c => c.k) };
+  try {
+    const saved = JSON.parse(localStorage.getItem('ow.cols.' + view));
+    if (saved && Array.isArray(saved.order)) {
+      st.order = [...saved.order.filter(k => defs.some(c => c.k === k)), ...st.order.filter(k => !saved.order.includes(k))];
+      st.hidden = (saved.hidden || []).filter(k => defs.some(c => c.k === k));
+    }
+  } catch {}
+  state.cols[view] = st;
+  return st;
+}
+function saveCols(view) { try { localStorage.setItem('ow.cols.' + view, JSON.stringify(state.cols[view])); } catch {} }
+function visibleCols(view) { const st = colState(view), defs = COLS[view]; return st.order.filter(k => !st.hidden.includes(k)).map(k => defs.find(c => c.k === k)); }
+function table(view, rows) {
+  const cols = visibleCols(view);
+  return '<table><thead><tr>' + cols.map(c => th(view, c.k, c.l, c.left)).join('') + '</tr></thead><tbody>' +
+    rows.map(r => '<tr>' + cols.map(c => '<td class="' + (c.left ? 'l ' : '') + (c.cls ? c.cls(r) : '') + '">' + c.r(r) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+}
+function moveCol(view, from, to) {
+  const st = colState(view), order = st.order.filter(k => k !== from), at = order.indexOf(to);
+  order.splice(at < 0 ? order.length : at, 0, from);
+  st.order = order; saveCols(view); render();
+}
+function renderColPicker() {
+  const view = state.view, pick = $('#colpick');
+  if (!COLS[view]) { pick.style.display = 'none'; return; }
+  const st = colState(view), defs = COLS[view];
+  pick.innerHTML = '<div class="pophead">字段 · 拖动表头可调整顺序 <a href="#" id="colreset">重置</a></div>' + st.order.map(k => { const c = defs.find(d => d.k === k); return '<label><input type="checkbox" data-col="' + k + '"' + (st.hidden.includes(k) ? '' : ' checked') + '> ' + c.l + '</label>'; }).join('');
 }
 
 function renderPositions() {
@@ -656,14 +766,11 @@ function renderPositions() {
         <div><div class="k">强平价格</div><div class="v">\${r.liquidationPrice ? px(r.liquidationPrice) : '—'}</div></div>
         <div><div class="k">保证金</div><div class="v">\${n(r.margin)}</div></div>
         <div><div class="k">未实现盈亏 (回报率)</div><div class="v \${cls(r.unrealizedPnl)}">\${sg(r.unrealizedPnl)} (\${sg(r.roiPct)}%)</div></div>
-        <div><div class="k">区间内已实现</div><div class="v \${cls(r.realizedSoFar)}">\${sg(r.realizedSoFar)}</div></div>
-        <div><div class="k">区间内手续费 / 资金费</div><div class="v">\${n(r.feesSoFar)} / <span class="\${cls(r.fundingSoFar)}">\${sg(r.fundingSoFar)}</span></div></div>
+        <div><div class="k">本仓已实现</div><div class="v \${cls(r.realizedSoFar)}">\${sg(r.realizedSoFar)}</div></div>
+        <div><div class="k">本仓手续费 / 资金费</div><div class="v">\${n(r.feesSoFar)} / <span class="\${cls(r.fundingSoFar)}">\${sg(r.fundingSoFar)}</span></div></div>
       </div>
     </div>\`).join('');
-  return '<table><thead><tr>' + th('positions','symbol','合约',true) + th('positions','qty','数量') + th('positions','notional','名义价值') + th('positions','entryPrice','开仓价格') + th('positions','breakEvenPrice','损益两平价') + th('positions','markPrice','标记价格') + th('positions','liquidationPrice','强平价格') + th('positions','margin','保证金') + th('positions','unrealizedPnl','未实现盈亏') + th('positions','roiPct','回报率') + th('positions','realizedSoFar','区间内已实现') + th('positions','fundingSoFar','区间内资金费') + th('positions','openedAt','开仓时间') + '</tr></thead><tbody>' +
-    rows.map(r => '<tr><td class="l"><span class="sym">' + esc(r.symbol) + '</span><span class="pill">' + r.leverage + 'x</span><span class="pill">' + (r.marginMode === 'isolated' ? '逐仓' : '全仓') + '</span>' + side(r) + '</td>' +
-      '<td>' + n(r.qty, 4) + '</td><td>' + n(r.notional) + '</td><td>' + px(r.entryPrice) + '</td><td>' + (r.breakEvenPrice ? px(r.breakEvenPrice) : '—') + '</td><td>' + px(r.markPrice) + '</td><td>' + (r.liquidationPrice ? px(r.liquidationPrice) : '—') + '</td><td>' + n(r.margin) + '</td>' +
-      '<td class="' + cls(r.unrealizedPnl) + '">' + sg(r.unrealizedPnl) + '</td><td class="' + cls(r.roiPct) + '">' + sg(r.roiPct) + '%</td><td class="' + cls(r.realizedSoFar) + '">' + sg(r.realizedSoFar) + '</td><td class="' + cls(r.fundingSoFar) + '">' + sg(r.fundingSoFar) + '</td><td>' + (r.openedAt ? fmtT(r.openedAt) : '区间前') + '</td></tr>').join('') + '</tbody></table>';
+  return table('positions', rows);
 }
 
 function renderHistory() {
@@ -675,13 +782,13 @@ function renderHistory() {
   // the range, which no single episode says.
   const bySym = new Map();
   for (const r of all) {
-    const a = bySym.get(r.symbol) || { symbol: r.symbol, episodes: 0, open: 0, closedQty: 0, tradePnl: 0, quoteFees: 0, funding: 0, net: 0 };
-    a.episodes++; if (!r.closedAt) a.open++; a.closedQty += r.closedQty; a.tradePnl += r.tradePnl; a.quoteFees += r.quoteFees; a.funding += r.funding; a.net += r.net;
+    const a = bySym.get(r.symbol) || { symbol: r.symbol, episodes: 0, open: 0, closedQty: 0, volumeUsd: 0, maxNotional: 0, tradePnl: 0, quoteFees: 0, funding: 0, net: 0 };
+    a.episodes++; if (!r.closedAt) a.open++; a.closedQty += r.closedQty; a.volumeUsd += r.volumeUsd; a.maxNotional = Math.max(a.maxNotional, r.maxNotional); a.tradePnl += r.tradePnl; a.quoteFees += r.quoteFees; a.funding += r.funding; a.net += r.net;
     bySym.set(r.symbol, a);
   }
   const sums = sortRows([...bySym.values()], 'historySum', 'net', 'desc');
-  const summary = '<details' + (state.sumOpen ? ' open' : '') + ' id="history-sum"><summary style="cursor:pointer;color:var(--muted);padding:6px 0">按合约汇总（' + sums.length + ' 个合约）</summary><table><thead><tr>' + th('historySum','symbol','合约',true) + th('historySum','episodes','仓位段') + th('historySum','closedQty','已平仓量') + th('historySum','tradePnl','已实现盈亏') + th('historySum','quoteFees','手续费') + th('historySum','funding','资金费') + th('historySum','net','净盈亏') + '</tr></thead><tbody>' +
-    sums.map(a => '<tr><td class="l sym">' + esc(a.symbol) + '</td><td>' + a.episodes + (a.open ? ' <span class="pill">' + a.open + ' 持仓中</span>' : '') + '</td><td>' + n(a.closedQty, 4) + '</td><td class="' + cls(a.tradePnl) + '">' + sg(a.tradePnl) + '</td><td>' + n(a.quoteFees) + '</td><td class="' + cls(a.funding) + '">' + sg(a.funding) + '</td><td class="' + cls(a.net) + '">' + sg(a.net) + '</td></tr>').join('') + '</tbody></table></details>';
+  const summary = '<details' + (state.sumOpen ? ' open' : '') + ' id="history-sum"><summary style="cursor:pointer;color:var(--muted);padding:6px 0">按合约汇总（' + sums.length + ' 个合约）</summary><table><thead><tr>' + th('historySum','symbol','合约',true) + th('historySum','episodes','仓位段') + th('historySum','closedQty','已平仓量') + th('historySum','volumeUsd','交易量 (USD)') + th('historySum','maxNotional','最大名义 (USD)') + th('historySum','tradePnl','已实现盈亏') + th('historySum','quoteFees','手续费') + th('historySum','funding','资金费') + th('historySum','net','净盈亏') + '</tr></thead><tbody>' +
+    sums.map(a => '<tr><td class="l sym">' + esc(a.symbol) + '</td><td>' + a.episodes + (a.open ? ' <span class="pill">' + a.open + ' 持仓中</span>' : '') + '</td><td>' + n(a.closedQty, 4) + '</td><td>' + n(a.volumeUsd) + '</td><td>' + n(a.maxNotional) + '</td><td class="' + cls(a.tradePnl) + '">' + sg(a.tradePnl) + '</td><td>' + n(a.quoteFees) + '</td><td class="' + cls(a.funding) + '">' + sg(a.funding) + '</td><td class="' + cls(a.net) + '">' + sg(a.net) + '</td></tr>').join('') + '</tbody></table></details>';
   if (state.style === 'cards') return summary + rows.map(r => \`
     <div class="card">
       <div class="head"><div><span class="sym">\${esc(r.symbol)}</span><span class="pill">永续\${r.leverage ? ' ' + r.leverage + 'x' : ''}</span>\${r.marginMode ? '<span class="pill">' + (r.marginMode === 'isolated' ? '逐仓' : '全仓') + '</span>' : ''}\${side(r)}<span class="pill">\${r.closedAt ? '全部平仓' : '持仓中'}</span>\${r.truncated ? '<span class="pill">区间前开仓</span>' : ''}</div>
@@ -693,14 +800,13 @@ function renderHistory() {
         <div><div class="k">开仓价格</div><div class="v">\${px(r.openAvg)}</div></div>
         <div><div class="k">平仓均价</div><div class="v">\${px(r.closeAvg)}</div></div>
         <div><div class="k">最大未平仓合约量</div><div class="v">\${n(r.maxQty, 4)}</div></div>
+        <div><div class="k">最大名义 / 交易量 (USD)</div><div class="v">\${n(r.maxNotional)} / \${n(r.volumeUsd)}</div></div>
         <div><div class="k">手续费 / 资金费</div><div class="v">\${n(r.quoteFees)} / <span class="\${cls(r.funding)}">\${sg(r.funding)}</span></div></div>
         <div><div class="k">净盈亏</div><div class="v \${cls(r.net)}">\${sg(r.net)}</div></div>
         <div><div class="k">成交笔数</div><div class="v">\${r.fillCount}</div></div>
       </div>
     </div>\`).join('');
-  return summary + '<table><thead><tr>' + th('history','symbol','合约',true) + th('history','tradePnl','已实现盈亏') + th('history','roiPct','收益率') + th('history','closedQty','已平仓量') + th('history','openAvg','开仓价格') + th('history','closeAvg','平仓均价') + th('history','maxQty','最大未平仓量') + th('history','quoteFees','手续费') + th('history','funding','资金费') + th('history','net','净盈亏') + th('history','fillCount','成交') + th('history','openedAt','开仓时间') + th('history','closedAt','最后平仓时间') + '</tr></thead><tbody>' +
-    rows.map(r => '<tr><td class="l"><span class="sym">' + esc(r.symbol) + '</span>' + (r.leverage ? '<span class="pill">' + r.leverage + 'x</span>' : '') + side(r) + (r.closedAt ? '' : '<span class="pill">持仓中</span>') + (r.truncated ? '<span class="pill">区间前开仓</span>' : '') + '</td>' +
-      '<td class="' + cls(r.tradePnl) + '">' + sg(r.tradePnl) + '</td><td class="' + cls(r.roiPct) + '">' + sg(r.roiPct) + '%</td><td>' + n(r.closedQty, 4) + '</td><td>' + px(r.openAvg) + '</td><td>' + px(r.closeAvg) + '</td><td>' + n(r.maxQty, 4) + '</td><td>' + n(r.quoteFees) + '</td><td class="' + cls(r.funding) + '">' + sg(r.funding) + '</td><td class="' + cls(r.net) + '">' + sg(r.net) + '</td><td>' + r.fillCount + '</td><td>' + (r.truncated ? '区间前' : fmtT(r.openedAt)) + '</td><td>' + (r.closedAt ? fmtT(r.closedAt) : '—') + '</td></tr>').join('') + '</tbody></table>';
+  return summary + table('history', rows);
 }
 
 function renderFills() {
@@ -708,8 +814,7 @@ function renderFills() {
   const rows = sortRows(all, 'fills', 'time', 'desc');
   $('#n-fills').textContent = '(' + R.fills.length + ')';
   if (!rows.length) return '<div class="empty">区间内没有成交</div>';
-  return '<table><thead><tr>' + th('fills','time','时间',true) + th('fills','symbol','合约',true) + th('fills','side','方向',true) + th('fills','price','价格') + th('fills','qty','数量') + th('fills','quoteQty','成交额') + th('fills','fee','手续费') + th('fills','realizedPnl','已实现盈亏') + th('fills','maker','Maker',true) + th('fills','orderId','订单号',true) + '</tr></thead><tbody>' +
-    rows.map(r => '<tr><td class="l">' + fmtT(r.time) + '</td><td class="l sym">' + esc(r.symbol) + (R.hedged ? '<span class="pill">' + r.positionSide + '</span>' : '') + '</td><td class="l ' + (r.side === 'buy' ? 'up' : 'down') + '">' + (r.side === 'buy' ? '买入' : '卖出') + '</td><td>' + px(r.price) + '</td><td>' + n(r.qty, 4) + '</td><td>' + n(r.quoteQty) + '</td><td>' + (r.fee !== undefined ? n(r.fee, 6) + ' ' + esc(r.feeAsset || '') : '—') + '</td><td class="' + cls(r.realizedPnl) + '">' + (r.realizedPnl !== undefined ? sg(r.realizedPnl, 4) : '—') + '</td><td class="l">' + (r.maker === undefined ? '—' : r.maker ? '是' : '否') + '</td><td class="l">' + esc(r.orderId) + '</td></tr>').join('') + '</tbody></table>';
+  return table('fills', rows);
 }
 
 function renderFunding() {
@@ -718,8 +823,7 @@ function renderFunding() {
   $('#n-funding').textContent = '(' + R.funding.length + ')';
   if (!rows.length) return '<div class="empty">区间内没有资金费记录</div>';
   const sum = all.reduce((s, r) => s + r.amount, 0);
-  return '<div class="totals"><span>筛选合计 <b class="' + cls(sum) + '">' + sg(sum, 4) + '</b></span></div><table><thead><tr>' + th('funding','timestamp','时间',true) + th('funding','symbol','合约',true) + th('funding','amount','金额') + th('funding','asset','资产',true) + th('funding','attributed','归属',true) + '</tr></thead><tbody>' +
-    rows.map(r => '<tr><td class="l">' + fmtT(r.timestamp) + '</td><td class="l sym">' + esc(r.symbol) + '</td><td class="' + cls(r.amount) + '">' + sg(r.amount, 6) + '</td><td class="l">' + esc(r.asset) + '</td><td class="l">' + (r.attributed ? '已计入仓位' : '<span class="pill">无对应仓位</span>') + '</td></tr>').join('') + '</tbody></table>';
+  return '<div class="totals"><span>筛选合计 <b class="' + cls(sum) + '">' + sg(sum, 4) + '</b></span></div>' + table('funding', rows);
 }
 
 // ── Equity curve: 0 at the first fill, then every fill's realized PnL and
@@ -833,9 +937,19 @@ function render() {
   $('#history').innerHTML = renderHistory();
   $('#fills').innerHTML = renderFills();
   $('#funding').innerHTML = renderFunding();
+  $('#colbtn').style.display = COLS[state.view] ? '' : 'none';
   renderCurve();
 }
 document.addEventListener('toggle', e => { if (e.target.id === 'history-sum') state.sumOpen = e.target.open; }, true);
+let dragKey = null;
+document.addEventListener('dragstart', e => { const h = e.target.closest && e.target.closest('th[draggable]'); if (!h) return; dragKey = { view: h.dataset.view, key: h.dataset.key }; e.dataTransfer.effectAllowed = 'move'; });
+document.addEventListener('dragover', e => { const h = e.target.closest && e.target.closest('th[draggable]'); if (!h || !dragKey || h.dataset.view !== dragKey.view) return; e.preventDefault(); h.classList.add('dragover'); });
+document.addEventListener('dragleave', e => { const h = e.target.closest && e.target.closest('th[draggable]'); if (h) h.classList.remove('dragover'); });
+document.addEventListener('drop', e => { const h = e.target.closest && e.target.closest('th[draggable]'); if (!h || !dragKey || h.dataset.view !== dragKey.view) return; e.preventDefault(); if (h.dataset.key !== dragKey.key) moveCol(dragKey.view, dragKey.key, h.dataset.key); dragKey = null; });
+$('#colbtn').addEventListener('click', e => { e.stopPropagation(); renderColPicker(); $('#colpick').classList.toggle('on'); });
+$('#colpick').addEventListener('click', e => e.stopPropagation());
+$('#colpick').addEventListener('change', e => { const k = e.target.dataset.col; if (!k) return; const st = colState(state.view); st.hidden = e.target.checked ? st.hidden.filter(x => x !== k) : [...st.hidden, k]; saveCols(state.view); render(); });
+document.addEventListener('click', e => { if (e.target.id === 'colreset') { e.preventDefault(); delete state.cols[state.view]; try { localStorage.removeItem('ow.cols.' + state.view); } catch {} renderColPicker(); render(); return; } $('#colpick').classList.remove('on'); });
 document.addEventListener('click', e => {
   const tab = e.target.closest('.tab');
   if (tab) { state.view = tab.dataset.view; render(); return; }

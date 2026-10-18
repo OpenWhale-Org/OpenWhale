@@ -42,6 +42,8 @@ export interface Episode {
   closeAvg: number
   /** Venue-reported realized position PnL across the episode's fills. */
   tradePnl: number
+  /** Quote traded across the episode's fills, opening and closing both. */
+  volume: number
   /** Fees by asset, as positive costs. */
   fees: Record<string, number>
   /** Funding payments attributed to the episode (positive = received). */
@@ -70,7 +72,7 @@ function newEpisode(f: ExchangeFill, side: PositionSide, direction: 'long' | 'sh
     symbol: f.symbol, positionSide: side, direction,
     openedAt: f.timestamp, status: 'open', truncated,
     openedQty: 0, closedQty: 0, maxQty: 0, remainingQty: 0,
-    openAvg: 0, closeAvg: 0, tradePnl: 0, fees: {}, funding: 0,
+    openAvg: 0, closeAvg: 0, tradePnl: 0, volume: 0, fees: {}, funding: 0,
     fillCount: 0, fillIds: [],
   }
 }
@@ -123,6 +125,7 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
         book.closeNotional += f.qty * f.price
         e.closeAvg = book.closeNotional / e.closedQty
         e.tradePnl += f.realizedPnl ?? 0
+        e.volume += f.qty * f.price
         addFee(e, f, 1)
         e.fillCount++
         e.fillIds.push(f.id)
@@ -141,6 +144,7 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
       e.openedQty += f.qty
       book.openNotional += f.qty * f.price
       e.openAvg = book.openNotional / e.openedQty
+      e.volume += f.qty * f.price
       addFee(e, f, 1)
       e.fillCount++
       e.fillIds.push(f.id)
@@ -158,6 +162,7 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
     book.closeNotional += closeQty * f.price
     e.closeAvg = book.closeNotional / e.closedQty
     e.tradePnl += f.realizedPnl ?? 0
+    e.volume += closeQty * f.price
     addFee(e, f, overshoot > EPS ? closeShare : 1)
     e.fillCount++
     e.fillIds.push(f.id)
@@ -178,6 +183,7 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
       next.episode.openAvg = f.price
       next.episode.maxQty = overshoot
       next.episode.remainingQty = overshoot
+      next.episode.volume = overshoot * f.price
       addFee(next.episode, f, 1 - closeShare)
       next.episode.fillCount++
       next.episode.fillIds.push(f.id)
