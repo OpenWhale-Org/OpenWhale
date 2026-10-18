@@ -671,7 +671,18 @@ function renderHistory() {
   const rows = sortRows(all, 'history', 'closedAt', 'desc');
   $('#n-history').textContent = '(' + R.history.length + ')';
   if (!rows.length) return '<div class="empty">区间内没有仓位记录</div>';
-  if (state.style === 'cards') return rows.map(r => \`
+  // Per-contract totals over the filtered episodes: what the contract made in
+  // the range, which no single episode says.
+  const bySym = new Map();
+  for (const r of all) {
+    const a = bySym.get(r.symbol) || { symbol: r.symbol, episodes: 0, open: 0, closedQty: 0, tradePnl: 0, quoteFees: 0, funding: 0, net: 0 };
+    a.episodes++; if (!r.closedAt) a.open++; a.closedQty += r.closedQty; a.tradePnl += r.tradePnl; a.quoteFees += r.quoteFees; a.funding += r.funding; a.net += r.net;
+    bySym.set(r.symbol, a);
+  }
+  const sums = sortRows([...bySym.values()], 'historySum', 'net', 'desc');
+  const summary = '<details' + (state.sumOpen ? ' open' : '') + ' id="history-sum"><summary style="cursor:pointer;color:var(--muted);padding:6px 0">按合约汇总（' + sums.length + ' 个合约）</summary><table><thead><tr>' + th('historySum','symbol','合约',true) + th('historySum','episodes','仓位段') + th('historySum','closedQty','已平仓量') + th('historySum','tradePnl','已实现盈亏') + th('historySum','quoteFees','手续费') + th('historySum','funding','资金费') + th('historySum','net','净盈亏') + '</tr></thead><tbody>' +
+    sums.map(a => '<tr><td class="l sym">' + esc(a.symbol) + '</td><td>' + a.episodes + (a.open ? ' <span class="pill">' + a.open + ' 持仓中</span>' : '') + '</td><td>' + n(a.closedQty, 4) + '</td><td class="' + cls(a.tradePnl) + '">' + sg(a.tradePnl) + '</td><td>' + n(a.quoteFees) + '</td><td class="' + cls(a.funding) + '">' + sg(a.funding) + '</td><td class="' + cls(a.net) + '">' + sg(a.net) + '</td></tr>').join('') + '</tbody></table></details>';
+  if (state.style === 'cards') return summary + rows.map(r => \`
     <div class="card">
       <div class="head"><div><span class="sym">\${esc(r.symbol)}</span><span class="pill">永续\${r.leverage ? ' ' + r.leverage + 'x' : ''}</span>\${r.marginMode ? '<span class="pill">' + (r.marginMode === 'isolated' ? '逐仓' : '全仓') + '</span>' : ''}\${side(r)}<span class="pill">\${r.closedAt ? '全部平仓' : '持仓中'}</span>\${r.truncated ? '<span class="pill">区间前开仓</span>' : ''}</div>
         <div class="when">\${r.truncated ? '区间前' : fmtT(r.openedAt)} 开仓时间 | \${r.closedAt ? fmtT(r.closedAt) + ' 最后平仓时间' : '未平'}</div></div>
@@ -687,7 +698,7 @@ function renderHistory() {
         <div><div class="k">成交笔数</div><div class="v">\${r.fillCount}</div></div>
       </div>
     </div>\`).join('');
-  return '<table><thead><tr>' + th('history','symbol','合约',true) + th('history','tradePnl','已实现盈亏') + th('history','roiPct','收益率') + th('history','closedQty','已平仓量') + th('history','openAvg','开仓价格') + th('history','closeAvg','平仓均价') + th('history','maxQty','最大未平仓量') + th('history','quoteFees','手续费') + th('history','funding','资金费') + th('history','net','净盈亏') + th('history','fillCount','成交') + th('history','openedAt','开仓时间') + th('history','closedAt','最后平仓时间') + '</tr></thead><tbody>' +
+  return summary + '<table><thead><tr>' + th('history','symbol','合约',true) + th('history','tradePnl','已实现盈亏') + th('history','roiPct','收益率') + th('history','closedQty','已平仓量') + th('history','openAvg','开仓价格') + th('history','closeAvg','平仓均价') + th('history','maxQty','最大未平仓量') + th('history','quoteFees','手续费') + th('history','funding','资金费') + th('history','net','净盈亏') + th('history','fillCount','成交') + th('history','openedAt','开仓时间') + th('history','closedAt','最后平仓时间') + '</tr></thead><tbody>' +
     rows.map(r => '<tr><td class="l"><span class="sym">' + esc(r.symbol) + '</span>' + (r.leverage ? '<span class="pill">' + r.leverage + 'x</span>' : '') + side(r) + (r.closedAt ? '' : '<span class="pill">持仓中</span>') + (r.truncated ? '<span class="pill">区间前开仓</span>' : '') + '</td>' +
       '<td class="' + cls(r.tradePnl) + '">' + sg(r.tradePnl) + '</td><td class="' + cls(r.roiPct) + '">' + sg(r.roiPct) + '%</td><td>' + n(r.closedQty, 4) + '</td><td>' + px(r.openAvg) + '</td><td>' + px(r.closeAvg) + '</td><td>' + n(r.maxQty, 4) + '</td><td>' + n(r.quoteFees) + '</td><td class="' + cls(r.funding) + '">' + sg(r.funding) + '</td><td class="' + cls(r.net) + '">' + sg(r.net) + '</td><td>' + r.fillCount + '</td><td>' + (r.truncated ? '区间前' : fmtT(r.openedAt)) + '</td><td>' + (r.closedAt ? fmtT(r.closedAt) : '—') + '</td></tr>').join('') + '</tbody></table>';
 }
@@ -824,6 +835,7 @@ function render() {
   $('#funding').innerHTML = renderFunding();
   renderCurve();
 }
+document.addEventListener('toggle', e => { if (e.target.id === 'history-sum') state.sumOpen = e.target.open; }, true);
 document.addEventListener('click', e => {
   const tab = e.target.closest('.tab');
   if (tab) { state.view = tab.dataset.view; render(); return; }
