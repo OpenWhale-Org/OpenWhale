@@ -171,9 +171,10 @@ tfoot td{border-top:1px solid var(--rule-2);border-bottom:none;background:var(--
 .prose input:checked::after{transform:translateX(14px);background:var(--accent)}
 .prose input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Timestamps are written UTC, because a report is usually read somewhere
-   other than where it was produced; the switch is next to Notes so the two
-   reader-preference controls live in one place. */
-.prose.tz{margin-left:18px}
+   other than where it was produced; the switch sits on one row with Notes so
+   the two reader-preference controls live in one place. */
+.switches{display:flex;flex-wrap:wrap;align-items:center;gap:0 18px}
+.switches .prose{margin:0}
 body.terse p.lede,body.terse p.dim,body.terse p.note,body.terse footer{display:none}
 /* A jump target must not sit flush against the top: a heading hidden under
    the toolbar is a jump that did not arrive. */
@@ -373,8 +374,8 @@ ${REPORT_CSS}
 <header>
   <div class="eyebrow">${esc(o.eyebrow)}</div>
   <h1>${esc(o.h1)}</h1>
-  <label class="prose"><input type="checkbox" id="prose"><span>Notes</span></label>
-  <label class="prose tz"><input type="checkbox" id="tz"><span>Local time</span></label>
+  <div class="switches"><label class="prose"><input type="checkbox" id="prose"><span>Notes</span></label>
+  <label class="prose tz"><input type="checkbox" id="tz"><span>Local time</span></label></div>
   ${o.lede !== undefined ? `<p class="lede">${esc(o.lede)}</p>` : ''}
   ${ident}
 </header>
