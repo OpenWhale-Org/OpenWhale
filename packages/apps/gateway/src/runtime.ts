@@ -8,6 +8,7 @@ import { hyperliquidPlugin } from '@openwhaleorg/hyperliquid'
 import { whaledancePlugin } from '@openwhaleorg/whaledance'
 import { examplesPlugin } from '@openwhaleorg/examples'
 import { binancePlugin } from '@openwhaleorg/binance'
+import { ccxtPlugin } from '@openwhaleorg/ccxt-adapter'
 import { asterPlugin } from '@openwhaleorg/aster'
 import { variationalPlugin } from '@openwhaleorg/variational'
 import { allVenuePlugins } from '@openwhaleorg/venues'
@@ -73,6 +74,7 @@ function createRuntime(): OpenWhaleRuntime {
   runtime.loadPlugin(hyperliquidPlugin, {})
   runtime.loadPlugin(whaledancePlugin, {})
   runtime.loadPlugin(binancePlugin, {})
+  runtime.loadPlugin(ccxtPlugin, {})
   runtime.loadPlugin(asterPlugin, {})
   // Market data only until Variational opens its trading API.
   runtime.loadPlugin(variationalPlugin, {})

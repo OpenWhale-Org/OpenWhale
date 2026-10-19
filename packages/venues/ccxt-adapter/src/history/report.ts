@@ -1,77 +1,11 @@
-import { z } from 'zod'
-import { reportPage, esc, reportStamp, cls as tone, type AccountView, type ScriptDefinition } from '@openwhaleorg/core'
-import type { ExchangeFill, FundingEvent } from '@openwhaleorg/exchange'
-import { restHeldUntil } from '@openwhaleorg/ccxt-adapter'
-import type { BinanceAdapter } from '../adapter.js'
-import { replayFills, attributeFunding, returnPct, type Episode } from '../positionHistory.js'
+import { reportPage, esc, reportStamp, cls as tone } from '@openwhaleorg/core'
+import type { FundingEvent } from '@openwhaleorg/exchange'
 
 /**
- * One Binance futures account, the way Binance's own page shows it: open
- * positions, position history, fills and funding — for a time range,
- * from the venue, into one HTML report with those four tabs.
- *
- * Everything is read from the account itself, whoever placed the orders:
- * contracts are discovered from the income ledger (every fill leaves a
- * commission row there), then each contract's fills are read in the 7-day
- * windows `userTrades` allows. The reads are paced and stop at once if the
- * venue is holding this process's REST — a month of a busy account is a few
- * hundred weight-5 calls, and 2026-10-14 showed what a burst of those costs.
+ * The account report: Binance's four tabs plus an equity curve, for any
+ * perp account the collector can read. Pure data in, one self-contained HTML
+ * file out.
  */
-
-const paramsSchema = z.object({
-  account: z.string().default('').meta({
-    displayName: 'Account',
-    description: 'A Binance futures account with a bound credential. Leave empty to use the sole ready one.',
-    i18n: { 'zh-CN': { displayName: '账户', description: '已绑定凭证的币安合约账户。留空则使用唯一一个可用账户。' } },
-  }),
-  from: z.string().default('').meta({
-    displayName: 'From',
-    description: 'Start of the range. Empty = 30 days before "To".',
-    widget: 'datetime',
-    i18n: { 'zh-CN': { displayName: '开始时刻', description: '区间起点（按本机时间选，存成 UTC）。留空 = 截止时刻往前 30 天。' } },
-  }),
-  to: z.string().default('').meta({
-    displayName: 'To',
-    description: 'End of the range. Empty = now.',
-    widget: 'datetime',
-    i18n: { 'zh-CN': { displayName: '截止时刻', description: '区间终点。留空 = 现在。' } },
-  }),
-  symbols: z.string().default('').meta({
-    displayName: 'Contracts',
-    description: 'Comma-separated, e.g. SOXS/USDT:USDT, SOXL/USDT:USDT. Empty = every contract the account traded in the range.',
-    i18n: { 'zh-CN': { displayName: '合约', description: '逗号分隔，如 SOXS/USDT:USDT, SOXL/USDT:USDT。留空 = 区间内账户交易过的全部合约。' } },
-  }),
-})
-
-const DAY_MS = 24 * 3600_000
-const DEFAULT_RANGE_MS = 30 * DAY_MS
-/** userTrades refuses a window over 7 days; a little under keeps clear of the venue's rounding. */
-const FILL_WINDOW_MS = 6.5 * DAY_MS
-const FILL_PAGE = 1000
-const FUNDING_PAGE = 1000
-/** Between venue calls. Weight 5 each: ~240 weight a minute, a tenth of the IP budget. */
-const PACE_MS = 250
-const MAX_PAGES_PER_WINDOW = 50
-
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
-const parseInstant = (raw: string): number | null | undefined => {
-  if (!raw.trim()) return null
-  const t = Date.parse(raw.trim())
-  return Number.isFinite(t) ? t : undefined
-}
-const quoteOf = (symbol: string): string => symbol.split(':')[1] ?? symbol.split('/')[1] ?? 'USDT'
-const iso = (ms: number | undefined) => (ms === undefined ? '—' : new Date(ms).toISOString().replace('T', ' ').slice(0, 19))
-const num = (v: number | undefined, d = 2) => (v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(d))
-const signed = (v: number | undefined, d = 2) => (v === undefined || !Number.isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(d)}`)
-const pad = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-const lpad = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
-
-interface LeverageRow { longLeverage?: number; shortLeverage?: number; marginMode?: string }
-
-type Runtime = {
-  listAccounts(): Promise<AccountView[]>
-  adapters: { resolve<T>(kind: string, type: string, credentialName?: string): Promise<T> }
-}
 
 export interface PositionRow {
   symbol: string
@@ -124,6 +58,8 @@ export interface HistoryRow {
   fillCount: number
   fillIds: string[]
   quote: string
+  /** The venue reported no PnL on some closing fill; it was taken from the averages. */
+  estimated?: boolean
 }
 
 export interface FillRow {
@@ -144,6 +80,10 @@ export interface FillRow {
 
 export interface Report {
   account: string
+  /** Venue name as the account names it: 'binance', 'hyperliquid', … */
+  venue: string
+  /** 'native': the venue package's own path. 'ccxt': the generic ccxt path. */
+  source: 'native' | 'ccxt'
   unified: boolean
   hedged: boolean
   from: number
@@ -167,301 +107,6 @@ export interface Report {
     openPositions: number
     fills: number
   }
-}
-
-export const accountHistoryScript: ScriptDefinition = {
-  id: 'account-history',
-  name: { en: 'Account history (positions, history, fills, funding)', 'zh-CN': '账户交易历史（持仓 / 仓位历史 / 成交 / 资金费）' },
-  description: {
-    en: 'Read one Binance futures account from the venue for a time range and produce Binance\'s own four tabs as an HTML report. Read-only.',
-    'zh-CN': '按时间范围从币安读取一个合约账户的全部交易，生成与币安页面一致的四个页签（当前持仓 / 仓位历史 / 历史成交 / 资金费用）的 HTML 报告。只读。',
-  },
-  paramsSchema,
-
-  paramOptions: async (runtime) => {
-    const rt = runtime as Runtime
-    const accounts = await rt.listAccounts()
-    return {
-      account: accounts
-        .filter(a => a.type === 'binance' && (a.kind ?? 'exchange/perp') === 'exchange/perp' && a.status === 'ready')
-        .map(a => ({ value: a.name, label: a.name })),
-    }
-  },
-
-  run: async ({ params, runtime, emit, signal }) => {
-    const p = paramsSchema.parse(params)
-    const rt = runtime as Runtime
-    const out: string[] = []
-    const say = (s = '') => { out.push(s); emit?.(s) }
-
-    const ready = (await rt.listAccounts())
-      .filter(a => a.type === 'binance' && (a.kind ?? 'exchange/perp') === 'exchange/perp' && a.status === 'ready')
-    if (ready.length === 0) return { text: 'No ready Binance futures account.' }
-    const account = p.account === '' ? (ready.length === 1 ? ready[0] : undefined) : ready.find(a => a.name === p.account)
-    if (!account) {
-      return { text: p.account === ''
-        ? `${ready.length} accounts are ready, pick one: ${ready.map(a => a.name).join(', ')}`
-        : `No ready Binance futures account named "${p.account}"` }
-    }
-    if (!account.credential) return { text: `Account "${account.name}" has no bound credential` }
-
-    const toMs = parseInstant(p.to), fromMs = parseInstant(p.from)
-    if (toMs === undefined) return { text: `"To" is not a time: ${p.to}` }
-    if (fromMs === undefined) return { text: `"From" is not a time: ${p.from}` }
-    const to = toMs ?? Date.now()
-    const from = fromMs ?? to - DEFAULT_RANGE_MS
-    if (from >= to) return { text: 'The range is empty: "From" is not before "To".' }
-
-    const session = await rt.adapters.resolve<BinanceAdapter>('exchange/perp', 'binance', account.credential)
-    const unified = session.isUnifiedAccount
-    const notes: string[] = []
-    let complete = true
-
-    const aborted = () => signal?.aborted === true
-    const held = () => restHeldUntil('binanceusdm')
-    /** One venue call, paced, abandoned when the venue is holding us or the operator stopped. */
-    const venue = async <T>(what: string, call: () => Promise<T>): Promise<T | undefined> => {
-      if (aborted()) { complete = false; return undefined }
-      const until = held()
-      if (until !== undefined) {
-        complete = false
-        notes.push(`Binance REST is held until ${iso(until)} — ${what} not read`)
-        return undefined
-      }
-      try {
-        return await call()
-      } catch (err) {
-        complete = false
-        notes.push(`${what}: ${(err as Error).message}`)
-        return undefined
-      } finally {
-        await sleep(PACE_MS)
-      }
-    }
-
-    say(`Account   ${account.name}${unified ? ' (Portfolio Margin)' : ''}`)
-    say(`Range     ${iso(from)} → ${iso(to)} UTC`)
-
-    const mode = await venue('position mode', () => session.fetchPositionMode())
-    const hedged = mode?.hedged ?? false
-    say(`Mode      ${hedged ? 'hedge' : 'one-way'}`)
-
-    // ── Discovery ────────────────────────────────────────────────────────────
-    const positions = (await venue('positions', () => session.fetchPositions())) ?? []
-    const wanted = new Set<string>()
-    for (const s of p.symbols.split(',').map(s => s.trim()).filter(Boolean)) wanted.add(s)
-    if (wanted.size === 0) {
-      emit?.('Discovering contracts from the income ledger…')
-      const traded = (await venue('traded contracts', () => session.fetchTradedSymbols(from, 1000, to))) ?? []
-      for (const s of traded) wanted.add(s)
-      for (const pos of positions) if (pos.contracts !== 0) wanted.add(pos.symbol)
-    }
-    const symbols = [...wanted].sort()
-    say(`Contracts ${symbols.length}`)
-
-    // ── Leverage, for ROI ────────────────────────────────────────────────────
-    const leverages = new Map<string, LeverageRow>()
-    const lev = await venue('leverages', async () => {
-      const ex = (session as unknown as { exchange: { has: Record<string, unknown>; fetchLeverages(symbols?: string[]): Promise<Record<string, LeverageRow>> } }).exchange
-      return ex.has['fetchLeverages'] ? ex.fetchLeverages() : {}
-    })
-    for (const [symbol, row] of Object.entries((lev ?? {}) as Record<string, LeverageRow>)) leverages.set(symbol, row)
-    for (const pos of positions) {
-      if (!leverages.has(pos.symbol) && pos.leverage > 0) leverages.set(pos.symbol, { longLeverage: pos.leverage, shortLeverage: pos.leverage, marginMode: pos.marginMode })
-    }
-    const leverageOf = (symbol: string, direction: 'long' | 'short'): number | undefined => {
-      const row = leverages.get(symbol)
-      const v = direction === 'long' ? row?.longLeverage : row?.shortLeverage
-      return v !== undefined && v > 0 ? v : undefined
-    }
-
-    // ── Fills, per contract, in 7-day windows ────────────────────────────────
-    const fills: ExchangeFill[] = []
-    const seen = new Set<string>()
-    let done = 0
-    for (const symbol of symbols) {
-      if (aborted() || held() !== undefined) break
-      let windowStart = from
-      while (windowStart < to) {
-        const windowEnd = Math.min(windowStart + FILL_WINDOW_MS, to)
-        let since = windowStart
-        for (let page = 0; page < MAX_PAGES_PER_WINDOW; page++) {
-          const rows = await venue(`${symbol} fills`, () => session.fetchFills(symbol, since, FILL_PAGE, windowEnd))
-          if (rows === undefined) break
-          let newest = since
-          for (const f of rows) {
-            if (seen.has(f.id)) continue
-            seen.add(f.id)
-            if (f.timestamp < from || f.timestamp > to) continue
-            fills.push(f)
-            if (f.timestamp > newest) newest = f.timestamp
-          }
-          if (rows.length < FILL_PAGE || newest <= since) break
-          since = newest
-        }
-        windowStart = windowEnd
-      }
-      done++
-      emit?.(`  ${done}/${symbols.length} ${symbol}: ${fills.length} fills so far`)
-    }
-    say(`Fills     ${fills.length}`)
-
-    // ── Funding ──────────────────────────────────────────────────────────────
-    const funding: FundingEvent[] = []
-    {
-      const seenF = new Set<string>()
-      let since = from
-      for (let page = 0; page < MAX_PAGES_PER_WINDOW; page++) {
-        const rows = await venue('funding', () => session.fetchFundingHistory(since, FUNDING_PAGE))
-        if (rows === undefined) break
-        let newest = since
-        for (const ev of rows) {
-          const key = ev.id ?? `${ev.symbol}|${ev.timestamp}|${ev.amount}`
-          if (seenF.has(key)) continue
-          seenF.add(key)
-          if (ev.timestamp >= from && ev.timestamp <= to && (symbols.length === 0 || wanted.has(ev.symbol))) funding.push(ev)
-          if (ev.timestamp > newest) newest = ev.timestamp
-        }
-        if (rows.length < FUNDING_PAGE || newest <= since || newest > to) break
-        since = newest
-      }
-    }
-    say(`Funding   ${funding.length} payments`)
-
-    // ── Replay ───────────────────────────────────────────────────────────────
-    const replay = replayFills(fills, hedged)
-    const orphans = attributeFunding(replay, funding)
-    const orphanKeys = new Set(orphans.map(o => `${o.symbol}|${o.timestamp}|${o.amount}`))
-
-    const toHistory = (e: Episode): HistoryRow => {
-      const quote = quoteOf(e.symbol)
-      const quoteFees = e.fees[quote] ?? 0
-      const leverage = leverageOf(e.symbol, e.direction)
-      const row = leverages.get(e.symbol)
-      const roi = returnPct(e, leverage)
-      return {
-        symbol: e.symbol, positionSide: e.positionSide, direction: e.direction,
-        openedAt: e.openedAt, truncated: e.truncated,
-        closedQty: e.closedQty, maxQty: e.maxQty, openAvg: e.openAvg, closeAvg: e.closeAvg,
-        tradePnl: e.tradePnl, volumeUsd: e.volume, maxNotional: e.maxQty * (e.openAvg > 0 ? e.openAvg : e.closeAvg),
-        fees: e.fees, quoteFees, funding: e.funding,
-        net: e.tradePnl - quoteFees + e.funding,
-        fillCount: e.fillCount, fillIds: e.fillIds, quote,
-        ...(e.closedAt !== undefined ? { closedAt: e.closedAt } : {}),
-        ...(leverage !== undefined ? { leverage } : {}),
-        ...(row?.marginMode ? { marginMode: row.marginMode } : {}),
-        ...(roi !== undefined ? { roiPct: roi } : {}),
-      }
-    }
-    const history = replay.closed.map(toHistory).sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
-
-    // Open positions: the venue's numbers, joined with what the replay saw of them.
-    const openByKey = new Map<string, Episode>()
-    for (const e of replay.open) openByKey.set(`${e.symbol}|${e.positionSide}`, e)
-    const positionRows: PositionRow[] = positions
-      .filter(pos => pos.contracts !== 0)
-      .map((pos): PositionRow => {
-        const info = (pos.info ?? {}) as Record<string, unknown>
-        const positionSide = hedged ? String(info['positionSide'] ?? (pos.side === 'long' ? 'LONG' : 'SHORT')).toUpperCase() : 'BOTH'
-        const e = openByKey.get(`${pos.symbol}|${positionSide}`)
-        const quote = quoteOf(pos.symbol)
-        const margin = pos.marginMode === 'isolated' && Number(info['isolatedMargin']) > 0 ? Number(info['isolatedMargin']) : pos.initialMargin
-        // positionRisk v3 carries no leverage; the symbol's configured one does.
-        const leverage = pos.leverage > 0 ? pos.leverage : (leverageOf(pos.symbol, pos.side) ?? 0)
-        const breakEven = Number(info['breakEvenPrice'])
-        const updateTime = Number(info['updateTime'])
-        return {
-          symbol: pos.symbol, positionSide, direction: pos.side,
-          qty: Math.abs(pos.contracts) * (pos.contractSize || 1), notional: Math.abs(pos.notional),
-          entryPrice: pos.entryPrice, markPrice: pos.markPrice,
-          leverage, marginMode: pos.marginMode, margin, unrealizedPnl: pos.unrealizedPnl,
-          truncated: e === undefined || e.truncated,
-          ...(Number.isFinite(breakEven) && breakEven > 0 ? { breakEvenPrice: breakEven } : {}),
-          ...(pos.liquidationPrice !== undefined && pos.liquidationPrice > 0 ? { liquidationPrice: pos.liquidationPrice } : {}),
-          ...(margin > 0 ? { roiPct: (pos.unrealizedPnl / margin) * 100 } : {}),
-          ...(e !== undefined && !e.truncated ? { openedAt: e.openedAt } : {}),
-          ...(e !== undefined ? { realizedSoFar: e.tradePnl, feesSoFar: e.fees[quote] ?? 0, fundingSoFar: e.funding } : {}),
-          ...(Number.isFinite(updateTime) && updateTime > 0 ? { updateTime } : {}),
-        }
-      })
-      .sort((a, b) => b.notional - a.notional)
-    // Replay says open, venue says flat: the range ended before the close, or
-    // the venue's view is newer. Shown in history as still open.
-    for (const e of replay.open) {
-      const key = `${e.symbol}|${e.positionSide}`
-      if (!positionRows.some(r => `${r.symbol}|${r.positionSide}` === key)) history.unshift(toHistory(e))
-    }
-
-    const fillRows: FillRow[] = fills
-      .map((f): FillRow => {
-        const info = f.info ?? {}
-        const maker = info['maker']
-        return {
-          id: f.id, orderId: f.orderId, time: f.timestamp, symbol: f.symbol, side: f.side,
-          positionSide: hedged ? String(info['positionSide'] ?? 'BOTH').toUpperCase() : 'BOTH',
-          qty: f.qty, price: f.price, quoteQty: f.qty * f.price,
-          ...(f.realizedPnl !== undefined ? { realizedPnl: f.realizedPnl } : {}),
-          ...(f.fee !== undefined ? { fee: f.fee } : {}),
-          ...(f.feeAsset !== undefined ? { feeAsset: f.feeAsset } : {}),
-          ...(typeof maker === 'boolean' ? { maker } : {}),
-        }
-      })
-      .sort((a, b) => b.time - a.time)
-
-    const otherFees: Record<string, number> = {}
-    let tradePnl = 0, quoteFees = 0, fundingTotal = 0
-    for (const e of [...replay.closed, ...replay.open]) {
-      tradePnl += e.tradePnl
-      fundingTotal += e.funding
-      const quote = quoteOf(e.symbol)
-      for (const [asset, v] of Object.entries(e.fees)) {
-        if (asset === quote) quoteFees += v
-        else otherFees[asset] = (otherFees[asset] ?? 0) + v
-      }
-    }
-    for (const o of orphans) fundingTotal += o.amount
-    const unrealizedPnl = positionRows.reduce((s, r) => s + r.unrealizedPnl, 0)
-
-    const report: Report = {
-      account: account.name, unified, hedged, from, to, generatedAt: Date.now(), complete, notes, symbols,
-      positions: positionRows, history, fills: fillRows,
-      funding: funding.map(ev => ({ ...ev, attributed: !orphanKeys.has(`${ev.symbol}|${ev.timestamp}|${ev.amount}`) })).sort((a, b) => b.timestamp - a.timestamp),
-      totals: {
-        tradePnl, quoteFees, otherFees, funding: fundingTotal, net: tradePnl - quoteFees + fundingTotal,
-        unrealizedPnl, closedEpisodes: replay.closed.length, openPositions: positionRows.length, fills: fills.length,
-      },
-    }
-
-    // ── Text ─────────────────────────────────────────────────────────────────
-    say()
-    say(`Realized  ${signed(tradePnl)}   fees ${num(quoteFees)}${Object.keys(otherFees).length ? ` (+ ${Object.entries(otherFees).map(([a, v]) => `${num(v, 6)} ${a}`).join(', ')})` : ''}   funding ${signed(fundingTotal)}   net ${signed(report.totals.net)}`)
-    say(`Open      ${positionRows.length} positions, unrealized ${signed(unrealizedPnl)}`)
-    say(`History   ${history.length} episodes (${replay.closed.length} closed)`)
-    if (!complete) say('INCOMPLETE — see notes; the report covers what was read.')
-    for (const n of notes) say(`  ! ${n}`)
-    if (positionRows.length > 0) {
-      say()
-      say(`${pad('Position', 22)} ${pad('side', 6)} ${lpad('notional $', 12)} ${lpad('entry', 12)} ${lpad('mark', 12)} ${lpad('lev', 4)} ${lpad('uPnL', 10)} ${lpad('ROI%', 8)}  opened`)
-      for (const r of positionRows) {
-        say(`${pad(r.symbol, 22)} ${pad(r.direction, 6)} ${lpad(num(r.notional), 12)} ${lpad(num(r.entryPrice, 6), 12)} ${lpad(num(r.markPrice, 6), 12)} ${lpad(`${r.leverage}x`, 4)} ${lpad(signed(r.unrealizedPnl), 10)} ${lpad(signed(r.roiPct), 8)}  ${r.openedAt !== undefined ? iso(r.openedAt) : 'before range'}`)
-      }
-    }
-    if (history.length > 0) {
-      say()
-      say(`${pad('History', 22)} ${pad('side', 6)} ${lpad('closed qty', 12)} ${lpad('open avg', 12)} ${lpad('close avg', 12)} ${lpad('PnL', 10)} ${lpad('ROI%', 8)} ${lpad('fees', 8)} ${lpad('funding', 8)}  opened → closed`)
-      for (const r of history.slice(0, 40)) {
-        say(`${pad(r.symbol, 22)} ${pad(r.direction, 6)} ${lpad(num(r.closedQty, 4), 12)} ${lpad(num(r.openAvg, 6), 12)} ${lpad(num(r.closeAvg, 6), 12)} ${lpad(signed(r.tradePnl), 10)} ${lpad(signed(r.roiPct), 8)} ${lpad(num(r.quoteFees), 8)} ${lpad(signed(r.funding), 8)}  ${r.truncated ? '<range' : iso(r.openedAt)} → ${r.closedAt !== undefined ? iso(r.closedAt) : 'open'}`)
-      }
-      if (history.length > 40) say(`  … ${history.length - 40} more in the HTML report`)
-    }
-
-    const stamp = new Date(report.generatedAt).toISOString().slice(0, 16).replace(/[:T]/g, '-')
-    return {
-      text: out.join('\n'),
-      json: { ...report, fills: undefined, funding: undefined, fillsCount: fillRows.length, fundingCount: funding.length },
-      files: [{ name: `binance-${account.name.replace(/[^\w.-]+/g, '_')}-${stamp}.html`, mime: 'text/html', content: renderHtml(report) }],
-    }
-  },
 }
 
 // ── HTML ─────────────────────────────────────────────────────────────────────
@@ -553,10 +198,12 @@ export function renderHtml(report: Report): string {
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
   const t = report.totals
   const otherFees = Object.entries(t.otherFees).map(([a, v]) => `${plain(v, 6)} ${a}`).join(', ')
+  const estimated = report.history.filter(r => r.estimated).length
 
   const body = `${REPORT_CSS}
 <p class="ident"><span>区间 ${reportStamp(report.from)} → ${reportStamp(report.to)}</span><span>生成于 ${reportStamp(report.generatedAt)}</span></p>
 ${report.complete ? '' : `<p class="alarm">数据不完整：${report.notes.map(esc).join('；')}</p>`}
+${estimated > 0 ? `<p class="note">${estimated} 段仓位的已实现盈亏是按均价估算的（交易所没有在成交上回报盈亏），区间前开仓的段估不出来，记 0。</p>` : ''}
 <p class="dim">仓位历史由区间内的成交重建：净数量离开 0 为开仓、回到 0 为平仓，中间的加减仓同属一段；双向持仓模式下 LONG 与 SHORT 各自成账。已实现盈亏取交易所在每笔平仓成交上回报的数字（不含手续费），资金费按结算时刻归入当时持有该合约的那段仓位。收益率 = 已实现盈亏 × 杠杆 ÷ (开仓均价 × 最大持仓量)，杠杆取该合约当前的配置值。</p>
 <div class="ah-tabs">
   <span class="tab on" data-view="positions">仓位<small id="n-positions"></small></span>
@@ -670,7 +317,7 @@ const COLS = {
     { k: 'updateTime', l: '最后更新', r: r => fmtS(r.updateTime), hide: true },
   ],
   history: [
-    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + (r.leverage ? tag(r.leverage + 'x') : '') + side(r) + (r.closedAt ? '' : tag('持仓中')) + (r.truncated ? tag('区间前开仓') : '') },
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + (r.leverage ? tag(r.leverage + 'x') : '') + side(r) + (r.closedAt ? '' : tag('持仓中')) + (r.truncated ? tag('区间前开仓') : '') + (r.estimated ? tag('盈亏估算') : '') },
     { k: 'tradePnl', l: '已实现盈亏', ...money('tradePnl') },
     { k: 'roiPct', l: '收益率', r: r => sg(r.roiPct) + '%', cls: r => cls(r.roiPct) },
     { k: 'closedQty', l: '已平仓量', r: r => n(r.closedQty, 4) },
@@ -964,12 +611,12 @@ render();
 
   return reportPage({
     title: `${report.account} · 账户交易历史`,
-    eyebrow: 'binance / account-history',
+    eyebrow: `${report.venue} / account-history${report.source === 'ccxt' ? ' / ccxt' : ''}`,
     h1: `${report.account} 的交易历史`,
     lede: `账户 ${report.account} 在 ${day(report.from)} → ${day(report.to)} 的 ${plain(t.fills, 0)} 笔成交，`
       + `重建为 ${plain(report.history.length, 0)} 段仓位（${plain(t.closedEpisodes, 0)} 段已平），现持 ${t.openPositions} 个仓位。`
       + `四个标签页与币安的仓位、仓位历史、历史成交、资金费用页一一对应，收益曲线从第一笔成交起以 0 计。`,
-    ident: [report.account, report.unified ? '统一账户' : '经典账户', report.hedged ? '双向持仓' : '单向持仓',
+    ident: [report.account, report.venue, ...(report.source === 'ccxt' ? ['ccxt 通用路径'] : []), ...(report.unified ? ['统一账户'] : []), report.hedged ? '双向持仓' : '单向持仓',
       `${day(report.from)} → ${day(report.to)}`, `${report.symbols.length} 个合约`],
     figures: [
       { k: '已实现盈亏', v: money(t.tradePnl), n: `${plain(t.closedEpisodes, 0)} 段已平仓位`, cls: tone(t.tradePnl) },
@@ -979,10 +626,11 @@ render();
       { k: '未实现盈亏', v: money(t.unrealizedPnl), n: `${t.openPositions} 个持仓`, cls: tone(t.unrealizedPnl) },
     ],
     body,
-    footer: '成交来自 userTrades（按 7 天分窗拉取），资金费来自 income 账本的 FUNDING_FEE，持仓来自 positionRisk。'
+    footer: '成交、资金费、持仓分别来自交易所的成交、资金费流水和持仓接口（币安为 userTrades / income / positionRisk），成交按交易所允许的时间窗分段拉取。'
       + '仓位历史由成交重建：净数量离开 0 为开仓、回到 0 为平仓；区间前已开的仓位只记区间内的平仓部分并标「区间前开仓」。'
-      + '已实现盈亏为交易所回报的 realizedPnl，不含手续费；手续费只合计计价币种的部分，BNB 等其他资产另列。'
+      + '已实现盈亏为交易所在成交上回报的数字，不含手续费；交易所不回报时按开仓均价与平仓价估算并标「盈亏估算」。手续费只合计计价币种的部分，BNB 等其他资产另列。'
       + '收益率 = 已实现盈亏 × 杠杆 ÷ (开仓均价 × 最大持仓量)，杠杆取合约当前配置。',
     script,
   })
 }
+

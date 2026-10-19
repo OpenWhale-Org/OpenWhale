@@ -353,6 +353,9 @@ importers:
       ccxt:
         specifier: ^4.4.87
         version: 4.5.52
+      zod:
+        specifier: ^4.4.1
+        version: 4.4.1
     devDependencies:
       '@openwhaleorg/core':
         specifier: workspace:*

@@ -6,7 +6,6 @@ import { BinanceAdapter } from './adapter.js'
 import { BinancePerpAccount } from './account.js'
 import { binanceSigningSecret } from './keys.js'
 import { marginModeScript } from './scripts/marginMode.js'
-import { accountHistoryScript } from './scripts/accountHistory.js'
 
 // Both builders hand ccxt the signing string: the HMAC secret, or the Ed25519
 // PEM — ccxt switches to Ed25519 signatures on its own when it sees a PEM.
@@ -54,7 +53,7 @@ export const binancePlugin = definePlugin({
   // Binance's official actualEquity instead of the generic collateral+PnL recipe
   accounts: [BinancePerpAccount],
 
-  scripts: [marginModeScript, accountHistoryScript],
+  scripts: [marginModeScript],
 
   credentialTypes: [
     {

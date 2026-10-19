@@ -33,7 +33,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "ccxt": "^4.4.87"
+    "ccxt": "^4.4.87",
+    "zod": "^4.4.1"
   },
   "peerDependencies": {
     "@openwhaleorg/core": "workspace:^",

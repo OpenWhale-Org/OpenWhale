@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { ExchangeFill, FundingEvent } from '@openwhaleorg/exchange'
-import { replayFills, attributeFunding, returnPct } from '../positionHistory.js'
+import { replayFills, attributeFunding, returnPct } from '../history/positionHistory.js'
 
 /**
  * Position history rebuilt from fills, checked against what Binance's own
@@ -126,5 +126,27 @@ describe('funding', () => {
     expect(r.closed[0]!.funding).toBe(-0.5)
     expect(r.open[0]!.funding).toBe(0.25)
     expect(orphans).toEqual([ev(250, 9)])
+  })
+})
+
+describe('venues that report no PnL per fill', () => {
+  it('take the position\'s own arithmetic and say so', () => {
+    const r = replayFills([
+      fill({ symbol: 'X/USDT:USDT', side: 'sell', qty: 10, price: 100, timestamp: 1 }),
+      fill({ symbol: 'X/USDT:USDT', side: 'sell', qty: 10, price: 110, timestamp: 2 }),
+      fill({ symbol: 'X/USDT:USDT', side: 'buy', qty: 20, price: 90, timestamp: 3 }),
+    ], false)
+    const e = r.closed[0]!
+    expect(e.tradePnl).toBeCloseTo((105 - 90) * 20)
+    expect(e.estimatedPnl).toBe(true)
+  })
+
+  it('a venue number is never overridden', () => {
+    const r = replayFills([
+      fill({ symbol: 'X/USDT:USDT', side: 'buy', qty: 1, price: 100, timestamp: 1 }),
+      fill({ symbol: 'X/USDT:USDT', side: 'sell', qty: 1, price: 120, timestamp: 2, realizedPnl: 19.5 }),
+    ], false)
+    expect(r.closed[0]!.tradePnl).toBe(19.5)
+    expect(r.closed[0]!.estimatedPnl).toBe(false)
   })
 })

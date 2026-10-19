@@ -426,7 +426,8 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     return trades
       .map((t): ExchangeFill => {
         const info = (t.info ?? {}) as Record<string, unknown>
-        const rawPnl = Number(info['realizedPnl'] ?? info['closedPnl'])
+        // binance/aster realizedPnl, hyperliquid closedPnl, okx fillPnl; the rest leave it undefined.
+        const rawPnl = Number(info['realizedPnl'] ?? info['closedPnl'] ?? info['fillPnl'])
         return {
           id: String(t.id),
           orderId: String(t.order ?? ''),

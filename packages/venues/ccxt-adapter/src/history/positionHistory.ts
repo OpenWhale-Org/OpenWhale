@@ -11,8 +11,10 @@ import type { ExchangeFill, FundingEvent } from '@openwhaleorg/exchange'
  * opens the next episode at the same price.
  *
  * Realized PnL is what the venue reported on each closing fill (position PnL
- * only). Fees and funding are kept apart so the net is visible rather than
- * assumed, and because fees may be paid in BNB.
+ * only); a venue that reports none per fill gets the position's own
+ * arithmetic instead, and the episode says so. Fees and funding are kept
+ * apart so the net is visible rather than assumed, and because fees may be
+ * paid in BNB.
  */
 
 export type PositionSide = 'LONG' | 'SHORT' | 'BOTH'
@@ -40,8 +42,11 @@ export interface Episode {
   openAvg: number
   /** Quantity-weighted average of the closing fills. */
   closeAvg: number
-  /** Venue-reported realized position PnL across the episode's fills. */
+  /** Realized position PnL across the episode's fills: the venue's number, or
+      when a closing fill carries none, (close − open average) × quantity. */
   tradePnl: number
+  /** Some closing fill carried no venue PnL, so part of `tradePnl` is estimated. */
+  estimatedPnl: boolean
   /** Quote traded across the episode's fills, opening and closing both. */
   volume: number
   /** Fees by asset, as positive costs. */
@@ -72,7 +77,7 @@ function newEpisode(f: ExchangeFill, side: PositionSide, direction: 'long' | 'sh
     symbol: f.symbol, positionSide: side, direction,
     openedAt: f.timestamp, status: 'open', truncated,
     openedQty: 0, closedQty: 0, maxQty: 0, remainingQty: 0,
-    openAvg: 0, closeAvg: 0, tradePnl: 0, volume: 0, fees: {}, funding: 0,
+    openAvg: 0, closeAvg: 0, tradePnl: 0, estimatedPnl: false, volume: 0, fees: {}, funding: 0,
     fillCount: 0, fillIds: [],
   }
 }
@@ -124,7 +129,8 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
         e.closedQty += f.qty
         book.closeNotional += f.qty * f.price
         e.closeAvg = book.closeNotional / e.closedQty
-        e.tradePnl += f.realizedPnl ?? 0
+        if (f.realizedPnl !== undefined) e.tradePnl += f.realizedPnl
+        else e.estimatedPnl = true // no opening average to estimate from
         e.volume += f.qty * f.price
         addFee(e, f, 1)
         e.fillCount++
@@ -161,7 +167,12 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
     e.closedQty += closeQty
     book.closeNotional += closeQty * f.price
     e.closeAvg = book.closeNotional / e.closedQty
-    e.tradePnl += f.realizedPnl ?? 0
+    if (f.realizedPnl !== undefined) e.tradePnl += f.realizedPnl
+    else {
+      // Venues that report no PnL per fill: the position's own arithmetic.
+      e.tradePnl += (f.price - e.openAvg) * closeQty * (e.direction === 'long' ? 1 : -1)
+      e.estimatedPnl = true
+    }
     e.volume += closeQty * f.price
     addFee(e, f, overshoot > EPS ? closeShare : 1)
     e.fillCount++
