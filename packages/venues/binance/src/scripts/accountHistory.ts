@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { AccountView, ScriptDefinition } from '@openwhaleorg/core'
+import { reportPage, esc, reportStamp, cls as tone, type AccountView, type ScriptDefinition } from '@openwhaleorg/core'
 import type { ExchangeFill, FundingEvent } from '@openwhaleorg/exchange'
 import { restHeldUntil } from '@openwhaleorg/ccxt-adapter'
 import type { BinanceAdapter } from '../adapter.js'
@@ -488,112 +488,105 @@ function compactFills(fills: FillRow[]): { symbols: string[]; feeAssets: string[
   return { symbols, feeAssets, rows }
 }
 
+
+/*
+ * The report rides on the house shell (`reportPage`): same palette, type and
+ * tables as every other report, so the reader is not handed a Binance
+ * look-alike. The layout is still Binance's — the four tabs, the per-row
+ * fields — because that is what the reader compares it against.
+ *
+ * Styles below only cover what the shell has no word for: tabs, the filter
+ * bar, the column picker, cards, and the canvas chart. Everything else is the
+ * shell's class names, so a change there carries here.
+ */
+const REPORT_CSS = `<style>
+.ah-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--rule);margin:0 0 14px}
+.ah-tabs .tab{font-family:var(--f-sans);font-size:13px;color:var(--ink-3);padding:8px 12px;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;user-select:none}
+.ah-tabs .tab:hover{color:var(--ink)}
+.ah-tabs .tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.ah-tabs .tab small{font-family:var(--f-mono);font-size:11px;color:var(--ink-3);margin-left:5px}
+.ah-bar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:0 0 14px;font-family:var(--f-sans);font-size:12.5px;color:var(--ink-3)}
+.ah-bar input,.ah-bar select,.ah-bar button{font-family:var(--f-sans);font-size:12.5px;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:2px;padding:3px 8px}
+.ah-bar button{cursor:pointer;color:var(--ink-2)}
+.ah-bar button:hover{border-color:var(--accent)}
+.ah-bar input:focus,.ah-bar select:focus{outline:none;border-color:var(--accent)}
+.view{display:none}.view.on{display:block}
+.tag{display:inline-block;font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);background:var(--surface-2);border:1px solid var(--rule);border-radius:2px;padding:0 5px;margin-left:6px;vertical-align:1px}
+.tag.long{color:var(--gain);border-color:var(--gain)}
+.tag.short{color:var(--loss);border-color:var(--loss)}
+.sym{font-weight:600}
+th[data-key]{cursor:pointer}
+th[draggable]{cursor:grab}
+th.dragover{box-shadow:inset 2px 0 0 var(--accent)}
+th.sorted{color:var(--accent)}
+th.sorted::after{content:" ▾"}
+th.sorted.asc::after{content:" ▴"}
+.pop{display:none;position:absolute;top:30px;left:0;z-index:5;background:var(--surface);border:1px solid var(--rule-2);padding:8px 12px;min-width:220px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-family:var(--f-sans);font-size:12.5px;color:var(--ink)}
+.pop.on{display:block}
+.pop label{display:block;padding:2px 0;cursor:pointer;white-space:nowrap}
+.pop .pophead{color:var(--ink-3);font-size:11px;padding-bottom:6px;border-bottom:1px solid var(--rule);margin-bottom:6px}
+.pop a{color:var(--accent);float:right;text-decoration:none}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:10px;margin:0 0 8px}
+.card{background:var(--surface);border:1px solid var(--rule);padding:12px 14px}
+.card .head{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;font-family:var(--f-sans);font-size:13px}
+.card .when{color:var(--ink-3);font-family:var(--f-mono);font-size:11.5px}
+.card .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 16px;margin-top:10px}
+.card .k{font-family:var(--f-sans);font-size:11px;color:var(--ink-3)}
+.card .v{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums}
+details.sum{margin:0 0 14px}
+details.sum summary{cursor:pointer;font-family:var(--f-sans);font-size:12.5px;color:var(--ink-2);padding:4px 0 8px}
+.subtotal{font-family:var(--f-sans);font-size:12.5px;color:var(--ink-3);margin:0 0 8px}
+.subtotal b,.stats b{font-family:var(--f-mono);font-weight:600;color:var(--ink)}
+.subtotal b.pos,.stats b.pos{color:var(--gain)}
+.subtotal b.neg,.stats b.neg{color:var(--loss)}
+.keys .hint{font-family:var(--f-sans);font-size:12px;color:var(--ink-3)}
+.chartwrap{position:relative}
+#cv{width:100%;height:460px;display:block;cursor:crosshair;touch-action:none}
+.tip{position:absolute;pointer-events:none;display:none;background:var(--surface);border:1px solid var(--rule-2);padding:6px 8px;font-family:var(--f-mono);font-size:11.5px;color:var(--ink);white-space:nowrap;z-index:2;box-shadow:0 4px 16px rgba(0,0,0,.18)}
+.stats{font-family:var(--f-sans);font-size:12.5px;color:var(--ink-3);margin:6px 0 0}
+</style>`
+
 export function renderHtml(report: Report): string {
   const data = JSON.stringify({ ...report, fills: [], fillCols: compactFills(report.fills) }).replace(/</g, '\\u003c')
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(report.account)} · 账户交易历史</title>
-<style>
-  :root { --bg:#0b0e11; --panel:#161a1e; --line:#2b3139; --text:#eaecef; --muted:#848e9c; --up:#0ecb81; --down:#f6465d; --accent:#f0b90b; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font: 13px/1.45 -apple-system, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", sans-serif; }
-  header { padding:14px 20px 0; display:flex; flex-wrap:wrap; gap:10px 24px; align-items:baseline; }
-  h1 { font-size:16px; margin:0; }
-  .meta { color:var(--muted); }
-  .meta b { color:var(--text); font-weight:500; }
-  .tabs { display:flex; gap:4px; padding:10px 20px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  .tab { padding:8px 12px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; user-select:none; }
-  .tab.on { color:var(--text); border-color:var(--accent); }
-  .tab small { color:var(--muted); margin-left:4px; }
-  .bar { display:flex; gap:12px; align-items:center; padding:10px 20px; flex-wrap:wrap; }
-  .bar input, .bar select { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:5px 8px; font:inherit; }
-  .bar label { color:var(--muted); }
-  .totals { display:flex; gap:18px; flex-wrap:wrap; padding:0 20px 8px; color:var(--muted); }
-  .totals b { color:var(--text); font-weight:500; }
-  main { padding:0 20px 40px; overflow-x:auto; }
-  table { border-collapse:collapse; width:100%; white-space:nowrap; }
-  th, td { padding:7px 10px; border-bottom:1px solid var(--line); text-align:right; font-variant-numeric: tabular-nums; }
-  th:first-child, td:first-child, th.l, td.l { text-align:left; }
-  th { color:var(--muted); font-weight:500; cursor:pointer; position:sticky; top:0; background:var(--bg); }
-  th.sorted::after { content:" ▾"; color:var(--accent); }
-  th.sorted.asc::after { content:" ▴"; }
-  .up { color:var(--up); } .down { color:var(--down); }
-  .sym { font-weight:600; }
-  .pill { display:inline-block; font-size:11px; padding:1px 6px; border-radius:3px; background:var(--panel); color:var(--muted); margin-left:6px; }
-  .pill.long { color:var(--up); } .pill.short { color:var(--down); }
-  .note { color:var(--accent); padding:6px 20px; }
-  .empty { color:var(--muted); padding:30px 0; text-align:center; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin:10px 0; }
-  .card .row { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:8px 16px; margin-top:8px; }
-  .card .k { color:var(--muted); font-size:11px; }
-  .card .v { font-size:14px; }
-  .card .head { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; }
-  .card .when { color:var(--muted); font-size:12px; }
-  .view { display:none; } .view.on { display:block; }
-  .btn { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:5px 10px; font:inherit; cursor:pointer; }
-  .pop { display:none; position:absolute; top:32px; left:0; z-index:5; background:#1e2329; border:1px solid var(--line); border-radius:6px; padding:8px 12px; min-width:200px; box-shadow:0 6px 24px rgba(0,0,0,.4); }
-  .pop.on { display:block; }
-  .pop label { display:block; padding:3px 0; cursor:pointer; white-space:nowrap; }
-  .pop .pophead { color:var(--muted); font-size:11px; padding-bottom:6px; border-bottom:1px solid var(--line); margin-bottom:6px; }
-  .pop a { color:var(--accent); float:right; }
-  th[draggable] { cursor:grab; } th.dragover { border-left:2px solid var(--accent); }
-  .chartbar { display:flex; gap:16px; align-items:center; flex-wrap:wrap; padding:8px 0; color:var(--muted); }
-  .chartbar label { cursor:pointer; } .chartbar .hint { font-size:11px; }
-  .chartbar b { color:var(--text); font-weight:500; }
-  .chartwrap { position:relative; }
-  #cv { width:100%; height:460px; display:block; background:var(--panel); border:1px solid var(--line); border-radius:6px; cursor:crosshair; touch-action:none; }
-  .tip { position:absolute; pointer-events:none; display:none; background:#1e2329; border:1px solid var(--line); border-radius:4px; padding:6px 8px; font-size:12px; white-space:nowrap; z-index:2; }
-  @media (max-width: 720px) { header, .tabs, .bar, .totals, main { padding-left:16px; padding-right:16px; } }
-</style>
-</head>
-<body>
-<header>
-  <h1>${escapeHtml(report.account)}${report.unified ? ' <span class="pill">统一账户</span>' : ''} <span class="pill">${report.hedged ? '双向持仓' : '单向持仓'}</span></h1>
-  <div class="meta">区间 <b data-t="${report.from}"></b> → <b data-t="${report.to}"></b> · 生成于 <b data-t="${report.generatedAt}"></b></div>
-  <div class="meta">合约 <b>${report.symbols.length}</b> · 成交 <b>${report.totals.fills}</b> · 已平 <b>${report.totals.closedEpisodes}</b> · 持仓 <b>${report.totals.openPositions}</b></div>
-</header>
-${report.complete ? '' : `<div class="note">⚠ 数据不完整：${report.notes.map(escapeHtml).join('；')}</div>`}
-<div class="totals">
-  <span>已实现盈亏 <b class="${cls(report.totals.tradePnl)}">${signed(report.totals.tradePnl)}</b></span>
-  <span>手续费 <b>−${num(report.totals.quoteFees)}</b>${Object.keys(report.totals.otherFees).length ? ` <small>(+ ${Object.entries(report.totals.otherFees).map(([a, v]) => `${num(v, 6)} ${a}`).join(', ')})</small>` : ''}</span>
-  <span>资金费 <b class="${cls(report.totals.funding)}">${signed(report.totals.funding)}</b></span>
-  <span>净盈亏 <b class="${cls(report.totals.net)}">${signed(report.totals.net)}</b></span>
-  <span>未实现 <b class="${cls(report.totals.unrealizedPnl)}">${signed(report.totals.unrealizedPnl)}</b></span>
+  const money = (v: number) => `${v >= 0 ? '+' : ''}${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const plain = (v: number, d = 2) => v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  const t = report.totals
+  const otherFees = Object.entries(t.otherFees).map(([a, v]) => `${plain(v, 6)} ${a}`).join(', ')
+
+  const body = `${REPORT_CSS}
+<p class="ident"><span>区间 ${reportStamp(report.from)} → ${reportStamp(report.to)}</span><span>生成于 ${reportStamp(report.generatedAt)}</span></p>
+${report.complete ? '' : `<p class="alarm">数据不完整：${report.notes.map(esc).join('；')}</p>`}
+<p class="dim">仓位历史由区间内的成交重建：净数量离开 0 为开仓、回到 0 为平仓，中间的加减仓同属一段；双向持仓模式下 LONG 与 SHORT 各自成账。已实现盈亏取交易所在每笔平仓成交上回报的数字（不含手续费），资金费按结算时刻归入当时持有该合约的那段仓位。收益率 = 已实现盈亏 × 杠杆 ÷ (开仓均价 × 最大持仓量)，杠杆取该合约当前的配置值。</p>
+<div class="ah-tabs">
+  <span class="tab on" data-view="positions">仓位<small id="n-positions"></small></span>
+  <span class="tab" data-view="history">仓位历史<small id="n-history"></small></span>
+  <span class="tab" data-view="fills">历史成交<small id="n-fills"></small></span>
+  <span class="tab" data-view="funding">资金费用<small id="n-funding"></small></span>
+  <span class="tab" data-view="curve">收益曲线<small id="n-curve"></small></span>
 </div>
-<div class="tabs">
-  <div class="tab on" data-view="positions">仓位<small id="n-positions"></small></div>
-  <div class="tab" data-view="history">仓位历史<small id="n-history"></small></div>
-  <div class="tab" data-view="fills">历史成交<small id="n-fills"></small></div>
-  <div class="tab" data-view="funding">资金费用<small id="n-funding"></small></div>
-  <div class="tab" data-view="curve">收益曲线<small id="n-curve"></small></div>
-</div>
-<div class="bar">
-  <label>合约 <input id="q" placeholder="筛选，如 SOXS" size="18"></label>
+<div class="ah-bar">
+  <label>合约 <input id="q" placeholder="筛选，如 SOXS" size="16"></label>
   <label>时间 <select id="from"><option value="">区间起点</option></select> → <select id="to"><option value="">区间终点</option></select></label>
-  <label>时区 <select id="tz"><option value="local">本机</option><option value="Asia/Shanghai">北京</option><option value="UTC">UTC</option></select></label>
   <label>风格 <select id="style"><option value="table">表格</option><option value="cards">卡片</option></select></label>
-  <span style="position:relative"><button id="colbtn" class="btn">字段</button><div id="colpick" class="pop"></div></span>
+  <span style="position:relative"><button id="colbtn">字段</button><div id="colpick" class="pop"></div></span>
 </div>
-<main>
-  <div id="positions" class="view on"></div>
-  <div id="history" class="view"></div>
-  <div id="fills" class="view"></div>
-  <div id="funding" class="view"></div>
-  <div id="curve" class="view">
-    <div class="chartbar">
-      <label><input type="checkbox" id="s-trade" checked> 交易盈亏</label>
-      <label><input type="checkbox" id="s-fee" checked> 扣手续费</label>
-      <label><input type="checkbox" id="s-net" checked> 净值（含资金费）</label>
-      <span class="hint">滚轮缩放 · 拖动平移 · 双击复原</span>
-      <span id="curve-stats"></span>
-    </div>
-    <div class="chartwrap"><canvas id="cv"></canvas><div id="tip" class="tip"></div></div>
+<div id="positions" class="view on"></div>
+<div id="history" class="view"></div>
+<div id="fills" class="view"></div>
+<div id="funding" class="view"></div>
+<div id="curve" class="view">
+  <div class="keys">
+    <button data-key="trade"><i style="color:var(--ink-3)"></i>交易盈亏</button>
+    <button data-key="afterFee"><i style="color:var(--warn)"></i>扣手续费</button>
+    <button data-key="net"><i style="color:var(--accent)"></i>净值（含资金费）</button>
+    <span class="hint">滚轮缩放 · 拖动平移 · 双击复原</span>
   </div>
-</main>
-<script>
+  <div class="chart chartwrap"><canvas id="cv"></canvas><div id="tip" class="tip"></div></div>
+  <p class="stats" id="curve-stats"></p>
+</div>`
+
+  const script = `
 const R = ${data};
 (() => {
   const c = R.fillCols, ps = ['BOTH', 'LONG', 'SHORT'];
@@ -602,25 +595,26 @@ const R = ${data};
     feeAsset: r[10] < 0 ? undefined : c.feeAssets[r[10]], maker: r[11] < 0 ? undefined : r[11] === 1 }));
 })();
 const $ = s => document.querySelector(s);
-const state = { view: 'positions', q: '', tz: 'local', style: 'table', from: '', to: '', sort: {} };
-try { state.tz = localStorage.getItem('ow.tz') || 'local'; state.style = localStorage.getItem('ow.style') || 'table'; } catch {}
-$('#tz').value = state.tz; $('#style').value = state.style;
+const state = { view: 'positions', q: '', style: 'table', from: '', to: '', sort: {} };
+try { state.style = localStorage.getItem('ow.style') || 'table'; } catch {}
+$('#style').value = state.style;
+// A deep link: #history, #curve … opens on that tab.
+if (/^#(positions|history|fills|funding|curve)$/.test(location.hash)) state.view = location.hash.slice(1);
 
-const fmtT = ms => {
-  if (ms === undefined || ms === null) return '—';
-  const d = new Date(ms);
-  const opt = { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false };
-  if (state.tz !== 'local') opt.timeZone = state.tz;
-  return new Intl.DateTimeFormat('zh-CN', opt).format(d).replace(/\\//g, '-');
-};
+// Timestamps follow the shell's UTC / local switch; the shell announces a
+// change and the tables are redrawn in whichever zone it now says.
+const fmtT = ms => (ms === undefined || ms === null || !isFinite(ms)) ? '—' : (window.owTz ? window.owTz.fmt(ms) : new Date(ms).toISOString().slice(5, 23).replace('T', ' '));
+const fmtS = ms => fmtT(ms).slice(0, 14);
 const n = (v, d=2) => (v === undefined || v === null || !isFinite(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const sg = (v, d=2) => (v === undefined || v === null || !isFinite(v)) ? '—' : (v >= 0 ? '+' : '') + n(v, d);
-const cls = v => (v > 0 ? 'up' : v < 0 ? 'down' : '');
+const cls = v => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
 const px = v => n(v, v >= 100 ? 2 : v >= 1 ? 4 : 6);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const base = s => s.split('/')[0];
 const quote = s => (s.split(':')[1] || s.split('/')[1] || 'USDT');
-const side = r => '<span class="pill ' + r.direction + '">' + (r.direction === 'long' ? '做多' : '做空') + '</span>';
+const tag = (s, k) => '<span class="tag' + (k ? ' ' + k : '') + '">' + s + '</span>';
+const side = r => tag(r.direction === 'long' ? '做多' : '做空', r.direction);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 // Day choices for the in-page range filter.
 (() => {
@@ -651,6 +645,7 @@ function th(view, key, label, left) {
   const on = s && s.key === key;
   return '<th class="' + (left ? 'l ' : '') + (on ? 'sorted ' + s.dir : '') + '" data-view="' + view + '" data-key="' + key + '"' + (COLS[view] ? ' draggable="true"' : '') + '>' + label + '</th>';
 }
+const wrap = (inner, slim) => '<div class="tblwrap"><table' + (slim ? ' class="slim"' : '') + '>' + inner + '</table></div>';
 
 // ── Tables: columns the reader can reorder (drag a header) and show or hide
 // (the 字段 button). Kept per table in this browser.
@@ -658,7 +653,7 @@ const sym = r => '<span class="sym">' + esc(r.symbol) + '</span>';
 const money = (k, d = 2) => ({ r: r => sg(r[k], d), cls: r => cls(r[k]) });
 const COLS = {
   positions: [
-    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + '<span class="pill">' + r.leverage + 'x</span><span class="pill">' + (r.marginMode === 'isolated' ? '逐仓' : '全仓') + '</span>' + side(r) },
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + tag(r.leverage + 'x') + tag(r.marginMode === 'isolated' ? '逐仓' : '全仓') + side(r) },
     { k: 'qty', l: '数量', r: r => n(r.qty, 4) },
     { k: 'notional', l: '名义价值', r: r => n(r.notional) },
     { k: 'entryPrice', l: '开仓价格', r: r => px(r.entryPrice) },
@@ -671,11 +666,11 @@ const COLS = {
     { k: 'realizedSoFar', l: '本仓已实现', ...money('realizedSoFar') },
     { k: 'feesSoFar', l: '本仓手续费', r: r => n(r.feesSoFar), hide: true },
     { k: 'fundingSoFar', l: '本仓资金费', ...money('fundingSoFar') },
-    { k: 'openedAt', l: '开仓时间', r: r => r.openedAt ? fmtT(r.openedAt) : '区间前' },
-    { k: 'updateTime', l: '最后更新', r: r => fmtT(r.updateTime), hide: true },
+    { k: 'openedAt', l: '开仓时间', r: r => r.openedAt ? fmtS(r.openedAt) : '区间前' },
+    { k: 'updateTime', l: '最后更新', r: r => fmtS(r.updateTime), hide: true },
   ],
   history: [
-    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + (r.leverage ? '<span class="pill">' + r.leverage + 'x</span>' : '') + side(r) + (r.closedAt ? '' : '<span class="pill">持仓中</span>') + (r.truncated ? '<span class="pill">区间前开仓</span>' : '') },
+    { k: 'symbol', l: '合约', left: true, r: r => sym(r) + (r.leverage ? tag(r.leverage + 'x') : '') + side(r) + (r.closedAt ? '' : tag('持仓中')) + (r.truncated ? tag('区间前开仓') : '') },
     { k: 'tradePnl', l: '已实现盈亏', ...money('tradePnl') },
     { k: 'roiPct', l: '收益率', r: r => sg(r.roiPct) + '%', cls: r => cls(r.roiPct) },
     { k: 'closedQty', l: '已平仓量', r: r => n(r.closedQty, 4) },
@@ -689,14 +684,14 @@ const COLS = {
     { k: 'net', l: '净盈亏', ...money('net') },
     { k: 'fillCount', l: '成交', r: r => r.fillCount },
     { k: 'positionSide', l: '持仓方向', left: true, r: r => r.positionSide, hide: true },
-    { k: 'openedAt', l: '开仓时间', r: r => r.truncated ? '区间前' : fmtT(r.openedAt) },
-    { k: 'closedAt', l: '最后平仓时间', r: r => r.closedAt ? fmtT(r.closedAt) : '—' },
+    { k: 'openedAt', l: '开仓时间', r: r => r.truncated ? '区间前' : fmtS(r.openedAt) },
+    { k: 'closedAt', l: '最后平仓时间', r: r => r.closedAt ? fmtS(r.closedAt) : '—' },
   ],
   fills: [
     { k: 'time', l: '时间', left: true, r: r => fmtT(r.time) },
     { k: 'symbol', l: '合约', left: true, r: r => sym(r) },
     { k: 'positionSide', l: '持仓方向', left: true, r: r => r.positionSide, hide: !R.hedged },
-    { k: 'side', l: '方向', left: true, r: r => r.side === 'buy' ? '买入' : '卖出', cls: r => r.side === 'buy' ? 'up' : 'down' },
+    { k: 'side', l: '方向', left: true, r: r => r.side === 'buy' ? '买入' : '卖出', cls: r => r.side === 'buy' ? 'pos' : 'neg' },
     { k: 'price', l: '价格', r: r => px(r.price) },
     { k: 'qty', l: '数量', r: r => n(r.qty, 4) },
     { k: 'quoteQty', l: '成交额', r: r => n(r.quoteQty) },
@@ -707,11 +702,11 @@ const COLS = {
     { k: 'id', l: '成交号', left: true, r: r => esc(r.id), hide: true },
   ],
   funding: [
-    { k: 'timestamp', l: '时间', left: true, r: r => fmtT(r.timestamp) },
+    { k: 'timestamp', l: '时间', left: true, r: r => fmtS(r.timestamp) },
     { k: 'symbol', l: '合约', left: true, r: r => sym(r) },
     { k: 'amount', l: '金额', r: r => sg(r.amount, 6), cls: r => cls(r.amount) },
     { k: 'asset', l: '资产', left: true, r: r => esc(r.asset) },
-    { k: 'attributed', l: '归属', left: true, r: r => r.attributed ? '已计入仓位' : '<span class="pill">无对应仓位</span>' },
+    { k: 'attributed', l: '归属', left: true, r: r => r.attributed ? '已计入仓位' : tag('无对应仓位') },
   ],
 };
 state.cols = {};
@@ -732,10 +727,10 @@ function colState(view) {
 }
 function saveCols(view) { try { localStorage.setItem('ow.cols.' + view, JSON.stringify(state.cols[view])); } catch {} }
 function visibleCols(view) { const st = colState(view), defs = COLS[view]; return st.order.filter(k => !st.hidden.includes(k)).map(k => defs.find(c => c.k === k)); }
-function table(view, rows) {
+function table(view, rows, slim) {
   const cols = visibleCols(view);
-  return '<table><thead><tr>' + cols.map(c => th(view, c.k, c.l, c.left)).join('') + '</tr></thead><tbody>' +
-    rows.map(r => '<tr>' + cols.map(c => '<td class="' + (c.left ? 'l ' : '') + (c.cls ? c.cls(r) : '') + '">' + c.r(r) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+  return wrap('<thead><tr>' + cols.map(c => th(view, c.k, c.l, c.left)).join('') + '</tr></thead><tbody>' +
+    rows.map(r => '<tr>' + cols.map(c => '<td class="' + (c.left ? 'l ' : '') + (c.cls ? c.cls(r) : '') + '">' + c.r(r) + '</td>').join('') + '</tr>').join('') + '</tbody>', slim);
 }
 function moveCol(view, from, to) {
   const st = colState(view), order = st.order.filter(k => k !== from), at = order.indexOf(to);
@@ -753,10 +748,10 @@ function renderPositions() {
   const rows = sortRows(R.positions.filter(r => match(r.symbol)), 'positions', 'notional', 'desc');
   $('#n-positions').textContent = '(' + R.positions.length + ')';
   if (!rows.length) return '<div class="empty">没有持仓</div>';
-  if (state.style === 'cards') return rows.map(r => \`
+  if (state.style === 'cards') return '<div class="cards">' + rows.map(r => \`
     <div class="card">
-      <div class="head"><div><span class="sym">\${esc(r.symbol)}</span><span class="pill">永续 \${r.leverage}x</span><span class="pill">\${r.marginMode === 'isolated' ? '逐仓' : '全仓'}</span>\${side(r)}</div>
-        <div class="when">\${r.openedAt ? fmtT(r.openedAt) + ' 开仓' : '区间前开仓'}\${r.updateTime ? ' · 最后更新 ' + fmtT(r.updateTime) : ''}</div></div>
+      <div class="head"><div><span class="sym">\${esc(r.symbol)}</span>\${tag('永续 ' + r.leverage + 'x')}\${tag(r.marginMode === 'isolated' ? '逐仓' : '全仓')}\${side(r)}</div>
+        <div class="when">\${r.openedAt ? fmtS(r.openedAt) + ' 开仓' : '区间前开仓'}\${r.updateTime ? ' · 最后更新 ' + fmtS(r.updateTime) : ''}</div></div>
       <div class="row">
         <div><div class="k">数量 (\${esc(base(r.symbol))})</div><div class="v">\${n(r.qty, 4)}</div></div>
         <div><div class="k">名义价值</div><div class="v">\${n(r.notional)} \${quote(r.symbol)}</div></div>
@@ -769,7 +764,7 @@ function renderPositions() {
         <div><div class="k">本仓已实现</div><div class="v \${cls(r.realizedSoFar)}">\${sg(r.realizedSoFar)}</div></div>
         <div><div class="k">本仓手续费 / 资金费</div><div class="v">\${n(r.feesSoFar)} / <span class="\${cls(r.fundingSoFar)}">\${sg(r.fundingSoFar)}</span></div></div>
       </div>
-    </div>\`).join('');
+    </div>\`).join('') + '</div>';
   return table('positions', rows);
 }
 
@@ -787,12 +782,12 @@ function renderHistory() {
     bySym.set(r.symbol, a);
   }
   const sums = sortRows([...bySym.values()], 'historySum', 'net', 'desc');
-  const summary = '<details' + (state.sumOpen ? ' open' : '') + ' id="history-sum"><summary style="cursor:pointer;color:var(--muted);padding:6px 0">按合约汇总（' + sums.length + ' 个合约）</summary><table><thead><tr>' + th('historySum','symbol','合约',true) + th('historySum','episodes','仓位段') + th('historySum','closedQty','已平仓量') + th('historySum','volumeUsd','交易量 (USD)') + th('historySum','maxNotional','最大名义 (USD)') + th('historySum','tradePnl','已实现盈亏') + th('historySum','quoteFees','手续费') + th('historySum','funding','资金费') + th('historySum','net','净盈亏') + '</tr></thead><tbody>' +
-    sums.map(a => '<tr><td class="l sym">' + esc(a.symbol) + '</td><td>' + a.episodes + (a.open ? ' <span class="pill">' + a.open + ' 持仓中</span>' : '') + '</td><td>' + n(a.closedQty, 4) + '</td><td>' + n(a.volumeUsd) + '</td><td>' + n(a.maxNotional) + '</td><td class="' + cls(a.tradePnl) + '">' + sg(a.tradePnl) + '</td><td>' + n(a.quoteFees) + '</td><td class="' + cls(a.funding) + '">' + sg(a.funding) + '</td><td class="' + cls(a.net) + '">' + sg(a.net) + '</td></tr>').join('') + '</tbody></table></details>';
-  if (state.style === 'cards') return summary + rows.map(r => \`
+  const summary = '<details class="sum"' + (state.sumOpen ? ' open' : '') + ' id="history-sum"><summary>按合约汇总（' + sums.length + ' 个合约）</summary>' + wrap('<thead><tr>' + th('historySum','symbol','合约',true) + th('historySum','episodes','仓位段') + th('historySum','closedQty','已平仓量') + th('historySum','volumeUsd','交易量 (USD)') + th('historySum','maxNotional','最大名义 (USD)') + th('historySum','tradePnl','已实现盈亏') + th('historySum','quoteFees','手续费') + th('historySum','funding','资金费') + th('historySum','net','净盈亏') + '</tr></thead><tbody>' +
+    sums.map(a => '<tr><td class="l sym">' + esc(a.symbol) + '</td><td>' + a.episodes + (a.open ? tag(a.open + ' 持仓中') : '') + '</td><td>' + n(a.closedQty, 4) + '</td><td>' + n(a.volumeUsd) + '</td><td>' + n(a.maxNotional) + '</td><td class="' + cls(a.tradePnl) + '">' + sg(a.tradePnl) + '</td><td>' + n(a.quoteFees) + '</td><td class="' + cls(a.funding) + '">' + sg(a.funding) + '</td><td class="' + cls(a.net) + '">' + sg(a.net) + '</td></tr>').join('') + '</tbody>') + '</details>';
+  if (state.style === 'cards') return summary + '<div class="cards">' + rows.map(r => \`
     <div class="card">
-      <div class="head"><div><span class="sym">\${esc(r.symbol)}</span><span class="pill">永续\${r.leverage ? ' ' + r.leverage + 'x' : ''}</span>\${r.marginMode ? '<span class="pill">' + (r.marginMode === 'isolated' ? '逐仓' : '全仓') + '</span>' : ''}\${side(r)}<span class="pill">\${r.closedAt ? '全部平仓' : '持仓中'}</span>\${r.truncated ? '<span class="pill">区间前开仓</span>' : ''}</div>
-        <div class="when">\${r.truncated ? '区间前' : fmtT(r.openedAt)} 开仓时间 | \${r.closedAt ? fmtT(r.closedAt) + ' 最后平仓时间' : '未平'}</div></div>
+      <div class="head"><div><span class="sym">\${esc(r.symbol)}</span>\${tag('永续' + (r.leverage ? ' ' + r.leverage + 'x' : ''))}\${r.marginMode ? tag(r.marginMode === 'isolated' ? '逐仓' : '全仓') : ''}\${side(r)}\${tag(r.closedAt ? '全部平仓' : '持仓中')}\${r.truncated ? tag('区间前开仓') : ''}</div>
+        <div class="when">\${r.truncated ? '区间前' : fmtS(r.openedAt)} 开仓 | \${r.closedAt ? fmtS(r.closedAt) + ' 最后平仓' : '未平'}</div></div>
       <div class="row">
         <div><div class="k">已实现盈亏 (\${quote(r.symbol)})</div><div class="v \${cls(r.tradePnl)}">\${sg(r.tradePnl)}</div></div>
         <div><div class="k">收益率</div><div class="v \${cls(r.roiPct)}">\${sg(r.roiPct)}%</div></div>
@@ -805,7 +800,7 @@ function renderHistory() {
         <div><div class="k">净盈亏</div><div class="v \${cls(r.net)}">\${sg(r.net)}</div></div>
         <div><div class="k">成交笔数</div><div class="v">\${r.fillCount}</div></div>
       </div>
-    </div>\`).join('');
+    </div>\`).join('') + '</div>';
   return summary + table('history', rows);
 }
 
@@ -823,12 +818,13 @@ function renderFunding() {
   $('#n-funding').textContent = '(' + R.funding.length + ')';
   if (!rows.length) return '<div class="empty">区间内没有资金费记录</div>';
   const sum = all.reduce((s, r) => s + r.amount, 0);
-  return '<div class="totals"><span>筛选合计 <b class="' + cls(sum) + '">' + sg(sum, 4) + '</b></span></div>' + table('funding', rows);
+  return '<p class="subtotal">筛选合计 <b class="' + cls(sum) + '">' + sg(sum, 4) + '</b></p>' + table('funding', rows, true);
 }
 
 // ── Equity curve: 0 at the first fill, then every fill's realized PnL and
 // every funding payment, in time order. Three readings of the same walk.
-const chart = { x0: null, x1: null, pts: [], drag: null, dirty: true };
+const chart = { x0: null, x1: null, pts: [], drag: null, off: {} };
+const SERIES = [['trade', '交易盈亏', '--ink-3'], ['afterFee', '扣手续费', '--warn'], ['net', '净值', '--accent']];
 function curveSeries() {
   const ev = [];
   for (const f of R.fills) if (match(f.symbol) && inRange(f.time)) ev.push({ t: f.time, trade: f.realizedPnl || 0, fee: f.feeAsset === quote(f.symbol) ? (f.fee || 0) : 0, fund: 0, sym: f.symbol, kind: 'fill', side: f.side, qty: f.qty, price: f.price });
@@ -845,50 +841,47 @@ function curveStats(pts) {
   let peak = -Infinity, dd = 0, peakT = 0;
   for (const p of pts) { if (p.net > peak) { peak = p.net; peakT = p.t; } dd = Math.min(dd, p.net - peak); }
   const last = pts[pts.length - 1];
-  return '终值 <b class="' + cls(last.net) + '">' + sg(last.net) + '</b> · 峰值 <b class="' + cls(peak) + '">' + sg(peak) + '</b> (' + fmtT(peakT) + ') · 最大回撤 <b class="down">' + n(dd) + '</b> · 事件 <b>' + (pts.length - 1) + '</b>';
+  return '终值 <b class="' + cls(last.net) + '">' + sg(last.net) + '</b> · 峰值 <b class="' + cls(peak) + '">' + sg(peak) + '</b> (' + fmtS(peakT) + ') · 最大回撤 <b class="neg">' + n(dd) + '</b> · 事件 <b>' + (pts.length - 1) + '</b>';
 }
+function axisT(t, span) { const s = fmtT(t); return span > 2 * 86400000 ? s.slice(0, 5) : s.slice(0, 11); }
 function drawCurve() {
   const cv = $('#cv'); if (!cv.isConnected || !$('#curve').classList.contains('on')) return;
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
-  const pts = chart.pts; if (pts.length < 2) { g.fillStyle = '#848e9c'; g.font = '13px sans-serif'; g.fillText('区间内没有成交', 20, 30); return; }
+  const mono = '11px ' + css('--f-mono'), ink = css('--ink'), ink3 = css('--ink-3'), rule = css('--rule'), rule2 = css('--rule-2');
+  const pts = chart.pts; if (pts.length < 2) { g.fillStyle = ink3; g.font = '13px ' + css('--f-sans'); g.fillText('区间内没有成交', 20, 30); return; }
   const L = 70, Rm = 16, T = 16, B = 34;
   const tMin = pts[0].t, tMax = pts[pts.length - 1].t;
   const x0 = chart.x0 ?? tMin, x1 = chart.x1 ?? (tMax === tMin ? tMin + 60000 : tMax);
-  const show = { trade: $('#s-trade').checked, afterFee: $('#s-fee').checked, net: $('#s-net').checked };
+  const show = {}; for (const [k] of SERIES) show[k] = !chart.off[k];
   // y range over the visible window, holding the value from just before it.
   let yMin = 0, yMax = 0, lo = lower(pts, x0); if (lo > 0) lo--;
-  for (let i = lo; i < pts.length && pts[i].t <= x1 + (x1 - x0); i++) for (const k of ['trade', 'afterFee', 'net']) if (show[k]) { yMin = Math.min(yMin, pts[i][k]); yMax = Math.max(yMax, pts[i][k]); }
+  for (let i = lo; i < pts.length && pts[i].t <= x1 + (x1 - x0); i++) for (const [k] of SERIES) if (show[k]) { yMin = Math.min(yMin, pts[i][k]); yMax = Math.max(yMax, pts[i][k]); }
   if (yMax === yMin) { yMax += 1; yMin -= 1; } const pad = (yMax - yMin) * 0.08; yMin -= pad; yMax += pad;
   const X = t => L + (t - x0) / (x1 - x0) * (W - L - Rm), Y = v => T + (yMax - v) / (yMax - yMin) * (H - T - B);
   chart.X = X; chart.Y = Y; chart.x0v = x0; chart.x1v = x1;
-  g.font = '11px sans-serif'; g.textBaseline = 'middle';
+  g.font = mono; g.textBaseline = 'middle';
   // grid
-  const ySteps = 6; g.strokeStyle = '#2b3139'; g.fillStyle = '#848e9c'; g.textAlign = 'right';
+  const ySteps = 6; g.strokeStyle = rule; g.fillStyle = ink3; g.textAlign = 'right';
   for (let i = 0; i <= ySteps; i++) { const v = yMin + (yMax - yMin) * i / ySteps, y = Y(v); g.beginPath(); g.moveTo(L, y); g.lineTo(W - Rm, y); g.stroke(); g.fillText(n(v, Math.abs(yMax - yMin) < 10 ? 2 : 0), L - 6, y); }
   const span = x1 - x0, xSteps = Math.max(2, Math.floor((W - L - Rm) / 110)); g.textAlign = 'center'; g.textBaseline = 'top';
-  for (let i = 0; i <= xSteps; i++) { const t = x0 + span * i / xSteps, x = X(t); g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); const s = fmtT(t); g.fillText(span > 2 * 86400000 ? s.slice(0, 10) : s.slice(5, 16), x, H - B + 6); }
+  for (let i = 0; i <= xSteps; i++) { const t = x0 + span * i / xSteps, x = X(t); g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); g.fillText(axisT(t, span), x, H - B + 6); }
   // zero line
-  if (yMin < 0 && yMax > 0) { g.strokeStyle = '#555'; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(W - Rm, Y(0)); g.stroke(); g.setLineDash([]); }
+  if (yMin < 0 && yMax > 0) { g.strokeStyle = rule2; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(W - Rm, Y(0)); g.stroke(); g.setLineDash([]); }
   g.save(); g.beginPath(); g.rect(L, T, W - L - Rm, H - T - B); g.clip();
-  const colors = { trade: '#848e9c', afterFee: '#f0b90b', net: '#0ecb81' };
-  for (const k of ['trade', 'afterFee', 'net']) {
+  for (const [k, , color] of SERIES) {
     if (!show[k]) continue;
-    g.strokeStyle = colors[k]; g.lineWidth = k === 'net' ? 1.6 : 1; g.beginPath();
-    let started = false, lastX = -1;
+    g.strokeStyle = css(color); g.lineWidth = k === 'net' ? 1.7 : 1; g.lineJoin = 'round'; g.beginPath();
+    let started = false;
     for (let i = lo; i < pts.length; i++) {
       const p = pts[i]; if (p.t > x1 && started) { g.lineTo(X(p.t), Y(pts[i - 1][k])); g.lineTo(X(p.t), Y(p[k])); break; }
       const x = X(p.t), y = Y(p[k]);
       if (!started) { g.moveTo(x, y); started = true; } else { if (i > lo) g.lineTo(x, Y(pts[i - 1][k])); g.lineTo(x, y); }
-      lastX = x;
     }
     g.stroke();
   }
   g.restore();
-  // legend
-  g.textAlign = 'left'; g.textBaseline = 'middle'; let lx = L + 8;
-  for (const [k, label] of [['trade', '交易盈亏'], ['afterFee', '扣手续费'], ['net', '净值']]) { if (!show[k]) continue; g.fillStyle = colors[k]; g.fillRect(lx, T + 4, 10, 3); g.fillStyle = '#eaecef'; g.fillText(label, lx + 14, T + 6); lx += 14 + g.measureText(label).width + 16; }
 }
 function lower(pts, t) { let a = 0, b = pts.length; while (a < b) { const m = (a + b) >> 1; if (pts[m].t < t) a = m + 1; else b = m; } return a; }
 function renderCurve() {
@@ -925,19 +918,20 @@ function renderCurve() {
     const tx = Math.min(mx + 14, cv.clientWidth - tip.offsetWidth - 8), ty = Math.max(0, e.clientY - rect.top - tip.offsetHeight - 12);
     tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
   });
-  for (const id of ['s-trade', 's-fee', 's-net']) $('#' + id).addEventListener('change', drawCurve);
+  for (const b of document.querySelectorAll('#curve .keys button[data-key]')) b.addEventListener('click', () => { chart.off[b.dataset.key] = !chart.off[b.dataset.key]; b.classList.toggle('off', !!chart.off[b.dataset.key]); drawCurve(); });
   window.addEventListener('resize', drawCurve);
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawCurve);
 })();
 
 function render() {
-  for (const el of document.querySelectorAll('.tab')) el.classList.toggle('on', el.dataset.view === state.view);
+  for (const el of document.querySelectorAll('.ah-tabs .tab')) el.classList.toggle('on', el.dataset.view === state.view);
   for (const el of document.querySelectorAll('.view')) el.classList.toggle('on', el.id === state.view);
-  for (const el of document.querySelectorAll('[data-t]')) el.textContent = fmtT(Number(el.dataset.t));
   $('#positions').innerHTML = renderPositions();
   $('#history').innerHTML = renderHistory();
   $('#fills').innerHTML = renderFills();
   $('#funding').innerHTML = renderFunding();
   $('#colbtn').style.display = COLS[state.view] ? '' : 'none';
+  $('#style').parentElement.style.display = state.view === 'positions' || state.view === 'history' ? '' : 'none';
   renderCurve();
 }
 document.addEventListener('toggle', e => { if (e.target.id === 'history-sum') state.sumOpen = e.target.open; }, true);
@@ -951,8 +945,8 @@ $('#colpick').addEventListener('click', e => e.stopPropagation());
 $('#colpick').addEventListener('change', e => { const k = e.target.dataset.col; if (!k) return; const st = colState(state.view); st.hidden = e.target.checked ? st.hidden.filter(x => x !== k) : [...st.hidden, k]; saveCols(state.view); render(); });
 document.addEventListener('click', e => { if (e.target.id === 'colreset') { e.preventDefault(); delete state.cols[state.view]; try { localStorage.removeItem('ow.cols.' + state.view); } catch {} renderColPicker(); render(); return; } $('#colpick').classList.remove('on'); });
 document.addEventListener('click', e => {
-  const tab = e.target.closest('.tab');
-  if (tab) { state.view = tab.dataset.view; render(); return; }
+  const tab = e.target.closest('.ah-tabs .tab');
+  if (tab) { state.view = tab.dataset.view; try { history.replaceState(null, '', '#' + state.view); } catch {} render(); return; }
   const h = e.target.closest('th[data-key]');
   if (h) {
     const cur = state.sort[h.dataset.view];
@@ -963,19 +957,32 @@ document.addEventListener('click', e => {
 $('#q').addEventListener('input', e => { state.q = e.target.value.trim(); render(); });
 $('#from').addEventListener('change', e => { state.from = e.target.value; render(); });
 $('#to').addEventListener('change', e => { state.to = e.target.value; render(); });
-$('#tz').addEventListener('change', e => { state.tz = e.target.value; try { localStorage.setItem('ow.tz', state.tz); } catch {} render(); });
 $('#style').addEventListener('change', e => { state.style = e.target.value; try { localStorage.setItem('ow.style', state.style); } catch {} render(); });
+window.addEventListener('owtzchange', render);
 render();
-</script>
-</body>
-</html>`
-}
+`
 
-function cls(v: number): string {
-  return v > 0 ? 'up' : v < 0 ? 'down' : ''
+  return reportPage({
+    title: `${report.account} · 账户交易历史`,
+    eyebrow: 'binance / account-history',
+    h1: `${report.account} 的交易历史`,
+    lede: `账户 ${report.account} 在 ${day(report.from)} → ${day(report.to)} 的 ${plain(t.fills, 0)} 笔成交，`
+      + `重建为 ${plain(report.history.length, 0)} 段仓位（${plain(t.closedEpisodes, 0)} 段已平），现持 ${t.openPositions} 个仓位。`
+      + `四个标签页与币安的仓位、仓位历史、历史成交、资金费用页一一对应，收益曲线从第一笔成交起以 0 计。`,
+    ident: [report.account, report.unified ? '统一账户' : '经典账户', report.hedged ? '双向持仓' : '单向持仓',
+      `${day(report.from)} → ${day(report.to)}`, `${report.symbols.length} 个合约`],
+    figures: [
+      { k: '已实现盈亏', v: money(t.tradePnl), n: `${plain(t.closedEpisodes, 0)} 段已平仓位`, cls: tone(t.tradePnl) },
+      { k: '手续费', v: `−${plain(t.quoteFees)}`, n: otherFees ? `另有 ${otherFees}` : `${plain(t.fills, 0)} 笔成交`, cls: 'neg' },
+      { k: '资金费', v: money(t.funding), n: `${plain(report.funding.length, 0)} 次结算`, cls: tone(t.funding) },
+      { k: '净盈亏', v: money(t.net), n: '已实现 − 手续费 + 资金费', cls: tone(t.net) },
+      { k: '未实现盈亏', v: money(t.unrealizedPnl), n: `${t.openPositions} 个持仓`, cls: tone(t.unrealizedPnl) },
+    ],
+    body,
+    footer: '成交来自 userTrades（按 7 天分窗拉取），资金费来自 income 账本的 FUNDING_FEE，持仓来自 positionRisk。'
+      + '仓位历史由成交重建：净数量离开 0 为开仓、回到 0 为平仓；区间前已开的仓位只记区间内的平仓部分并标「区间前开仓」。'
+      + '已实现盈亏为交易所回报的 realizedPnl，不含手续费；手续费只合计计价币种的部分，BNB 等其他资产另列。'
+      + '收益率 = 已实现盈亏 × 杠杆 ÷ (开仓均价 × 最大持仓量)，杠杆取合约当前配置。',
+    script,
+  })
 }
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] ?? c))
-}
-
