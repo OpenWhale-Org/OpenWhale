@@ -90,6 +90,14 @@ export interface CollectOptions {
 }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+/**
+ * What makes two funding rows the same payment. The venue id alone is not
+ * enough: Hyperliquid's is a hash that is zero on every funding entry, and
+ * a venue may reuse one id across coins. Symbol, settlement time and amount
+ * identify a payment on their own — a coin settles once per hour.
+ */
+export const fundingKey = (ev: FundingEvent): string => `${ev.id ?? ''}|${ev.symbol}|${ev.timestamp}|${ev.amount}`
+
 export const quoteOf = (symbol: string): string => symbol.split(':')[1] ?? symbol.split('/')[1] ?? 'USDT'
 export const iso = (ms: number | undefined) => (ms === undefined ? '—' : new Date(ms).toISOString().replace('T', ' ').slice(0, 19))
 
@@ -233,7 +241,7 @@ export async function collectHistory(o: CollectOptions): Promise<Report> {
       if (rows === undefined) break
       let newest = since
       for (const ev of rows) {
-        const key = ev.id ?? `${ev.symbol}|${ev.timestamp}|${ev.amount}`
+        const key = fundingKey(ev)
         if (seenF.has(key)) continue
         seenF.add(key)
         if (ev.timestamp >= from && ev.timestamp <= to && (symbols.length === 0 || wanted.has(ev.symbol))) funding.push(ev)
@@ -339,6 +347,7 @@ export async function collectHistory(o: CollectOptions): Promise<Report> {
   }
   for (const x of orphans) fundingTotal += x.amount
   const unrealizedPnl = positionRows.reduce((s, r) => s + r.unrealizedPnl, 0)
+  const volumeUsd = fillRows.reduce((s, r) => s + r.quoteQty, 0)
 
   return {
     account: o.account, venue: o.venue, source: o.source, unified, hedged, from, to, generatedAt: Date.now(), complete, notes, symbols,
@@ -346,7 +355,7 @@ export async function collectHistory(o: CollectOptions): Promise<Report> {
     funding: funding.map(ev => ({ ...ev, attributed: !orphanKeys.has(`${ev.symbol}|${ev.timestamp}|${ev.amount}`) })).sort((a, b) => b.timestamp - a.timestamp),
     totals: {
       tradePnl, quoteFees, otherFees, funding: fundingTotal, net: tradePnl - quoteFees + fundingTotal,
-      unrealizedPnl, closedEpisodes: replay.closed.length, openPositions: positionRows.length, fills: fills.length,
+      unrealizedPnl, closedEpisodes: replay.closed.length, openPositions: positionRows.length, fills: fills.length, volumeUsd,
     },
   }
 }

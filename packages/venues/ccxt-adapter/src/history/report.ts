@@ -106,6 +106,8 @@ export interface Report {
     closedEpisodes: number
     openPositions: number
     fills: number
+    /** Every fill's quote notional (qty × price) summed: the turnover of the range. */
+    volumeUsd: number
   }
 }
 
@@ -619,8 +621,9 @@ render();
     ident: [report.account, report.venue, ...(report.source === 'ccxt' ? ['ccxt 通用路径'] : []), ...(report.unified ? ['统一账户'] : []), report.hedged ? '双向持仓' : '单向持仓',
       `${day(report.from)} → ${day(report.to)}`, `${report.symbols.length} 个合约`],
     figures: [
+      { k: '总交易量', v: plain(t.volumeUsd, 0), n: `${plain(t.fills, 0)} 笔成交 · ${report.symbols.length} 个合约` },
       { k: '已实现盈亏', v: money(t.tradePnl), n: `${plain(t.closedEpisodes, 0)} 段已平仓位`, cls: tone(t.tradePnl) },
-      { k: '手续费', v: `−${plain(t.quoteFees)}`, n: otherFees ? `另有 ${otherFees}` : `${plain(t.fills, 0)} 笔成交`, cls: 'neg' },
+      { k: '手续费', v: `−${plain(t.quoteFees)}`, n: otherFees ? `另有 ${otherFees}` : (t.volumeUsd > 0 ? `${(t.quoteFees / t.volumeUsd * 1e4).toFixed(2)} bp` : '—'), cls: 'neg' },
       { k: '资金费', v: money(t.funding), n: `${plain(report.funding.length, 0)} 次结算`, cls: tone(t.funding) },
       { k: '净盈亏', v: money(t.net), n: '已实现 − 手续费 + 资金费', cls: tone(t.net) },
       { k: '未实现盈亏', v: money(t.unrealizedPnl), n: `${t.openPositions} 个持仓`, cls: tone(t.unrealizedPnl) },

@@ -129,6 +129,7 @@ export const accountHistoryScript: ScriptDefinition = {
     // ── Text ───────────────────────────────────────────────────────────────
     say()
     say(`Realized  ${signed(t.tradePnl)}   fees ${num(t.quoteFees)}${Object.keys(t.otherFees).length ? ` (+ ${Object.entries(t.otherFees).map(([a, v]) => `${num(v, 6)} ${a}`).join(', ')})` : ''}   funding ${signed(t.funding)}   net ${signed(t.net)}`)
+    say(`Volume    ${num(t.volumeUsd, 0)} (${report.fills.length} fills)`)
     say(`Open      ${report.positions.length} positions, unrealized ${signed(t.unrealizedPnl)}`)
     say(`History   ${report.history.length} episodes (${t.closedEpisodes} closed${report.history.some(r => r.estimated) ? `, ${report.history.filter(r => r.estimated).length} with estimated PnL` : ''})`)
     if (!report.complete) say('INCOMPLETE — see notes; the report covers what was read.')

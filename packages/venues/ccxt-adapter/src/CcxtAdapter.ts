@@ -452,9 +452,13 @@ export class CcxtAdapter implements PerpExchangeAdapter {
    */
   async fetchFundingHistory(since?: number, limit = 500): Promise<FundingEvent[]> {
     const rows = await this.guard(() => this.exchange.fetchFundingHistory(undefined, since, limit))
+    // Hyperliquid stamps every funding entry with the zero hash and ccxt
+    // passes it through as the id, so one id would stand for all of them
+    // (observed 2026-10-20: a week of hourly payments deduplicated to one).
+    const realId = (id: unknown) => (id === undefined || /^(0x)?0+$/.test(String(id)) ? undefined : String(id))
     return rows
       .map((r): FundingEvent => ({
-        ...(r.id !== undefined ? { id: String(r.id) } : {}),
+        ...(realId(r.id) !== undefined ? { id: realId(r.id)! } : {}),
         symbol: r.symbol ?? '',
         amount: r.amount ?? 0,
         asset: r.code ?? 'USDT',
