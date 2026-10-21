@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { AccountView, ScriptDefinition } from '@openwhaleorg/core'
-import { collectHistory, isHistorySession, limitsFor, BINANCE_LIMITS, DEFAULT_RANGE_MS, iso, type HistorySession } from './collect.js'
+import { collectHistory, isHistorySession, limitsFor, BINANCE_LIMITS, DEFAULT_RANGE_MS, iso, type HistorySession, type VenueLimits } from './collect.js'
 import { renderHtml } from './report.js'
 
 /**
@@ -47,10 +47,11 @@ const paramsSchema = z.object({
   }),
 })
 
-type Runtime = {
+export type HistoryRuntime = {
   listAccounts(): Promise<AccountView[]>
   adapters: { resolve<T>(kind: string, type: string, credentialName?: string): Promise<T> }
 }
+type Runtime = HistoryRuntime
 
 const parseInstant = (raw: string): number | null | undefined => {
   if (!raw.trim()) return null
@@ -65,6 +66,50 @@ const lpad = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.len
 const venueOf = (a: AccountView): string => a.venue ?? a.type ?? ''
 const isPerp = (a: AccountView) => (a.kind ?? 'exchange/perp') === 'exchange/perp' && a.status === 'ready' && venueOf(a) !== ''
 
+/** The account picker shared by the history scripts. */
+export async function perpAccountOptions(runtime: unknown): Promise<Array<{ value: string; label: string }>> {
+  const accounts = await (runtime as Runtime).listAccounts()
+  return accounts.filter(isPerp).map(a => ({ value: a.name, label: `${a.name} (${venueOf(a)})` }))
+}
+
+export interface OpenedAccount {
+  name: string
+  venue: string
+  source: 'native' | 'ccxt'
+  session: HistorySession
+  limits: VenueLimits
+}
+
+/**
+ * Resolve the account a history script was asked for, refuse a venue whose
+ * own path does not exist yet unless the ccxt path was chosen, and open its
+ * session. A string is the reason it could not.
+ */
+export async function openPerpAccount(runtime: unknown, accountName: string, useCcxt: boolean): Promise<OpenedAccount | string> {
+  const rt = runtime as Runtime
+  const ready = (await rt.listAccounts()).filter(isPerp)
+  if (ready.length === 0) return 'No ready perp account.'
+  const account = accountName === '' ? (ready.length === 1 ? ready[0] : undefined) : ready.find(a => a.name === accountName)
+  if (!account) {
+    return accountName === ''
+      ? `${ready.length} accounts are ready, pick one: ${ready.map(a => `${a.name} (${venueOf(a)})`).join(', ')}`
+      : `No ready perp account named "${accountName}"`
+  }
+  if (!account.credential) return `Account "${account.name}" has no bound credential`
+  const venue = venueOf(account)
+  if (!useCcxt && !NATIVE_VENUES.has(venue)) {
+    return [
+      `The venue's own path exists for ${[...NATIVE_VENUES].join(', ')} only; "${account.name}" is on ${venue}.`,
+      `Tick "Use the ccxt path (testing)" to read it through the generic ccxt path instead.`,
+      `原生路径目前只实现了 ${[...NATIVE_VENUES].join('、')}；账户「${account.name}」在 ${venue} 上。勾选「使用 ccxt 通用路径（测试）」即可用通用路径读取。`,
+    ].join('\n')
+  }
+  const session = await rt.adapters.resolve<unknown>('exchange/perp', venue, account.credential)
+  if (!isHistorySession(session)) return `The ${venue} adapter is not a ccxt adapter; the ccxt path cannot read it.`
+  const source = useCcxt ? 'ccxt' : 'native'
+  return { name: account.name, venue, source, session, limits: source === 'native' ? BINANCE_LIMITS : limitsFor(session.exchange.id) }
+}
+
 export const accountHistoryScript: ScriptDefinition = {
   id: 'account-history',
   name: { en: 'Account history (positions, history, fills, funding)', 'zh-CN': '账户交易历史（持仓 / 仓位历史 / 成交 / 资金费）' },
@@ -74,38 +119,15 @@ export const accountHistoryScript: ScriptDefinition = {
   },
   paramsSchema,
 
-  paramOptions: async (runtime) => {
-    const rt = runtime as Runtime
-    const accounts = await rt.listAccounts()
-    return {
-      account: accounts.filter(isPerp).map(a => ({ value: a.name, label: `${a.name} (${venueOf(a)})` })),
-    }
-  },
+  paramOptions: async (runtime) => ({ account: await perpAccountOptions(runtime) }),
 
   run: async ({ params, runtime, emit, signal }) => {
     const p = paramsSchema.parse(params)
-    const rt = runtime as Runtime
     const out: string[] = []
     const say = (s = '') => { out.push(s); emit?.(s) }
 
-    const ready = (await rt.listAccounts()).filter(isPerp)
-    if (ready.length === 0) return { text: 'No ready perp account.' }
-    const account = p.account === '' ? (ready.length === 1 ? ready[0] : undefined) : ready.find(a => a.name === p.account)
-    if (!account) {
-      return { text: p.account === ''
-        ? `${ready.length} accounts are ready, pick one: ${ready.map(a => `${a.name} (${venueOf(a)})`).join(', ')}`
-        : `No ready perp account named "${p.account}"` }
-    }
-    if (!account.credential) return { text: `Account "${account.name}" has no bound credential` }
-    const venue = venueOf(account)
-
-    if (!p.useCcxt && !NATIVE_VENUES.has(venue)) {
-      return { text: [
-        `The venue's own path exists for ${[...NATIVE_VENUES].join(', ')} only; "${account.name}" is on ${venue}.`,
-        `Tick "Use the ccxt path (testing)" to read it through the generic ccxt path instead.`,
-        `原生路径目前只实现了 ${[...NATIVE_VENUES].join('、')}；账户「${account.name}」在 ${venue} 上。勾选「使用 ccxt 通用路径（测试）」即可用通用路径读取。`,
-      ].join('\n') }
-    }
+    const opened = await openPerpAccount(runtime, p.account, p.useCcxt)
+    if (typeof opened === 'string') return { text: opened }
 
     const toMs = parseInstant(p.to), fromMs = parseInstant(p.from)
     if (toMs === undefined) return { text: `"To" is not a time: ${p.to}` }
@@ -114,15 +136,10 @@ export const accountHistoryScript: ScriptDefinition = {
     const from = fromMs ?? to - DEFAULT_RANGE_MS
     if (from >= to) return { text: 'The range is empty: "From" is not before "To".' }
 
-    const session = await rt.adapters.resolve<unknown>('exchange/perp', venue, account.credential)
-    if (!isHistorySession(session)) return { text: `The ${venue} adapter is not a ccxt adapter; the ccxt path cannot read it.` }
-    const source = p.useCcxt ? 'ccxt' : 'native'
-    const limits = source === 'native' ? BINANCE_LIMITS : limitsFor(session.exchange.id)
-
     const report = await collectHistory({
-      account: account.name, venue, source, session: session as HistorySession, from, to,
+      account: opened.name, venue: opened.venue, source: opened.source, session: opened.session, from, to,
       symbols: p.symbols.split(',').map(s => s.trim()).filter(Boolean),
-      limits, signal, emit: say,
+      limits: opened.limits, signal, emit: say,
     })
     const t = report.totals
 
@@ -155,7 +172,7 @@ export const accountHistoryScript: ScriptDefinition = {
     return {
       text: out.join('\n'),
       json: { ...report, fills: undefined, funding: undefined, fillsCount: report.fills.length, fundingCount: report.funding.length },
-      files: [{ name: `${slug(venue)}-${slug(account.name)}-${stamp}.html`, mime: 'text/html', content: renderHtml(report) }],
+      files: [{ name: `${slug(opened.venue)}-${slug(opened.name)}-${stamp}.html`, mime: 'text/html', content: renderHtml(report) }],
     }
   },
 }

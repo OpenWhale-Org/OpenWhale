@@ -61,6 +61,8 @@ export interface Episode {
 export interface ReplayResult {
   closed: Episode[]
   open: Episode[]
+  /** Per closing fill without venue PnL, the estimate it contributed, keyed `${symbol}|${id}`. */
+  estimates: Map<string, number>
 }
 
 const EPS = 1e-9
@@ -105,6 +107,7 @@ function positionSideOf(f: ExchangeFill, hedged: boolean): PositionSide {
 export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResult {
   const books = new Map<string, Book>()
   const closed: Episode[] = []
+  const estimates = new Map<string, number>()
   const sorted = [...fills].sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id))
 
   for (const f of sorted) {
@@ -170,8 +173,10 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
     if (f.realizedPnl !== undefined) e.tradePnl += f.realizedPnl
     else {
       // Venues that report no PnL per fill: the position's own arithmetic.
-      e.tradePnl += (f.price - e.openAvg) * closeQty * (e.direction === 'long' ? 1 : -1)
+      const est = (f.price - e.openAvg) * closeQty * (e.direction === 'long' ? 1 : -1)
+      e.tradePnl += est
       e.estimatedPnl = true
+      estimates.set(`${f.symbol}|${f.id}`, est)
     }
     e.volume += closeQty * f.price
     addFee(e, f, overshoot > EPS ? closeShare : 1)
@@ -203,7 +208,7 @@ export function replayFills(fills: ExchangeFill[], hedged: boolean): ReplayResul
   }
 
   const open = [...books.values()].map(b => b.episode)
-  return { closed, open }
+  return { closed, open, estimates }
 }
 
 /**

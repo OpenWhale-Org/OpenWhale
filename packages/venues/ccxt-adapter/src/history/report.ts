@@ -73,6 +73,8 @@ export interface FillRow {
   price: number
   quoteQty: number
   realizedPnl?: number
+  /** The replay's estimate when the venue reported no PnL on a closing fill. */
+  pnlEstimate?: number
   fee?: number
   feeAsset?: string
   maker?: boolean

@@ -327,6 +327,7 @@ export async function collectHistory(o: CollectOptions): Promise<Report> {
         positionSide: hedged ? String(info['positionSide'] ?? 'BOTH').toUpperCase() : 'BOTH',
         qty: f.qty, price: f.price, quoteQty: f.qty * f.price,
         ...(f.realizedPnl !== undefined ? { realizedPnl: f.realizedPnl } : {}),
+        ...(replay.estimates.has(`${f.symbol}|${f.id}`) ? { pnlEstimate: replay.estimates.get(`${f.symbol}|${f.id}`)! } : {}),
         ...(f.fee !== undefined ? { fee: f.fee } : {}),
         ...(f.feeAsset !== undefined ? { feeAsset: f.feeAsset } : {}),
         ...(typeof maker === 'boolean' ? { maker } : {}),

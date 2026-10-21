@@ -1,5 +1,6 @@
 import { definePlugin } from '@openwhaleorg/core'
 import { accountHistoryScript } from './history/script.js'
+import { dailyTradingScript } from './history/dailyScript.js'
 
 /**
  * What every ccxt venue shares, as a plugin: no credential types, no
@@ -9,7 +10,7 @@ import { accountHistoryScript } from './history/script.js'
 export const ccxtPlugin = definePlugin({
   name: 'ccxt',
   version: '1.0.0',
-  scripts: [accountHistoryScript],
+  scripts: [accountHistoryScript, dailyTradingScript],
 })
 
 export default ccxtPlugin
