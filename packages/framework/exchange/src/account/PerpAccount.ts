@@ -91,6 +91,7 @@ export class PerpAccount {
          */
         const byMargin = p.initialMargin > 0 ? p.notional / p.initialMargin : 0
         const leverage = byMargin > 0 ? byMargin : p.leverage
+        const margin = p.initialMargin > 0 ? p.initialMargin : p.leverage > 0 ? p.notional / p.leverage : 0
         return {
           id: p.symbol,
           side: p.side,
@@ -98,6 +99,7 @@ export class PerpAccount {
           pnl: p.unrealizedPnl,
           ...(leverage > 0 ? { leverage, leverageBasis: byMargin > 0 ? 'margin' as const : 'venue' as const } : {}),
           ...(p.marginMode ? { marginMode: p.marginMode } : {}),
+          ...(margin > 0 ? { margin } : {}),
         }
       })
   }

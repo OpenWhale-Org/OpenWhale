@@ -16,6 +16,7 @@ interface PositionRow {
   leverage?: number
   leverageBasis?: 'margin' | 'venue'
   marginMode?: 'cross' | 'isolated'
+  margin?: number
 }
 interface OrderRow { id: string; side: 'buy' | 'sell'; value: number; status: 'open' | 'partial' }
 
@@ -276,6 +277,17 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
                   <span>
                     ({usd(positions.reduce((sum, p) => sum + Math.abs(p.value), 0))} / {usd(balance!.usd.total)})
                   </span>
+                  {(() => {
+                    const used = positions.reduce((sum, p) => sum + (p.margin ?? 0), 0)
+                    if (used <= 0) return null
+                    return (
+                      <span className="ml-3" title={t('accounts.margin.totalHint')}>
+                        {t('accounts.margin.total')}{' '}
+                        <span className="font-mono" style={{ color: 'var(--foreground)' }}>{usd(used)}</span>{' '}
+                        ({trimZeros(used / balance!.usd.total * 100)}%)
+                      </span>
+                    )
+                  })()}
                 </p>
               )
             })()}
@@ -288,6 +300,7 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
                       <th className="text-left py-1 font-medium">{t('accounts.col.side')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.leverage')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.value')}</th>
+                      <th className="text-right py-1 font-medium" title={t('accounts.margin.hint')}>{t('accounts.col.margin')}</th>
                       <th className="text-right py-1 font-medium">{t('accounts.col.upnl')}</th>
                       <th className="text-right py-1 font-medium pl-3">{t('groups.col.groups')}</th>
                     </tr>
@@ -304,6 +317,7 @@ export function AccountDetail({ account, writable, venue }: { account: string; w
                           {p.marginMode && <span className="ml-1 text-[10px]" style={{ color: 'var(--muted)' }}>{marginShort(p.marginMode, t)}</span>}
                         </td>
                         <td className="py-1 text-right font-mono">{usd(p.value)}</td>
+                        <td className="py-1 text-right font-mono">{usd(p.margin)}</td>
                         <td className="py-1 text-right font-mono" style={{ color: p.pnl >= 0 ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>
                           {p.pnl >= 0 ? '+' : ''}{usd(p.pnl)}
                         </td>

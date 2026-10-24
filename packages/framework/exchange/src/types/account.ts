@@ -42,6 +42,11 @@ export interface IPosition {
    */
   leverageBasis?: 'margin' | 'venue'
   marginMode?: 'cross' | 'isolated'
+  /**
+   * Initial margin the position ties up (USD): the venue's own figure, else
+   * value ÷ the venue's leverage. Absent when neither is known.
+   */
+  margin?: number
 }
 
 export interface IOrder {
