@@ -335,6 +335,18 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
             // what the account holds right now, and an operator may be naming
             // a market it does not hold yet.
             if (f.suggestions === true) continue
+            /* A multi-select holds SEVERAL values in one comma-separated
+               string, so that string is never itself an option: snapping it to
+               the first option threw away a selection the new list still
+               covers. Keep the values the new list still has and drop the
+               rest; a list sharing nothing with it leaves the field empty,
+               which is what the script's own default already means. */
+            if (f.multiple === true) {
+              const kept = (next[f.name] ?? '').split(',').filter(v => v !== '' && opts.some(o => String(o.value) === v))
+              const joined = kept.join(',')
+              if (joined !== (next[f.name] ?? '')) { next[f.name] = joined; changed = true }
+              continue
+            }
             if (!opts.some(o => String(o.value) === (next[f.name] ?? ''))) { next[f.name] = String(opts[0]?.value ?? ''); changed = true }
           }
           return changed ? next : prev
