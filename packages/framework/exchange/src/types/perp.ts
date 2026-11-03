@@ -77,6 +77,13 @@ export interface PerpExchangeAdapter extends SpotExchangeAdapter {
    */
   fetchLeverageTiers?(symbol: string): Promise<LeverageTier[]>
 
+  /**
+   * The leverage set on each contract, whether or not a position is open —
+   * a position only reports it while there is one. Contracts the venue does
+   * not answer for are absent. Optional.
+   */
+  fetchLeverages?(symbols: string[]): Promise<Record<string, number>>
+
   // ── Account (perp-specific) ───────────────────────────────────────────────
 
   /**

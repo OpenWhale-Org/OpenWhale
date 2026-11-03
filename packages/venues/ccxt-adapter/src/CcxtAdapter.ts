@@ -828,6 +828,18 @@ export class CcxtAdapter implements PerpExchangeAdapter {
     return [{ maxNotionalUsd: Infinity, maxLeverage: typeof max === 'number' && max > 0 ? max : 1 }]
   }
 
+  async fetchLeverages(symbols: string[]): Promise<Record<string, number>> {
+    if (!this.exchange.has['fetchLeverages']) return {}
+    const all = await this.guard(() => this.exchange.fetchLeverages(symbols))
+    const out: Record<string, number> = {}
+    for (const symbol of symbols) {
+      const l = all[symbol]
+      const lev = l?.longLeverage ?? l?.shortLeverage
+      if (typeof lev === 'number' && lev > 0) out[symbol] = lev
+    }
+    return out
+  }
+
   async fetchPositions(symbols?: string[]): Promise<ExchangePosition[]> {
     const positions = await this.guard(() => this.exchange.fetchPositions(symbols))
     return positions.map(this.mapPosition)
