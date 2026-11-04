@@ -264,7 +264,8 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
           .split('\n')
           .filter(l => l.trim().length > 0)
           .slice(-n)
-          .map(l => JSON.parse(l) as MonitorRecord<TData>)
+          // A full disk leaves half-written lines mid-file (2026-11-04); one must not fail the whole read.
+          .flatMap((l) => { try { return [JSON.parse(l) as MonitorRecord<TData>] } catch { return [] } })
         tailCache = { file, stamp, n, ...(maxBytes !== undefined ? { maxBytes } : {}), records }
         return records
       } finally {
@@ -624,7 +625,8 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
         const records = content
           .split('\n')
           .filter(l => l.trim().length > 0)
-          .map(l => JSON.parse(l) as MonitorRecord<TData>)
+          // A full disk leaves half-written lines mid-file (2026-11-04); one must not fail the whole read.
+          .flatMap((l) => { try { return [JSON.parse(l) as MonitorRecord<TData>] } catch { return [] } })
 
         // Re-stat: an append between the stat and the read would cache records
         // under a stamp that no longer describes them, and the staleness would
