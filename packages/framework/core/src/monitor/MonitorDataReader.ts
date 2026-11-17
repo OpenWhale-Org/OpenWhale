@@ -464,8 +464,22 @@ export class MonitorDataReaderImpl<TData = Record<string, unknown>>
         return lo
       }
       const lo = await offsetBefore(from)
-      // One block past the last line of the window, so its final record is whole.
-      const hi = Math.min(size, (await offsetBefore(to + 1)) + 64 * 1024 + 8192)
+      /*
+       * The window ends where the first line PAST it begins — found, not
+       * assumed. This used to be "one block past the bisect", which holds the
+       * final record only while a record is smaller than a block: on a store
+       * of 79KB settlement sessions (2026-11-17) every window lost its last
+       * record, cut in half by the read and then dropped as a line with no
+       * terminator. Walk forward from the bisect a line at a time instead;
+       * it starts within one block of the answer.
+       */
+      let hi = await offsetBefore(to + 1)
+      for (;;) {
+        const line = await lineAt(hi)
+        if (line === undefined) { hi = size; break }
+        if (line.ts > to) { hi = line.start; break }
+        hi = line.start + 1
+      }
       const wanted = Math.max(0, hi - lo)
       const take = Math.min(wanted, maxBytes)
       const buf = Buffer.alloc(take)

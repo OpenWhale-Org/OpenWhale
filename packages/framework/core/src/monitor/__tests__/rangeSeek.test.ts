@@ -83,3 +83,38 @@ describe('readRange on an oversized store', () => {
     ])
   })
 })
+
+/**
+ * Records bigger than the block the bisect works in.
+ *
+ * A settlement session is ~79KB of candles; the window's end used to be "one
+ * 64KB block past the bisect", which cut the final record in half every time.
+ */
+describe('readRange over records larger than a block', () => {
+  const bigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-range-big-'))
+  const BIG = 'venue'
+  const N = 60
+  beforeAll(() => {
+    const lines: string[] = []
+    // Uneven sizes, 70–130KB, so no window edge lands on a convenient boundary.
+    for (let i = 0; i < N; i++) lines.push(JSON.stringify({ ts: T0 + i * 1_000, data: { i, pad: 'x'.repeat(70_000 + (i * 7_919) % 60_000) } }))
+    fs.writeFileSync(path.join(bigDir, `${BIG}.jsonl`), lines.join('\n') + '\n')
+  })
+  afterAll(() => fs.rmSync(bigDir, { recursive: true, force: true }))
+  // A low slurp limit makes this 6MB file take the seeking path.
+  const big = () => new MonitorDataReaderImpl<{ i: number }>(bigDir, { slurpLimit: 1 << 20 })
+
+  it('keeps the last record of the window, wherever the window ends', async () => {
+    const r = big()
+    expect(await r.isOversized(BIG)).toBe(true)
+    for (const [a, b] of [[0, N - 1], [10, 11], [17, 42], [N - 3, N - 1], [N - 1, N - 1], [0, 0]] as const) {
+      const rows = await r.readRange(BIG, T0 + a * 1_000, T0 + b * 1_000)
+      expect(rows.map(x => x.data.i)).toEqual(Array.from({ length: b - a + 1 }, (_, k) => a + k))
+    }
+  })
+
+  it('an open-ended window runs to the end of the file', async () => {
+    const rows = await big().readRange(BIG, T0 + (N - 5) * 1_000, Number.MAX_SAFE_INTEGER)
+    expect(rows.map(x => x.data.i)).toEqual([N - 5, N - 4, N - 3, N - 2, N - 1])
+  })
+})

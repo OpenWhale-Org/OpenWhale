@@ -23,7 +23,12 @@ export interface MonitorDataReader<TData = Record<string, unknown>> {
    */
   readAll(key: string): Promise<MonitorRecord<TData>[]>
   readLatest(key: string): Promise<MonitorRecord<TData> | null>
-  readRange(key: string, from: number, to: number): Promise<MonitorRecord<TData>[]>
+  /**
+   * Every record in [from, to]. On a store too large to slurp the answer is
+   * capped at `maxBytes` of file (64MB unless stated), kept from the start of
+   * the window.
+   */
+  readRange(key: string, from: number, to: number, options?: { maxBytes?: number }): Promise<MonitorRecord<TData>[]>
   count(key: string): Promise<number>
   stream(key: string): AsyncIterable<MonitorRecord<TData>>
 
