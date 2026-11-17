@@ -225,6 +225,9 @@ function fieldVisible(f: ParamFieldDef, values: Record<string, string>): boolean
   return true
 }
 
+/** A background run with no word from the server for this long is given up on. */
+const RECONNECT_GIVE_UP_MS = 10 * 60_000
+
 function seedValues(fields: ScriptInfo['paramsFields']): Record<string, string> {
   const out: Record<string, string> = {}
   for (const f of fields ?? []) {
@@ -440,16 +443,48 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
       abortRef.current = abort
       runIdRef.current = null
       setStopping(false)
-      const post = (path: string) => fetch(base + path, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }), signal: abort.signal,
+      const post = (path: string, extra?: Record<string, unknown>) => fetch(base + path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params, ...extra }), signal: abort.signal,
       })
 
       // Stream by default. /api is proxied through Next, which severs an idle
       // connection at 30s, so a script that only spoke at the end returned a
       // bare "Internal Server Error" however well it had run. Streaming keeps
       // bytes moving and shows the run as it happens.
-      const res = await post('/stream')
-      if (res.ok && res.body) {
+      //
+      // A background script's run belongs to the server: a connection that
+      // drops — the gateway too busy to feed its own heartbeat — is picked
+      // back up with the same `attempt`, asking only for the lines not yet
+      // seen. Anything else is asked exactly once: re-sending a script that
+      // places orders is how one press becomes two fills.
+      const background = script.background === true
+      const attempt = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      const lines: string[] = []
+      let done: ScriptOutput | undefined
+      let failed: string | undefined
+      let stopped = false
+      let legacy = false
+      let lastProgress = Date.now()
+      for (let tries = 0; done === undefined && failed === undefined && !stopped; tries++) {
+        if (tries > 0) {
+          if (Date.now() - lastProgress > RECONNECT_GIVE_UP_MS) break
+          setResult({ text: [...lines, '', t('scripts.reconnecting')].join('\n') })
+          await new Promise(r => setTimeout(r, Math.min(1000 * tries, 5000)))
+          if (abort.signal.aborted) { stopped = true; break }
+        }
+        let res: Response
+        try { res = await post('/stream', background ? { attempt, from: lines.length } : undefined) } catch (err) {
+          if (abort.signal.aborted) { stopped = true; break }
+          if (background) continue
+          throw err
+        }
+        if (!res.ok || !res.body) {
+          // Only a gateway that has no streaming route is asked the old way. A
+          // 5xx is the proxy giving up on a run that may well have started.
+          if (res.status === 404 && tries === 0) { legacy = true; break }
+          if (background) continue
+          throw new Error(`HTTP ${res.status}`)
+        }
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
@@ -457,17 +492,15 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
         // rescanning the whole buffer on every chunk made a large report take
         // minutes to arrive.
         let scanFrom = 0
-        const lines: string[] = []
-        let done: ScriptOutput | undefined
-        let failed: string | undefined
-        let stopped = false
         for (;;) {
           let chunk: ReadableStreamReadResult<Uint8Array>
           try { chunk = await reader.read() } catch (err) {
             if (abort.signal.aborted) { stopped = true; break }
+            if (background) break
             throw err
           }
           if (chunk.done) break
+          lastProgress = Date.now()
           buffer += decoder.decode(chunk.value, { stream: true })
           // Frames are newline-delimited; a chunk can split one in half, so the
           // trailing partial stays in the buffer until its newline arrives.
@@ -481,27 +514,31 @@ function ScriptCard({ script }: { script: ScriptInfo }) {
             if (!part.trim()) continue
             let frame: { type?: string; id?: string; text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
             try { frame = JSON.parse(part) } catch { continue }
-            if (frame.type === 'run') runIdRef.current = frame.id ?? null
+            if (frame.type === 'run') { runIdRef.current = frame.id ?? null; if (tries > 0) setResult({ text: lines.join('\n') }) }
             else if (frame.type === 'line') { lines.push(frame.text ?? ''); setResult({ text: lines.join('\n') }) }
             else if (frame.type === 'result') done = { text: frame.text ?? '', ...(frame.json !== undefined ? { json: frame.json } : {}), ...(frame.files?.length ? { files: frame.files } : {}) }
             else if (frame.type === 'error') failed = frame.error ?? t('scripts.failed')
           }
         }
-        if (failed !== undefined) throw new Error(failed)
-        if (stopped) { setResult({ text: [...lines, '', t('scripts.stoppedByOperator')].join('\n') }); setRanAt(new Date()); return }
-        // No terminal frame means the connection died mid-run. Keep whatever
-        // was streamed — it is the only record of what actually happened.
-        if (done === undefined) throw new Error(t('scripts.connectionClosed'))
-        setResult(done)
-        setRanAt(new Date())
-      } else {
+        // No terminal frame means the connection died mid-run. Only a
+        // background run is there to go back to.
+        if (!background) break
+      }
+      if (legacy) {
         // Older gateway without the streaming route.
-        const legacy = await post('/run')
-        const body = await legacy.json() as { text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
-        if (!legacy.ok) throw new Error(body.error ?? `HTTP ${legacy.status}`)
+        const old = await post('/run')
+        const body = await old.json() as { text?: string; json?: unknown; files?: ScriptFile[]; error?: string }
+        if (!old.ok) throw new Error(body.error ?? `HTTP ${old.status}`)
         setResult({ text: body.text ?? '', ...(body.json !== undefined ? { json: body.json } : {}), ...(body.files?.length ? { files: body.files } : {}) })
         setRanAt(new Date())
+        return
       }
+      if (failed !== undefined) throw new Error(failed)
+      if (stopped) { setResult({ text: [...lines, '', t('scripts.stoppedByOperator')].join('\n') }); setRanAt(new Date()); return }
+      // Keep whatever was streamed — it is the only record of what actually happened.
+      if (done === undefined) { if (lines.length > 0) setResult({ text: lines.join('\n') }); throw new Error(t('scripts.connectionClosed')) }
+      setResult(done)
+      setRanAt(new Date())
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) setRunError(err instanceof Error ? err.message : String(err))
     } finally {

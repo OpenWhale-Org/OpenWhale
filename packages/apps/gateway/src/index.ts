@@ -30,6 +30,7 @@ import { ensureStarted } from './runtime.js'
 import { buildRouter } from './routes.js'
 import { getAuth, getScriptShelf } from './authService.js'
 import { requireAuth } from './auth.js'
+import { watchLoopLag } from './loopLag.js'
 
 // ── env files ─────────────────────────────────────────────────────────────────
 // A plain Node process loads no .env by itself (Next did that for the old
@@ -109,6 +110,7 @@ ensureStarted()
     }
   })
   .then(() => {
+    watchLoopLag(({ ms }) => log.warn({ stalledMs: Math.round(ms) }, 'Event loop stalled — nothing was served for this long'))
     app.listen(port, () => {
       log.info({ port }, `OpenWhale Gateway listening on http://localhost:${port}`)
     })

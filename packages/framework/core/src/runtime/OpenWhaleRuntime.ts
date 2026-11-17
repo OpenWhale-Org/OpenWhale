@@ -1281,9 +1281,15 @@ export class OpenWhaleRuntime implements IRuntime {
         id: def.id, name: def.name, pluginName: owner,
         ...(def.description !== undefined ? { description: def.description } : {}),
         ...(fields.length > 0 ? { paramsFields: fields } : {}),
+        ...(def.background === true ? { background: true } : {}),
       })
     }
     return out
+  }
+
+  /** Whether a script's run outlives its caller — see ScriptDefinition.background. */
+  scriptRunsInBackground(id: string): boolean {
+    return this.scriptRegistry.get(id)?.def.background === true
   }
 
   /**

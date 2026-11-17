@@ -84,6 +84,20 @@ export interface ScriptDefinition {
    * declares `optionsDependOn` sees one of its dependencies change.
    */
   paramOptions?(runtime: unknown, params?: Record<string, unknown>): Promise<Record<string, Array<{ value: string; label: string }>>>
+  /**
+   * The run belongs to the server, not to the connection watching it.
+   *
+   * By default a streamed run ends when its caller goes away — the right
+   * contract for a script that places orders, where hanging up is the last
+   * Stop left. A script that only reads and reports should set this: the run
+   * then finishes whoever is watching, a caller that lost its connection
+   * picks the same run back up, and a second request with the same params
+   * joins the run in flight instead of starting another. `signal` still
+   * fires on an explicit Stop.
+   *
+   * Never set it on a script with side effects on a venue.
+   */
+  background?: boolean
   run(ctx: ScriptContext): Promise<ScriptResult>
 }
 
@@ -94,4 +108,6 @@ export interface ScriptInfo {
   description?: Text
   pluginName: string
   paramsFields?: ParamFieldDef[]
+  /** See ScriptDefinition.background — a caller may safely re-request a dropped run. */
+  background?: boolean
 }

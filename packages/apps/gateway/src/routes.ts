@@ -31,6 +31,7 @@ import { getAuth, getScriptShelf } from './authService.js'
 import { SESSION_COOKIE, readCookie, setSessionCookie, clearSessionCookie } from './auth.js'
 import type { AuthedRequest } from './auth.js'
 import { readExecutions } from './executions.js'
+import { ScriptRuns, runKey } from './scriptRuns.js'
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
@@ -442,6 +443,8 @@ export function buildRouter(): Router {
    * POST reaches the controller whatever the stream is doing.
    */
   const runningScripts = new Map<string, AbortController>()
+  /** Runs of `background` scripts — these outlive the connection that started them. */
+  const scriptRuns = new ScriptRuns()
 
   /**
    * Attachments too big to ride the result frame.
@@ -492,7 +495,9 @@ export function buildRouter(): Router {
    * the operator gets 'unknown', not a silent 200 that reads like a success.
    */
   router.post('/api/scripts/runs/:runId/stop', h(async (req, res) => {
-    const ctrl = runningScripts.get(req.params['runId'] ?? '')
+    const id = req.params['runId'] ?? ''
+    if (scriptRuns.stop(id)) { res.json({ stopped: true }); return }
+    const ctrl = runningScripts.get(id)
     if (ctrl === undefined) { res.status(404).json({ stopped: false, reason: 'unknown' }); return }
     ctrl.abort()
     res.json({ stopped: true })
@@ -529,6 +534,35 @@ export function buildRouter(): Router {
     // round trip). The heartbeat is what actually holds the proxy open then.
     const beat = setInterval(() => write({ type: 'ping' }), 10_000)
 
+    const scriptId = `${req.params['owner']}/${req.params['sid']}`
+    const body = (req.body ?? {}) as { params?: Record<string, unknown>; attempt?: unknown; from?: unknown }
+    const params = body.params ?? {}
+
+    /*
+     * A background script's run is a job this connection merely watches: the
+     * socket closing detaches the viewer and nothing else. `attempt` is the
+     * caller's own token for one press of Run, so its retry after a dropped
+     * connection lands on the same job — finished or not — and `from` is how
+     * many lines it already holds.
+     */
+    if ((runtime as { scriptRunsInBackground?: (id: string) => boolean }).scriptRunsInBackground?.(scriptId) === true) {
+      const attempt = typeof body.attempt === 'string' && body.attempt !== '' ? body.attempt.slice(0, 64) : undefined
+      const from = typeof body.from === 'number' && Number.isFinite(body.from) && body.from > 0 ? Math.floor(body.from) : 0
+      const { run, joined } = scriptRuns.open(runKey(scriptId, params), attempt, async (emit, signal, id) => {
+        const result = await runtime.runScript(scriptId, params, emit, signal)
+        return { type: 'result', ...detachLargeFiles(id, result) }
+      })
+      write({ type: 'run', id: run.id, background: true, ...(joined ? { joined: true } : {}) })
+      const detach = scriptRuns.watch(run, from, (frame) => {
+        write(frame)
+        if (frame.type === 'line') return
+        clearInterval(beat)
+        if (!res.writableEnded) res.end()
+      })
+      res.on('close', () => { detach(); clearInterval(beat) })
+      return
+    }
+
     const abort = new AbortController()
     /*
      * Disconnect is read off the RESPONSE, not the request.
@@ -553,9 +587,8 @@ export function buildRouter(): Router {
     // the run starts, not once the script gets around to its first emit.
     write({ type: 'run', id: runId })
     try {
-      const params = ((req.body ?? {}) as { params?: Record<string, unknown> }).params ?? {}
       const result = await runtime.runScript(
-        `${req.params['owner']}/${req.params['sid']}`, params,
+        scriptId, params,
         (line) => write({ type: 'line', text: line }),
         abort.signal,
       )
