@@ -19,7 +19,7 @@ function responseFor(url: string): Response {
     policy: { allowedAssets: [], maxLeverage: 5, maxOrderNotionalUsd: 1000, maxDailyNotionalUsd: 5000, maxSlippageBps: 100 },
   })
   if (url.endsWith('/balance')) return Response.json({
-    accountValue: '123.45', withdrawable: '100.00', totalMarginUsed: '23.45', spotUsdc: '123.45', loading: false,
+    accountValue: '123.45', withdrawable: '10.00', totalMarginUsed: '113.45', spotUsdc: '150.00', loading: false,
   })
   if (url.endsWith('/positions')) return Response.json({ assetPositions: [], loading: false })
   if (url.endsWith('/orders')) return Response.json([])
@@ -54,9 +54,43 @@ describe('whaledancePlugin', () => {
     })
     const detail = await runtime.accountDetail('WhaleDance Main')
     expect(detail.sections['identity']).toMatchObject({ marketVenue: 'hyperliquid', address: '0x1234' })
-    expect(detail.sections['balance']).toMatchObject({ accountValue: '123.45', withdrawable: '100.00' })
+    expect(detail.sections['balance']).toMatchObject({
+      totalUsd: 150,
+      availableUsd: 36.55,
+      accountValue: '123.45',
+      withdrawable: '10.00',
+      spotUsdc: '150.00',
+    })
     expect(detail.sections['positions']).toEqual([])
     expect(detail.sections['orders']).toEqual([])
+
+    await runtime.snapshotAccounts()
+    expect((await runtime.latestAccountSnapshots())['WhaleDance Main']).toMatchObject({
+      equity: 150,
+      available: 36.55,
+    })
+
+    await runtime.stop()
+  })
+
+  it('uses perp equity for wallets without a spot USDC balance', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/balance')) return Response.json({
+        accountValue: '50.00', withdrawable: '20.00', totalMarginUsed: '30.00', spotUsdc: '0', loading: false,
+      })
+      return responseFor(url)
+    }))
+    const runtime = new OpenWhaleRuntime({ credentialStore })
+    runtime.loadPlugin(whaledancePlugin, {})
+    await runtime.saveAccount({
+      name: 'Legacy Wallet', implementation: 'whaledance/wallet-account', credential: 'WhaleDance Key',
+    })
+
+    const detail = await runtime.accountDetail('Legacy Wallet')
+    expect(detail.sections['balance']).toMatchObject({ totalUsd: 50, availableUsd: 20 })
+    await runtime.snapshotAccounts()
+    expect((await runtime.latestAccountSnapshots())['Legacy Wallet']).toMatchObject({ equity: 50, available: 20 })
 
     await runtime.stop()
   })
