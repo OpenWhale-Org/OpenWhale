@@ -314,7 +314,7 @@ describe('TriggerManager', () => {
 
       manager.start(queue)
 
-      expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), { timezone: 'Asia/Shanghai' })
+      expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), { recoverMissedExecutions: true, timezone: 'Asia/Shanghai' })
     })
 
     // Scheduling happens during ACTIVATION, so a typo used to stop the whole
@@ -337,7 +337,25 @@ describe('TriggerManager', () => {
 
       manager.start(queue)
 
-      expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), undefined)
+      expect(schedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function), { recoverMissedExecutions: true })
+    })
+
+    // The scheduler looks at the clock once a second. A look just before the
+    // scheduled second followed by one just after it used to skip the run.
+    it('still fires when the look at the clock lands after the scheduled second', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'hrtime'] })
+      vi.setSystemTime(new Date('2026-11-21T15:56:59.950Z'))
+      strategy = new MockStrategy({ id: 'test', monitors: [], instructions: [makeInstruction()] })
+      const trigger = makeTrigger({ conditions: [{ type: 'cron', expression: '57 * * * *' }] })
+      manager.registerInstance('instance-1', strategy, [trigger], { base: {}, tunable: {} }, [], [], makeLabelMap(strategy), new Map())
+      manager.start(queue)
+
+      // The loop is busy across 15:57:00: the next look happens at 15:57:01.100.
+      setTimeout(() => vi.setSystemTime(new Date('2026-11-21T15:57:01.100Z')), 999)
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(strategy.contexts).toHaveLength(1)
+      vi.useRealTimers()
     })
 
     it('fires when cron ticks', async () => {

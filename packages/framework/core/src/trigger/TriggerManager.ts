@@ -16,6 +16,21 @@ import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('TriggerManager')
 
+/** A cron run starting this long after its scheduled second is worth a line. */
+const CRON_LATE_MS = 1_500
+
+/**
+ * How long after its scheduled second a cron run started.
+ *
+ * node-cron reports the matched second in the trigger's own time zone, shifted
+ * from the real instant by the zone's offset. Every offset is a whole number of
+ * quarter hours, so the remainder inside a quarter hour is the lateness.
+ */
+function latenessOf(matched: Date, now: number): number {
+  const quarter = 900_000
+  return (((now - matched.getTime()) % quarter) + quarter) % quarter
+}
+
 export interface StrategyRunEvent {
   instanceId: string
   triggerId: string
@@ -561,13 +576,24 @@ export class TriggerManager {
     queue: ExecutionQueue,
   ): void {
     if (condition.timezone !== undefined) assertTimeZone(condition.timezone)
-    const task = cron.schedule(condition.expression, async () => {
+    /* node-cron looks at the clock about once a second and fires only if that
+       look lands INSIDE the scheduled second. Its looks drift, so sooner or
+       later one lands just before the second and the next — a few milliseconds
+       late on a busy loop — just after it; the schedule is then skipped without
+       a word. recoverMissedExecutions makes it account for every second since
+       the previous look, so a late look fires late instead of never. */
+    const task = cron.schedule(condition.expression, async matched => {
       const now = Date.now()
+      const lateMs = matched instanceof Date ? latenessOf(matched, now) : 0
+      if (lateMs >= CRON_LATE_MS) log.warn(
+        { instanceId: entry.instanceId, triggerId: trigger.id, expression: condition.expression, lateMs },
+        'Cron fired late — the event loop was busy at the scheduled second',
+      )
       const triggerState = this.triggerStates.get(trigger.id)
       if (!triggerState) return
       triggerState.satisfyCron(conditionIndex, now)
       await this.checkAndFire(entry, trigger, triggerState, queue, now)
-    }, condition.timezone ? { timezone: condition.timezone } : undefined)
+    }, { recoverMissedExecutions: true, ...(condition.timezone ? { timezone: condition.timezone } : {}) })
     if (!this.cronTasks.has(entry.instanceId)) this.cronTasks.set(entry.instanceId, [])
     this.cronTasks.get(entry.instanceId)!.push(task)
   }
